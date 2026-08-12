@@ -384,7 +384,22 @@ class MasterDataDialog(QDialog):
             data = d.get_data()
             if "atamalar" not in self.data_store:
                 self.data_store["atamalar"] = []
-            self.data_store["atamalar"].append(data)
+            
+            # Remove old assignments for this teacher (they are being re-saved from the dialog)
+            current_teacher = d.cb_ogretmen.currentText()
+            self.data_store["atamalar"] = [
+                a for a in self.data_store["atamalar"] 
+                if a.get("teacher") != current_teacher
+            ]
+                
+            if isinstance(data, list):
+                self.data_store["atamalar"].extend(data)
+            else:
+                self.data_store["atamalar"].append(data)
+                
+            p = self.parent()
+            if p and hasattr(p, "save_db"): p.save_db()
+            if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
 
     def _act_new(self):
         idx = self.stack.currentIndex()

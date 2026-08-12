@@ -22,6 +22,40 @@ from core.timetable_data import TimetableData
 APP_TITLE = "BGZ Ders Planlama"
 VERSION   = "2025"
 
+PASTEL_DISTINCT_COLORS = [
+    "#1E88E5", "#43A047", "#FB8C00", "#8E24AA", "#E53935",
+    "#00ACC1", "#7CB342", "#FFB300", "#6D4C41", "#546E7A",
+    "#3949AB", "#00897B", "#F4511E", "#D81B60", "#00838F",
+    "#5E35B1", "#A1887F", "#0097A7", "#C2185B", "#F57C00"
+]
+
+def format_tr_name(name_str: str) -> str:
+    """Capitalizes Turkish names properly (e.g. 'hüseyin arman' -> 'Hüseyin Arman', 'ali ihsan' -> 'Ali İhsan')."""
+    if not name_str:
+        return name_str
+    words = name_str.strip().split()
+    formatted = []
+    tr_upper_map = {'i': 'İ', 'ı': 'I', 'ç': 'Ç', 'ğ': 'Ğ', 'ö': 'Ö', 'ş': 'Ş', 'ü': 'Ü'}
+    tr_lower_map = {'İ': 'i', 'I': 'ı', 'Ç': 'ç', 'Ğ': 'ğ', 'Ö': 'ö', 'Ş': 'ş', 'Ü': 'ü'}
+    
+    for w in words:
+        if not w:
+            continue
+        first = w[0]
+        rest = w[1:]
+        first_cap = tr_upper_map.get(first, first.upper())
+        rest_lower = "".join(tr_lower_map.get(c, c.lower()) for c in rest)
+        formatted.append(first_cap + rest_lower)
+        
+    return " ".join(formatted)
+
+def get_subject_color(subject_name: str) -> str:
+    """Returns a deterministic, vibrant, distinct color for any subject name."""
+    if not subject_name:
+        return "#1E88E5"
+    hash_val = sum(ord(c) * (i + 1) for i, c in enumerate(subject_name.strip()))
+    return PASTEL_DISTINCT_COLORS[hash_val % len(PASTEL_DISTINCT_COLORS)]
+
 def make_menu_icon(symbol: str, color1: str, color2: str) -> QIcon:
     pix = QPixmap(32, 32)
     pix.fill(Qt.transparent)
@@ -113,6 +147,7 @@ class MainWindow(QMainWindow):
         self.load_db()
 
         self._build_ui()
+        self._restore_grid_placements()
         self._refresh_tree()
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -395,13 +430,41 @@ class MainWindow(QMainWindow):
                     loaded = json.load(f)
                     self.data_store.update(loaded)
                 self.statusBar().showMessage(f"Veriler yüklendi: {load_path}")
+                
+                # Restore grid placements
+                self._restore_grid_placements()
             except Exception as e:
                 print("DB Load Error:", e)
+    
+    def _restore_grid_placements(self):
+        if not hasattr(self, "_grid"):
+            return
+        grid_data = self.data_store.get("grid_placements", {})
+        if grid_data:
+            self._grid.clear_grid()
+            for key, info in grid_data.items():
+                parts = key.split(",")
+                if len(parts) == 2:
+                    r, c = int(parts[0]), int(parts[1])
+                    self._grid.set_cell(
+                        r, c,
+                        info.get("subject_name", "Ders"),
+                        info.get("color", "#1E88E5"),
+                        info.get("teacher_name", ""),
+                        info.get("duration", 1)
+                    )
 
     def save_db(self, path=None):
         import json
         save_path = path or self.db_path
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        
+        # Save grid placements into data_store before writing
+        grid_data = {}
+        for (r, c), info in self._grid.get_placed_lessons().items():
+            grid_data[f"{r},{c}"] = info
+        self.data_store["grid_placements"] = grid_data
+        
         try:
             with open(save_path, "w", encoding="utf-8") as f:
                 json.dump(self.data_store, f, ensure_ascii=False, indent=4)
@@ -418,6 +481,38 @@ class MainWindow(QMainWindow):
     def _refresh_tree(self):
         self._tree.clear()
         
+        # 0. Sanitize & Capitalize Teacher Names and Assign Distinct Subject Colors across data_store
+        for t in self.data_store.get("ogretmenler", []):
+            if t.get("ad"):
+                t["ad"] = format_tr_name(t["ad"])
+                if not t.get("kisa"):
+                    t["kisa"] = t["ad"][:4].upper()
+
+        for d in self.data_store.get("dersler", []):
+            if d.get("ad"):
+                d["color"] = get_subject_color(d["ad"])
+                d["renk"] = d["color"]
+
+        for a in self.data_store.get("atamalar", []):
+            if a.get("teacher"):
+                a["teacher"] = format_tr_name(a["teacher"])
+            if a.get("subject"):
+                a["color"] = get_subject_color(a["subject"])
+
+        grid_placements = self.data_store.get("grid_placements", {})
+        for key, info in grid_placements.items():
+            if info.get("teacher_name"):
+                info["teacher_name"] = format_tr_name(info["teacher_name"])
+            if info.get("subject_name"):
+                info["color"] = get_subject_color(info["subject_name"])
+
+        if hasattr(self, "_grid") and hasattr(self._grid, "_placed_lessons"):
+            for key, info in self._grid._placed_lessons.items():
+                if info.get("teacher_name"):
+                    info["teacher_name"] = format_tr_name(info["teacher_name"])
+                if info.get("subject_name"):
+                    info["color"] = get_subject_color(info["subject_name"])
+        
         s_count = len(self.data_store.get("siniflar", []))
         t_count = len(self.data_store.get("ogretmenler", []))
         d_count = len(self.data_store.get("dersler", []))
@@ -431,36 +526,27 @@ class MainWindow(QMainWindow):
         self._tree.expandAll()
         
         unplaced = []
-        colors = ["#E53935", "#1E88E5", "#43A047", "#8E24AA", "#FFB300", "#00ACC1", "#D81B60", "#3949AB", "#4A148C", "#00838F"]
         
         # 1. Add explicitly assigned lessons from self.data_store["atamalar"]
         atamalar = self.data_store.get("atamalar", [])
-        seen_atamalar = []
-        unique_atamalar = []
-        for a in atamalar:
-            sig = (a.get("subject"), a.get("teacher"), a.get("class"), a.get("duration"), a.get("type"))
-            if sig not in seen_atamalar:
-                seen_atamalar.append(sig)
-                unique_atamalar.append(a)
         existing_teachers = [t.get("ad") for t in self.data_store.get("ogretmenler", []) if t.get("ad")]
         existing_subjects = [d.get("ad") for d in self.data_store.get("dersler", []) if d.get("ad")]
         
-        valid_atamalar = []
-        for a in unique_atamalar:
-            t_name = a.get("teacher")
+        # Auto-register subjects/teachers that were assigned but not yet in master data
+        for a in atamalar:
+            t_name = format_tr_name(a.get("teacher"))
             s_name = a.get("subject")
-            if existing_teachers and t_name and t_name not in existing_teachers:
-                continue
-            if existing_subjects and s_name and s_name not in existing_subjects:
-                continue
-            valid_atamalar.append(a)
-            
-        self.data_store["atamalar"] = valid_atamalar
-        atamalar = valid_atamalar
+            if t_name and t_name not in existing_teachers:
+                self.data_store.setdefault("ogretmenler", []).append({"ad": t_name, "kisa": t_name[:4].upper()})
+                existing_teachers.append(t_name)
+            if s_name and s_name not in existing_subjects:
+                self.data_store.setdefault("dersler", []).append({"ad": s_name, "kisa": s_name[:3].upper(), "color": get_subject_color(s_name)})
+                existing_subjects.append(s_name)
 
         for idx, atama in enumerate(atamalar):
             subj_name = atama.get("subject", "Ders")
-            teacher_name = atama.get("teacher", "")
+            teacher_name = format_tr_name(atama.get("teacher", ""))
+            cls_name = atama.get("class", "")
             dur = atama.get("duration", 2)
             type_str = str(atama.get("type", ""))
             
@@ -479,8 +565,9 @@ class MainWindow(QMainWindow):
                 unplaced.append({
                     "id": f"{idx}_{p_idx}",
                     "subject_name": subj_name,
-                    "color": colors[(idx + p_idx) % len(colors)],
+                    "color": get_subject_color(subj_name),
                     "teacher": teacher_name,
+                    "class_name": cls_name,
                     "duration": block_dur
                 })
             
@@ -491,12 +578,12 @@ class MainWindow(QMainWindow):
         for idx, ders in enumerate(defined_subjects):
             sname = ders.get("kisa") or ders.get("ad")
             if sname and (sname not in assigned_subj_names and ders.get("ad") not in assigned_subj_names):
-                color = ders.get("renk") or colors[(len(unplaced) + idx) % len(colors)]
                 unplaced.append({
                     "id": len(unplaced),
                     "subject_name": sname,
-                    "color": color,
+                    "color": get_subject_color(sname),
                     "teacher": "Öğretmen",
+                    "class_name": "",
                     "duration": 2
                 })
                 
@@ -504,8 +591,9 @@ class MainWindow(QMainWindow):
 
     def _on_lesson_dropped(self, row, col, lesson_info):
         subject_name = lesson_info.get("subject_name", "Ders")
-        color = lesson_info.get("color", "#1E88E5")
-        teacher = lesson_info.get("teacher", "")
+        color = get_subject_color(subject_name)
+        teacher = format_tr_name(lesson_info.get("teacher", ""))
+        cls_name = lesson_info.get("class_name", "")
         duration = lesson_info.get("duration", 1)
         
         from timetable_grid import DAYS
@@ -538,7 +626,7 @@ class MainWindow(QMainWindow):
                     )
                     return
 
-        self._grid.set_cell(row, col, subject_name, color, teacher, duration)
+        self._grid.set_cell(row, col, subject_name, color, teacher, duration, class_name=cls_name)
         self.statusBar().showMessage(f"'{subject_name}' dersi {day_name} günü {row+1}. ders saatine yerleştirildi.")
         self.save_db()
 
@@ -551,7 +639,10 @@ class MainWindow(QMainWindow):
         dlg = LessonAssignmentDialog(data_store=self.data_store, parent=self)
         if dlg.exec():
             data = dlg.get_data()
-            self.data_store.setdefault("atamalar", []).append(data)
+            if isinstance(data, list):
+                self.data_store.setdefault("atamalar", []).extend(data)
+            else:
+                self.data_store.setdefault("atamalar", []).append(data)
             self.save_db()
             self._refresh_tree()
 

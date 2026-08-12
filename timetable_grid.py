@@ -32,13 +32,14 @@ def make_context_icon(symbol: str, color1: str, color2: str) -> QIcon:
 DAYS = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"]
 
 class DraggableLessonCard(QLabel):
-    def __init__(self, lesson_id: int, subject_name: str, color: str, duration: int = 1, teacher: str = "", parent=None):
+    def __init__(self, lesson_id: int, subject_name: str, color: str, duration: int = 1, teacher: str = "", class_name: str = "", parent=None):
         super().__init__(parent)
         self.lesson_id = lesson_id
         self.subject_name = subject_name
         self.color = color
         self.duration = duration
         self.teacher = teacher
+        self.class_name = class_name
         
         display_text = f"{subject_name}"
         if teacher and teacher != "Öğretmen":
@@ -70,6 +71,8 @@ class DraggableLessonCard(QLabel):
             }}
         """)
         self.setCursor(Qt.OpenHandCursor)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_card_context_menu)
         
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -81,7 +84,8 @@ class DraggableLessonCard(QLabel):
                 "subject_name": self.subject_name,
                 "color": self.color,
                 "duration": self.duration,
-                "teacher": self.teacher
+                "teacher": self.teacher,
+                "class_name": self.class_name
             }
             mime.setData("application/x-lesson", QByteArray(json.dumps(data).encode()))
             drag.setMimeData(mime)
@@ -91,6 +95,88 @@ class DraggableLessonCard(QLabel):
             drag.setHotSpot(event.pos())
             
             drag.exec_(Qt.MoveAction)
+
+    def _show_card_context_menu(self, pos):
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu { background: #FFFFFF; border: 1px solid #CCC; font-family: 'Segoe UI'; font-size: 12px; }
+            QMenu::item { padding: 6px 22px; }
+            QMenu::item:selected { background: #0078D7; color: white; }
+            QMenu::separator { height: 1px; background: #DDD; margin: 3px 10px; }
+        """)
+        
+        act_1 = menu.addAction(make_context_icon("1", "#29B6F6", "#0277BD"), "1 Saat (Tekli)")
+        act_2 = menu.addAction(make_context_icon("2", "#29B6F6", "#0277BD"), "2 Saat (İkili Blok)")
+        act_3 = menu.addAction(make_context_icon("3", "#29B6F6", "#0277BD"), "3 Saat (Üçlü Blok)")
+        act_4 = menu.addAction(make_context_icon("4", "#29B6F6", "#0277BD"), "4 Saat (Dörtlü Blok)")
+        menu.addSeparator()
+        act_2_2 = menu.addAction(make_context_icon("2+2", "#AB47BC", "#7B1FA2"), "2+2 Saat (2 İkili Blok)")
+        act_2_1 = menu.addAction(make_context_icon("2+1", "#AB47BC", "#7B1FA2"), "2+1 Saat (1 İkili + 1 Tekli)")
+        act_2_2_1 = menu.addAction(make_context_icon("2+2+1", "#AB47BC", "#7B1FA2"), "2+2+1 Saat (5 Saat)")
+        act_3_2 = menu.addAction(make_context_icon("3+2", "#AB47BC", "#7B1FA2"), "3+2 Saat (5 Saat)")
+        act_1_1_1 = menu.addAction(make_context_icon("1+1+1", "#AB47BC", "#7B1FA2"), "1+1+1 Saat (3 Tekli)")
+        act_custom = menu.addAction(make_context_icon("✏️", "#4CAF50", "#2E7D32"), "Özel Dağılım Yapısı Gir...")
+        menu.addSeparator()
+        act_del = menu.addAction(make_context_icon("X", "#EF5350", "#C62828"), "Atamayı Sil (Kaldır)")
+        
+        action = menu.exec_(self.mapToGlobal(pos))
+        
+        if not action:
+            return
+            
+        win = self.window()
+        data_store = getattr(win, "data_store", None)
+        
+        selected_type = None
+        if action == act_1: selected_type = "1"
+        elif action == act_2: selected_type = "2"
+        elif action == act_3: selected_type = "3"
+        elif action == act_4: selected_type = "4"
+        elif action == act_2_2: selected_type = "2+2"
+        elif action == act_2_1: selected_type = "2+1"
+        elif action == act_2_2_1: selected_type = "2+2+1"
+        elif action == act_3_2: selected_type = "3+2"
+        elif action == act_1_1_1: selected_type = "1+1+1"
+        elif action == act_custom:
+            val, ok = QInputDialog.getText(self, "Özel Ders Dağılımı", "Dağılım biçimi (Örn: 2+3, 1+2+2, 2+2+2):", text=str(self.duration))
+            if ok and val.strip():
+                selected_type = val.strip()
+        elif action == act_del:
+            if data_store and "atamalar" in data_store:
+                data_store["atamalar"] = [
+                    a for a in data_store["atamalar"]
+                    if not (a.get("teacher") == self.teacher and a.get("subject") == self.subject_name)
+                ]
+                if hasattr(win, "save_db"): win.save_db()
+                if hasattr(win, "_refresh_tree"): win._refresh_tree()
+            return
+            
+        if selected_type and data_store:
+            if "atamalar" not in data_store:
+                data_store["atamalar"] = []
+                
+            updated = False
+            for a in data_store["atamalar"]:
+                if (a.get("teacher") == self.teacher or not self.teacher or self.teacher == "Öğretmen") and a.get("subject") == self.subject_name:
+                    a["type"] = selected_type
+                    parts = [int(p.strip()) for p in selected_type.split("+") if p.strip().isdigit()]
+                    a["duration"] = sum(parts) if parts else (int(selected_type) if selected_type.isdigit() else 1)
+                    updated = True
+                    break
+                    
+            if not updated:
+                parts = [int(p.strip()) for p in selected_type.split("+") if p.strip().isdigit()]
+                tot_dur = sum(parts) if parts else (int(selected_type) if selected_type.isdigit() else 1)
+                data_store["atamalar"].append({
+                    "teacher": self.teacher or "Öğretmen",
+                    "subject": self.subject_name,
+                    "class": self.class_name,
+                    "duration": tot_dur,
+                    "type": selected_type
+                })
+                
+            if hasattr(win, "save_db"): win.save_db()
+            if hasattr(win, "_refresh_tree"): win._refresh_tree()
 
 
 class UnplacedLessonsDock(QFrame):
@@ -134,7 +220,8 @@ class UnplacedLessonsDock(QFrame):
         for l in lessons_data:
             dur = l.get("duration", 1)
             teacher = l.get("teacher", "")
-            card = DraggableLessonCard(l["id"], l["subject_name"], l["color"], duration=dur, teacher=teacher)
+            cls_name = l.get("class_name", "")
+            card = DraggableLessonCard(l["id"], l["subject_name"], l["color"], duration=dur, teacher=teacher, class_name=cls_name)
             self.container_layout.addWidget(card)
 
 
@@ -177,10 +264,23 @@ class DropTableWidget(QTableWidget):
         else:
             event.ignore()
 
+    def _get_lesson_origin(self, row, col):
+        """Finds the true starting cell (origin_row, origin_col) and info of a placed lesson at (row, col)."""
+        grid = self.parent()
+        if hasattr(grid, "_placed_lessons"):
+            for (r, c), info in list(grid._placed_lessons.items()):
+                dur = info.get("duration", 1)
+                if c == col and r <= row < r + dur:
+                    return r, c, dur, info
+        return row, col, max(1, self.rowSpan(row, col)), None
+
     def _show_context_menu(self, pos):
         item = self.itemAt(pos)
         row = self.rowAt(pos.y())
         col = self.columnAt(pos.x())
+        
+        orig_r, orig_c, orig_dur, orig_info = self._get_lesson_origin(row, col)
+        orig_item = self.item(orig_r, orig_c) or item
         
         menu = QMenu(self)
         menu.setStyleSheet("""
@@ -190,7 +290,7 @@ class DropTableWidget(QTableWidget):
             QMenu::separator { height: 1px; background: #DDD; margin: 3px 10px; }
         """)
         
-        if item and item.text().strip():
+        if orig_item and orig_item.text().strip():
             act_edit = menu.addAction(make_context_icon("E", "#4CAF50", "#2E7D32"), "Düzenle")
             act_move = menu.addAction(make_context_icon("M", "#FFCA28", "#FF8F00"), "Taşı")
             menu.addSeparator()
@@ -205,18 +305,19 @@ class DropTableWidget(QTableWidget):
             action = menu.exec_(self.viewport().mapToGlobal(pos))
             
             if action == act_del:
-                r_span = max(1, self.rowSpan(row, col))
-                c_span = max(1, self.columnSpan(row, col))
-                self.setSpan(row, col, 1, 1)
-                for r_off in range(r_span):
-                    for c_off in range(c_span):
-                        tr, tc = row + r_off, col + c_off
-                        self.setItem(tr, tc, None)
-                        if hasattr(self.parent(), "_placed_lessons"):
-                            self.parent()._placed_lessons.pop((tr, tc), None)
+                self.setSpan(orig_r, orig_c, 1, 1)
+                for r_off in range(orig_dur):
+                    tr = orig_r + r_off
+                    if tr < self.rowCount():
+                        self.setItem(tr, orig_c, None)
+                grid = self.parent()
+                if hasattr(grid, "_placed_lessons"):
+                    grid._placed_lessons.pop((orig_r, orig_c), None)
                 win = self.window()
                 if hasattr(win, "save_db"):
                     win.save_db()
+                if hasattr(win, "_refresh_tree"):
+                    win._refresh_tree()
             elif action == act_single:
                 self._set_span(row, col, 1)
             elif action == act_double:
@@ -228,7 +329,7 @@ class DropTableWidget(QTableWidget):
             elif action == act_quint:
                 self._set_span(row, col, 5)
             elif action == act_edit:
-                self.cell_right_clicked.emit(row, col)
+                self.cell_right_clicked.emit(orig_r, orig_c)
             elif action == act_move:
                 # Instant move dialog
                 from PySide6.QtWidgets import QInputDialog
@@ -240,31 +341,115 @@ class DropTableWidget(QTableWidget):
                     p_choice, ok2 = QInputDialog.getItem(self, "Dersi Taşı", "Hedef Saat:", period_strs, 0, False)
                     if ok2 and p_choice:
                         target_row = period_strs.index(p_choice)
-                        # Swap / Move item
-                        old_item = self.item(row, col)
-                        if old_item:
-                            txt = old_item.text()
-                            bg = old_item.background().color().name()
-                            self.setSpan(row, col, 1, 1)
-                            self.setItem(row, col, None)
-                            if hasattr(self.parent(), "set_cell"):
-                                self.parent().set_cell(target_row, target_col, txt.split('\n')[0], bg, txt.split('\n')[1] if '\n' in txt else "")
+                        if orig_item and hasattr(self.parent(), "set_cell"):
+                            txt = orig_item.text()
+                            bg = orig_item.background().color().name()
+                            self.setSpan(orig_r, orig_c, 1, 1)
+                            for r_off in range(orig_dur):
+                                tr = orig_r + r_off
+                                if tr < self.rowCount():
+                                    self.setItem(tr, orig_c, None)
+                            if hasattr(self.parent(), "_placed_lessons"):
+                                self.parent()._placed_lessons.pop((orig_r, orig_c), None)
+                            self.parent().set_cell(target_row, target_col, txt.split('\n')[0], bg, txt.split('\n')[1] if '\n' in txt else "", duration=orig_dur)
                             win = self.window()
                             if hasattr(win, "save_db"):
                                 win.save_db()
+                            if hasattr(win, "_refresh_tree"):
+                                win._refresh_tree()
         else:
             act_add = menu.addAction(make_context_icon("+", "#B0BEC5", "#546E7A"), "Ders Ekle (Aşağıdan Sürükle)")
             act_block = menu.addAction(make_context_icon("L", "#B0BEC5", "#546E7A"), "Bu Slotu Kilitle")
             menu.exec_(self.viewport().mapToGlobal(pos))
 
     def _set_span(self, row, col, span):
-        """Change span of existing cell"""
-        item = self.item(row, col)
-        if item:
-            self.setSpan(row, col, 1, 1)
-            max_span = min(span, self.rowCount() - row)
-            if max_span > 1:
-                self.setSpan(row, col, max_span, 1)
+        """Change span of existing cell, automatically shifting any displaced lessons down!"""
+        orig_r, orig_c, old_dur, info = self._get_lesson_origin(row, col)
+        
+        grid = self.parent()
+        if not hasattr(grid, "_placed_lessons") or (orig_r, orig_c) not in grid._placed_lessons:
+            return
+            
+        target_lesson_info = dict(grid._placed_lessons[(orig_r, orig_c)])
+        
+        max_possible_span = min(span, self.rowCount() - orig_r)
+        if max_possible_span <= 0:
+            return
+            
+        target_range = range(orig_r + 1, orig_r + max_possible_span)
+        
+        # 1. Identify all displaced lessons in target_range on column orig_c
+        displaced = []
+        for r_check in target_range:
+            if r_check < self.rowCount():
+                d_orig_r, d_orig_c, d_dur, d_info = self._get_lesson_origin(r_check, orig_c)
+                if d_info and (d_orig_r, d_orig_c) != (orig_r, orig_c):
+                    if (d_orig_r, d_orig_c, d_dur, d_info) not in displaced:
+                        displaced.append((d_orig_r, d_orig_c, d_dur, d_info))
+                        
+        # 2. Clear displaced lessons from grid
+        for d_orig_r, d_orig_c, d_dur, _ in displaced:
+            self.setSpan(d_orig_r, d_orig_c, 1, 1)
+            for r_off in range(d_dur):
+                tr = d_orig_r + r_off
+                if tr < self.rowCount():
+                    self.setItem(tr, d_orig_c, None)
+            grid._placed_lessons.pop((d_orig_r, d_orig_c), None)
+
+        # 3. Clear old span of target lesson and apply new span
+        self.setSpan(orig_r, orig_c, 1, 1)
+        if max_possible_span > 1:
+            self.setSpan(orig_r, orig_c, max_possible_span, 1)
+            
+        target_lesson_info["duration"] = max_possible_span
+        grid._placed_lessons[(orig_r, orig_c)] = target_lesson_info
+
+        # Re-set item display for target lesson
+        display_text = f"{target_lesson_info.get('subject_name', '')}"
+        t_name = target_lesson_info.get("teacher_name", "")
+        if t_name and t_name != "Öğretmen":
+            display_text += f"\n{t_name}"
+        item = QTableWidgetItem(display_text)
+        item.setTextAlignment(Qt.AlignCenter)
+        color = target_lesson_info.get("color", "#1E88E5")
+        item.setBackground(QBrush(QColor(color)))
+        c = QColor(color)
+        lum = (0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue())
+        item.setForeground(QBrush(Qt.white if lum < 160 else Qt.black))
+        font = QFont("Segoe UI", 9, QFont.Bold)
+        item.setFont(font)
+        self.setItem(orig_r, orig_c, item)
+
+        # 4. Shift/re-place all displaced lessons further down on column orig_c
+        curr_r = orig_r + max_possible_span
+        for _, _, d_dur, d_info in displaced:
+            placed_ok = False
+            while curr_r + d_dur <= self.rowCount():
+                is_free = True
+                for check_r in range(curr_r, curr_r + d_dur):
+                    if self.item(check_r, orig_c) is not None or (check_r, orig_c) in grid._placed_lessons:
+                        is_free = False
+                        break
+                if is_free:
+                    grid.set_cell(
+                        curr_r, orig_c,
+                        d_info.get("subject_name", ""),
+                        d_info.get("color", "#1E88E5"),
+                        d_info.get("teacher_name", ""),
+                        d_dur,
+                        d_info.get("class_name", "")
+                    )
+                    curr_r += d_dur
+                    placed_ok = True
+                    break
+                else:
+                    curr_r += 1
+
+        win = self.window()
+        if hasattr(win, "save_db"):
+            win.save_db()
+        if hasattr(win, "_refresh_tree"):
+            win._refresh_tree()
 
 
 class TimetableGrid(QWidget):
@@ -278,8 +463,8 @@ class TimetableGrid(QWidget):
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(4)
+        layout.setContentsMargins(12, 8, 12, 4)
+        layout.setSpacing(6)
 
         # ── Toolbar row
         top = QHBoxLayout()
@@ -315,22 +500,23 @@ class TimetableGrid(QWidget):
         hh = self.table.horizontalHeader()
         hh.setSectionResizeMode(QHeaderView.Stretch)
         hh.setDefaultAlignment(Qt.AlignCenter)
-        hh.setStyleSheet("QHeaderView::section { background: #D0D8E4; font-weight: bold; padding: 4px; border: 1px solid #BCC8D8; }")
+        hh.setMinimumSectionSize(100)
+        hh.setStyleSheet("QHeaderView::section { background: #D0D8E4; font-weight: bold; padding: 6px; border: 1px solid #BCC8D8; font-size: 12px; }")
 
         vh = self.table.verticalHeader()
-        vh.setSectionResizeMode(QHeaderView.Fixed)
-        vh.setDefaultSectionSize(60)
-        vh.setStyleSheet("QHeaderView::section { background: #F5F7FA; font-weight: bold; border: 1px solid #DDD; padding: 4px; }")
+        vh.setSectionResizeMode(QHeaderView.Stretch)
+        vh.setMinimumSectionSize(55)
+        vh.setStyleSheet("QHeaderView::section { background: #F5F7FA; font-weight: bold; border: 1px solid #DDD; padding: 6px; font-size: 12px; }")
 
-        self.table.setStyleSheet("QTableWidget { background: #E0E0E0; gridline-color: #BCC8D8; }")
+        self.table.setStyleSheet("QTableWidget { background: #FFFFFF; gridline-color: #BCC8D8; font-size: 11px; } QTableWidget::item { padding: 4px; }")
         
-        layout.addWidget(self.table)
+        layout.addWidget(self.table, stretch=1)
         
         # Bottom Dock for unplaced lessons
         self.unplaced_dock = UnplacedLessonsDock(self)
         layout.addWidget(self.unplaced_dock)
         
-    def set_cell(self, row, col, subject_name, color, teacher_name="", duration=1):
+    def set_cell(self, row, col, subject_name, color, teacher_name="", duration=1, class_name=""):
         display_text = f"{subject_name}"
         if teacher_name and teacher_name != "Öğretmen":
             display_text += f"\n{teacher_name}"
@@ -357,7 +543,7 @@ class TimetableGrid(QWidget):
         # Track placed lesson
         self._placed_lessons[(row, col)] = {
             "subject_name": subject_name, "color": color,
-            "teacher_name": teacher_name, "duration": duration
+            "teacher_name": teacher_name, "class_name": class_name, "duration": max_span
         }
         
     def get_placed_lessons(self):

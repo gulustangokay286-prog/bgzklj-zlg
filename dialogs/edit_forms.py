@@ -1,10 +1,45 @@
 """dialogs/edit_forms.py - Sihirbaz içindeki detaylı özel formlar (Ders, Sınıf vb.)"""
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QLabel,
-    QLineEdit, QComboBox, QCheckBox, QColorDialog, QFrame, QFormLayout, QGridLayout
+    QLineEdit, QComboBox, QCheckBox, QColorDialog, QFrame, QFormLayout, QGridLayout,
+    QScrollArea
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QColor
+
+PASTEL_DISTINCT_COLORS = [
+    "#1E88E5", "#43A047", "#FB8C00", "#8E24AA", "#E53935",
+    "#00ACC1", "#7CB342", "#FFB300", "#6D4C41", "#546E7A",
+    "#3949AB", "#00897B", "#F4511E", "#D81B60", "#00838F",
+    "#5E35B1", "#A1887F", "#0097A7", "#C2185B", "#F57C00"
+]
+
+def format_tr_name(name_str: str) -> str:
+    """Capitalizes Turkish names properly (e.g. 'hüseyin arman' -> 'Hüseyin Arman', 'ali ihsan' -> 'Ali İhsan')."""
+    if not name_str:
+        return name_str
+    words = name_str.strip().split()
+    formatted = []
+    tr_upper_map = {'i': 'İ', 'ı': 'I', 'ç': 'Ç', 'ğ': 'Ğ', 'ö': 'Ö', 'ş': 'Ş', 'ü': 'Ü'}
+    tr_lower_map = {'İ': 'i', 'I': 'ı', 'Ç': 'ç', 'Ğ': 'ğ', 'Ö': 'ö', 'Ş': 'ş', 'Ü': 'ü'}
+    
+    for w in words:
+        if not w:
+            continue
+        first = w[0]
+        rest = w[1:]
+        first_cap = tr_upper_map.get(first, first.upper())
+        rest_lower = "".join(tr_lower_map.get(c, c.lower()) for c in rest)
+        formatted.append(first_cap + rest_lower)
+        
+    return " ".join(formatted)
+
+def get_subject_color(subject_name: str) -> str:
+    """Returns a deterministic, vibrant, distinct color for any subject name."""
+    if not subject_name:
+        return "#1E88E5"
+    hash_val = sum(ord(c) * (i + 1) for i, c in enumerate(subject_name.strip()))
+    return PASTEL_DISTINCT_COLORS[hash_val % len(PASTEL_DISTINCT_COLORS)]
 
 
 class BaseEditForm(QDialog):
@@ -94,6 +129,17 @@ class LessonAssignmentDialog(QDialog):
         main_layout.setContentsMargins(16, 16, 16, 16)
         main_layout.setSpacing(10)
         
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("QScrollArea { background: transparent; } QWidget#scrollContent { background: transparent; }")
+        
+        scroll_content = QWidget()
+        scroll_content.setObjectName("scrollContent")
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setSpacing(10)
+        
         # 1. Öğretmen Row
         row1 = self._create_row_frame()
         l1 = QHBoxLayout(row1)
@@ -109,7 +155,7 @@ class LessonAssignmentDialog(QDialog):
         l1.addStretch(1)
         btn_ortak_ogr = QPushButton("Ortak Öğretmen")
         l1.addWidget(btn_ortak_ogr, alignment=Qt.AlignBottom)
-        main_layout.addWidget(row1)
+        scroll_layout.addWidget(row1)
         
         # 2. Ders Row
         row2 = self._create_row_frame()
@@ -131,7 +177,7 @@ class LessonAssignmentDialog(QDialog):
         btn_daha_fazla_ders.clicked.connect(self._add_extra_subject_dialog)
         l2.addWidget(btn_daha_fazla_ders, alignment=Qt.AlignBottom)
         
-        main_layout.addWidget(row2)
+        scroll_layout.addWidget(row2)
         
         # 3. Sınıf Row
         row3 = self._create_row_frame()
@@ -147,7 +193,7 @@ class LessonAssignmentDialog(QDialog):
         l3.addStretch(1)
         btn_birl_sinif = QPushButton("Birleşik Sınıflar")
         l3.addWidget(btn_birl_sinif, alignment=Qt.AlignBottom)
-        main_layout.addWidget(row3)
+        scroll_layout.addWidget(row3)
         
         # 4. Haftalık Ders Row
         row4 = self._create_row_frame()
@@ -170,7 +216,7 @@ class LessonAssignmentDialog(QDialog):
         l4.addStretch(1)
         lbl_coklu = QLabel("Çoklu Hafta/Dönem")
         l4.addWidget(lbl_coklu, alignment=Qt.AlignBottom)
-        main_layout.addWidget(row4)
+        scroll_layout.addWidget(row4)
         
         # 5. Derslik Row
         row5 = self._create_row_frame()
@@ -201,10 +247,13 @@ class LessonAssignmentDialog(QDialog):
         v5.addLayout(h5)
         
         l5.addLayout(v5)
-        main_layout.addWidget(row5)
+        scroll_layout.addWidget(row5)
+        
+        scroll_layout.addStretch(1)
+        scroll.setWidget(scroll_content)
+        main_layout.addWidget(scroll)
         
         # Bottom Buttons (Single clean set)
-        main_layout.addStretch(1)
         bot_lay = QHBoxLayout()
         
         btn_iptal = QPushButton("İptal")
@@ -288,6 +337,43 @@ class LessonAssignmentDialog(QDialog):
 
             for c in self.data_store.get("siniflar", []):
                 self.cb_sinif.addItem(c.get("ad", ""), c)
+            
+            # Load existing assignments for this teacher
+            teacher_name = self.cb_ogretmen.currentText()
+            existing = [a for a in self.data_store.get("atamalar", []) if a.get("teacher") == teacher_name]
+            
+            if existing:
+                # Fill first assignment into primary fields
+                first = existing[0]
+                s_idx = self.cb_ders.findText(first.get("subject", ""))
+                if s_idx >= 0:
+                    self.cb_ders.setCurrentIndex(s_idx)
+                c_idx = self.cb_sinif.findText(first.get("class", ""))
+                if c_idx >= 0:
+                    self.cb_sinif.setCurrentIndex(c_idx)
+                
+                dur = str(first.get("duration", 2))
+                h_idx = self.cb_hafta.findText(dur)
+                if h_idx >= 0:
+                    self.cb_hafta.setCurrentIndex(h_idx)
+                
+                tip = first.get("type", "")
+                if tip:
+                    t_idx = self.cb_tip.findText(tip)
+                    if t_idx >= 0:
+                        self.cb_tip.setCurrentIndex(t_idx)
+                    else:
+                        self.cb_tip.setCurrentText(tip)
+                
+                # Add remaining assignments as extra rows
+                for extra in existing[1:]:
+                    self._add_extra_subject_dialog()
+                    last_cb = self.extra_ders_combos[-1]
+                    e_idx = last_cb.findText(extra.get("subject", ""))
+                    if e_idx >= 0:
+                        last_cb.setCurrentIndex(e_idx)
+                    else:
+                        last_cb.setCurrentText(extra.get("subject", ""))
 
     def get_data(self):
         dur_str = self.cb_hafta.currentText()
@@ -301,28 +387,29 @@ class LessonAssignmentDialog(QDialog):
             
         all_subjs = [self.cb_ders.currentText().strip()] + [cb.currentText().strip() for cb in self.extra_ders_combos if cb.currentText().strip()]
         unique_subjs = list(dict.fromkeys(filter(None, all_subjs)))
-        final_subject = " & ".join(unique_subjs) if unique_subjs else "Ders"
 
-        return {
-            "teacher": self.cb_ogretmen.currentText(),
-            "subject": final_subject,
+        teacher_name = format_tr_name(self.cb_ogretmen.currentText())
+        assignments = []
+        for subj in unique_subjs:
+            assignments.append({
+                "teacher": teacher_name,
+                "subject": subj,
+                "class": self.cb_sinif.currentText(),
+                "duration": duration,
+                "type": type_val,
+                "color": get_subject_color(subj)
+            })
+            
+        return assignments if assignments else [{
+            "teacher": teacher_name,
+            "subject": "Ders",
             "class": self.cb_sinif.currentText(),
             "duration": duration,
-            "type": type_val
-        }
+            "type": type_val,
+            "color": get_subject_color("Ders")
+        }]
 
     def accept(self):
-        data = self.get_data()
-        p = self.parent()
-        if p and hasattr(p, "data_store"):
-            if "atamalar" not in p.data_store:
-                p.data_store["atamalar"] = []
-            p.data_store["atamalar"].append(data)
-            if hasattr(p, "save_db"): p.save_db()
-            if hasattr(p, "_refresh_tree"): p._refresh_tree()
-            pp = p.parent()
-            if pp and hasattr(pp, "save_db"): pp.save_db()
-            if pp and hasattr(pp, "_refresh_tree"): pp._refresh_tree()
         super().accept()
 
 
@@ -664,8 +751,10 @@ class OgretmenEditDialog(BaseEditForm):
             self.color_box.setStyleSheet(f"background: {self._color};")
 
     def get_data(self):
+        raw_ad = self.w_ad.text().strip()
+        ad_formatted = format_tr_name(raw_ad)
         return {
-            "ad": self.w_ad.text(), "kisa": self.w_kisa.text(),
+            "ad": ad_formatted, "kisa": self.w_kisa.text(),
             "renk": self._color, "sinif_ogretmeni": self.w_so.text(),
             "ek_dersler": self.w_ek_dersler.text(),
             "es_zamanli": self.chk_es_zamanli.isChecked(),
