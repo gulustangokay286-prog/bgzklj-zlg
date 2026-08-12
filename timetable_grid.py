@@ -40,10 +40,35 @@ class DraggableLessonCard(QLabel):
         self.duration = duration
         self.teacher = teacher
         
-        self.setText(f"{subject_name} ({duration})")
+        display_text = f"{subject_name}"
+        if teacher and teacher != "Öğretmen":
+            display_text += f"\n{teacher}"
+        if duration > 1:
+            display_text += f" ({duration} Saat)"
+            
+        self.setText(display_text)
         self.setAlignment(Qt.AlignCenter)
-        self.setFixedSize(50 + (duration - 1)*30, 40)
-        self.setStyleSheet(f"background: {color}; color: white; font-weight: bold; border: 1px solid #333; border-radius: 4px; font-size: 10px;")
+        card_width = max(90, 80 + (duration - 1)*35)
+        self.setFixedSize(card_width, 54)
+        
+        c = QColor(color)
+        luminance = (0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue())
+        text_color = "#FFFFFF" if luminance < 160 else "#111111"
+        
+        self.setStyleSheet(f"""
+            QLabel {{
+                background-color: {color};
+                color: {text_color};
+                font-weight: bold;
+                border: 1px solid rgba(0, 0, 0, 0.25);
+                border-radius: 6px;
+                font-size: 11px;
+                padding: 4px;
+            }}
+            QLabel:hover {{
+                border: 2px solid #0078D7;
+            }}
+        """)
         self.setCursor(Qt.OpenHandCursor)
         
     def mousePressEvent(self, event):
@@ -51,7 +76,13 @@ class DraggableLessonCard(QLabel):
             drag = QDrag(self)
             mime = QMimeData()
             
-            data = {"lesson_id": self.lesson_id, "subject_name": self.subject_name, "color": self.color, "duration": self.duration, "teacher": self.teacher}
+            data = {
+                "lesson_id": self.lesson_id,
+                "subject_name": self.subject_name,
+                "color": self.color,
+                "duration": self.duration,
+                "teacher": self.teacher
+            }
             mime.setData("application/x-lesson", QByteArray(json.dumps(data).encode()))
             drag.setMimeData(mime)
             
@@ -65,14 +96,14 @@ class DraggableLessonCard(QLabel):
 class UnplacedLessonsDock(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(80)
-        self.setStyleSheet("background: #555555; border-top: 2px solid #F39C12;")
+        self.setFixedHeight(85)
+        self.setStyleSheet("QFrame { background: #2B2D30; border-top: 3px solid #F39C12; }")
         
         self.layout = QHBoxLayout(self)
-        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setContentsMargins(10, 8, 10, 8)
         self.layout.setSpacing(10)
         
-        # Scroll area for many unplaced lessons
+        # Scroll area for unplaced lessons
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
@@ -81,6 +112,7 @@ class UnplacedLessonsDock(QFrame):
         self.container.setStyleSheet("background: transparent;")
         self.container_layout = QHBoxLayout(self.container)
         self.container_layout.setContentsMargins(0, 0, 0, 0)
+        self.container_layout.setSpacing(8)
         self.container_layout.setAlignment(Qt.AlignLeft)
         
         scroll.setWidget(self.container)
@@ -93,6 +125,12 @@ class UnplacedLessonsDock(QFrame):
             if item.widget():
                 item.widget().deleteLater()
                 
+        if not lessons_data:
+            hint = QLabel("Yerleştirilecek ders kartı bulunamadı. Lütfen 'Dersler' veya 'Ders Atama' bölümünden ders ekleyin.")
+            hint.setStyleSheet("color: #BBB; font-style: italic; font-size: 12px; padding: 10px;")
+            self.container_layout.addWidget(hint)
+            return
+
         for l in lessons_data:
             dur = l.get("duration", 1)
             teacher = l.get("teacher", "")
@@ -101,7 +139,7 @@ class UnplacedLessonsDock(QFrame):
 
 
 class DropTableWidget(QTableWidget):
-    lesson_dropped = Signal(int, int, int, int) # row, col, lesson_id, duration
+    lesson_dropped = Signal(int, int, dict) # row, col, lesson_info
     cell_right_clicked = Signal(int, int)  # row, col for context menu
     
     def __init__(self, rows, cols, parent=None):
@@ -132,7 +170,7 @@ class DropTableWidget(QTableWidget):
             col = self.column(item) if item else self.columnAt(event.pos().x())
             
             if row >= 0 and col >= 0:
-                self.lesson_dropped.emit(row, col, lesson_info["lesson_id"], lesson_info.get("duration", 1))
+                self.lesson_dropped.emit(row, col, lesson_info)
                 event.accept()
             else:
                 event.ignore()
@@ -146,8 +184,8 @@ class DropTableWidget(QTableWidget):
         
         menu = QMenu(self)
         menu.setStyleSheet("""
-            QMenu { background: #FFFFFF; border: 1px solid #CCC; font-family: 'Segoe UI'; font-size: 11px; }
-            QMenu::item { padding: 8px 30px 8px 30px; }
+            QMenu { background: #FFFFFF; border: 1px solid #CCC; font-family: system-ui; font-size: 12px; }
+            QMenu::item { padding: 8px 25px; }
             QMenu::item:selected { background: #0078D7; color: white; }
             QMenu::separator { height: 1px; background: #DDD; margin: 3px 10px; }
         """)
@@ -156,18 +194,29 @@ class DropTableWidget(QTableWidget):
             act_edit = menu.addAction(make_context_icon("E", "#4CAF50", "#2E7D32"), "Düzenle")
             act_move = menu.addAction(make_context_icon("M", "#FFCA28", "#FF8F00"), "Taşı")
             menu.addSeparator()
-            act_single = menu.addAction(make_context_icon("1", "#29B6F6", "#0277BD"), "Tekli Yap")
-            act_double = menu.addAction(make_context_icon("2", "#29B6F6", "#0277BD"), "İkili Blok Yap")
-            act_triple = menu.addAction(make_context_icon("3", "#29B6F6", "#0277BD"), "Üçlü Blok Yap")
-            act_quad   = menu.addAction(make_context_icon("4", "#29B6F6", "#0277BD"), "Dörtlü Blok Yap")
+            act_single = menu.addAction(make_context_icon("1", "#29B6F6", "#0277BD"), "Tekli Yap (1 Saat)")
+            act_double = menu.addAction(make_context_icon("2", "#29B6F6", "#0277BD"), "İkili Blok Yap (2 Saat)")
+            act_triple = menu.addAction(make_context_icon("3", "#29B6F6", "#0277BD"), "Üçlü Blok Yap (3 Saat)")
+            act_quad   = menu.addAction(make_context_icon("4", "#29B6F6", "#0277BD"), "Dörtlü Blok Yap (4 Saat)")
+            act_quint  = menu.addAction(make_context_icon("5", "#29B6F6", "#0277BD"), "Beşli Blok Yap (5 Saat)")
             menu.addSeparator()
             act_del = menu.addAction(make_context_icon("X", "#EF5350", "#C62828"), "Sil (Kaldır)")
             
             action = menu.exec_(self.viewport().mapToGlobal(pos))
             
             if action == act_del:
-                self.setSpan(row, col, 1, 1) # Clear span
-                self.setItem(row, col, None)
+                r_span = max(1, self.rowSpan(row, col))
+                c_span = max(1, self.columnSpan(row, col))
+                self.setSpan(row, col, 1, 1)
+                for r_off in range(r_span):
+                    for c_off in range(c_span):
+                        tr, tc = row + r_off, col + c_off
+                        self.setItem(tr, tc, None)
+                        if hasattr(self.parent(), "_placed_lessons"):
+                            self.parent()._placed_lessons.pop((tr, tc), None)
+                win = self.window()
+                if hasattr(win, "save_db"):
+                    win.save_db()
             elif action == act_single:
                 self._set_span(row, col, 1)
             elif action == act_double:
@@ -176,10 +225,33 @@ class DropTableWidget(QTableWidget):
                 self._set_span(row, col, 3)
             elif action == act_quad:
                 self._set_span(row, col, 4)
+            elif action == act_quint:
+                self._set_span(row, col, 5)
             elif action == act_edit:
                 self.cell_right_clicked.emit(row, col)
             elif action == act_move:
-                self.parent().parent().statusBar().showMessage("Taşımak için hücreyi basılı tutup başka bir boşluğa sürükleyebilirsiniz.")
+                # Instant move dialog
+                from PySide6.QtWidgets import QInputDialog
+                days = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"]
+                day_choice, ok1 = QInputDialog.getItem(self, "Dersi Taşı", "Hedef Gün:", days, 0, False)
+                if ok1 and day_choice:
+                    target_col = days.index(day_choice)
+                    period_strs = [f"{p+1}. Ders" for p in range(self.rowCount())]
+                    p_choice, ok2 = QInputDialog.getItem(self, "Dersi Taşı", "Hedef Saat:", period_strs, 0, False)
+                    if ok2 and p_choice:
+                        target_row = period_strs.index(p_choice)
+                        # Swap / Move item
+                        old_item = self.item(row, col)
+                        if old_item:
+                            txt = old_item.text()
+                            bg = old_item.background().color().name()
+                            self.setSpan(row, col, 1, 1)
+                            self.setItem(row, col, None)
+                            if hasattr(self.parent(), "set_cell"):
+                                self.parent().set_cell(target_row, target_col, txt.split('\n')[0], bg, txt.split('\n')[1] if '\n' in txt else "")
+                            win = self.window()
+                            if hasattr(win, "save_db"):
+                                win.save_db()
         else:
             act_add = menu.addAction(make_context_icon("+", "#B0BEC5", "#546E7A"), "Ders Ekle (Aşağıdan Sürükle)")
             act_block = menu.addAction(make_context_icon("L", "#B0BEC5", "#546E7A"), "Bu Slotu Kilitle")
@@ -189,8 +261,6 @@ class DropTableWidget(QTableWidget):
         """Change span of existing cell"""
         item = self.item(row, col)
         if item:
-            # We don't call clearSpans() because it ruins ALL spans!
-            # Instead, reset current cell span to 1x1 first, then apply new span
             self.setSpan(row, col, 1, 1)
             max_span = min(span, self.rowCount() - row)
             if max_span > 1:
@@ -198,10 +268,12 @@ class DropTableWidget(QTableWidget):
 
 
 class TimetableGrid(QWidget):
+    cell_right_clicked = Signal(int, int)
+
     def __init__(self, periods: int = 8, parent=None):
         super().__init__(parent)
         self._periods = periods
-        self._placed_lessons = {}  # (row, col) -> lesson_data
+        self._placed_lessons = {}
         self._build_ui()
 
     def _build_ui(self):
@@ -218,7 +290,7 @@ class TimetableGrid(QWidget):
         top.addWidget(view_lbl)
 
         self.view_combo = QComboBox(self)
-        self.view_combo.addItems(["Sınıf Görünümü", "Öğretmen Görünümü", "Derslik Görünümü"])
+        self.view_combo.addItems(["Sınıf Görünümü", "Öğretmen Görünümü", "Derslik Görünümü", "Öğrenci Görünümü"])
         self.view_combo.setFixedWidth(180)
         top.addWidget(self.view_combo)
 
@@ -231,6 +303,7 @@ class TimetableGrid(QWidget):
 
         # ── Table
         self.table = DropTableWidget(self._periods, len(DAYS), self)
+        self.table.cell_right_clicked.connect(self.cell_right_clicked)
         self.table.setHorizontalHeaderLabels(DAYS)
         self.table.setVerticalHeaderLabels([f"{i+1}" for i in range(self._periods)])
 
@@ -258,19 +331,27 @@ class TimetableGrid(QWidget):
         layout.addWidget(self.unplaced_dock)
         
     def set_cell(self, row, col, subject_name, color, teacher_name="", duration=1):
-        item = QTableWidgetItem(f"{subject_name}\n{teacher_name}")
+        display_text = f"{subject_name}"
+        if teacher_name and teacher_name != "Öğretmen":
+            display_text += f"\n{teacher_name}"
+            
+        item = QTableWidgetItem(display_text)
         item.setTextAlignment(Qt.AlignCenter)
         item.setBackground(QBrush(QColor(color)))
-        # White text for dark colors
-        is_dark = color.upper() in ["#E53935", "#FF0000", "#A30F37", "#1E88E5", "#8E24AA", "#C62828", "#1565C0"]
-        item.setForeground(QBrush(Qt.white if is_dark else Qt.black))
+        
+        c = QColor(color)
+        luminance = (0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue())
+        text_color = Qt.white if luminance < 160 else Qt.black
+        item.setForeground(QBrush(text_color))
+        
         font = QFont("Segoe UI", 9)
         font.setBold(True)
         item.setFont(font)
         
         # Set span
         max_span = min(duration, self.table.rowCount() - row)
-        self.table.setSpan(row, col, max_span, 1)
+        if max_span > 1:
+            self.table.setSpan(row, col, max_span, 1)
         self.table.setItem(row, col, item)
         
         # Track placed lesson

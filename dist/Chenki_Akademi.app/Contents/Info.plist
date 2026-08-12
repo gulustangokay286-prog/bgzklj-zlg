@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>Chenki_Akademi</string>
+	<key>CFBundleExecutable</key>
+	<string>Chenki_Akademi</string>
+	<key>CFBundleIconFile</key>
+	<string>generated-16b8a88d912e871a967319a8c543d59938b4f2fc546ecacae5536797aa715bab.icns</string>
+	<key>CFBundleIdentifier</key>
+	<string>Chenki_Akademi</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Chenki_Akademi</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.0.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+</dict>
+</plist>

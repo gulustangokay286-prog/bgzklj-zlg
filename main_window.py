@@ -95,9 +95,21 @@ class MainWindow(QMainWindow):
 
         # Core Data Engine Initialization
         self.tt_data = TimetableData()
-        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-        self.db_path = os.path.join(BASE_DIR, "data", "bgz_database.json")
-        self.data_store = {"dersler": [], "siniflar": [], "derslikler": [], "ogretmenler": []}
+        user_dir = os.path.join(os.path.expanduser("~"), ".chenki_akademi")
+        os.makedirs(user_dir, exist_ok=True)
+        self.db_path = os.path.join(user_dir, "bgz_database.json")
+        
+        # Seed from workspace data if user database does not exist yet
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        init_db = os.path.join(base_dir, "data", "bgz_database.json")
+        if not os.path.exists(self.db_path) and os.path.exists(init_db):
+            import shutil
+            try:
+                shutil.copy(init_db, self.db_path)
+            except Exception:
+                pass
+                
+        self.data_store = {"dersler": [], "siniflar": [], "derslikler": [], "ogretmenler": [], "atamalar": []}
         self.load_db()
 
         self._build_ui()
@@ -349,6 +361,7 @@ class MainWindow(QMainWindow):
         
         # Connect drop signal
         self._grid.table.lesson_dropped.connect(self._on_lesson_dropped)
+        self._grid.cell_right_clicked.connect(self._on_cell_edit)
 
         r_layout.addWidget(self._tab_widget)
 
@@ -396,6 +409,12 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.statusBar().showMessage(f"Kaydetme hatası: {e}")
 
+        try:
+            with open("bgz_database.json", "w", encoding="utf-8") as f2:
+                json.dump(self.data_store, f2, ensure_ascii=False, indent=4)
+        except Exception:
+            pass
+
     def _refresh_tree(self):
         self._tree.clear()
         
@@ -412,68 +431,166 @@ class MainWindow(QMainWindow):
         self._tree.expandAll()
         
         unplaced = []
-        colors = ["#E53935", "#1E88E5", "#43A047", "#8E24AA", "#FFB300", "#00ACC1", "#D81B60", "#3949AB"]
-        for idx, ders in enumerate(self.data_store.get("dersler", [])):
-            unplaced.append({
-                "id": idx,
-                "subject_name": ders.get("kisa", ders.get("ad", f"Ders {idx}")),
-                "color": colors[idx % len(colors)],
-                "teacher": "Öğretmen",
-                "duration": 2 # default test duration
-            })
+        colors = ["#E53935", "#1E88E5", "#43A047", "#8E24AA", "#FFB300", "#00ACC1", "#D81B60", "#3949AB", "#4A148C", "#00838F"]
+        
+        # 1. Add explicitly assigned lessons from self.data_store["atamalar"]
+        atamalar = self.data_store.get("atamalar", [])
+        seen_atamalar = []
+        unique_atamalar = []
+        for a in atamalar:
+            sig = (a.get("subject"), a.get("teacher"), a.get("class"), a.get("duration"), a.get("type"))
+            if sig not in seen_atamalar:
+                seen_atamalar.append(sig)
+                unique_atamalar.append(a)
+        existing_teachers = [t.get("ad") for t in self.data_store.get("ogretmenler", []) if t.get("ad")]
+        existing_subjects = [d.get("ad") for d in self.data_store.get("dersler", []) if d.get("ad")]
+        
+        valid_atamalar = []
+        for a in unique_atamalar:
+            t_name = a.get("teacher")
+            s_name = a.get("subject")
+            if existing_teachers and t_name and t_name not in existing_teachers:
+                continue
+            if existing_subjects and s_name and s_name not in existing_subjects:
+                continue
+            valid_atamalar.append(a)
+            
+        self.data_store["atamalar"] = valid_atamalar
+        atamalar = valid_atamalar
+
+        for idx, atama in enumerate(atamalar):
+            subj_name = atama.get("subject", "Ders")
+            teacher_name = atama.get("teacher", "")
+            dur = atama.get("duration", 2)
+            type_str = str(atama.get("type", ""))
+            
+            # Parse custom breakdown like "2+3", "3+1", "2+1", "1+1+1"
+            parts = []
+            if "+" in type_str:
+                for p in type_str.split("+"):
+                    p_clean = p.strip()
+                    if p_clean.isdigit():
+                        parts.append(int(p_clean))
+            
+            if not parts:
+                parts = [dur]
+                
+            for p_idx, block_dur in enumerate(parts):
+                unplaced.append({
+                    "id": f"{idx}_{p_idx}",
+                    "subject_name": subj_name,
+                    "color": colors[(idx + p_idx) % len(colors)],
+                    "teacher": teacher_name,
+                    "duration": block_dur
+                })
+            
+        # 2. Add defined subjects from self.data_store["dersler"] if not already in atamalar
+        defined_subjects = self.data_store.get("dersler", [])
+        assigned_subj_names = {a.get("subject") for a in atamalar}
+        
+        for idx, ders in enumerate(defined_subjects):
+            sname = ders.get("kisa") or ders.get("ad")
+            if sname and (sname not in assigned_subj_names and ders.get("ad") not in assigned_subj_names):
+                color = ders.get("renk") or colors[(len(unplaced) + idx) % len(colors)]
+                unplaced.append({
+                    "id": len(unplaced),
+                    "subject_name": sname,
+                    "color": color,
+                    "teacher": "Öğretmen",
+                    "duration": 2
+                })
+                
         self._grid.unplaced_dock.load_unplaced(unplaced)
 
-    def _on_lesson_dropped(self, row, col, lesson_id, duration):
-        dersler = self.data_store.get("dersler", [])
-        if 0 <= lesson_id < len(dersler):
-            ders = dersler[lesson_id]
-            colors = ["#E53935", "#1E88E5", "#43A047", "#8E24AA", "#FFB300", "#00ACC1", "#D81B60", "#3949AB"]
-            self._grid.set_cell(row, col, ders.get("kisa", "Ders"), colors[lesson_id % len(colors)], "Öğretmen", duration)
-            self.statusBar().showMessage(f"Ders '{ders.get('kisa')}' {row+1}. periyot, gün {col+1} konumuna yerleştirildi.")
+    def _on_lesson_dropped(self, row, col, lesson_info):
+        subject_name = lesson_info.get("subject_name", "Ders")
+        color = lesson_info.get("color", "#1E88E5")
+        teacher = lesson_info.get("teacher", "")
+        duration = lesson_info.get("duration", 1)
+        
+        from timetable_grid import DAYS
+        day_name = DAYS[col] if 0 <= col < len(DAYS) else f"{col+1}. Gün"
+        
+        # 1. Check Teacher Constraints (Time-off / Kapalı gün/saat)
+        kisitlamalar = self.data_store.get("kisitlamalar", {})
+        if teacher and teacher in kisitlamalar:
+            cell_key = f"{col},{row}"
+            is_available = kisitlamalar[teacher].get(cell_key, True)
+            if not is_available:
+                QMessageBox.warning(
+                    self, "Kısıtlama Engeli",
+                    f"⚠️ '{teacher}' öğretmeninin {day_name} günü {row+1}. ders saatinde 'ÇALIŞAMAZ / KAPALI' kısıtlaması bulunmaktadır!\nDers yerleştirilemez."
+                )
+                self.statusBar().showMessage(f"Kısıtlama engeli: {teacher} - {day_name} {row+1}. saat kapalı!")
+                return
+                
+        # 2. Check Teacher Conflict (Is teacher already placed elsewhere at this slot?)
+        teacher_info = next((t for t in self.data_store.get("ogretmenler", []) if t.get("ad") == teacher), {})
+        allows_parallel = teacher_info.get("es_zamanli", False)
+        
+        if not allows_parallel:
+            placed = self._grid.get_placed_lessons()
+            for (r, c), data in placed.items():
+                if (r, c) == (row, col) and data.get("teacher") == teacher and teacher != "":
+                    QMessageBox.warning(
+                        self, "Çakışma Engeli",
+                        f"⚠️ '{teacher}' öğretmeni {day_name} günü {row+1}. ders saatinde zaten başka bir derste görevlidir!\n(Farklı bir sınıfta eş zamanlı ders vermek için öğretmen düzenleme ekranından 'Çoklu Ders İzni' seçeneğini açabilirsiniz)."
+                    )
+                    return
+
+        self._grid.set_cell(row, col, subject_name, color, teacher, duration)
+        self.statusBar().showMessage(f"'{subject_name}' dersi {day_name} günü {row+1}. ders saatine yerleştirildi.")
+        self.save_db()
 
     # ── Actions ───────────────────────────────────────────────────────────────
     def _go_main_tab(self):
         self._ribbon._select(0)
 
+    def _on_cell_edit(self, row, col):
+        from dialogs.edit_forms import LessonAssignmentDialog
+        dlg = LessonAssignmentDialog(data_store=self.data_store, parent=self)
+        if dlg.exec():
+            data = dlg.get_data()
+            self.data_store.setdefault("atamalar", []).append(data)
+            self.save_db()
+            self._refresh_tree()
+
     def _act_new(self):
-        d = SchoolInfoDialog(self)
-        d.exec()
+        from PySide6.QtWidgets import QInputDialog
+        opts = [
+            "🏫 Kurum / Sınıf Haftalık Ders Programı Oluştur",
+            "🎓 Öğrenci Bireysel Ders Programı Oluştur"
+        ]
+        choice, ok = QInputDialog.getItem(self, "Yeni Program Yapılandır", "Oluşturmak istediğiniz program türünü seçin:", opts, 0, False)
+        if ok and choice:
+            if "Öğrenci" in choice:
+                self.statusBar().showMessage("Öğrenci Bireysel Ders Programı Modu Aktif.")
+                self._grid.view_combo.setCurrentText("Öğrenci Görünümü")
+            else:
+                d = SchoolInfoDialog(self)
+                d.exec()
 
     def _act_open(self):
         path, _ = QFileDialog.getOpenFileName(self, "Dosya Aç", "", "BGZ Planlama Dosyaları (*.roz);;Tüm Dosyalar (*)")
         if path:
             self.load_db(path)
             self._grid.clear_grid()
-            # Also load placed lessons back into the grid if they exist
-            # Here we need to implement hydration of the grid later
+            self._refresh_tree()
             self.statusBar().showMessage(f"Açıldı: {path}")
 
     def _act_save(self):
         path, _ = QFileDialog.getSaveFileName(self, "Farklı Kaydet", "program.roz", "BGZ Planlama Dosyaları (*.roz)")
         if path:
-            # Save placed lessons into data_store
             placed = self._grid.get_placed_lessons()
             self.data_store["yerlesim"] = {f"{r},{c}": data for (r, c), data in placed.items()}
             self.save_db(path)
 
     def _act_print(self):
-        from PySide6.QtPrintSupport import QPrinter, QPrintDialog
-        printer = QPrinter()
-        dlg = QPrintDialog(printer, self)
-        if dlg.exec():
-            self.statusBar().showMessage("Yazdırılıyor...")
+        dlg = TimetablePrintPreview(self.data_store, self._grid.get_placed_lessons(), self)
+        dlg.exec()
 
     def _act_preview(self):
-        # Use placed lessons from the grid
-        placed = self._grid.get_placed_lessons()
-        # Convert (row, col) -> lesson data for print
-        print_data = {}
-        for (row, col), data in placed.items():
-            print_data[(row, col)] = data
-        
-        # Get selected class name from the entity combo
-        class_name = self._grid.entity_combo.currentText() or "12/B"
-        dlg = TimetablePrintPreview(print_data, class_name, self)
+        dlg = TimetablePrintPreview(self.data_store, self._grid.get_placed_lessons(), self)
         dlg.exec()
 
     def _act_close(self):
@@ -489,27 +606,31 @@ class MainWindow(QMainWindow):
         d = MasterDataDialog(0, self)
         d.exec()
         self.save_db()
+        self._refresh_tree()
 
     def _open_classes(self):
         d = MasterDataDialog(1, self)
         d.exec()
         self.save_db()
+        self._refresh_tree()
 
     def _open_rooms(self):
         d = MasterDataDialog(2, self)
         d.exec()
         self.save_db()
+        self._refresh_tree()
 
     def _open_teachers(self):
         d = MasterDataDialog(3, self)
         d.exec()
         self.save_db()
+        self._refresh_tree()
 
     def _open_wizard(self):
-        # Fallback or main entry
         d = MasterDataDialog(0, self)
         d.exec()
         self.save_db()
+        self._refresh_tree()
 
     def _act_auto_schedule(self):
         d = AutoScheduleDialog(self)

@@ -274,19 +274,22 @@ class MasterDataDialog(QDialog):
         right_panel.addWidget(btn_ders_atama)
         
         btn_zaman = ActionButton("Zaman Tablosu", icon_name="clock")
-        btn_zaman.clicked.connect(lambda: self._open_2025_dialog("135"))
+        btn_zaman.clicked.connect(self._act_constraints)
         right_panel.addWidget(btn_zaman)
         
         btn_kisit = ActionButton("Kısıtlamalar", icon_name="hash")
-        btn_kisit.clicked.connect(lambda: self._open_2025_dialog("124"))
+        btn_kisit.clicked.connect(self._act_constraints)
         right_panel.addWidget(btn_kisit)
         
         self.btn_gruplar = ActionButton("Gruplar", icon_name="branch")
-        self.btn_gruplar.clicked.connect(lambda: self._open_2025_dialog("136"))
+        self.btn_gruplar.clicked.connect(self._act_groups)
         right_panel.addWidget(self.btn_gruplar)
         
         self.btn_tumunu_sil = ActionButton("Tümünü Sil", icon_name="minus")
+        self.btn_tumunu_sil.clicked.connect(self._act_delete_all)
+        
         self.btn_oto_olustur = ActionButton("Otomatik Oluştur", icon_name="plus", is_primary=True)
+        self.btn_oto_olustur.clicked.connect(self._act_auto_schedule)
         
         right_panel.addStretch(1)
         right_panel.addWidget(self.btn_tumunu_sil)
@@ -305,8 +308,8 @@ class MasterDataDialog(QDialog):
         btn_help.setStyleSheet("background: #F0F0F0; border: 1px solid #CCC; border-radius: 4px;")
         
         btn_save = QPushButton("Kaydet")
-        btn_save.setFixedSize(90, 30)
-        btn_save.setStyleSheet("background: #F0F0F0; border: 1px solid #CCC; border-radius: 4px;")
+        btn_save.setFixedSize(110, 32)
+        btn_save.setStyleSheet("background: #0078D7; color: white; font-weight: bold; border-radius: 4px; font-size: 13px;")
         btn_save.clicked.connect(self.accept)
         
         btn_info = QPushButton("Bilgi Al")
@@ -368,10 +371,20 @@ class MasterDataDialog(QDialog):
         # Enable/Disable right panel buttons based on context if necessary
         # All actions are kept enabled for now as they are universally valid in this design
 
-    def _act_assign(self):
+    def _act_assign(self, teacher_name=None):
         from dialogs.edit_forms import LessonAssignmentDialog
-        d = LessonAssignmentDialog(self, data_store=self.data_store)
-        d.exec()
+        if not teacher_name and hasattr(self, "table_ogretmen"):
+            r = self.table_ogretmen.currentRow()
+            if r >= 0:
+                item = self.table_ogretmen.item(r, 0)
+                if item: teacher_name = item.text()
+                
+        d = LessonAssignmentDialog(data_store=self.data_store, parent=self, selected_teacher=teacher_name)
+        if d.exec():
+            data = d.get_data()
+            if "atamalar" not in self.data_store:
+                self.data_store["atamalar"] = []
+            self.data_store["atamalar"].append(data)
 
     def _act_new(self):
         idx = self.stack.currentIndex()
@@ -399,6 +412,11 @@ class MasterDataDialog(QDialog):
                 data = d.get_data()
                 self.data_store["ogretmenler"].append(data)
                 self._add_row(self.table_ogretmen, [data.get("ad",""), data.get("kisa",""), "0", "", "", ""])
+                self._act_assign(teacher_name=data.get("ad"))
+
+        p = self.parent()
+        if p and hasattr(p, "save_db"): p.save_db()
+        if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
 
     def _act_update(self):
         idx = self.stack.currentIndex()
@@ -420,6 +438,9 @@ class MasterDataDialog(QDialog):
                 data_list[row] = new_data
                 table.item(row, 0).setText(new_data.get("ad", ""))
                 table.item(row, 1).setText(new_data.get("kisa", ""))
+                p = self.parent()
+                if p and hasattr(p, "save_db"): p.save_db()
+                if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
 
     def _act_delete(self):
         from PySide6.QtWidgets import QMessageBox
@@ -436,11 +457,68 @@ class MasterDataDialog(QDialog):
             if r == QMessageBox.Yes:
                 table.removeRow(row)
                 if row < len(self.data_store[stores[idx]]):
-                    self.data_store[stores[idx]].pop(row)
+                    removed_item = self.data_store[stores[idx]].pop(row)
+                    del_name = removed_item.get("ad")
+                    if del_name:
+                        if idx == 3: # Teacher
+                            self.data_store["atamalar"] = [a for a in self.data_store.get("atamalar", []) if a.get("teacher") != del_name]
+                        elif idx == 0: # Subject
+                            self.data_store["atamalar"] = [a for a in self.data_store.get("atamalar", []) if a.get("subject") != del_name]
+                        elif idx == 1: # Class
+                            self.data_store["atamalar"] = [a for a in self.data_store.get("atamalar", []) if a.get("class") != del_name]
+                p = self.parent()
+                if p and hasattr(p, "save_db"): p.save_db()
+                if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
+
+    def _act_constraints(self):
+        from dialogs.constraints_dialog import ConstraintsDialog
+        idx = self.stack.currentIndex()
+        target_type = "ogretmen" if idx == 3 else "sinif"
+        dlg = ConstraintsDialog(self.data_store, target_type=target_type, parent=self)
+        dlg.exec()
+
+    def _act_delete_all(self):
+        from PySide6.QtWidgets import QMessageBox
+        idx = self.stack.currentIndex()
+        tables = [self.table_ders, self.table_sinif, self.table_derslik, self.table_ogretmen]
+        stores = ["dersler", "siniflar", "derslikler", "ogretmenler"]
+        names = ["derslerin", "sınıfların", "dersliklerin", "öğretmenlerin"]
+        
+        r = QMessageBox.question(
+            self, "Tümünü Sil Onayı",
+            f"Tanımlı tüm {names[idx]} listesini silmek istediğinize emin misiniz?\nBu işlem geri alınamaz!",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if r == QMessageBox.Yes:
+            tables[idx].setRowCount(0)
+            self.data_store[stores[idx]] = []
+            if idx in (0, 1, 3):
+                self.data_store["atamalar"] = []
+            p = self.parent()
+            if p and hasattr(p, "save_db"): p.save_db()
+            if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
+
+    def _act_groups(self):
+        from dialogs.groups_dialog import GroupsDialog
+        dlg = GroupsDialog(self.data_store, self)
+        dlg.exec()
+
+    def _act_auto_schedule(self):
+        from dialogs.auto_schedule_dialog import AutoScheduleDialog
+        dlg = AutoScheduleDialog(self.data_store, self)
+        dlg.exec()
 
     def _open_2025_dialog(self, dlg_id):
         from dialogs.extracted_dialog import open_extracted_dialog
         open_extracted_dialog(dlg_id, self)
+
+    def accept(self):
+        p = self.parent()
+        if p and hasattr(p, "save_db"):
+            p.save_db()
+        if p and hasattr(p, "_refresh_tree"):
+            p._refresh_tree()
+        super().accept()
 
     def _add_row(self, table, texts):
         r = table.rowCount()
