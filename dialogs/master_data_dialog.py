@@ -1,0 +1,449 @@
+"""dialogs/master_data_dialog.py - Gerçek Zamanlı Ana Veri Yönetim Penceresi"""
+from PySide6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QLabel,
+    QStackedWidget, QTableWidget, QTableWidgetItem, QHeaderView,
+    QFrame, QSizePolicy, QSpacerItem
+)
+from PySide6.QtCore import Qt, QSize, QPoint
+from PySide6.QtGui import QFont, QPixmap, QPainter, QColor, QPen, QBrush, QPolygon, QIcon
+
+from dialogs.edit_forms import DersEditDialog, SinifEditDialog, OgretmenEditDialog, DerslikEditDialog
+
+
+def create_wizard_icon(name: str) -> QPixmap:
+    pix = QPixmap(48, 48)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    
+    selected = name.endswith("_selected")
+    base_name = name.replace("_selected", "")
+    
+    if base_name == "book":
+        # Mavi Kitap
+        p.setBrush(QColor("#5C99D6"))
+        p.setPen(QColor("#3A78B4"))
+        p.drawRect(8, 6, 32, 36)
+        p.setBrush(QColor("#FFFFFF"))
+        p.setPen(Qt.NoPen)
+        p.drawRect(12, 12, 20, 4)
+        p.drawRect(12, 20, 24, 2)
+        
+    elif base_name == "teachers":
+        # İki Kişi (Kahve ve Yeşil)
+        # Kişi 1 (Kahve/Turuncu)
+        p.setBrush(QColor("#E2A065"))
+        p.setPen(QColor("#C07C41"))
+        p.drawEllipse(6, 12, 14, 14)
+        p.setBrush(QColor("#D66A55"))
+        p.setPen(QColor("#B54D3D"))
+        _create_shoulder_path(p, 13, 30, 20, 16)
+        
+        # Kişi 2 (Yeşil)
+        p.setBrush(QColor("#F4D08F"))
+        p.setPen(QColor("#CF9F53"))
+        p.drawEllipse(18, 16, 16, 16)
+        p.setBrush(QColor("#9BD08F"))
+        p.setPen(QColor("#6A9E5F"))
+        _create_shoulder_path(p, 26, 36, 24, 18)
+        
+    elif base_name == "door":
+        # Kahverengi Kapı
+        p.setBrush(QColor("#E8C9A8"))
+        p.setPen(QColor("#9E7655"))
+        p.drawRect(10, 8, 28, 32)
+        # Açık kapı detayı
+        p.setBrush(QColor("#5A3E26"))
+        p.drawRect(14, 12, 20, 28)
+        p.setBrush(QColor("#E8C9A8"))
+        poly = QPolygon([QPoint(14, 12), QPoint(34, 4), QPoint(34, 44), QPoint(14, 40)])
+        p.drawPolygon(poly)
+        
+    elif base_name == "grad_hat":
+        # Mezuniyet Şapkası
+        p.setBrush(QColor("#333333"))
+        p.setPen(QColor("#111111"))
+        poly = QPolygon([QPoint(24, 8), QPoint(42, 16), QPoint(24, 24), QPoint(6, 16)])
+        p.drawPolygon(poly)
+        p.drawRect(16, 20, 16, 12)
+        # Püskül
+        p.setPen(QPen(QColor("#F4A030"), 2))
+        p.drawLine(24, 16, 38, 26)
+        p.drawLine(38, 26, 38, 34)
+        
+    if selected:
+        # Yeşil Ok
+        p.setBrush(QColor("#4CAF50"))
+        p.setPen(QColor("#2E7D32"))
+        poly = QPolygon([
+            QPoint(12, 22), QPoint(32, 22), QPoint(32, 14),
+            QPoint(48, 26), QPoint(32, 38), QPoint(32, 30), QPoint(12, 30)
+        ])
+        p.drawPolygon(poly)
+        
+    p.end()
+    return pix
+
+def _create_shoulder_path(painter, cx, cy, w, h):
+    from PySide6.QtGui import QPainterPath
+    path = QPainterPath()
+    path.moveTo(cx - w/2, cy + h/2)
+    path.quadTo(cx - w/2, cy - h/2, cx, cy - h/2)
+    path.quadTo(cx + w/2, cy - h/2, cx + w/2, cy + h/2)
+    path.closeSubpath()
+    painter.drawPath(path)
+
+class LeftMenuButton(QPushButton):
+    def __init__(self, icon_name, parent=None):
+        super().__init__(parent)
+        self.icon_name = icon_name
+        self.setFixedSize(64, 64)
+        self.setIcon(create_wizard_icon(self.icon_name))
+        self.setIconSize(QSize(48, 48))
+        self.setCheckable(True)
+        self.setStyleSheet("""
+            QPushButton { border: none; background: transparent; border-radius: 4px; }
+            QPushButton:hover { background: rgba(0, 120, 215, 0.1); }
+            QPushButton:checked { background: rgba(0, 120, 215, 0.2); border: 1px solid rgba(0, 120, 215, 0.5); }
+        """)
+
+    def setChecked(self, checked):
+        super().setChecked(checked)
+        if checked:
+            self.setIcon(create_wizard_icon(self.icon_name + "_selected"))
+        else:
+            self.setIcon(create_wizard_icon(self.icon_name))
+
+class ActionButton(QPushButton):
+    def __init__(self, text, icon_name=None, is_primary=False, parent=None):
+        super().__init__(text, parent)
+        self.icon_name = icon_name
+        self.setFixedHeight(28)
+        self.setFont(QFont("Segoe UI", 9))
+        self.setStyleSheet("text-align: left; padding-left: 32px;")
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if not self.icon_name: return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        if self.icon_name == "plus":
+            p.setBrush(QColor("#4CAF50"))
+            p.setPen(Qt.NoPen)
+            p.drawEllipse(8, 6, 16, 16)
+            p.setPen(QPen(Qt.white, 2))
+            p.drawLine(16, 10, 16, 18)
+            p.drawLine(12, 14, 20, 14)
+        elif self.icon_name == "edit":
+            p.setBrush(QColor("#B0B0B0"))
+            p.setPen(Qt.NoPen)
+            p.drawRect(8, 8, 16, 12)
+            p.drawPolygon([QPoint(8, 8), QPoint(16, 4), QPoint(24, 8)])
+        elif self.icon_name == "minus":
+            p.setBrush(QColor("#B0B0B0"))
+            p.setPen(Qt.NoPen)
+            p.drawEllipse(8, 6, 16, 16)
+            p.setPen(QPen(Qt.white, 2))
+            p.drawLine(12, 14, 20, 14)
+        elif self.icon_name == "doc":
+            p.setBrush(QColor("#B0B0B0"))
+            p.setPen(Qt.NoPen)
+            p.drawRect(10, 6, 12, 16)
+            p.drawRect(18, 4, 6, 6)
+        elif self.icon_name == "clock":
+            p.setPen(QPen(QColor("#B0B0B0"), 2))
+            p.drawEllipse(8, 6, 16, 16)
+            p.drawLine(16, 14, 16, 8)
+            p.drawLine(16, 14, 20, 14)
+        elif self.icon_name == "hash":
+            p.setPen(QPen(QColor("#B0B0B0"), 2))
+            p.drawLine(12, 6, 12, 22)
+            p.drawLine(20, 6, 20, 22)
+            p.drawLine(8, 10, 24, 10)
+            p.drawLine(8, 18, 24, 18)
+        elif self.icon_name == "branch":
+            p.setPen(QPen(QColor("#B0B0B0"), 2))
+            p.drawLine(16, 20, 16, 14)
+            p.drawLine(16, 14, 10, 8)
+            p.drawLine(16, 14, 22, 8)
+        p.end()
+
+
+class MasterDataDialog(QDialog):
+    def __init__(self, start_idx=0, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Sınıflar") # Will be updated in select_tab
+        self.resize(900, 650)
+        self.setFont(QFont("Segoe UI", 9))
+        
+        self.main_window = parent
+        if hasattr(self.main_window, "data_store"):
+            self.data_store = self.main_window.data_store
+            # Ensure keys exist
+            for k in ["siniflar", "ogretmenler", "derslikler", "dersler"]:
+                if k not in self.data_store:
+                    self.data_store[k] = []
+        else:
+            self.data_store = {
+                "siniflar": [], "ogretmenler": [], "derslikler": [], "dersler": []
+            }
+        
+        self._build_ui()
+        self._load_existing_data()
+        self._select_tab(start_idx)
+
+    def _load_existing_data(self):
+        for data in self.data_store["dersler"]:
+            self._add_row(self.table_ders, [data.get("ad",""), data.get("kisa",""), "0", "", "Ideal", "", ""])
+        for data in self.data_store["siniflar"]:
+            self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), "0", "", "30", "", "", ""])
+        for data in self.data_store["derslikler"]:
+            self._add_row(self.table_derslik, [data.get("ad",""), data.get("kisa",""), "0", "", "Standart", "Merkez"])
+        for data in self.data_store["ogretmenler"]:
+            self._add_row(self.table_ogretmen, [data.get("ad",""), data.get("kisa",""), "0", "", "", ""])
+
+    def closeEvent(self, event):
+        if hasattr(self.main_window, "_refresh_tree"):
+            self.main_window._refresh_tree()
+        event.accept()
+
+    def _build_ui(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(12, 12, 12, 12)
+        main_layout.setSpacing(12)
+        
+        # --- Top / Center Area ---
+        center_layout = QHBoxLayout()
+        center_layout.setSpacing(12)
+        
+        # 1. Left Icons
+        left_panel = QVBoxLayout()
+        left_panel.setSpacing(16)
+        
+        self.left_btns = [
+            LeftMenuButton("book"),      # idx 0 -> Dersler
+            LeftMenuButton("teachers"),  # idx 1 -> Sınıflar
+            LeftMenuButton("door"),      # idx 2 -> Derslikler
+            LeftMenuButton("grad_hat")   # idx 3 -> Öğretmenler
+        ]
+        
+        for i, btn in enumerate(self.left_btns):
+            left_panel.addWidget(btn)
+            btn.clicked.connect(lambda checked, idx=i: self._select_tab(idx))
+            
+        left_panel.addStretch(1)
+        center_layout.addLayout(left_panel)
+        
+        # 2. Main Content (Stacked Widget)
+        self.stack = QStackedWidget(self)
+        self.stack.setStyleSheet("background: #FFFFFF; border: 1px solid #D0D0D0;")
+        
+        self.table_ders = self._create_table(["Adı", "Kısa Kodu", "Toplam", "Zaman Tablosu", "Dağılım", "Evde Hazırlık", "Max."])
+        self.table_sinif = self._create_table(["Adı", "Kısa Kodu", "Toplam", "Zaman Tablosu", "2. Ders", "Hazırlık", "Öğretmen", "Öğrenci"])
+        self.table_derslik = self._create_table(["Adı", "Kısa Kodu", "Toplam", "Zaman Tablosu", "Tipi", "Bina"])
+        self.table_ogretmen = self._create_table(["Adı", "Kısa Kodu", "Toplam", "Zaman Tablosu", "Sınıf Öğretmeni", "Branşı"])
+        
+        self.stack.addWidget(self._wrap_table("Tanımlı Dersler", self.table_ders))
+        self.stack.addWidget(self._wrap_table("Tanımlı Sınıflar", self.table_sinif))
+        self.stack.addWidget(self._wrap_table("Tanımlı Derslikler", self.table_derslik))
+        self.stack.addWidget(self._wrap_table("Tanımlı Öğretmenler ve Dersleri", self.table_ogretmen))
+        
+        center_layout.addWidget(self.stack, 1)
+        
+        # 3. Right Action Menu
+        right_panel = QVBoxLayout()
+        right_panel.setSpacing(6)
+        right_panel.setContentsMargins(0, 24, 0, 0)
+        
+        self.btn_yeni = ActionButton("Yeni", icon_name="plus", is_primary=True)
+        self.btn_yeni.clicked.connect(self._act_new)
+        right_panel.addWidget(self.btn_yeni)
+        self.btn_guncelle = ActionButton("Güncelle", icon_name="edit")
+        self.btn_guncelle.clicked.connect(self._act_update)
+        right_panel.addWidget(self.btn_guncelle)
+        
+        self.btn_sil = ActionButton("Sil", icon_name="minus")
+        self.btn_sil.clicked.connect(self._act_delete)
+        right_panel.addWidget(self.btn_sil)
+        
+        right_panel.addSpacing(20)
+        
+        # Orijinal 2025 Dialoglarına yönlendiren butonlar
+        btn_ders_atama = ActionButton("Ders Atama", icon_name="doc")
+        btn_ders_atama.clicked.connect(self._act_assign)
+        right_panel.addWidget(btn_ders_atama)
+        
+        btn_zaman = ActionButton("Zaman Tablosu", icon_name="clock")
+        btn_zaman.clicked.connect(lambda: self._open_2025_dialog("135"))
+        right_panel.addWidget(btn_zaman)
+        
+        btn_kisit = ActionButton("Kısıtlamalar", icon_name="hash")
+        btn_kisit.clicked.connect(lambda: self._open_2025_dialog("124"))
+        right_panel.addWidget(btn_kisit)
+        
+        self.btn_gruplar = ActionButton("Gruplar", icon_name="branch")
+        self.btn_gruplar.clicked.connect(lambda: self._open_2025_dialog("136"))
+        right_panel.addWidget(self.btn_gruplar)
+        
+        self.btn_tumunu_sil = ActionButton("Tümünü Sil", icon_name="minus")
+        self.btn_oto_olustur = ActionButton("Otomatik Oluştur", icon_name="plus", is_primary=True)
+        
+        right_panel.addStretch(1)
+        right_panel.addWidget(self.btn_tumunu_sil)
+        right_panel.addWidget(self.btn_oto_olustur)
+        
+        center_layout.addLayout(right_panel)
+        main_layout.addLayout(center_layout, 1)
+
+        # --- Bottom Area ---
+        bottom_layout = QHBoxLayout()
+        bottom_layout.setContentsMargins(0, 12, 0, 0)
+        
+        btn_help = QPushButton("Yardım")
+        btn_help.setIcon(QIcon.fromTheme("help-browser")) # System icon if available
+        btn_help.setFixedSize(90, 30)
+        btn_help.setStyleSheet("background: #F0F0F0; border: 1px solid #CCC; border-radius: 4px;")
+        
+        btn_save = QPushButton("Kaydet")
+        btn_save.setFixedSize(90, 30)
+        btn_save.setStyleSheet("background: #F0F0F0; border: 1px solid #CCC; border-radius: 4px;")
+        btn_save.clicked.connect(self.accept)
+        
+        btn_info = QPushButton("Bilgi Al")
+        btn_info.setFixedSize(90, 30)
+        btn_info.setStyleSheet("background: #F0F0F0; border: 1px solid #CCC; border-radius: 4px;")
+        
+        btn_close = QPushButton("Kapat")
+        btn_close.setFixedSize(90, 30)
+        btn_close.setStyleSheet("background: #F0F0F0; border: 1px solid #CCC; border-radius: 4px;")
+        btn_close.clicked.connect(self.reject)
+        
+        bottom_layout.addWidget(btn_help)
+        bottom_layout.addWidget(btn_save)
+        bottom_layout.addWidget(btn_info)
+        bottom_layout.addStretch(1)
+        bottom_layout.addWidget(btn_close)
+        
+        main_layout.addLayout(bottom_layout)
+
+    def _create_table(self, headers):
+        t = QTableWidget(0, len(headers))
+        t.setHorizontalHeaderLabels(headers)
+        t.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        t.setSelectionBehavior(QTableWidget.SelectRows)
+        t.setEditTriggers(QTableWidget.NoEditTriggers)
+        t.setAlternatingRowColors(True)
+        t.setStyleSheet("""
+            QTableWidget { border: 1px solid #D0D0D0; font-size: 9pt; gridline-color: #E0E0E0; }
+            QHeaderView::section {
+                background-color: #F0F0F0;
+                border: 1px solid #D0D0D0;
+                padding: 4px; font-weight: bold; font-size: 9pt;
+            }
+        """)
+        return t
+
+    def _wrap_table(self, title, table):
+        w = QWidget()
+        l = QVBoxLayout(w)
+        l.setContentsMargins(0, 0, 0, 0)
+        l.setSpacing(0)
+        lbl = QLabel(title)
+        lbl.setFont(QFont("Segoe UI", 9))
+        lbl.setStyleSheet("padding: 4px; border-bottom: 1px solid #D0D0D0;")
+        l.addWidget(lbl)
+        l.addWidget(table, 1)
+        return w
+
+    def _select_tab(self, idx):
+        # Update left buttons
+        for i, btn in enumerate(self.left_btns):
+            btn.setChecked(i == idx)
+            
+        self.stack.setCurrentIndex(idx)
+        
+        titles = ["Dersler", "Sınıflar", "Derslikler", "Öğretmenler"]
+        self.setWindowTitle(titles[idx])
+        
+        # Enable/Disable right panel buttons based on context if necessary
+        # All actions are kept enabled for now as they are universally valid in this design
+
+    def _act_assign(self):
+        from dialogs.edit_forms import LessonAssignmentDialog
+        d = LessonAssignmentDialog(self, data_store=self.data_store)
+        d.exec()
+
+    def _act_new(self):
+        idx = self.stack.currentIndex()
+        if idx == 0:  # Dersler
+            d = DersEditDialog(self)
+            if d.exec():
+                data = d.get_data()
+                self.data_store["dersler"].append(data)
+                self._add_row(self.table_ders, [data.get("ad",""), data.get("kisa",""), "0", "", "Ideal", "", ""])
+        elif idx == 1:  # Sınıflar
+            d = SinifEditDialog(self)
+            if d.exec():
+                data = d.get_data()
+                self.data_store["siniflar"].append(data)
+                self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), "0", "", "30", "", "", ""])
+        elif idx == 2:  # Derslikler
+            d = DerslikEditDialog(self)
+            if d.exec():
+                data = d.get_data()
+                self.data_store["derslikler"].append(data)
+                self._add_row(self.table_derslik, [data.get("ad",""), data.get("kisa",""), "0", "", "Standart", "Merkez"])
+        elif idx == 3:  # Öğretmenler
+            d = OgretmenEditDialog(self)
+            if d.exec():
+                data = d.get_data()
+                self.data_store["ogretmenler"].append(data)
+                self._add_row(self.table_ogretmen, [data.get("ad",""), data.get("kisa",""), "0", "", "", ""])
+
+    def _act_update(self):
+        idx = self.stack.currentIndex()
+        tables = [self.table_ders, self.table_sinif, self.table_derslik, self.table_ogretmen]
+        stores = ["dersler", "siniflar", "derslikler", "ogretmenler"]
+        dialogs = [DersEditDialog, SinifEditDialog, DerslikEditDialog, OgretmenEditDialog]
+        
+        table = tables[idx]
+        row = table.currentRow()
+        if row < 0:
+            return
+            
+        data_list = self.data_store[stores[idx]]
+        if row < len(data_list):
+            old_data = data_list[row]
+            d = dialogs[idx](parent=self, existing_data=old_data)
+            if d.exec():
+                new_data = d.get_data()
+                data_list[row] = new_data
+                table.item(row, 0).setText(new_data.get("ad", ""))
+                table.item(row, 1).setText(new_data.get("kisa", ""))
+
+    def _act_delete(self):
+        from PySide6.QtWidgets import QMessageBox
+        idx = self.stack.currentIndex()
+        tables = [self.table_ders, self.table_sinif, self.table_derslik, self.table_ogretmen]
+        stores = ["dersler", "siniflar", "derslikler", "ogretmenler"]
+        
+        table = tables[idx]
+        row = table.currentRow()
+        if row >= 0:
+            item = table.item(row, 0)
+            name = item.text() if item else "Bu öğeyi"
+            r = QMessageBox.question(self, "Silme Onayı", f"{name} silmek istediğinize emin misiniz?", QMessageBox.Yes | QMessageBox.No)
+            if r == QMessageBox.Yes:
+                table.removeRow(row)
+                if row < len(self.data_store[stores[idx]]):
+                    self.data_store[stores[idx]].pop(row)
+
+    def _open_2025_dialog(self, dlg_id):
+        from dialogs.extracted_dialog import open_extracted_dialog
+        open_extracted_dialog(dlg_id, self)
+
+    def _add_row(self, table, texts):
+        r = table.rowCount()
+        table.insertRow(r)
+        for c, txt in enumerate(texts):
+            table.setItem(r, c, QTableWidgetItem(str(txt)))
