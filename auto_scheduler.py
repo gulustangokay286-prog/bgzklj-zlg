@@ -24,24 +24,25 @@ class AutoSchedulerWorker(QThread):
 
         # Parçala (saat sayısına göre 1 saatlik ders blokları oluştur)
         lessons_to_place = []
-        for asgn in assignments:
-            hours = int(asgn.get("saat", 1))
-            for _ in range(hours):
-                lessons_to_place.append({
-                    "class_name": asgn.get("sinif", ""),
-                    "teacher_name": asgn.get("ogretmen", ""),
-                    "subject_name": asgn.get("ders", "")
-                })
-
-        # Öğretmen saatlerini say
         teacher_hours = {}
         for asgn in assignments:
-            t = asgn.get("ogretmen", "")
-            teacher_hours[t] = teacher_hours.get(t, 0) + int(asgn.get("saat", 1))
+            hours = int(asgn.get("duration") or asgn.get("saat") or 1)
+            t_name = asgn.get("teacher") or asgn.get("ogretmen") or ""
+            c_name = asgn.get("class") or asgn.get("sinif") or ""
+            subj_name = asgn.get("subject") or asgn.get("ders") or ""
+            
+            if t_name and c_name and subj_name:
+                teacher_hours[t_name] = teacher_hours.get(t_name, 0) + hours
+                for _ in range(hours):
+                    lessons_to_place.append({
+                        "class_name": c_name,
+                        "teacher_name": t_name,
+                        "subject_name": subj_name
+                    })
 
         # Optimize by precaching objects
-        t_objs = {t["ad"]: t for t in self.data_store.get("ogretmenler", [])}
-        c_objs = {c["ad"]: c for c in self.data_store.get("siniflar", [])}
+        t_objs = {t["ad"]: t for t in self.data_store.get("ogretmenler", []) if t.get("ad")}
+        c_objs = {c["ad"]: c for c in self.data_store.get("siniflar", []) if c.get("ad")}
         
         total = len(lessons_to_place)
         best_schedule = []

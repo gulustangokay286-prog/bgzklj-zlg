@@ -436,6 +436,10 @@ class MasterDataDialog(QDialog):
         t.setSelectionBehavior(QTableWidget.SelectRows)
         t.setEditTriggers(QTableWidget.NoEditTriggers)
         t.setAlternatingRowColors(True)
+        t.setDragEnabled(True)
+        t.setAcceptDrops(True)
+        t.setDragDropMode(QTableWidget.InternalMove)
+        t.setDefaultDropAction(Qt.MoveAction)
         t.setStyleSheet("""
             QTableWidget { border: 1px solid #D0D0D0; font-size: 9pt; gridline-color: #E0E0E0; }
             QHeaderView::section {
@@ -445,7 +449,19 @@ class MasterDataDialog(QDialog):
             }
         """)
         t.cellDoubleClicked.connect(self._on_table_double_clicked)
+        t.model().rowsMoved.connect(self._on_rows_moved)
         return t
+
+    def _on_rows_moved(self, parent, start, end, destination, destination_row):
+        idx = self.stack.currentIndex()
+        stores = ["dersler", "siniflar", "derslikler", "ogretmenler"]
+        data_list = self.data_store.get(stores[idx], [])
+        if 0 <= start < len(data_list):
+            dest = destination_row if destination_row < start else destination_row - 1
+            dest = max(0, min(dest, len(data_list) - 1))
+            data_list.insert(dest, data_list.pop(start))
+            p = self.parent() or getattr(self, "main_window", None)
+            if p and hasattr(p, "save_db"): p.save_db()
 
     def _on_table_double_clicked(self, row, col):
         idx = self.stack.currentIndex()
