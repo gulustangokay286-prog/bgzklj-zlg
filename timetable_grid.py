@@ -105,7 +105,10 @@ class DraggableLessonCard(QLabel):
             QMenu::separator { height: 1px; background: #DDD; margin: 3px 10px; }
         """)
         
-        act_color = menu.addAction(make_context_icon("🎨", "#FF9800", "#F57C00"), "Ders Rengi Değiştir")
+        act_1 = menu.addAction(make_context_icon("1", "#29B6F6", "#0277BD"), "1 Saat (Tekli)")
+        act_2 = menu.addAction(make_context_icon("2", "#29B6F6", "#0277BD"), "2 Saat (İkili Blok)")
+        act_3 = menu.addAction(make_context_icon("3", "#29B6F6", "#0277BD"), "3 Saat (Üçlü Blok)")
+        act_4 = menu.addAction(make_context_icon("4", "#29B6F6", "#0277BD"), "4 Saat (Dörtlü Blok)")
         menu.addSeparator()
         act_2_2 = menu.addAction(make_context_icon("2+2", "#AB47BC", "#7B1FA2"), "2+2 Saat (2 İkili Blok)")
         act_2_1 = menu.addAction(make_context_icon("2+1", "#AB47BC", "#7B1FA2"), "2+1 Saat (1 İkili + 1 Tekli)")
@@ -125,49 +128,16 @@ class DraggableLessonCard(QLabel):
         data_store = getattr(win, "data_store", None)
         
         selected_type = None
-        if action == act_color:
-            from PySide6.QtWidgets import QColorDialog
-            from PySide6.QtGui import QColor
-            from PySide6.QtCore import QTimer
-            c = QColorDialog.getColor(QColor(self.color), self, "Renk Seç")
-            if c.isValid():
-                new_color = c.name()
-                if self.subject_name and data_store:
-                    # Update master data
-                    for d in data_store.get("dersler", []):
-                        if d.get("ad") == self.subject_name:
-                            d["renk"] = new_color
-                            
-                    # Update grid placements storage
-                    for p in data_store.get("grid_placements", []):
-                        if p.get("subject_name") == self.subject_name:
-                            p["color"] = new_color
-                            
-                    # Update internal tracking
-                    for (r, c_idx), info in self.parent()._placed_lessons.items() if hasattr(self.parent(), "_placed_lessons") else ():
-                        if info.get("subject_name") == self.subject_name:
-                            info["color"] = new_color
-                            
-                    # Real-time UI update without rebuilding the grid
-                    parent_table = self.parent() if hasattr(self, "parent") else None
-                    if parent_table and hasattr(parent_table, "rowCount"):
-                        for row in range(parent_table.rowCount()):
-                            for col in range(parent_table.columnCount()):
-                                widget = parent_table.cellWidget(row, col)
-                                if widget and isinstance(widget, DraggableLessonBlock):
-                                    if widget.subject_name == self.subject_name:
-                                        widget.color = new_color
-                                        widget.setStyleSheet(f"background-color: {new_color}; border-radius: 4px; padding: 2px; color: #333;")
-                    
-                    if hasattr(win, "save_db"): win.save_db()
-            return
+        if action == act_1: selected_type = "1"
+        elif action == act_2: selected_type = "2"
+        elif action == act_3: selected_type = "3"
+        elif action == act_4: selected_type = "4"
         elif action == act_2_2: selected_type = "2+2"
         elif action == act_2_1: selected_type = "2+1"
         elif action == act_2_2_1: selected_type = "2+2+1"
         elif action == act_3_2: selected_type = "3+2"
         elif action == act_1_1_1: selected_type = "1+1+1"
         elif action == act_custom:
-            from PySide6.QtWidgets import QInputDialog
             val, ok = QInputDialog.getText(self, "Özel Ders Dağılımı", "Dağılım biçimi (Örn: 2+3, 1+2+2, 2+2+2):", text=str(self.duration))
             if ok and val.strip():
                 selected_type = val.strip()
@@ -676,6 +646,61 @@ class TimetableGrid(QWidget):
         item.setTextAlignment(Qt.AlignCenter)
         item.setBackground(QBrush(QColor(color)))
         
+        c = QColor(color)
+        luminance = (0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue())
+        text_color = Qt.white if luminance < 160 else Qt.black
+        item.setForeground(QBrush(text_color))
+        
+        font = QFont("Segoe UI", 9)
+        font.setBold(True)
+        item.setFont(font)
+        
+        # Set span
+        max_span = min(duration, self.table.rowCount() - row)
+        if max_span > 1:
+            self.table.setSpan(row, col, max_span, 1)
+        self.table.setItem(row, col, item)
+        
+        # Track placed lesson
+        self._placed_lessons[(row, col)] = {
+            "subject_name": subject_name, "color": color,
+            "teacher_name": teacher_name, "class_name": class_name, "duration": max_span
+        }
+        
+    def get_placed_lessons(self):
+        """Return dict of placed lessons for printing"""
+        return self._placed_lessons
+        
+    def clear_grid(self):
+        self.table.clearContents()
+        self.table.clearSpans()
+        self._placed_lessons.clear()
+        
+    def set_mode_single_entity(self, periods: int, days_list: list):
+        """Standard view: 1 entity (class/teacher), Rows=Periods, Cols=Days"""
+        self._periods = periods
+        self.table.setRowCount(periods)
+        self.table.setColumnCount(len(days_list))
+        self.table.setHorizontalHeaderLabels(days_list)
+        self.table.setVerticalHeaderLabels([f"{i+1}" for i in range(periods)])
+        self.clear_grid()
+        
+    def set_mode_all_classes(self, class_list: list, periods: int, days_list: list):
+        """Whole School View: Rows=Classes, Cols=Days*Periods"""
+        self._periods = periods
+        self.table.setRowCount(len(class_list))
+        total_cols = len(days_list) * periods
+        self.table.setColumnCount(total_cols)
+        
+        # Build headers
+        self.table.setVerticalHeaderLabels(class_list)
+        
+        col_headers = []
+        for d in days_list:
+            for p in range(periods):
+                col_headers.append(f"{d[:3]} {p+1}")
+        self.table.setHorizontalHeaderLabels(col_headers)
+        self.clear_grid()
         c = QColor(color)
         luminance = (0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue())
         text_color = Qt.white if luminance < 160 else Qt.black

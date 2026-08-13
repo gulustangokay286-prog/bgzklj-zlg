@@ -149,7 +149,16 @@ class TimetablePrintPreview(QDialog):
         self.preview.print_()
 
     def _do_print(self):
-        self.preview.print_()
+        from PySide6.QtPrintSupport import QPrintDialog
+        dialog = QPrintDialog(self.printer, self)
+        if dialog.exec() == QPrintDialog.Accepted:
+            self._render_page(self.printer)
+
+    def direct_print(self):
+        from PySide6.QtPrintSupport import QPrintDialog
+        dialog = QPrintDialog(self.printer, self)
+        if dialog.exec() == QPrintDialog.Accepted:
+            self._render_page(self.printer)
 
     def _export_pdf(self):
         path, _ = QFileDialog.getSaveFileName(self, "PDF Olarak Kaydet", "Ders_Programi.pdf", "PDF Dosyaları (*.pdf)")

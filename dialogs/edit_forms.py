@@ -192,6 +192,7 @@ class LessonAssignmentDialog(QDialog):
         l3.addLayout(v3)
         l3.addStretch(1)
         btn_birl_sinif = QPushButton("Birleşik Sınıflar")
+        btn_birl_sinif.clicked.connect(self._select_combined_classes)
         l3.addWidget(btn_birl_sinif, alignment=Qt.AlignBottom)
         scroll_layout.addWidget(row3)
         
@@ -375,6 +376,60 @@ class LessonAssignmentDialog(QDialog):
                     else:
                         last_cb.setCurrentText(extra.get("subject", ""))
 
+    def _select_combined_classes(self):
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QCheckBox, QPushButton, QHBoxLayout, QScrollArea, QWidget, QLabel
+        d = QDialog(self)
+        d.setWindowTitle("Birleşik Sınıflar Seçimi")
+        d.setFixedSize(380, 440)
+        lay = QVBoxLayout(d)
+        
+        lay.addWidget(QLabel("<b>Birleştirilecek Sınıfları Seçin:</b>"))
+        
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        w = QWidget()
+        v_lay = QVBoxLayout(w)
+        
+        classes = [c.get("ad", "") for c in self.data_store.get("siniflar", []) if c.get("ad")]
+        chks = []
+        for c in classes:
+            chk = QCheckBox(c)
+            v_lay.addWidget(chk)
+            chks.append(chk)
+            
+        scroll.setWidget(w)
+        lay.addWidget(scroll)
+        
+        bot = QHBoxLayout()
+        btn_yoksay = QPushButton("Çakışmayı Yoksay ve Birleştir")
+        btn_yoksay.setStyleSheet("background: #FB8C00; color: white; font-weight: bold; padding: 6px;")
+        btn_ok = QPushButton("Tamam")
+        btn_ok.setStyleSheet("background: #0078D7; color: white; font-weight: bold; padding: 6px;")
+        
+        bot.addWidget(btn_yoksay)
+        bot.addWidget(btn_ok)
+        lay.addLayout(bot)
+        
+        selected_res = []
+        
+        def do_accept(bypass_conflict=False):
+            nonlocal selected_res
+            selected_res = [chk.text() for chk in chks if chk.isChecked()]
+            if bypass_conflict:
+                self.bypass_conflict = True
+            d.accept()
+            
+        btn_ok.clicked.connect(lambda: do_accept(False))
+        btn_yoksay.clicked.connect(lambda: do_accept(True))
+        
+        if d.exec() == QDialog.Accepted and selected_res:
+            combined_name = " + ".join(selected_res)
+            idx = self.cb_sinif.findText(combined_name)
+            if idx < 0:
+                self.cb_sinif.addItem(combined_name)
+                idx = self.cb_sinif.findText(combined_name)
+            self.cb_sinif.setCurrentIndex(idx)
+
     def get_data(self):
         dur_str = self.cb_hafta.currentText()
         type_val = self.cb_tip.currentText().strip()
@@ -506,11 +561,28 @@ class DersEditDialog(QDialog):
         btn_derslik.clicked.connect(self._open_derslikler)
         btn_uygula = QPushButton("Dersin Tanımlanmış Kartlarına Uygula")
         btn_uygula.clicked.connect(self._apply_to_cards)
+        btn_hoca_ata = QPushButton("🎓 Dersin Öğretmenlerini ve Sınıflarını Ata")
+        btn_hoca_ata.setStyleSheet("background: #0078D7; color: white; font-weight: bold; padding: 6px; border-radius: 4px;")
+        btn_hoca_ata.clicked.connect(self._assign_teachers_for_subject)
         
         l3.addWidget(btn_derslik)
         l3.addWidget(btn_uygula)
+        l3.addWidget(btn_hoca_ata)
         
         main_layout.addWidget(f3)
+
+    def _assign_teachers_for_subject(self):
+        p = self.parent()
+        data_store = getattr(p, "data_store", {}) if p else {}
+        subj_name = self.txt_ad.text().strip()
+        if not subj_name:
+            return
+        d = LessonAssignmentDialog(data_store=data_store, parent=p or self)
+        idx = d.cb_ders.findText(subj_name)
+        if idx >= 0: d.cb_ders.setCurrentIndex(idx)
+        else: d.cb_ders.setCurrentText(subj_name)
+        if d.exec():
+            if p and hasattr(p, "save_db"): p.save_db()
         
         # 4. Bottom Controls (Kaydet / İptal)
         bottom = QHBoxLayout()
@@ -547,11 +619,17 @@ class DersEditDialog(QDialog):
     def _auto_short_code(self, text):
         if text and not self.existing_data.get("kisa"):
             clean = text.strip()
-            words = clean.split()
-            if len(words) >= 2:
-                sc = (words[0][:3] + words[1][:2]).upper()
+            import re
+            nums = "".join(re.findall(r'\d+', clean))
+            letters_words = re.findall(r'[A-Za-zÇçĞğİıÖöŞşÜü]+', clean)
+            if letters_words:
+                if len(letters_words) >= 2:
+                    base = (letters_words[0][:3] + letters_words[1][:1]).capitalize()
+                else:
+                    base = letters_words[0][:3].capitalize()
             else:
-                sc = clean[:3].upper()
+                base = clean[:3]
+            sc = f"{base}{nums}" if nums else base
             self.txt_kisa.setText(sc)
 
     def _pick_color(self):
@@ -581,6 +659,7 @@ class SinifEditDialog(BaseEditForm):
         form.setSpacing(12)
         
         self.w_ad = QLineEdit(self.existing_data.get("ad", ""))
+        self.w_ad.textChanged.connect(self._auto_short_code_class)
         self.w_kisa = QLineEdit(self.existing_data.get("kisa", ""))
         form.addRow("Sınıf Adı", self.w_ad)
         form.addRow("Kısa Kodu", self.w_kisa)
@@ -657,6 +736,10 @@ class SinifEditDialog(BaseEditForm):
             self._color = c.name()
             self.color_box.setStyleSheet(f"background: {self._color};")
             
+    def _auto_short_code_class(self, text):
+        if text and not self.existing_data.get("kisa"):
+            self.w_kisa.setText(text.strip())
+
     def get_data(self):
         return {
             "ad": self.w_ad.text(), "kisa": self.w_kisa.text(), 
@@ -749,11 +832,15 @@ class OgretmenEditDialog(BaseEditForm):
 
     def _auto_short_code_teacher(self, text):
         if text and not self.existing_data.get("kisa"):
-            parts = text.strip().split()
-            if len(parts) >= 2:
-                sc = f"{parts[0][0].upper()}. {parts[-1].upper()}"
+            clean = text.strip()
+            if len(clean) <= 5:
+                sc = clean.upper()
             else:
-                sc = text.strip()[:4].upper()
+                parts = clean.split()
+                if len(parts) >= 2:
+                    sc = f"{parts[0][0].upper()}. {' '.join(parts[1:]).upper()}"
+                else:
+                    sc = clean[:5].upper()
             self.w_kisa.setText(sc)
 
     def _pick_color(self):

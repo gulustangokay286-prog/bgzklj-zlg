@@ -736,6 +736,8 @@ class MainWindow(QMainWindow):
 
     def save_db(self, path=None):
         import json
+        if hasattr(self, "_push_undo_state"):
+            self._push_undo_state()
         save_path = path or getattr(self, "current_roz_path", None) or self.db_path
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         self._set_last_db_path(save_path)
@@ -943,6 +945,15 @@ class MainWindow(QMainWindow):
                     "duration": 2
                 })
                 
+        # 3. Filter unplaced cards by currently selected class / teacher view if active
+        if hasattr(self, "_grid") and hasattr(self._grid, "view_combo") and hasattr(self._grid, "entity_combo"):
+            view_type = self._grid.view_combo.currentText()
+            entity_name = self._grid.entity_combo.currentText()
+            if view_type == "Sınıf Görünümü" and entity_name:
+                unplaced = [u for u in unplaced if not u.get("class_name") or entity_name in u.get("class_name")]
+            elif view_type == "Öğretmen Görünümü" and entity_name:
+                unplaced = [u for u in unplaced if not u.get("teacher") or entity_name in u.get("teacher")]
+
         self._grid.unplaced_dock.load_unplaced(unplaced)
 
     def _on_lesson_dropped(self, row, col, lesson_info):
@@ -1139,14 +1150,48 @@ class MainWindow(QMainWindow):
             dlg = TimetablePrintPreview(self.data_store, self._grid.get_placed_lessons(), filters, self)
             dlg.exec()
 
-    def _act_close(self):
-        self.statusBar().showMessage("Dosya kapatıldı.")
+    def _push_undo_state(self):
+        import copy
+        if not hasattr(self, "_history_stack"): self._history_stack = []
+        if not hasattr(self, "_redo_stack"): self._redo_stack = []
+        if len(self._history_stack) > 50:
+            self._history_stack.pop(0)
+        self._history_stack.append(copy.deepcopy(self.data_store))
+        self._redo_stack.clear()
 
     def _act_undo(self):
-        self.statusBar().showMessage("Geri alındı.")
+        import copy
+        if hasattr(self, "_history_stack") and self._history_stack:
+            if not hasattr(self, "_redo_stack"): self._redo_stack = []
+            self._redo_stack.append(copy.deepcopy(self.data_store))
+            prev_state = self._history_stack.pop()
+            self.data_store = prev_state
+            save_path = getattr(self, "current_roz_path", None) or self.db_path
+            with open(save_path, "w", encoding="utf-8") as f:
+                import json
+                json.dump(self.data_store, f, ensure_ascii=False, indent=4)
+            self._refresh_tree()
+            self._restore_grid_placements()
+            self.statusBar().showMessage("İşlem geri alındı (Rollback). ↩️")
+        else:
+            self.statusBar().showMessage("Geri alınacak başka işlem yok.")
 
     def _act_redo(self):
-        self.statusBar().showMessage("Tekrarlandı.")
+        import copy
+        if hasattr(self, "_redo_stack") and self._redo_stack:
+            if not hasattr(self, "_history_stack"): self._history_stack = []
+            self._history_stack.append(copy.deepcopy(self.data_store))
+            next_state = self._redo_stack.pop()
+            self.data_store = next_state
+            save_path = getattr(self, "current_roz_path", None) or self.db_path
+            with open(save_path, "w", encoding="utf-8") as f:
+                import json
+                json.dump(self.data_store, f, ensure_ascii=False, indent=4)
+            self._refresh_tree()
+            self._restore_grid_placements()
+            self.statusBar().showMessage("İşlem yinelendi (Redo). ↪️")
+        else:
+            self.statusBar().showMessage("Yinelenecek başka işlem yok.")
 
     def _open_subjects(self):
         d = MasterDataDialog(0, self)

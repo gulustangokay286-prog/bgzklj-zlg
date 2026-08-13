@@ -199,6 +199,16 @@ class MasterDataDialog(QDialog):
         self.table_derslik.setRowCount(0)
         self.table_ogretmen.setRowCount(0)
         
+        # Sort master data alphabetically
+        tr_map = str.maketrans("çğıöşüÇĞİÖŞÜ", "cgiosuCGIOSU")
+        def tr_sort(item):
+            n = item.get("ad", "") if isinstance(item, dict) else ""
+            return n.translate(tr_map).lower()
+
+        for k in ["dersler", "siniflar", "derslikler", "ogretmenler"]:
+            if k in self.data_store and isinstance(self.data_store[k], list):
+                self.data_store[k].sort(key=tr_sort)
+
         # Calculate totals from atamalar
         totals = {"dersler": {}, "siniflar": {}, "ogretmenler": {}}
         for a in self.data_store.get("atamalar", []):
@@ -381,17 +391,42 @@ class MasterDataDialog(QDialog):
                 padding: 4px; font-weight: bold; font-size: 9pt;
             }
         """)
+        t.doubleClicked.connect(self._act_update)
         return t
 
     def _wrap_table(self, title, table):
+        from PySide6.QtWidgets import QLineEdit
         w = QWidget()
         l = QVBoxLayout(w)
-        l.setContentsMargins(0, 0, 0, 0)
-        l.setSpacing(0)
+        l.setContentsMargins(4, 4, 4, 4)
+        l.setSpacing(4)
+        
+        top_bar = QHBoxLayout()
         lbl = QLabel(title)
-        lbl.setFont(QFont("Segoe UI", 9))
-        lbl.setStyleSheet("padding: 4px; border-bottom: 1px solid #D0D0D0;")
-        l.addWidget(lbl)
+        lbl.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        lbl.setStyleSheet("padding: 4px;")
+        top_bar.addWidget(lbl)
+        top_bar.addStretch(1)
+        
+        txt_search = QLineEdit()
+        txt_search.setPlaceholderText("🔍 Gerçek Zamanlı Ara...")
+        txt_search.setFixedWidth(220)
+        txt_search.setStyleSheet("padding: 4px 8px; border: 1px solid #CCCCCC; border-radius: 4px; font-size: 9pt; background: #FFFFFF;")
+        
+        def do_filter(text):
+            query = text.strip().lower()
+            for r in range(table.rowCount()):
+                match = False
+                for c in range(table.columnCount()):
+                    item = table.item(r, c)
+                    if item and query in item.text().lower():
+                        match = True
+                        break
+                table.setRowHidden(r, not match)
+                
+        txt_search.textChanged.connect(do_filter)
+        top_bar.addWidget(txt_search)
+        l.addLayout(top_bar)
         l.addWidget(table, 1)
         return w
 
