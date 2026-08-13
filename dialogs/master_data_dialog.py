@@ -452,8 +452,6 @@ class MasterDataDialog(QDialog):
         t = DragDropTableWidget(0, len(headers))
         t.setHorizontalHeaderLabels(headers)
         t.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        t.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
-        t.setColumnWidth(0, 40)
         t.setEditTriggers(QTableWidget.NoEditTriggers)
         t.setAlternatingRowColors(True)
         t.setStyleSheet("""
