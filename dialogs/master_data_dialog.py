@@ -199,6 +199,15 @@ class MasterDataDialog(QDialog):
         self.table_derslik.setRowCount(0)
         self.table_ogretmen.setRowCount(0)
         
+        # Clean & Format all subject and teacher names to Turkish title case
+        from dialogs.edit_forms import format_tr_name
+        for d in self.data_store.get("dersler", []):
+            if d.get("ad"): d["ad"] = format_tr_name(d["ad"])
+        for a in self.data_store.get("atamalar", []):
+            if a.get("subject"): a["subject"] = format_tr_name(a["subject"])
+        for t in self.data_store.get("ogretmenler", []):
+            if t.get("ad"): t["ad"] = format_tr_name(t["ad"])
+
         # Sort master data alphabetically
         tr_map = str.maketrans("çğıöşüÇĞİÖŞÜ", "cgiosuCGIOSU")
         def tr_sort(item):

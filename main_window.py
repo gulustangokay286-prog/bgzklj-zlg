@@ -703,6 +703,15 @@ class MainWindow(QMainWindow):
                 elif "grid_placements" not in self.data_store:
                     self.data_store["grid_placements"] = []
                     
+                # Clean & Format all subject and teacher names to Turkish title case
+                from dialogs.edit_forms import format_tr_name
+                for d in self.data_store.get("dersler", []):
+                    if d.get("ad"): d["ad"] = format_tr_name(d["ad"])
+                for a in self.data_store.get("atamalar", []):
+                    if a.get("subject"): a["subject"] = format_tr_name(a["subject"])
+                for t in self.data_store.get("ogretmenler", []):
+                    if t.get("ad"): t["ad"] = format_tr_name(t["ad"])
+
                 self.statusBar().showMessage(f"Veriler yüklendi: {load_path}")
                 
                 # Restore grid placements
