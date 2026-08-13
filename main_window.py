@@ -1197,17 +1197,7 @@ class MainWindow(QMainWindow):
             # AI produced a schedule
             results = self.data_store.get("auto_schedule_results", [])
             if results:
-                # Temizle
-                self._grid.clear_grid()
-                
-                # Tüm okulu tek seferde göstermek için Bütün Okul Görünümüne geç
-                classes = [c.get("ad") for c in self.data_store.get("siniflar", [])]
-                settings = self.data_store.get("settings", {})
-                periods = int(settings.get("periods", 8))
-                days = settings.get("days", ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"])
-                
-                self._grid.set_mode_all_classes(classes, periods, days)
-                
+                grid_placements = []
                 for r in results:
                     c_name = r["class_name"]
                     t_name = r["teacher_name"]
@@ -1215,25 +1205,30 @@ class MainWindow(QMainWindow):
                     d_idx = r["day_idx"]
                     p_idx = r["period"]
                     
-                    if c_name in classes:
-                        row = classes.index(c_name)
-                        col = d_idx * periods + p_idx
+                    from main_window import get_subject_color
+                    color = get_subject_color(subj)
+                    
+                    grid_placements.append({
+                        "period": p_idx,
+                        "day": d_idx,
+                        "subject_name": subj,
+                        "color": color,
+                        "teacher_name": t_name,
+                        "duration": 1,
+                        "class_name": c_name
+                    })
+                
+                # Update datastore and save
+                self.data_store["grid_placements"] = grid_placements
+                self.save_db()
+                
+                # Reload the current view so the new placements show up immediately
+                if hasattr(self, "_grid"):
+                    if hasattr(self._grid, "entity_combo") and self._grid.entity_combo.count() > 0:
+                        self._on_entity_combo_changed(self._grid.entity_combo.currentText())
+                    else:
+                        self._restore_grid_placements()
                         
-                        from PySide6.QtWidgets import QTableWidgetItem
-                        from PySide6.QtGui import QBrush, QColor
-                        item = QTableWidgetItem(f"{subj}\\n{t_name}")
-                        item.setTextAlignment(Qt.AlignCenter)
-                        item.setBackground(QBrush(QColor("#E8F4F8")))
-                        self._grid.table.setItem(row, col, item)
-                        
-                        # İç yapıya kaydet
-                        self._grid._placed_lessons[(row, col)] = {
-                            "class_name": c_name,
-                            "teacher_name": t_name,
-                            "subject_name": subj,
-                            "day_idx": d_idx,
-                            "period": p_idx
-                        }
                 self.statusBar().showMessage("Yapay Zeka yerleşimi tamamlandı.")
 
     def _act_statistics(self):
