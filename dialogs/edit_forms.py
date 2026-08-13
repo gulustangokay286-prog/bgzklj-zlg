@@ -571,16 +571,6 @@ class DersEditDialog(QDialog):
         
         main_layout.addWidget(f3)
 
-    def _assign_teachers_for_subject(self):
-        p = self.parent()
-        data_store = getattr(p, "data_store", {}) if p else {}
-        subj_name = format_tr_name(self.txt_ad.text().strip())
-        if not subj_name:
-            return
-        d = SubjectTeacherAssignmentDialog(subject_name=subj_name, data_store=data_store, parent=p or self)
-        if d.exec():
-            if p and hasattr(p, "save_db"): p.save_db()
-        
         # 4. Bottom Controls (Kaydet / İptal)
         bottom = QHBoxLayout()
         bottom.addWidget(QLabel("Numara:"))
@@ -603,6 +593,16 @@ class DersEditDialog(QDialog):
         bottom.addWidget(btn_tamam)
         
         main_layout.addLayout(bottom)
+
+    def _assign_teachers_for_subject(self):
+        p = self.parent()
+        data_store = getattr(p, "data_store", {}) if p else {}
+        subj_name = format_tr_name(self.txt_ad.text().strip())
+        if not subj_name:
+            return
+        d = SubjectTeacherAssignmentDialog(subject_name=subj_name, data_store=data_store, parent=p or self)
+        if d.exec():
+            if p and hasattr(p, "save_db"): p.save_db()
 
     def _open_derslikler(self):
         from dialogs.master_data_dialog import MasterDataDialog
@@ -922,11 +922,17 @@ class OgretmenEditDialog(BaseEditForm):
         self.main_layout.addWidget(renk_frame)
         
         so_lay = QHBoxLayout()
-        so_lay.addWidget(QLabel("Sınıf Öğretmeni:"))
-        self.w_so = QLineEdit(self.existing_data.get("sinif_ogretmeni", ""))
+        so_lay.addWidget(QLabel("Sınıf Öğretmeni (Rehberlik):"))
+        self.w_so = QComboBox()
+        classes = [""]
+        p = self.parent()
+        data_store = getattr(p, "data_store", {}) if p else {}
+        classes.extend([c.get("ad", "") for c in data_store.get("siniflar", []) if c.get("ad")])
+        self.w_so.addItems(classes)
+        existing_so = self.existing_data.get("sinif_ogretmeni", "")
+        idx_so = self.w_so.findText(existing_so)
+        if idx_so >= 0: self.w_so.setCurrentIndex(idx_so)
         so_lay.addWidget(self.w_so)
-        btn_so = QPushButton("Değiştir")
-        so_lay.addWidget(btn_so)
         self.main_layout.addLayout(so_lay)
         
         ek_lay = QFormLayout()
@@ -947,10 +953,18 @@ class OgretmenEditDialog(BaseEditForm):
         num_lay.addStretch(1)
         self.main_layout.addLayout(num_lay)
         
+        h_btn_lay = QHBoxLayout()
         btn_ata = QPushButton("🎓 Bu Öğretmene Ders Ata")
         btn_ata.setStyleSheet("background: #0078D7; color: white; font-weight: bold; min-height: 32px; border-radius: 4px;")
         btn_ata.clicked.connect(self._assign_lessons_for_this_teacher)
-        self.main_layout.addWidget(btn_ata)
+        
+        btn_cizelge = QPushButton("📅 Çizelge Göster / Yazdır")
+        btn_cizelge.setStyleSheet("background: #27AE60; color: white; font-weight: bold; min-height: 32px; border-radius: 4px;")
+        btn_cizelge.clicked.connect(self._show_teacher_timetable)
+        
+        h_btn_lay.addWidget(btn_ata)
+        h_btn_lay.addWidget(btn_cizelge)
+        self.main_layout.addLayout(h_btn_lay)
 
         self._add_bottom_buttons()
 
@@ -959,6 +973,14 @@ class OgretmenEditDialog(BaseEditForm):
         p = self.parent()
         data_store = getattr(p, "data_store", {}) if p else {}
         d = LessonAssignmentDialog(data_store=data_store, parent=p or self, selected_teacher=t_name)
+        d.exec()
+
+    def _show_teacher_timetable(self):
+        t_name = format_tr_name(self.w_ad.text().strip())
+        p = self.parent()
+        data_store = getattr(p, "data_store", {}) if p else {}
+        from dialogs.master_data_dialog import TeacherIndividualTimetableDialog
+        d = TeacherIndividualTimetableDialog(teacher_name=t_name, data_store=data_store, parent=p or self)
         d.exec()
 
     def _auto_short_code_teacher(self, text):

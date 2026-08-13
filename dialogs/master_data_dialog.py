@@ -240,9 +240,41 @@ class MasterDataDialog(QDialog):
             self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), toplam, zaman_str, data.get("ders_bitimi","15:30"), data.get("sinif_ogretmeni",""), data.get("kapasite","30")])
         for data in self.data_store.get("derslikler", []):
             self._add_row(self.table_derslik, [data.get("ad",""), data.get("kisa",""), "0", "Mevcut", data.get("kapasite",""), "Merkez"])
+        # Build Class Teacher mapping (e.g. 11A, 9B)
+        class_teacher_map = {}
+        for s in self.data_store.get("siniflar", []):
+            so = s.get("sinif_ogretmeni")
+            if so:
+                class_teacher_map[so] = s.get("ad")
+
         for data in self.data_store.get("ogretmenler", []):
-            toplam = str(totals["ogretmenler"].get(data.get("ad", ""), 0))
-            self._add_row(self.table_ogretmen, [data.get("ad",""), data.get("kisa",""), toplam, "Mevcut", data.get("sinif_ogretmeni",""), ""])
+            t_name = data.get("ad", "")
+            toplam = str(totals["ogretmenler"].get(t_name, 0))
+            
+            # Class teacher of which class (e.g. 11A)
+            so_class = class_teacher_map.get(t_name) or data.get("sinif_ogretmeni", "")
+            
+            # Branch
+            brans = data.get("brans") or data.get("kisa") or ""
+            
+            # Assigned subjects & classes
+            from dialogs.edit_forms import format_tr_name
+            teacher_atamalar = [a for a in self.data_store.get("atamalar", []) if format_tr_name(a.get("teacher", "")) == format_tr_name(t_name)]
+            assignments_summary_list = []
+            for a in teacher_atamalar:
+                subj = a.get("subject", "")
+                cls = a.get("class", "")
+                if subj and cls:
+                    assignments_summary_list.append(f"{subj} ({cls})")
+                elif subj:
+                    assignments_summary_list.append(subj)
+            atanan_dersler_str = ", ".join(assignments_summary_list) if assignments_summary_list else "Atama Yok"
+            
+            zaman_str = "📅 Çizelge Göster / Yazdır"
+            
+            self._add_row(self.table_ogretmen, [
+                t_name, data.get("kisa",""), toplam, zaman_str, so_class, brans, atanan_dersler_str
+            ])
 
     def closeEvent(self, event):
         try:
@@ -296,7 +328,7 @@ class MasterDataDialog(QDialog):
         self.table_derslik = self._create_table(["Derslik Adı", "Kısa Kodu", "Toplam", "Zaman Tablosu", "Kapasite", "Bina"])
         self.stack.addWidget(self._wrap_table("Tanımlı Derslikler", self.table_derslik))
 
-        self.table_ogretmen = self._create_table(["Öğretmen Adı", "Kısa Kodu", "Toplam", "Zaman Tablosu", "Sınıf Öğretmeni", "Branşı"])
+        self.table_ogretmen = self._create_table(["Öğretmen Adı", "Kısa Kodu", "Toplam", "Zaman Tablosu & Çizelge", "Sınıf Öğretmeni", "Branşı", "Atanan Dersler ve Sınıflar"])
         self.stack.addWidget(self._wrap_table("Tanımlı Öğretmenler ve Dersleri", self.table_ogretmen))
         
         center_layout.addWidget(self.stack, 1)
@@ -403,7 +435,19 @@ class MasterDataDialog(QDialog):
                 padding: 4px; font-weight: bold; font-size: 9pt;
             }
         """)
-        t.doubleClicked.connect(self._act_update)
+        t.cellDoubleClicked.connect(self._on_table_double_clicked)
+        return t
+
+    def _on_table_double_clicked(self, row, col):
+        idx = self.stack.currentIndex()
+        if idx == 3 and col == 3: # Zaman Tablosu & Çizelge column
+            item = self.table_ogretmen.item(row, 0)
+            if item:
+                t_name = item.text().strip()
+                d = TeacherIndividualTimetableDialog(t_name, self.data_store, self)
+                d.exec()
+                return
+        self._act_update()
         return t
 
     def _wrap_table(self, title, table):
@@ -754,4 +798,81 @@ class MasterDataDialog(QDialog):
         r = table.rowCount()
         table.insertRow(r)
         for c, txt in enumerate(texts):
-            table.setItem(r, c, QTableWidgetItem(str(txt)))
+            item = QTableWidgetItem(str(txt))
+            if c == 3 and table == self.table_ogretmen:
+                item.setForeground(QBrush(QColor("#0078D7")))
+                item.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+            table.setItem(r, c, item)
+
+
+class TeacherIndividualTimetableDialog(QDialog):
+    """Öğretmenin Özel Zaman Çizelgesi ve Önizleme/Yazdırma Ekranı"""
+    def __init__(self, teacher_name, data_store=None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Öğretmen Çizelgesi - {teacher_name}")
+        self.setFixedSize(720, 540)
+        self.teacher_name = teacher_name
+        self.data_store = data_store or {}
+        self.setStyleSheet("""
+            QDialog { background-color: #F4F6F9; font-family: system-ui, -apple-system, sans-serif; font-size: 13px; }
+            QLabel { color: #333; font-size: 13px; font-weight: bold; }
+            QPushButton { min-height: 28px; padding: 4px 12px; border: 1px solid #CCCCCC; border-radius: 4px; background: #F8F9FA; font-size: 13px; }
+            QPushButton:hover { background: #EAEAEA; }
+        """)
+        self._build_ui()
+
+    def _build_ui(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 16, 16, 16)
+        lay.setSpacing(12)
+        
+        top_bar = QHBoxLayout()
+        lbl = QLabel(f"👨‍🏫 {self.teacher_name} - Haftalık Ders Çizelgesi")
+        lbl.setStyleSheet("font-size: 15px; color: #0078D7;")
+        top_bar.addWidget(lbl)
+        top_bar.addStretch(1)
+        
+        btn_yazdir = QPushButton("🖨️ Bu Öğretmenin Çizelgesini Yazdır")
+        btn_yazdir.setStyleSheet("background: #0078D7; color: white; font-weight: bold; padding: 6px 14px; border-radius: 4px;")
+        btn_yazdir.clicked.connect(self._print_teacher_timetable)
+        top_bar.addWidget(btn_yazdir)
+        lay.addLayout(top_bar)
+        
+        days = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"]
+        periods = 8
+        
+        table = QTableWidget(periods, len(days))
+        table.setHorizontalHeaderLabels(days)
+        table.setVerticalHeaderLabels([f"{p+1}. Ders" for p in range(periods)])
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        table.setAlternatingRowColors(True)
+        
+        from dialogs.edit_forms import format_tr_name, get_subject_color
+        from PySide6.QtGui import QBrush, QColor
+        
+        placements = self.data_store.get("grid_placements", [])
+        for p in placements:
+            if format_tr_name(p.get("teacher", "")) == format_tr_name(self.teacher_name):
+                r = p.get("row", 0)
+                c = p.get("col", 0)
+                if 0 <= r < periods and 0 <= c < len(days):
+                    item = QTableWidgetItem(f"{p.get('subject_name','')}\n({p.get('class_name','')})")
+                    item.setTextAlignment(Qt.AlignCenter)
+                    item.setBackground(QBrush(QColor(p.get("color", "#C4C4F0"))))
+                    table.setItem(r, c, item)
+                    
+        lay.addWidget(table, 1)
+        
+        bot = QHBoxLayout()
+        btn_close = QPushButton("Kapat")
+        btn_close.clicked.connect(self.accept)
+        bot.addStretch(1)
+        bot.addWidget(btn_close)
+        lay.addLayout(bot)
+
+    def _print_teacher_timetable(self):
+        from dialogs.print_preview import TimetablePrintPreview
+        filters = {"entity_type": "teacher", "selected_items": [self.teacher_name]}
+        dlg = TimetablePrintPreview(self.data_store, {}, filters, self)
+        dlg.direct_print()
