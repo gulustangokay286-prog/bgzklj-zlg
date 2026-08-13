@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QSizePolicy, QFrame, QCheckBox, QToolButton
 )
 from PySide6.QtCore import Qt, QSize, Signal
-from PySide6.QtGui import QIcon, QPixmap, QColor, QPainter, QPen, QFont, QBrush, QPolygon, QLinearGradient, QRadialGradient
+from PySide6.QtGui import QIcon, QPixmap, QColor, QPainter, QPen, QFont, QBrush, QPolygon, QLinearGradient, QRadialGradient, QPainterPath
 from PySide6.QtCore import QPoint, QPointF
 
 
