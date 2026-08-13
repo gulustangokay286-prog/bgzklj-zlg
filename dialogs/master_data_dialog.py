@@ -8,8 +8,33 @@ from PySide6.QtCore import Qt, QSize, QPoint
 from PySide6.QtGui import QFont, QPixmap, QPainter, QColor, QPen, QBrush, QPolygon, QIcon
 
 from dialogs.edit_forms import DersEditDialog, SinifEditDialog, OgretmenEditDialog, DerslikEditDialog
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QAbstractItemView
 
+class DragDropTableWidget(QTableWidget):
+    row_dropped = Signal(int, int) # start_row, dest_row
 
+    def __init__(self, rows, cols, parent=None):
+        super().__init__(rows, cols, parent)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.setDragDropMode(QAbstractItemView.InternalMove)
+        
+    def dropEvent(self, event):
+        if not event.isAccepted() and event.source() == self:
+            drop_row = self.rowAt(event.position().toPoint().y())
+            if drop_row == -1:
+                drop_row = self.rowCount()
+            
+            selected_rows = sorted(list(set(item.row() for item in self.selectedItems())))
+            if selected_rows:
+                start_row = selected_rows[0]
+                self.row_dropped.emit(start_row, drop_row)
+                event.accept()
+                return
+        super().dropEvent(event)
 def create_wizard_icon(name: str) -> QPixmap:
     pix = QPixmap(48, 48)
     pix.fill(Qt.transparent)
@@ -208,15 +233,8 @@ class MasterDataDialog(QDialog):
         for t in self.data_store.get("ogretmenler", []):
             if t.get("ad"): t["ad"] = format_tr_name(t["ad"])
 
-        # Sort master data alphabetically
-        tr_map = str.maketrans("çğıöşüÇĞİÖŞÜ", "cgiosuCGIOSU")
-        def tr_sort(item):
-            n = item.get("ad", "") if isinstance(item, dict) else ""
-            return n.translate(tr_map).lower()
-
-        for k in ["dersler", "siniflar", "derslikler", "ogretmenler"]:
-            if k in self.data_store and isinstance(self.data_store[k], list):
-                self.data_store[k].sort(key=tr_sort)
+        # Sort logic removed here to preserve manual drag-and-drop order.
+        # A dedicated sort button will be provided in the UI instead.
 
         # Calculate totals from atamalar
         totals = {"dersler": {}, "siniflar": {}, "ogretmenler": {}}
@@ -430,16 +448,13 @@ class MasterDataDialog(QDialog):
         main_layout.addLayout(bottom_layout)
 
     def _create_table(self, headers):
-        t = QTableWidget(0, len(headers))
+        t = DragDropTableWidget(0, len(headers))
         t.setHorizontalHeaderLabels(headers)
         t.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        t.setSelectionBehavior(QTableWidget.SelectRows)
+        t.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
+        t.setColumnWidth(0, 40)
         t.setEditTriggers(QTableWidget.NoEditTriggers)
         t.setAlternatingRowColors(True)
-        t.setDragEnabled(True)
-        t.setAcceptDrops(True)
-        t.setDragDropMode(QTableWidget.InternalMove)
-        t.setDefaultDropAction(Qt.MoveAction)
         t.setStyleSheet("""
             QTableWidget { border: 1px solid #D0D0D0; font-size: 9pt; gridline-color: #E0E0E0; }
             QHeaderView::section {
@@ -449,17 +464,30 @@ class MasterDataDialog(QDialog):
             }
         """)
         t.cellDoubleClicked.connect(self._on_table_double_clicked)
-        t.model().rowsMoved.connect(self._on_rows_moved)
+        t.row_dropped.connect(self._on_row_dropped)
         return t
 
-    def _on_rows_moved(self, parent, start, end, destination, destination_row):
+    def _on_row_dropped(self, start, dest):
         idx = self.stack.currentIndex()
         stores = ["dersler", "siniflar", "derslikler", "ogretmenler"]
         data_list = self.data_store.get(stores[idx], [])
         if 0 <= start < len(data_list):
-            dest = destination_row if destination_row < start else destination_row - 1
+            if dest > start:
+                dest -= 1 # Adjust for shifting elements
             dest = max(0, min(dest, len(data_list) - 1))
-            data_list.insert(dest, data_list.pop(start))
+            
+            # Pop and insert manually in memory
+            item = data_list.pop(start)
+            data_list.insert(dest, item)
+            
+            # Re-render UI table to match memory
+            self._load_existing_data()
+            
+            # Highlight newly moved row
+            tables = [self.table_ders, self.table_sinif, self.table_derslik, self.table_ogretmen]
+            t = tables[idx]
+            t.selectRow(dest)
+            
             p = self.parent() or getattr(self, "main_window", None)
             if p and hasattr(p, "save_db"): p.save_db()
 
@@ -493,6 +521,30 @@ class MasterDataDialog(QDialog):
         txt_search.setPlaceholderText("🔍 Gerçek Zamanlı Ara...")
         txt_search.setFixedWidth(220)
         txt_search.setStyleSheet("padding: 4px 8px; border: 1px solid #CCCCCC; border-radius: 4px; font-size: 9pt; background: #FFFFFF;")
+        
+        btn_sort = QPushButton("A-Z Sırala")
+        btn_sort.setFixedHeight(28)
+        btn_sort.setStyleSheet("background: #E0E0E0; border: 1px solid #CCC; border-radius: 4px; padding: 0 10px; font-weight: bold;")
+        
+        def do_sort():
+            idx = self.stack.currentIndex()
+            stores = ["dersler", "siniflar", "derslikler", "ogretmenler"]
+            data_list = self.data_store.get(stores[idx], [])
+            
+            import re
+            def smart_sort(item):
+                name = item.get("ad", "") if isinstance(item, dict) else ""
+                parts = re.split(r'(\d+)', name)
+                return [int(p) if p.isdigit() else p.lower() for p in parts]
+                
+            data_list.sort(key=smart_sort)
+            self._load_existing_data()
+            p = self.parent() or getattr(self, "main_window", None)
+            if p and hasattr(p, "save_db"): p.save_db()
+            
+        btn_sort.clicked.connect(do_sort)
+        
+        top_bar.addWidget(btn_sort)
         
         def do_filter(text):
             query = text.strip().lower()
