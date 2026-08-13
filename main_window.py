@@ -787,9 +787,9 @@ class MainWindow(QMainWindow):
                 new_global = []
                 # 1. Retain everything except the current entity's lessons
                 for p in global_placements:
-                    if view_type == "class" and p.get("class_name") == entity_name:
+                    if view_type == "class" and p.get("class_name", "").strip().upper() == entity_name.strip().upper():
                         continue
-                    if view_type == "teacher" and p.get("teacher_name") == entity_name:
+                    if view_type == "teacher" and format_tr_name(p.get("teacher_name", "")) == format_tr_name(entity_name):
                         continue
                     new_global.append(p)
                     
@@ -900,7 +900,10 @@ class MainWindow(QMainWindow):
         # 1. Calculate already placed durations
         placed_counts = {}
         for info in self.data_store.get("grid_placements", []):
-            key = (info.get("class_name", ""), info.get("subject_name", ""), info.get("teacher_name", ""))
+            c_name = info.get("class_name", "").strip().upper()
+            t_name = format_tr_name(info.get("teacher_name", ""))
+            s_name = info.get("subject_name", "").strip().upper()
+            key = (c_name, s_name, t_name)
             placed_counts[key] = placed_counts.get(key, 0) + info.get("duration", 1)
 
         # 2. Add explicitly assigned lessons from self.data_store["atamalar"]
@@ -937,7 +940,7 @@ class MainWindow(QMainWindow):
             if not parts:
                 parts = [dur]
                 
-            key = (cls_name, subj_name, teacher_name)
+            key = (cls_name.strip().upper(), subj_name.strip().upper(), teacher_name)
             
             for p_idx, block_dur in enumerate(parts):
                 # Filter out placed durations!
