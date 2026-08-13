@@ -193,6 +193,12 @@ class MasterDataDialog(QDialog):
         self._select_tab(start_idx)
 
     def _load_existing_data(self):
+        # Reset row counts to avoid duplicate row stacking
+        self.table_ders.setRowCount(0)
+        self.table_sinif.setRowCount(0)
+        self.table_derslik.setRowCount(0)
+        self.table_ogretmen.setRowCount(0)
+        
         # Calculate totals from atamalar
         totals = {"dersler": {}, "siniflar": {}, "ogretmenler": {}}
         for a in self.data_store.get("atamalar", []):
@@ -229,6 +235,8 @@ class MasterDataDialog(QDialog):
             self._add_row(self.table_ogretmen, [data.get("ad",""), data.get("kisa",""), toplam, "Mevcut", data.get("sinif_ogretmeni",""), ""])
 
     def closeEvent(self, event):
+        if hasattr(self.main_window, "save_db"):
+            self.main_window.save_db()
         if hasattr(self.main_window, "_refresh_tree"):
             self.main_window._refresh_tree()
         event.accept()
@@ -490,6 +498,16 @@ class MasterDataDialog(QDialog):
             d = dialogs[idx](parent=self, existing_data=old_data)
             if d.exec():
                 new_data = d.get_data()
+                old_name = old_data.get("ad")
+                new_name = new_data.get("ad")
+                if old_name and new_name and old_name != new_name:
+                    key_map = {0: "subject", 1: "class", 3: "teacher"}
+                    if idx in key_map:
+                        attr = key_map[idx]
+                        for a in self.data_store.get("atamalar", []):
+                            if a.get(attr) == old_name:
+                                a[attr] = new_name
+
                 data_list[row] = new_data
                 
                 # Refresh entire table to be safe
@@ -533,6 +551,7 @@ class MasterDataDialog(QDialog):
                 
                 p = self.parent()
                 if p and hasattr(p, "save_db"): p.save_db()
+                if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
 
     def _act_delete(self):
         from PySide6.QtWidgets import QMessageBox
@@ -548,18 +567,16 @@ class MasterDataDialog(QDialog):
             r = QMessageBox.question(self, "Silme Onayı", f"{name} silmek istediğinize emin misiniz?", QMessageBox.Yes | QMessageBox.No)
             if r == QMessageBox.Yes:
                 table.removeRow(row)
-                del_name = name
-                
-                # Filter out the deleted entity from the store by name
-                self.data_store[stores[idx]] = [e for e in self.data_store.get(stores[idx], []) if e.get("ad") != del_name and e.get("id") != del_name and e.get("name") != del_name]
-                
-                if del_name:
-                    if idx == 3: # Teacher
-                        self.data_store["atamalar"] = [a for a in self.data_store.get("atamalar", []) if a.get("teacher") != del_name]
-                    elif idx == 0: # Subject
-                        self.data_store["atamalar"] = [a for a in self.data_store.get("atamalar", []) if a.get("subject") != del_name]
-                    elif idx == 1: # Class
-                        self.data_store["atamalar"] = [a for a in self.data_store.get("atamalar", []) if a.get("class") != del_name]
+                if row < len(self.data_store[stores[idx]]):
+                    removed_item = self.data_store[stores[idx]].pop(row)
+                    del_name = removed_item.get("ad")
+                    if del_name:
+                        if idx == 3: # Teacher
+                            self.data_store["atamalar"] = [a for a in self.data_store.get("atamalar", []) if a.get("teacher") != del_name]
+                        elif idx == 0: # Subject
+                            self.data_store["atamalar"] = [a for a in self.data_store.get("atamalar", []) if a.get("subject") != del_name]
+                        elif idx == 1: # Class
+                            self.data_store["atamalar"] = [a for a in self.data_store.get("atamalar", []) if a.get("class") != del_name]
                 p = self.parent()
                 if p and hasattr(p, "save_db"): p.save_db()
                 if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
