@@ -841,12 +841,29 @@ class SinifEditDialog(BaseEditForm):
         
         self.w_max_gunluk = QLineEdit(str(self.existing_data.get("ders_bitimi", "15:30")))
         form2.addRow("Ders Bitim Saati:", self.w_max_gunluk)
-        btn_hoca_ata = QPushButton("🎓 Bu Sınıfın Derslerini ve Öğretmenlerini Ata")
-        btn_hoca_ata.setStyleSheet("background: #0078D7; color: white; font-weight: bold; padding: 6px; border-radius: 4px;")
+        h_btn_lay = QHBoxLayout()
+        btn_hoca_ata = QPushButton("🎓 Ders & Öğretmen Ata")
+        btn_hoca_ata.setStyleSheet("background: #0078D7; color: white; font-weight: bold; min-height: 32px; border-radius: 4px;")
         btn_hoca_ata.clicked.connect(self._assign_lessons_for_this_class)
-        self.main_layout.addWidget(btn_hoca_ata)
+        
+        btn_cizelge = QPushButton("🖨️ Çizelge Göster / Yazdır")
+        btn_cizelge.setStyleSheet("background: #27AE60; color: white; font-weight: bold; min-height: 32px; border-radius: 4px;")
+        btn_cizelge.clicked.connect(self._show_class_timetable)
+        
+        h_btn_lay.addWidget(btn_hoca_ata)
+        h_btn_lay.addWidget(btn_cizelge)
+        self.main_layout.addLayout(h_btn_lay)
 
         self._add_bottom_buttons()
+
+    def _show_class_timetable(self):
+        c_name = self.w_ad.text().strip()
+        p = self.parent()
+        data_store = getattr(p, "data_store", {}) if p else {}
+        from dialogs.print_preview import TimetablePrintPreview
+        filters = {"entity_type": "class", "classes": [c_name], "selected_items": [c_name]}
+        dlg = TimetablePrintPreview(data_store=data_store, filters=filters, parent=self)
+        dlg.exec()
 
     def _assign_lessons_for_this_class(self):
         c_name = self.w_ad.text().strip()

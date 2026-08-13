@@ -61,6 +61,12 @@ class TimetablePrintPreview(QDialog):
             "Tüm Öğretmenlerin Ders Yükü Listesi"
         ])
         self.mode_combo.setMinimumWidth(340)
+        
+        if self.filters.get("entity_type") == "class":
+            self.mode_combo.setCurrentIndex(3)
+        elif self.filters.get("entity_type") == "teacher":
+            self.mode_combo.setCurrentIndex(4)
+            
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         top_bar.addWidget(self.mode_combo)
         
@@ -126,6 +132,19 @@ class TimetablePrintPreview(QDialog):
         else:
             self.target_combo.addItem("Genel Özet")
             
+        selected_item = None
+        if self.filters:
+            sel_list = self.filters.get("selected_items") or self.filters.get("classes") or self.filters.get("teachers")
+            if sel_list:
+                selected_item = sel_list[0]
+                
+        if selected_item:
+            idx = self.target_combo.findText(selected_item)
+            if idx >= 0:
+                self.target_combo.setCurrentIndex(idx)
+            elif self.target_combo.count() > 1:
+                self.target_combo.setCurrentIndex(1)
+
         self.target_combo.blockSignals(False)
 
     def _repaint(self):
@@ -134,16 +153,22 @@ class TimetablePrintPreview(QDialog):
     @property
     def filtered_classes(self):
         all_classes = self.data_store.get("siniflar", [])
-        if not self.filters or not self.filters.get("classes"):
+        if not self.filters:
             return all_classes
-        return [c for c in all_classes if c.get("ad") in self.filters["classes"]]
-        
+        target_list = self.filters.get("classes") or self.filters.get("selected_items") or []
+        if not target_list:
+            return all_classes
+        return [c for c in all_classes if c.get("ad") in target_list]
+
     @property
     def filtered_teachers(self):
         all_teachers = self.data_store.get("ogretmenler", [])
-        if not self.filters or not self.filters.get("teachers"):
+        if not self.filters:
             return all_teachers
-        return [t for t in all_teachers if t.get("ad") in self.filters["teachers"]]
+        target_list = self.filters.get("teachers") or self.filters.get("selected_items") or []
+        if not target_list:
+            return all_teachers
+        return [t for t in all_teachers if t.get("ad") in target_list]
 
     def _update_preview(self):
         self.preview.print_()

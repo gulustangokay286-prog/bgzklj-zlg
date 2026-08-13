@@ -500,7 +500,7 @@ class MasterDataDialog(QDialog):
                 d.exec()
                 return
         self._act_update()
-        return t
+        return
 
     def _wrap_table(self, title, table):
         from PySide6.QtWidgets import QLineEdit
