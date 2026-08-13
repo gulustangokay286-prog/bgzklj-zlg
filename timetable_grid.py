@@ -191,6 +191,7 @@ class UnplacedLessonsDock(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(85)
+        self.setAcceptDrops(True)
         self.setStyleSheet("QFrame { background: #F8FAFC; border-top: 2px solid #CBD5E1; }")
         
         self.layout = QHBoxLayout(self)
@@ -212,7 +213,37 @@ class UnplacedLessonsDock(QFrame):
         scroll.setWidget(self.container)
         self.layout.addWidget(scroll)
 
-    def load_unplaced(self, lessons_data):
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasFormat("application/x-lesson"):
+            event.accept()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        if event.mimeData().hasFormat("application/x-lesson"):
+            try:
+                data = json.loads(event.mimeData().data("application/x-lesson").data().decode())
+                if data.get("is_move"):
+                    orig_r = data.get("origin_row", -1)
+                    orig_c = data.get("origin_col", -1)
+                    orig_dur = data.get("duration", 1)
+                    win = self.window()
+                    grid = getattr(win, "_grid", None)
+                    if grid and orig_r >= 0 and orig_c >= 0:
+                        grid.table.setSpan(orig_r, orig_c, 1, 1)
+                        for r_off in range(orig_dur):
+                            tr = orig_r + r_off
+                            if tr < grid.table.rowCount():
+                                grid.table.setItem(tr, orig_c, None)
+                        if hasattr(grid, "_placed_lessons"):
+                            grid._placed_lessons.pop((orig_r, orig_c), None)
+                        if hasattr(win, "save_db"): win.save_db()
+                        if hasattr(win, "_refresh_tree"): win._refresh_tree()
+            except Exception as e:
+                print("Dock drop error:", e)
+            event.accept()
+
+    def load_unplaced(self, lessons_data, has_assignments=True):
         # clear existing
         while self.container_layout.count():
             item = self.container_layout.takeAt(0)
@@ -220,8 +251,12 @@ class UnplacedLessonsDock(QFrame):
                 item.widget().deleteLater()
                 
         if not lessons_data:
-            hint = QLabel("⚠️ Bu sınıfa / öğretmene henüz hiç ders atanmadı! Lütfen 'Ders Atama' bölümünden bu sınıfa ders ve öğretmen tanımlayın.")
-            hint.setStyleSheet("color: #D32F2F; font-weight: bold; font-size: 12px; padding: 10px; background: #FFEBEE; border: 1px solid #FFCDD2; border-radius: 4px;")
+            if not has_assignments:
+                hint = QLabel("⚠️ Bu sınıfa / öğretmene henüz hiç ders atanmadı! Lütfen 'Ders Atama' bölümünden ders ve öğretmen tanımlayın.")
+                hint.setStyleSheet("color: #D32F2F; font-weight: bold; font-size: 12px; padding: 10px; background: #FFEBEE; border: 1px solid #FFCDD2; border-radius: 6px;")
+            else:
+                hint = QLabel("✅ Bu sınıfın / öğretmenin tüm dersleri başarıyla programa yerleştirildi.")
+                hint.setStyleSheet("color: #2E7D32; font-weight: bold; font-size: 12px; padding: 10px; background: #E8F5E9; border: 1px solid #C8E6C9; border-radius: 6px;")
             self.container_layout.addWidget(hint)
             return
 

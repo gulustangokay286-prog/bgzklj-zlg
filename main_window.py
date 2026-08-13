@@ -507,7 +507,20 @@ class MainWindow(QMainWindow):
     # ── Workspace ─────────────────────────────────────────────────────────────
     def _build_workspace(self, parent):
         splitter = QSplitter(Qt.Horizontal, parent)
-        splitter.setHandleWidth(3)
+        splitter.setHandleWidth(6)
+        splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #CBD5E1;
+                margin: 0px 1px;
+                border-radius: 2px;
+            }
+            QSplitter::handle:hover {
+                background-color: #0284C7;
+            }
+            QSplitter::handle:pressed {
+                background-color: #0369A1;
+            }
+        """)
 
         # Left panel (Modern Sidebar)
         left = QFrame(splitter)
@@ -947,15 +960,20 @@ class MainWindow(QMainWindow):
                 })
             
         # 2. Filter unplaced cards by currently selected class / teacher view if active
+        has_assignments = True
         if hasattr(self, "_grid") and hasattr(self._grid, "view_combo") and hasattr(self._grid, "entity_combo"):
             v_type = view_type or self._grid.view_combo.currentText()
             e_name = target_entity or self._grid.entity_combo.currentText()
             if v_type in ("class", "Sınıf Görünümü") and e_name:
+                total_for_entity = [a for a in atamalar if a.get("class") and a.get("class").strip().upper() == e_name.strip().upper()]
+                has_assignments = len(total_for_entity) > 0
                 unplaced = [u for u in unplaced if u.get("class_name") and u.get("class_name").strip().upper() == e_name.strip().upper()]
             elif v_type in ("teacher", "Öğretmen Görünümü") and e_name:
+                total_for_entity = [a for a in atamalar if a.get("teacher") and format_tr_name(a.get("teacher")) == format_tr_name(e_name)]
+                has_assignments = len(total_for_entity) > 0
                 unplaced = [u for u in unplaced if u.get("teacher") and format_tr_name(u.get("teacher")) == format_tr_name(e_name)]
 
-        self._grid.unplaced_dock.load_unplaced(unplaced)
+        self._grid.unplaced_dock.load_unplaced(unplaced, has_assignments=has_assignments)
 
     def _on_lesson_dropped(self, row, col, lesson_info):
         subject_name = lesson_info.get("subject_name", "Ders")
@@ -1048,13 +1066,15 @@ class MainWindow(QMainWindow):
                 self._grid._placed_lessons.pop((target_r, target_c), None)
                 
                 # Re-place target at origin (Swap)
+                target_teacher = target_info.get("teacher_name") or target_info.get("teacher", "")
+                target_cls = target_info.get("class_name") or target_info.get("class", "")
                 self._grid.set_cell(
                     orig_r, orig_c, 
                     target_info.get("subject_name", ""), 
                     get_subject_color(target_info.get("subject_name", "")), 
-                    target_info.get("teacher", ""), 
+                    target_teacher, 
                     target_dur, 
-                    class_name=target_info.get("class_name", "")
+                    class_name=target_cls
                 )
                 self.statusBar().showMessage(f"Takas (Swap) Başarılı: '{subject_name}' <-> '{target_info.get('subject_name', '')}'")
             else:

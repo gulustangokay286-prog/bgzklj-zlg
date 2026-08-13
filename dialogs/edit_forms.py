@@ -756,14 +756,30 @@ class SubjectTeacherAssignmentDialog(QDialog):
         bot = QHBoxLayout()
         btn_cancel = QPushButton("İptal")
         btn_cancel.clicked.connect(self.reject)
+        
+        btn_clear = QPushButton("🗑️ Atamayı Kaldır / Temizle")
+        btn_clear.setStyleSheet("background: #FFEBEE; color: #D32F2F; border: 1px solid #FFCDD2; font-weight: bold; padding: 6px 12px;")
+        btn_clear.clicked.connect(self._clear_assignments)
+
         btn_save = QPushButton("Kaydet ve Atamaları Oluştur")
         btn_save.setStyleSheet("background: #0078D7; color: white; font-weight: bold; padding: 6px 16px;")
         btn_save.clicked.connect(self._save_assignments)
         
         bot.addWidget(btn_cancel)
+        bot.addWidget(btn_clear)
         bot.addStretch(1)
         bot.addWidget(btn_save)
         lay.addLayout(bot)
+
+    def _clear_assignments(self):
+        atamalar = self.data_store.setdefault("atamalar", [])
+        self.data_store["atamalar"] = [a for a in atamalar if not (a.get("subject") == self.subject_name)]
+        for i in range(self.list_teachers.count()):
+            self.list_teachers.item(i).setCheckState(Qt.Unchecked)
+        for i in range(self.list_classes.count()):
+            self.list_classes.item(i).setCheckState(Qt.Unchecked)
+        trigger_save_db(self, self.data_store)
+        self.accept()
 
     def _save_assignments(self):
         sel_teachers = [self.list_teachers.item(i).text() for i in range(self.list_teachers.count()) if self.list_teachers.item(i).checkState() == Qt.Checked]
@@ -1273,13 +1289,35 @@ class ClassComprehensiveAssignmentDialog(QDialog):
             item_dur.setFlags(item_dur.flags() ^ Qt.ItemIsEditable)
             self.table.setItem(row, 2, item_dur)
             
-            # 3. Action Button
+            # 3. Action Buttons (Edit + Remove)
+            cell_w = QWidget()
+            cell_lay = QHBoxLayout(cell_w)
+            cell_lay.setContentsMargins(4, 2, 4, 2)
+            cell_lay.setSpacing(6)
+            
             btn_edit = QPushButton("✏️ Öğretmen Seç & Saat")
-            btn_edit.setStyleSheet("background: #EBF3FA; color: #0078D7; border: 1px solid #B0D4F1; font-weight: bold;")
+            btn_edit.setStyleSheet("background: #EBF3FA; color: #0078D7; border: 1px solid #B0D4F1; font-weight: bold; padding: 3px 8px;")
             btn_edit.clicked.connect(lambda chk=False, s=subj: self._edit_subject_assignment(s))
-            self.table.setCellWidget(row, 3, btn_edit)
+            cell_lay.addWidget(btn_edit)
+            
+            if assigned_list:
+                btn_remove = QPushButton("🗑️ Kaldır")
+                btn_remove.setStyleSheet("background: #FFEBEE; color: #D32F2F; border: 1px solid #FFCDD2; font-weight: bold; padding: 3px 8px;")
+                btn_remove.clicked.connect(lambda chk=False, s=subj: self._remove_subject_assignment(s))
+                cell_lay.addWidget(btn_remove)
+                
+            self.table.setCellWidget(row, 3, cell_w)
 
         self.lbl_summary.setText(f"Toplam Atanan Ders Saati: {total_class_hours} Saat")
+
+    def _remove_subject_assignment(self, subject_name):
+        atamalar = self.data_store.get("atamalar", [])
+        self.data_store["atamalar"] = [
+            a for a in atamalar
+            if not (a.get("subject") == subject_name and a.get("class") == self.class_name)
+        ]
+        trigger_save_db(self, self.data_store)
+        self._load_data()
 
     def _edit_subject_assignment(self, subject_name):
         d = SubjectTeacherAssignmentDialog(subject_name=subject_name, data_store=self.data_store, parent=self)
