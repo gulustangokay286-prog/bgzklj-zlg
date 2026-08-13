@@ -369,7 +369,7 @@ class MainWindow(QMainWindow):
         self.save_db()
         self.statusBar().showMessage(f"Görünüm güncellendi: {entity_name}")
         self._restore_grid_placements(view_type, entity_name)
-        self._refresh_tree()
+        self._refresh_tree(view_type=view_type, target_entity=entity_name)
 
     # ── Ribbon ────────────────────────────────────────────────────────────────
     def _build_ribbon(self):
@@ -807,7 +807,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.statusBar().showMessage(f"Kaydetme hatası: {e}")
 
-    def _refresh_tree(self):
+    def _refresh_tree(self, view_type=None, target_entity=None):
         self._tree.clear()
         
         # Calculate teacher workloads
@@ -948,12 +948,12 @@ class MainWindow(QMainWindow):
             
         # 2. Filter unplaced cards by currently selected class / teacher view if active
         if hasattr(self, "_grid") and hasattr(self._grid, "view_combo") and hasattr(self._grid, "entity_combo"):
-            view_type = self._grid.view_combo.currentText()
-            entity_name = self._grid.entity_combo.currentText()
-            if view_type == "Sınıf Görünümü" and entity_name:
-                unplaced = [u for u in unplaced if u.get("class_name") and u.get("class_name").strip().upper() == entity_name.strip().upper()]
-            elif view_type == "Öğretmen Görünümü" and entity_name:
-                unplaced = [u for u in unplaced if u.get("teacher") and format_tr_name(u.get("teacher")) == format_tr_name(entity_name)]
+            v_type = view_type or self._grid.view_combo.currentText()
+            e_name = target_entity or self._grid.entity_combo.currentText()
+            if v_type in ("class", "Sınıf Görünümü") and e_name:
+                unplaced = [u for u in unplaced if u.get("class_name") and u.get("class_name").strip().upper() == e_name.strip().upper()]
+            elif v_type in ("teacher", "Öğretmen Görünümü") and e_name:
+                unplaced = [u for u in unplaced if u.get("teacher") and format_tr_name(u.get("teacher")) == format_tr_name(e_name)]
 
         self._grid.unplaced_dock.load_unplaced(unplaced)
 
