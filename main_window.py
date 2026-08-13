@@ -57,38 +57,52 @@ def get_subject_color(subject_name: str) -> str:
     hash_val = sum(ord(c) * (i + 1) for i, c in enumerate(subject_name.strip()))
     return PASTEL_DISTINCT_COLORS[hash_val % len(PASTEL_DISTINCT_COLORS)]
 
-def make_3d_category_icon(icon_type: str) -> QIcon:
-    pix = QPixmap(36, 36)
+def make_clean_vector_icon(icon_type: str) -> QIcon:
+    pix = QPixmap(28, 28)
     pix.fill(Qt.transparent)
     p = QPainter(pix)
     p.setRenderHint(QPainter.Antialiasing)
     
     if icon_type == "sinif":
-        c1, c2 = "#0EA5E9", "#0284C7"
-        label_text = "🏫"
+        p.setBrush(QBrush(QColor("#0284C7")))
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(2, 2, 10, 10, 3, 3)
+        p.drawRoundedRect(16, 2, 10, 10, 3, 3)
+        p.drawRoundedRect(2, 16, 10, 10, 3, 3)
+        p.drawRoundedRect(16, 16, 10, 10, 3, 3)
     elif icon_type == "ogretmen":
-        c1, c2 = "#10B981", "#059669"
-        label_text = "👨‍🏫"
+        p.setBrush(QBrush(QColor("#10B981")))
+        p.setPen(Qt.NoPen)
+        p.drawEllipse(9, 2, 10, 10)
+        from PySide6.QtGui import QPainterPath
+        path = QPainterPath()
+        path.moveTo(3, 25)
+        path.cubicTo(3, 15, 25, 15, 25, 25)
+        path.lineTo(25, 26)
+        path.lineTo(3, 26)
+        path.closeSubpath()
+        p.drawPath(path)
     elif icon_type == "ders":
-        c1, c2 = "#F59E0B", "#D97706"
-        label_text = "📚"
+        p.setBrush(QBrush(QColor("#F59E0B")))
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(2, 4, 11, 20, 2, 2)
+        p.drawRoundedRect(15, 4, 11, 20, 2, 2)
+        p.setBrush(QBrush(QColor("#D97706")))
+        p.drawRect(12, 4, 4, 20)
     else: # derslik
-        c1, c2 = "#8B5CF6", "#6D28D9"
-        label_text = "🏛️"
+        p.setBrush(QBrush(QColor("#8B5CF6")))
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(3, 9, 22, 17, 3, 3)
+        from PySide6.QtGui import QPainterPath
+        path = QPainterPath()
+        path.moveTo(14, 2)
+        path.lineTo(2, 9)
+        path.lineTo(26, 9)
+        path.closeSubpath()
+        p.drawPath(path)
+        p.setBrush(QBrush(Qt.white))
+        p.drawRoundedRect(11, 16, 6, 10, 1, 1)
         
-    p.setBrush(QBrush(QColor(0, 0, 0, 35)))
-    p.setPen(Qt.NoPen)
-    p.drawRoundedRect(3, 5, 30, 30, 8, 8)
-    
-    grad = QLinearGradient(0, 0, 0, 36)
-    grad.setColorAt(0, QColor(c1))
-    grad.setColorAt(1, QColor(c2))
-    p.setBrush(QBrush(grad))
-    p.setPen(QPen(QColor(255, 255, 255, 140), 1.5))
-    p.drawRoundedRect(2, 2, 32, 32, 8, 8)
-    
-    p.setFont(QFont("Segoe UI Emoji", 15))
-    p.drawText(2, 2, 32, 32, Qt.AlignCenter, label_text)
     p.end()
     return QIcon(pix)
 
@@ -377,6 +391,15 @@ class MainWindow(QMainWindow):
         # Connect tree item click
         self._tree.itemClicked.connect(self._on_tree_item_clicked)
 
+    def _on_tree_item_expanded_collapsed(self, item):
+        t = item.text(0)
+        if item.isExpanded():
+            if t.startswith("▸ "):
+                item.setText(0, "▾ " + t[2:])
+        else:
+            if t.startswith("▾ "):
+                item.setText(0, "▸ " + t[2:])
+
     def _on_tree_item_clicked(self, item, column):
         text = item.text(0)
         parent = item.parent()
@@ -615,10 +638,11 @@ class MainWindow(QMainWindow):
         from PySide6.QtWidgets import QAbstractItemView
         self._tree.setMouseTracking(True)
         self._tree.setHeaderHidden(True)
-        self._tree.setIndentation(20)
+        self._tree.setRootIsDecorated(False)
+        self._tree.setIndentation(10)
         self._tree.setAnimated(True)
-        self._tree.setIconSize(QSize(32, 32))
-        self._tree.setSelectionBehavior(QAbstractItemView.SelectItems)
+        self._tree.setIconSize(QSize(22, 22))
+        self._tree.setSelectionBehavior(QAbstractItemView.SelectRows)
         self._tree.setStyleSheet("""
             QTreeWidget {
                 border: none;
@@ -630,12 +654,12 @@ class MainWindow(QMainWindow):
                 outline: none;
             }
             QTreeWidget::item {
-                padding: 8px 12px;
+                padding: 8px 10px;
                 border-radius: 8px;
                 margin-bottom: 4px;
                 color: #1E293B;
                 font-weight: 600;
-                font-size: 14px;
+                font-size: 13px;
                 border: 2px solid transparent;
             }
             QTreeWidget::item:hover {
@@ -654,21 +678,9 @@ class MainWindow(QMainWindow):
                 border: 2px solid #0284C7;
                 color: #0369A1;
             }
-            QTreeWidget::branch {
-                background: transparent;
-            }
-            QTreeWidget::branch:selected {
-                background: transparent;
-            }
-            QTreeWidget::branch:has-children:closed:has-siblings,
-            QTreeWidget::branch:has-children:closed:no-siblings {
-                image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748B' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='9 18 15 12 9 6'></polyline></svg>");
-            }
-            QTreeWidget::branch:has-children:open:has-siblings,
-            QTreeWidget::branch:has-children:open:no-siblings {
-                image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%230284C7' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>");
-            }
         """)
+        self._tree.itemExpanded.connect(self._on_tree_item_expanded_collapsed)
+        self._tree.itemCollapsed.connect(self._on_tree_item_expanded_collapsed)
         l_layout.addWidget(self._tree)
 
         # Right panel  
@@ -923,35 +935,35 @@ class MainWindow(QMainWindow):
         d_list = self.data_store.get("dersler", [])
         r_list = self.data_store.get("derslikler", [])
         
-        icon_s = make_3d_category_icon("sinif")
-        icon_t = make_3d_category_icon("ogretmen")
-        icon_d = make_3d_category_icon("ders")
-        icon_r = make_3d_category_icon("derslik")
+        icon_s = make_clean_vector_icon("sinif")
+        icon_t = make_clean_vector_icon("ogretmen")
+        icon_d = make_clean_vector_icon("ders")
+        icon_r = make_clean_vector_icon("derslik")
         
-        root_s = QTreeWidgetItem(self._tree, [f" Sınıflar ({len(s_list)})"])
+        root_s = QTreeWidgetItem(self._tree, [f"▾  Sınıflar ({len(s_list)})"])
         root_s.setIcon(0, icon_s)
         for c in s_list:
-            item = QTreeWidgetItem(root_s, [f" {c.get('ad', '')}"])
+            item = QTreeWidgetItem(root_s, [f"   {c.get('ad', '')}"])
             item.setData(0, Qt.UserRole, c.get("ad", ""))
             
-        root_t = QTreeWidgetItem(self._tree, [f" Öğretmenler ({len(t_list)})"])
+        root_t = QTreeWidgetItem(self._tree, [f"▾  Öğretmenler ({len(t_list)})"])
         root_t.setIcon(0, icon_t)
         for t in t_list:
             t_name = t.get("ad", "")
             w_load = workloads.get(t_name, 0)
-            item = QTreeWidgetItem(root_t, [f" {t_name} ({w_load} Saat)"])
+            item = QTreeWidgetItem(root_t, [f"   {t_name} ({w_load} Saat)"])
             item.setData(0, Qt.UserRole, t_name)
             
-        root_d = QTreeWidgetItem(self._tree, [f" Dersler ({len(d_list)})"])
+        root_d = QTreeWidgetItem(self._tree, [f"▾  Dersler ({len(d_list)})"])
         root_d.setIcon(0, icon_d)
         for d in d_list:
-            item = QTreeWidgetItem(root_d, [f" {d.get('ad', '')}"])
+            item = QTreeWidgetItem(root_d, [f"   {d.get('ad', '')}"])
             item.setData(0, Qt.UserRole, d.get("ad", ""))
             
-        root_r = QTreeWidgetItem(self._tree, [f" Derslikler ({len(r_list)})"])
+        root_r = QTreeWidgetItem(self._tree, [f"▾  Derslikler ({len(r_list)})"])
         root_r.setIcon(0, icon_r)
         for r in r_list:
-            item = QTreeWidgetItem(root_r, [f" {r.get('ad', '')}"])
+            item = QTreeWidgetItem(root_r, [f"   {r.get('ad', '')}"])
             item.setData(0, Qt.UserRole, r.get("ad", ""))
         
         self._tree.expandAll()
