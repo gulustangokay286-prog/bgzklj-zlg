@@ -570,6 +570,24 @@ class DersEditDialog(QDialog):
         l3.addWidget(btn_uygula)
         l3.addWidget(btn_hoca_ata)
         
+        l3.addWidget(QLabel("Atandığı Sınıflar ve Öğretmenler (Gerçek Zamanlı):"))
+        self.list_assignments = QListWidget()
+        self.list_assignments.setStyleSheet("QListWidget { background: #F8F9FA; border: 1px solid #D0D7DE; border-radius: 4px; color: #333333; }")
+        
+        p = self.parent()
+        data_store = getattr(p, "data_store", {}) if p else {}
+        atamalar = data_store.get("atamalar", [])
+        my_ad = self.existing_data.get("ad", "")
+        my_atamalar = [a for a in atamalar if format_tr_name(a.get("subject", "")) == format_tr_name(my_ad)]
+        for a in my_atamalar:
+            item_text = f"👨‍🏫 {a.get('teacher', 'Atanmadı')} ➔ 🎓 {a.get('class', '')} ({a.get('duration', 0)} Saat)"
+            item = QListWidgetItem(item_text)
+            self.list_assignments.addItem(item)
+        if not my_atamalar:
+            self.list_assignments.addItem(QListWidgetItem("❌ Henüz hiçbir sınıfa atanmadı."))
+            
+        l3.addWidget(self.list_assignments)
+        
         main_layout.addWidget(f3)
 
         # 4. Bottom Controls (Kaydet / İptal)
@@ -959,10 +977,31 @@ class OgretmenEditDialog(BaseEditForm):
         self.main_layout.addLayout(so_lay)
         
         ek_lay = QFormLayout()
-        self.w_ek_dersler = QLineEdit(self.existing_data.get("ek_dersler", "Geometri, Matematik 2"))
+        
+        # 1. Sync subjects to ek_dersler
+        data_store = getattr(p, "data_store", {}) if p else {}
+        atamalar = data_store.get("atamalar", [])
+        my_name = self.existing_data.get("ad", "")
+        my_atamalar = [a for a in atamalar if format_tr_name(a.get("teacher", "")) == format_tr_name(my_name)]
+        my_subjects = list({a.get("subject", "") for a in my_atamalar if a.get("subject")})
+        
+        default_ek_dersler = ", ".join(my_subjects) if my_subjects else self.existing_data.get("ek_dersler", "")
+        self.w_ek_dersler = QLineEdit(default_ek_dersler)
         self.w_ek_dersler.setPlaceholderText("Örn: Geometri, Analitik Geometri (2 - 4 ek ders)")
-        ek_lay.addRow("Ek Branşlar / Dersler:", self.w_ek_dersler)
+        ek_lay.addRow("Atanan/Ek Dersler:", self.w_ek_dersler)
         self.main_layout.addLayout(ek_lay)
+        
+        # 2. Show synced assignments list
+        self.main_layout.addWidget(QLabel("Atandığı Sınıflar ve Dersler (Gerçek Zamanlı):"))
+        self.list_assignments = QListWidget()
+        self.list_assignments.setStyleSheet("QListWidget { background: #F8F9FA; border: 1px solid #D0D7DE; border-radius: 4px; color: #333333; }")
+        for a in my_atamalar:
+            item_text = f"📚 {a.get('subject', '')} ➔ 🎓 {a.get('class', '')} ({a.get('duration', 0)} Saat)"
+            item = QListWidgetItem(item_text)
+            self.list_assignments.addItem(item)
+        if not my_atamalar:
+            self.list_assignments.addItem(QListWidgetItem("❌ Henüz hiçbir derse veya sınıfa atanmadı."))
+        self.main_layout.addWidget(self.list_assignments)
 
         self.chk_es_zamanli = QCheckBox("Aynı saatte çoklu/paralel ders girebilir (Çoklu Ders İzni)")
         self.chk_es_zamanli.setChecked(self.existing_data.get("es_zamanli", False))
@@ -1249,6 +1288,6 @@ class ClassComprehensiveAssignmentDialog(QDialog):
 
     def _print_class_timetable(self):
         from dialogs.print_preview import TimetablePrintPreview
-        filters = {"entity_type": "class_list", "classes": [self.class_name], "selected_items": [self.class_name]}
+        filters = {"entity_type": "class_list", "default_selection": self.class_name}
         dlg = TimetablePrintPreview(data_store=self.data_store, filters=filters, parent=self)
         dlg.exec()

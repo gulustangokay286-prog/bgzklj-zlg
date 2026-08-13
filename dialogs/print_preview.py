@@ -58,7 +58,8 @@ class TimetablePrintPreview(QDialog):
             "Sınıf Dersleri & Atama Listesi (Liste Formatı)",
             "Sınıf Haftalık Ders Programı (Tam Sayfa Renkli Grid)",
             "Öğretmen Haftalık Ders Programı (Tam Sayfa Renkli Grid)",
-            "Tüm Öğretmenlerin Ders Yükü Listesi"
+            "Tüm Öğretmenlerin Ders Yükü Listesi",
+            "Ders (Branş) Atama Listesi"
         ])
         self.mode_combo.setMinimumWidth(340)
         
@@ -131,6 +132,10 @@ class TimetablePrintPreview(QDialog):
             self.target_combo.addItem("Tüm Öğretmenler")
             for t in teachers:
                 self.target_combo.addItem(t.get("ad", "Öğretmen"))
+        elif mode_idx == 6:  # Ders Branş Atama Listesi
+            self.target_combo.addItem("Tüm Dersler")
+            for d in self.data_store.get("dersler", []):
+                self.target_combo.addItem(d.get("ad", "Ders"))
         else:
             self.target_combo.addItem("Genel Özet")
             
@@ -139,6 +144,8 @@ class TimetablePrintPreview(QDialog):
             sel_list = self.filters.get("selected_items") or self.filters.get("classes") or self.filters.get("teachers")
             if sel_list:
                 selected_item = sel_list[0]
+            if self.filters.get("default_selection"):
+                selected_item = self.filters.get("default_selection")
                 
         if selected_item:
             idx = self.target_combo.findText(selected_item)
@@ -233,6 +240,8 @@ class TimetablePrintPreview(QDialog):
             self._render_weekly_grid(painter, VW, VH, is_teacher=True)
         elif mode_idx == 5:
             self._render_teacher_summary_list(painter, VW, VH)
+        elif mode_idx == 6:
+            self._render_subject_assignments_list(painter, VW, VH)
             
         painter.end()
 
@@ -332,7 +341,7 @@ class TimetablePrintPreview(QDialog):
                 items = [c.get("ad", "Sınıf") for c in self.filtered_classes]
             
         if not items:
-            items = ["Örnek 1"]
+            items = ["Boş Çizelge"]
             
         school_name = self.data_store.get("okul_adi", "ÇORUM - MERKEZ / Özel Çorum Birey Özel Öğretim Kursu")
         
