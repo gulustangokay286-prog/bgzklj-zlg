@@ -193,14 +193,28 @@ class MasterDataDialog(QDialog):
         self._select_tab(start_idx)
 
     def _load_existing_data(self):
+        # Calculate totals from atamalar
+        totals = {"dersler": {}, "siniflar": {}, "ogretmenler": {}}
+        for a in self.data_store.get("atamalar", []):
+            dur = a.get("duration", 1)
+            t = a.get("teacher", "")
+            s = a.get("subject", "")
+            c = a.get("class", "")
+            if t: totals["ogretmenler"][t] = totals["ogretmenler"].get(t, 0) + dur
+            if s: totals["dersler"][s] = totals["dersler"].get(s, 0) + dur
+            if c: totals["siniflar"][c] = totals["siniflar"].get(c, 0) + dur
+
         for data in self.data_store.get("dersler", []):
-            self._add_row(self.table_ders, [data.get("ad",""), data.get("kisa",""), data.get("renk","")])
+            toplam = str(totals["dersler"].get(data.get("ad", ""), 0))
+            self._add_row(self.table_ders, [data.get("ad",""), data.get("kisa",""), toplam, "Mevcut", "İdeal", "8"])
         for data in self.data_store.get("siniflar", []):
-            self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), data.get("sinif_ogretmeni",""), data.get("sinif_tipi",""), data.get("renk","")])
+            toplam = str(totals["siniflar"].get(data.get("ad", ""), 0))
+            self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), toplam, "Mevcut", "", data.get("sinif_ogretmeni",""), data.get("kapasite","30")])
         for data in self.data_store.get("derslikler", []):
-            self._add_row(self.table_derslik, [data.get("ad",""), data.get("kisa",""), data.get("kapasite",""), data.get("renk","")])
+            self._add_row(self.table_derslik, [data.get("ad",""), data.get("kisa",""), "0", "Mevcut", data.get("kapasite",""), "Merkez"])
         for data in self.data_store.get("ogretmenler", []):
-            self._add_row(self.table_ogretmen, [data.get("ad",""), data.get("kisa",""), data.get("ek_dersler",""), "Evet" if data.get("es_zamanli") else "Hayır", data.get("renk","")])
+            toplam = str(totals["ogretmenler"].get(data.get("ad", ""), 0))
+            self._add_row(self.table_ogretmen, [data.get("ad",""), data.get("kisa",""), toplam, "Mevcut", data.get("sinif_ogretmeni",""), ""])
 
     def closeEvent(self, event):
         if hasattr(self.main_window, "_refresh_tree"):
@@ -239,16 +253,16 @@ class MasterDataDialog(QDialog):
         self.stack.setStyleSheet("background: #FFFFFF; border: 1px solid #D0D0D0;")
         
         # Tables
-        self.table_ders = self._create_table(["Ders Adı", "Kısa Kodu", "Renk Kodu"])
+        self.table_ders = self._create_table(["Ders Adı", "Kısa Kodu", "Toplam", "Zaman Tablosu", "Dağılım", "Max. Günlük"])
         self.stack.addWidget(self._wrap_table("Tanımlı Dersler", self.table_ders))
 
-        self.table_sinif = self._create_table(["Sınıf Adı", "Kısa Kodu", "Sınıf Öğretmeni", "Sınıf Tipi", "Renk"])
+        self.table_sinif = self._create_table(["Sınıf Adı", "Kısa Kodu", "Toplam", "Zaman Tablosu", "2. Ders", "Sınıf Öğretmeni", "Öğrenci"])
         self.stack.addWidget(self._wrap_table("Tanımlı Sınıflar", self.table_sinif))
 
-        self.table_derslik = self._create_table(["Derslik Adı", "Kısa Kodu", "Kapasite", "Renk"])
+        self.table_derslik = self._create_table(["Derslik Adı", "Kısa Kodu", "Toplam", "Zaman Tablosu", "Kapasite", "Bina"])
         self.stack.addWidget(self._wrap_table("Tanımlı Derslikler", self.table_derslik))
 
-        self.table_ogretmen = self._create_table(["Öğretmen Adı", "Kısa Kodu", "Ek Dersler", "Eş Zamanlı", "Renk"])
+        self.table_ogretmen = self._create_table(["Öğretmen Adı", "Kısa Kodu", "Toplam", "Zaman Tablosu", "Sınıf Öğretmeni", "Branşı"])
         self.stack.addWidget(self._wrap_table("Tanımlı Öğretmenler ve Dersleri", self.table_ogretmen))
         
         center_layout.addWidget(self.stack, 1)
@@ -411,25 +425,25 @@ class MasterDataDialog(QDialog):
             if d.exec():
                 data = d.get_data()
                 self.data_store["dersler"].append(data)
-                self._add_row(self.table_ders, [data.get("ad",""), data.get("kisa",""), data.get("renk","")])
+                self._add_row(self.table_ders, [data.get("ad",""), data.get("kisa",""), "0", "Mevcut", "İdeal", "8"])
         elif idx == 1:  # Sınıflar
             d = SinifEditDialog(self)
             if d.exec():
                 data = d.get_data()
                 self.data_store["siniflar"].append(data)
-                self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), data.get("sinif_ogretmeni",""), data.get("sinif_tipi",""), data.get("renk","")])
+                self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), "0", "Mevcut", "", data.get("sinif_ogretmeni",""), data.get("kapasite","30")])
         elif idx == 2:  # Derslikler
             d = DerslikEditDialog(self)
             if d.exec():
                 data = d.get_data()
                 self.data_store["derslikler"].append(data)
-                self._add_row(self.table_derslik, [data.get("ad",""), data.get("kisa",""), data.get("kapasite",""), data.get("renk","")])
+                self._add_row(self.table_derslik, [data.get("ad",""), data.get("kisa",""), "0", "Mevcut", data.get("kapasite",""), "Merkez"])
         elif idx == 3:  # Öğretmenler
             d = OgretmenEditDialog(self)
             if d.exec():
                 data = d.get_data()
                 self.data_store["ogretmenler"].append(data)
-                self._add_row(self.table_ogretmen, [data.get("ad",""), data.get("kisa",""), data.get("ek_dersler",""), "Evet" if data.get("es_zamanli") else "Hayır", data.get("renk","")])
+                self._add_row(self.table_ogretmen, [data.get("ad",""), data.get("kisa",""), "0", "Mevcut", data.get("sinif_ogretmeni",""), ""])
                 self._act_assign(teacher_name=data.get("ad"))
 
         p = self.parent()
@@ -457,18 +471,32 @@ class MasterDataDialog(QDialog):
                 
                 # Refresh entire table to be safe
                 table.setRowCount(0)
+                
+                totals = {"dersler": {}, "siniflar": {}, "ogretmenler": {}}
+                for a in self.data_store.get("atamalar", []):
+                    dur = a.get("duration", 1)
+                    t = a.get("teacher", "")
+                    s = a.get("subject", "")
+                    c = a.get("class", "")
+                    if t: totals["ogretmenler"][t] = totals["ogretmenler"].get(t, 0) + dur
+                    if s: totals["dersler"][s] = totals["dersler"].get(s, 0) + dur
+                    if c: totals["siniflar"][c] = totals["siniflar"].get(c, 0) + dur
+
                 if idx == 0:
                     for data in self.data_store.get("dersler", []):
-                        self._add_row(self.table_ders, [data.get("ad",""), data.get("kisa",""), data.get("renk","")])
+                        toplam = str(totals["dersler"].get(data.get("ad", ""), 0))
+                        self._add_row(self.table_ders, [data.get("ad",""), data.get("kisa",""), toplam, "Mevcut", "İdeal", "8"])
                 elif idx == 1:
                     for data in self.data_store.get("siniflar", []):
-                        self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), data.get("sinif_ogretmeni",""), data.get("sinif_tipi",""), data.get("renk","")])
+                        toplam = str(totals["siniflar"].get(data.get("ad", ""), 0))
+                        self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), toplam, "Mevcut", "", data.get("sinif_ogretmeni",""), data.get("kapasite","30")])
                 elif idx == 2:
                     for data in self.data_store.get("derslikler", []):
-                        self._add_row(self.table_derslik, [data.get("ad",""), data.get("kisa",""), data.get("kapasite",""), data.get("renk","")])
+                        self._add_row(self.table_derslik, [data.get("ad",""), data.get("kisa",""), "0", "Mevcut", data.get("kapasite",""), "Merkez"])
                 elif idx == 3:
                     for data in self.data_store.get("ogretmenler", []):
-                        self._add_row(self.table_ogretmen, [data.get("ad",""), data.get("kisa",""), data.get("ek_dersler",""), "Evet" if data.get("es_zamanli") else "Hayır", data.get("renk","")])
+                        toplam = str(totals["ogretmenler"].get(data.get("ad", ""), 0))
+                        self._add_row(self.table_ogretmen, [data.get("ad",""), data.get("kisa",""), toplam, "Mevcut", data.get("sinif_ogretmeni",""), ""])
                 
                 p = self.parent()
                 if p and hasattr(p, "save_db"): p.save_db()

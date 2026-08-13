@@ -20,7 +20,7 @@ def push_ota():
         "url": "https://github.com/gulustangokay286-prog/bgzklj-zlg/archive/refs/heads/main.zip"
     }
     
-    url = f"{RTDB_URL}/system_updates.json?auth={token}"
+    url = f"{RTDB_URL}/updates.json?auth={token}"
     upload_resp = requests.put(url, json=update_data)
     print("OTA Update Push Status:", upload_resp.status_code)
     print("OTA Update Push Response:", upload_resp.text)

@@ -743,6 +743,11 @@ class MainWindow(QMainWindow):
         try:
             with open(save_path, "w", encoding="utf-8") as f:
                 json.dump(self.data_store, f, ensure_ascii=False, indent=4)
+                
+            if getattr(self, "current_roz_path", None) and path != self.current_roz_path:
+                with open(self.current_roz_path, "w", encoding="utf-8") as f:
+                    json.dump(self.data_store, f, ensure_ascii=False, indent=4)
+                    
             self.statusBar().showMessage(f"Veritabanı başarıyla kaydedildi: {save_path}")
             
             # Bulut senkronizasyonu (Çoklu kurum desteği ile UID altına)
@@ -1049,16 +1054,22 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "Dosya Aç", "", "BGZ Planlama Dosyaları (*.roz);;Tüm Dosyalar (*)")
         if path:
             self.load_db(path)
+            self.current_roz_path = path
             self._grid.clear_grid()
             self._refresh_tree()
             self.statusBar().showMessage(f"Açıldı: {path}")
 
     def _act_save(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Farklı Kaydet", "program.roz", "BGZ Planlama Dosyaları (*.roz)")
+        path = getattr(self, "current_roz_path", None)
+        if not path:
+            path, _ = QFileDialog.getSaveFileName(self, "Farklı Kaydet", "program.roz", "BGZ Planlama Dosyaları (*.roz)")
+        
         if path:
+            self.current_roz_path = path
             placed = self._grid.get_placed_lessons()
             self.data_store["yerlesim"] = {f"{r},{c}": data for (r, c), data in placed.items()}
             self.save_db(path)
+            self.save_db() # Also save to internal bgz_database.json for cloud sync
 
     def _act_print(self):
         from PySide6.QtWidgets import QDialog
