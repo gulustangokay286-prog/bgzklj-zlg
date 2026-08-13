@@ -728,6 +728,7 @@ class MasterDataDialog(QDialog):
                         self._add_row(self.table_ogretmen, [data.get("ad",""), data.get("kisa",""), toplam, "Mevcut", data.get("sinif_ogretmeni",""), ""])
                 
                 trigger_save_db(self, self.data_store)
+                p = self.parent()
                 if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
 
     def _act_delete(self):
