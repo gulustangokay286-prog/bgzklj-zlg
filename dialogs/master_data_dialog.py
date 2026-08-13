@@ -595,6 +595,13 @@ class MasterDataDialog(QDialog):
             if dlg.exec() == QDialog.Accepted:
                 p = self.parent()
                 if p and hasattr(p, "save_db"): p.save_db()
+                
+                # Anlık UI yenileme
+                self.table_ders.setRowCount(0)
+                self.table_sinif.setRowCount(0)
+                self.table_derslik.setRowCount(0)
+                self.table_ogretmen.setRowCount(0)
+                self._load_existing_data()
 
     def _act_constraints(self):
         from dialogs.constraints_dialog import ConstraintsDialog
