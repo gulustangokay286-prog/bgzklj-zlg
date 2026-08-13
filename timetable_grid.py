@@ -133,13 +133,33 @@ class DraggableLessonCard(QLabel):
             if c.isValid():
                 new_color = c.name()
                 if self.subject_name and data_store:
+                    # Update master data
                     for d in data_store.get("dersler", []):
                         if d.get("ad") == self.subject_name:
                             d["renk"] = new_color
+                            
+                    # Update grid placements storage
+                    for p in data_store.get("grid_placements", []):
+                        if p.get("subject_name") == self.subject_name:
+                            p["color"] = new_color
+                            
+                    # Update internal tracking
+                    for (r, c_idx), info in self.parent()._placed_lessons.items() if hasattr(self.parent(), "_placed_lessons") else ():
+                        if info.get("subject_name") == self.subject_name:
+                            info["color"] = new_color
+                            
+                    # Real-time UI update without rebuilding the grid
+                    parent_table = self.parent() if hasattr(self, "parent") else None
+                    if parent_table and hasattr(parent_table, "rowCount"):
+                        for row in range(parent_table.rowCount()):
+                            for col in range(parent_table.columnCount()):
+                                widget = parent_table.cellWidget(row, col)
+                                if widget and isinstance(widget, DraggableLessonBlock):
+                                    if widget.subject_name == self.subject_name:
+                                        widget.color = new_color
+                                        widget.setStyleSheet(f"background-color: {new_color}; border-radius: 4px; padding: 2px; color: #333;")
                     
                     if hasattr(win, "save_db"): win.save_db()
-                    if hasattr(win, "_refresh_tree"): 
-                        QTimer.singleShot(10, win._refresh_tree)
             return
         elif action == act_2_2: selected_type = "2+2"
         elif action == act_2_1: selected_type = "2+1"
