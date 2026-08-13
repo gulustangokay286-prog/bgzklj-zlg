@@ -624,22 +624,18 @@ class TimetablePrintPreview(QDialog):
                 if lesson:
                     sname = lesson.get("subject_name", "")
                     tname = lesson.get("teacher_name", "")
-                    scolor = get_subject_color(sname, lesson.get("color"))
                     
-                    painter.setBrush(QBrush(QColor(scolor)))
-                    painter.setPen(QPen(QColor(scolor).darker(120), 1))
-                    painter.drawRoundedRect(QRectF(cx + 2, ry + 2, col_w - 4, row_h - 4), 4, 4)
-                    
-                    c = QColor(scolor)
-                    lum = (0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue())
-                    t_color = QColor("#FFFFFF") if lum < 160 else QColor("#111111")
-                    painter.setPen(QPen(t_color, 1))
+                    painter.setBrush(QBrush(QColor("#FAFAFA")))
+                    painter.setPen(QPen(QColor("#444444"), 1))
+                    painter.drawRect(QRectF(cx + 1, ry + 1, col_w - 2, row_h - 2))
                     
                     painter.setFont(make_font(12, True))
-                    painter.drawText(QRectF(cx + 4, ry + 4, col_w - 8, row_h * 0.5), Qt.AlignCenter, sname)
+                    painter.setPen(QPen(QColor("#111111"), 1))
+                    painter.drawText(QRectF(cx + 4, ry + 4, col_w - 8, row_h * 0.45), Qt.AlignCenter, sname)
                     if tname:
-                        painter.setFont(make_font(10))
-                        painter.drawText(QRectF(cx + 4, ry + row_h * 0.5, col_w - 8, row_h * 0.45), Qt.AlignCenter, tname)
+                        painter.setFont(make_font(10, False))
+                        painter.setPen(QPen(QColor("#005A9E"), 1))
+                        painter.drawText(QRectF(cx + 4, ry + row_h * 0.48, col_w - 8, row_h * 0.45), Qt.AlignCenter, tname)
 
         painter.setFont(make_font(9))
         painter.setPen(QPen(QColor("#777777"), 1))

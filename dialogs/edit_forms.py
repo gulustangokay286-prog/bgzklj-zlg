@@ -739,25 +739,30 @@ class SubjectTeacherAssignmentDialog(QDialog):
     def _save_assignments(self):
         sel_teachers = [chk.text() for chk in self.teacher_chks if chk.isChecked()]
         sel_classes = [chk.text() for chk in self.class_chks if chk.isChecked()]
-        if not sel_teachers or not sel_classes:
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "Eksik Seçim", "Lütfen en az 1 öğretmen ve en az 1 sınıf seçin.")
-            return
-            
-        dur = int(self.cb_hafta.currentText()) if self.cb_hafta.currentText().isdigit() else 2
+        
         atamalar = self.data_store.setdefault("atamalar", [])
         
-        for t_name in sel_teachers:
-            for c_name in sel_classes:
-                atamalar.append({
-                    "teacher": format_tr_name(t_name),
-                    "subject": self.subject_name,
-                    "class": c_name,
-                    "duration": dur,
-                    "type": str(dur),
-                    "color": get_subject_color(self.subject_name)
-                })
-                
+        # Purge previous assignments for this subject for the selected classes
+        if sel_classes:
+            self.data_store["atamalar"] = [
+                a for a in atamalar
+                if not (a.get("subject") == self.subject_name and a.get("class") in sel_classes)
+            ]
+            atamalar = self.data_store["atamalar"]
+
+        if sel_teachers and sel_classes:
+            dur = int(self.cb_hafta.currentText()) if self.cb_hafta.currentText().isdigit() else 2
+            for t_name in sel_teachers:
+                for c_name in sel_classes:
+                    atamalar.append({
+                        "teacher": format_tr_name(t_name),
+                        "subject": self.subject_name,
+                        "class": c_name,
+                        "duration": dur,
+                        "type": str(dur),
+                        "color": get_subject_color(self.subject_name)
+                    })
+                    
         p = self.parent()
         if p and hasattr(p, "save_db"): p.save_db()
         self.accept()
