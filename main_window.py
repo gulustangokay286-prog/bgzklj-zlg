@@ -625,29 +625,8 @@ class MainWindow(QMainWindow):
             }
         """)
         l_layout = QVBoxLayout(left)
-        l_layout.setContentsMargins(12, 16, 12, 16)
-        l_layout.setSpacing(12)
-
-        header_card = QFrame()
-        header_card.setStyleSheet("""
-            QFrame {
-                background: #FFFFFF;
-                border: 1px solid #CBD5E1;
-                border-radius: 10px;
-            }
-        """)
-        h_lay = QVBoxLayout(header_card)
-        h_lay.setContentsMargins(12, 12, 12, 12)
-        h_lay.setSpacing(4)
-        
-        lbl_title = QLabel("DERS PROGRAMI ÖĞELERİ")
-        lbl_title.setStyleSheet("color: #64748B; font-size: 10px; font-weight: 800; letter-spacing: 1px; border: none;")
-        
-        lbl_sub = QLabel("Kurum Veri Yönetimi")
-        lbl_sub.setStyleSheet("color: #0F172A; font-size: 14px; font-weight: 700; border: none;")
-        
-        h_lay.addWidget(lbl_title)
-        l_layout.addWidget(header_card)
+        l_layout.setContentsMargins(8, 8, 8, 8)
+        l_layout.setSpacing(6)
 
         self._tree = QTreeWidget(left)
         from PySide6.QtWidgets import QAbstractItemView
@@ -950,10 +929,10 @@ class MainWindow(QMainWindow):
         d_list = self.data_store.get("dersler", [])
         r_list = self.data_store.get("derslikler", [])
         
-        icon_s = make_clean_vector_icon("sinif", True)
-        icon_t = make_clean_vector_icon("ogretmen", True)
-        icon_d = make_clean_vector_icon("ders", True)
-        icon_r = make_clean_vector_icon("derslik", True)
+        icon_s = make_clean_vector_icon("sinif", False)
+        icon_t = make_clean_vector_icon("ogretmen", False)
+        icon_d = make_clean_vector_icon("ders", False)
+        icon_r = make_clean_vector_icon("derslik", False)
         
         root_s = QTreeWidgetItem(self._tree, [f"Sınıflar ({len(s_list)})"])
         root_s.setIcon(0, icon_s)
@@ -985,7 +964,7 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem(root_r, [f"{r.get('ad', '')}"])
             item.setData(0, Qt.UserRole, r.get("ad", ""))
         
-        self._tree.expandAll()
+        self._tree.collapseAll()
         
         unplaced = []
         grid_placements = self.data_store.get("grid_placements", [])
