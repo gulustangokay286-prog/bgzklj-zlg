@@ -412,6 +412,7 @@ class MainWindow(QMainWindow):
         p1.add_button("Otomatik\nPlanlamayı Başlat","otomatik",self._act_auto_schedule)
         p1.add_button("Bulut Tabanlı\nPlanlama","bulut",self._act_cloud_timetable)
         p1.add_button("Planlama Sonrası\nKontrol","kontrol",self._act_verify_timetable)
+        p1.add_button("Çizelgeyi\nSıfırla","temizle",self._act_clear_schedule)
         p1.add_divider()
         p1.add_button("Temel\nBilgiler",  "bilgi",    self._open_school_info)
         p1.add_button("Evden Kod\nGüncelle", "internet", self._act_check_updates)
@@ -1375,16 +1376,19 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Bulut Tabanlı Planlama", "Bulut tabanlı planlama modülünü kullanabilmek için aktif bir Dijisa hesabı gereklidir.")
 
     def _act_clear_schedule(self):
-        r = QMessageBox.question(self, "Tabloyu Temizle",
-            "Tüm ders yerleştirmeleri silinecek. Emin misiniz?",
+        r = QMessageBox.question(self, "Çizelgeyi Sıfırla / Temizle",
+            "Tüm sınıflar ve öğretmenler için yerleştirilmiş derslerin TAMAMI çizelgeden kaldırılacak ve alt havuza aktarılacak.\n\nEmin misiniz?",
             QMessageBox.Yes | QMessageBox.No)
         if r == QMessageBox.Yes:
             self.data_store["grid_placements"] = []
-            self.save_db()
             if hasattr(self, "_grid"):
                 self._grid.clear_grid()
-                self._restore_grid_placements()
-            self.statusBar().showMessage("Tüm çizelge dersleri temizlendi ve kaydedildi.")
+            self._active_view_type = "class"
+            self._active_entity_name = ""
+            self.save_db()
+            self._restore_grid_placements()
+            self._refresh_tree()
+            self.statusBar().showMessage("🧹 Tüm çizelge dersleri başarıyla sıfırlandı ve kaydedildi.")
 
     def _open_extracted(self, dialog_id):
         from dialogs.extracted_dialog import open_extracted_dialog
