@@ -48,7 +48,8 @@ class BaseEditForm(QDialog):
     def __init__(self, title, parent=None, existing_data=None):
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.setFixedSize(500, 480)
+        self.resize(540, 680)
+        self.setMinimumSize(520, 560)
         self.existing_data = existing_data or {}
         
         self.setStyleSheet("""
@@ -477,7 +478,8 @@ class DersEditDialog(QDialog):
     def __init__(self, parent=None, existing_data=None):
         super().__init__(parent)
         self.setWindowTitle("Ders")
-        self.setFixedSize(520, 560)
+        self.resize(540, 680)
+        self.setMinimumSize(520, 640)
         self.setStyleSheet("""
             QDialog { background-color: #F4F6F9; font-family: system-ui, -apple-system, sans-serif; font-size: 13px; }
             QLabel { border: none; background: transparent; color: #333; font-size: 13px; }
@@ -573,6 +575,8 @@ class DersEditDialog(QDialog):
         
         l3.addWidget(QLabel("Atandığı Sınıflar ve Öğretmenler (Gerçek Zamanlı):"))
         self.list_assignments = QListWidget()
+        self.list_assignments.setMinimumHeight(75)
+        self.list_assignments.setMaximumHeight(110)
         self.list_assignments.setStyleSheet("QListWidget { background: #F8F9FA; border: 1px solid #D0D7DE; border-radius: 4px; color: #333333; }")
         
         p = self.parent()
@@ -925,6 +929,8 @@ class SinifEditDialog(BaseEditForm):
 class OgretmenEditDialog(BaseEditForm):
     def __init__(self, parent=None, existing_data=None):
         super().__init__("Öğretmen", parent, existing_data)
+        self.resize(540, 680)
+        self.setMinimumSize(520, 640)
         self._color = self.existing_data.get("renk", "#27AE60")
         self._build_ui()
         
@@ -995,6 +1001,8 @@ class OgretmenEditDialog(BaseEditForm):
         # 2. Show synced assignments list
         self.main_layout.addWidget(QLabel("Atandığı Sınıflar ve Dersler (Gerçek Zamanlı):"))
         self.list_assignments = QListWidget()
+        self.list_assignments.setMinimumHeight(75)
+        self.list_assignments.setMaximumHeight(110)
         self.list_assignments.setStyleSheet("QListWidget { background: #F8F9FA; border: 1px solid #D0D7DE; border-radius: 4px; color: #333333; }")
         for a in my_atamalar:
             item_text = f"📚 {a.get('subject', '')} ➔ 🎓 {a.get('class', '')} ({a.get('duration', 0)} Saat)"
