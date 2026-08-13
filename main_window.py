@@ -648,27 +648,23 @@ class MainWindow(QMainWindow):
                 outline: none;
             }
             QTreeWidget::item {
-                padding: 10px 12px;
-                margin-bottom: 6px;
+                padding: 8px 10px;
+                margin-bottom: 4px;
                 border-radius: 8px;
-                color: #0F172A;
+                color: #1E293B;
                 font-weight: 600;
                 font-size: 13px;
-                background: #FFFFFF;
-                border: 1px solid #E2E8F0;
-                border-bottom: 2px solid #CBD5E1;
+                border: 1px solid transparent;
             }
             QTreeWidget::item:hover {
-                background-color: #F0F9FF;
-                border: 1px solid #0284C7;
-                border-bottom: 2px solid #0284C7;
+                background-color: #F1F5F9;
+                border: 1px solid #CBD5E1;
                 color: #0284C7;
             }
             QTreeWidget::item:selected {
                 background-color: #E0F2FE;
                 border: 1px solid #0284C7;
                 border-left: 4px solid #0284C7;
-                border-bottom: 2px solid #0284C7;
                 color: #0369A1;
                 font-weight: 700;
             }
@@ -676,7 +672,6 @@ class MainWindow(QMainWindow):
                 background-color: #BAE6FD;
                 border: 1px solid #0284C7;
                 border-left: 4px solid #0284C7;
-                border-bottom: 2px solid #0284C7;
                 color: #0369A1;
             }
             QTreeWidget::branch {
@@ -916,6 +911,13 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Kaydetme hatası: {e}")
 
     def _refresh_tree(self, view_type=None, target_entity=None):
+        expanded_states = {}
+        for i in range(self._tree.topLevelItemCount()):
+            item = self._tree.topLevelItem(i)
+            icon_type = item.data(0, Qt.UserRole + 10)
+            if icon_type:
+                expanded_states[icon_type] = item.isExpanded()
+
         self._tree.clear()
         
         # Calculate teacher workloads
@@ -939,10 +941,15 @@ class MainWindow(QMainWindow):
         d_list = self.data_store.get("dersler", [])
         r_list = self.data_store.get("derslikler", [])
         
-        icon_s = make_clean_vector_icon("sinif", False)
-        icon_t = make_clean_vector_icon("ogretmen", False)
-        icon_d = make_clean_vector_icon("ders", False)
-        icon_r = make_clean_vector_icon("derslik", False)
+        is_exp_s = expanded_states.get("sinif", False)
+        is_exp_t = expanded_states.get("ogretmen", False)
+        is_exp_d = expanded_states.get("ders", False)
+        is_exp_r = expanded_states.get("derslik", False)
+        
+        icon_s = make_clean_vector_icon("sinif", is_exp_s)
+        icon_t = make_clean_vector_icon("ogretmen", is_exp_t)
+        icon_d = make_clean_vector_icon("ders", is_exp_d)
+        icon_r = make_clean_vector_icon("derslik", is_exp_r)
         
         root_s = QTreeWidgetItem(self._tree, [f"Sınıflar ({len(s_list)})"])
         root_s.setIcon(0, icon_s)
@@ -974,7 +981,10 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem(root_r, [f"{r.get('ad', '')}"])
             item.setData(0, Qt.UserRole, r.get("ad", ""))
         
-        self._tree.collapseAll()
+        root_s.setExpanded(is_exp_s)
+        root_t.setExpanded(is_exp_t)
+        root_d.setExpanded(is_exp_d)
+        root_r.setExpanded(is_exp_r)
         
         unplaced = []
         grid_placements = self.data_store.get("grid_placements", [])
