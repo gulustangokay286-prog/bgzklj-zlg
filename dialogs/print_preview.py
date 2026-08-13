@@ -710,3 +710,93 @@ class TimetablePrintPreview(QDialog):
             
             painter.drawText(QRectF(cur_x, cur_y, cols[3][1], row_h), Qt.AlignCenter, f"{tot_hours} Saat")
             cur_y += row_h
+
+    def _render_subject_assignments_list(self, painter, VW, VH):
+        """Ders (Branş) Atama Listesi Çıktısı"""
+        selected_subj = self.target_combo.currentText()
+        school_name = self.data_store.get("okul_adi", "ÇORUM - MERKEZ / Özel Çorum Birey Özel Öğretim Kursu")
+        
+        atamalar = self.data_store.get("atamalar", [])
+        if selected_subj and selected_subj != "Tüm Dersler":
+            atamalar = [a for a in atamalar if format_tr_name(a.get("subject", "")) == format_tr_name(selected_subj)]
+            
+        painter.setPen(QPen(QColor("#CCCCCC"), 1))
+        painter.setBrush(QBrush(QColor("#F5F7FA")))
+        painter.drawRoundedRect(30, 20, VW - 60, 50, 6, 6)
+        
+        painter.setPen(QPen(QColor("#111111"), 1))
+        painter.setFont(make_font(14, True))
+        painter.drawText(QRectF(50, 28, 400, 24), Qt.AlignLeft | Qt.AlignVCenter, "Ders / Branş Atama Listesi")
+        
+        painter.setFont(make_font(13, True))
+        target_title = selected_subj if selected_subj and selected_subj != "Tüm Dersler" else "TÜM DERSLER"
+        painter.drawText(QRectF(VW - 300, 28, 250, 24), Qt.AlignRight | Qt.AlignVCenter, target_title)
+        
+        painter.setFont(make_font(10))
+        painter.drawText(QRectF(50, 52, 600, 20), Qt.AlignLeft | Qt.AlignVCenter, school_name)
+        
+        start_y = 85
+        tbl_w = VW - 60
+        cols = [
+            ("Sınıf", 150), ("Öğretmen", 350), ("Ders (Branş)", 340), ("Saat", 200)
+        ]
+        
+        cur_x = 30
+        header_h = 32
+        painter.setBrush(QBrush(QColor("#E9ECEF")))
+        painter.setPen(QPen(QColor("#BCC8D8"), 1))
+        painter.drawRect(QRectF(30, start_y, tbl_w, header_h))
+        
+        painter.setFont(make_font(12, True))
+        for col_name, col_width in cols:
+            painter.drawText(QRectF(cur_x, start_y, col_width, header_h), Qt.AlignCenter, col_name)
+            cur_x += col_width
+
+        row_h = 30
+        cur_y = start_y + header_h
+        painter.setFont(make_font(10))
+        
+        sorted_atamalar = sorted(atamalar, key=lambda a: (a.get("class", ""), a.get("teacher", "")))
+        
+        total_hours = 0
+        if not sorted_atamalar:
+            painter.setBrush(QBrush(QColor("#FFFFFF")))
+            painter.drawRect(QRectF(30, cur_y, tbl_w, row_h))
+            painter.drawText(QRectF(30, cur_y, tbl_w, row_h), Qt.AlignCenter, "Bu ders için henüz hiç atama yapılmamış.")
+        else:
+            for idx, item in enumerate(sorted_atamalar):
+                if cur_y + row_h > VH - 50:
+                    break
+                    
+                bg_color = QColor("#F8F9FA") if idx % 2 == 1 else QColor("#FFFFFF")
+                painter.setBrush(QBrush(bg_color))
+                painter.setPen(QPen(QColor("#E0E0E0"), 1))
+                painter.drawRect(QRectF(30, cur_y, tbl_w, row_h))
+                
+                cur_x = 30
+                c_name = item.get("class", "")
+                t_name = item.get("teacher", "")
+                s_name = item.get("subject", "")
+                dur = item.get("duration", 2)
+                total_hours += dur
+                
+                painter.setPen(QPen(QColor("#111111"), 1))
+                painter.drawText(QRectF(cur_x, cur_y, cols[0][1], row_h), Qt.AlignCenter, c_name)
+                cur_x += cols[0][1]
+                
+                painter.drawText(QRectF(cur_x + 10, cur_y, cols[1][1] - 10, row_h), Qt.AlignLeft | Qt.AlignVCenter, t_name)
+                cur_x += cols[1][1]
+                
+                painter.drawText(QRectF(cur_x + 10, cur_y, cols[2][1] - 10, row_h), Qt.AlignLeft | Qt.AlignVCenter, s_name)
+                cur_x += cols[2][1]
+                
+                painter.drawText(QRectF(cur_x, cur_y, cols[3][1], row_h), Qt.AlignCenter, f"{dur} Saat")
+                cur_x += cols[3][1]
+                
+                cur_y += row_h
+
+        painter.setPen(QPen(QColor("#777777"), 1))
+        painter.setFont(make_font(9))
+        painter.drawText(QRectF(30, VH - 35, 400, 20), Qt.AlignLeft, f"Toplam Atanan Ders Kaydı: {len(sorted_atamalar)} | Toplam Saat: {total_hours}")
+        painter.drawText(QRectF(VW - 430, VH - 35, 400, 20), Qt.AlignRight, "BGZ Ders Planlama Yazılımı v2025")
+

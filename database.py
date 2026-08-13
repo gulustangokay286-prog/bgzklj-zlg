@@ -133,3 +133,31 @@ def update_record(table_name, record_id, data_dict):
     conn.commit()
     conn.close()
 
+def trigger_save_db(widget, data_store=None):
+    """Walks up the Qt parent hierarchy to find MainWindow and call save_db(). Fallbacks to direct disk write if needed."""
+    curr = widget
+    while curr is not None:
+        if hasattr(curr, "save_db") and callable(getattr(curr, "save_db")):
+            try:
+                curr.save_db()
+                return True
+            except Exception as e:
+                print(f"[SAVE_DB_ERR] {e}")
+        if hasattr(curr, "parent") and callable(getattr(curr, "parent")):
+            curr = curr.parent()
+        else:
+            break
+            
+    if data_store is not None:
+        try:
+            base_dir = get_base_dir()
+            save_path = os.path.join(base_dir, "program.roz")
+            with open(save_path, "w", encoding="utf-8") as f:
+                json.dump(data_store, f, ensure_ascii=False, indent=4)
+            print(f"[TRIGGER_SAVE_DB_FALLBACK] Saved to {save_path}")
+            return True
+        except Exception as e:
+            print(f"[TRIGGER_SAVE_DB_FALLBACK_ERR] {e}")
+    return False
+
+

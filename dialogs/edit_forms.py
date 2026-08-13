@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QColor, QBrush
+from database import trigger_save_db
 
 PASTEL_DISTINCT_COLORS = [
     "#1E88E5", "#43A047", "#FB8C00", "#8E24AA", "#E53935",
@@ -621,7 +622,7 @@ class DersEditDialog(QDialog):
             return
         d = SubjectTeacherAssignmentDialog(subject_name=subj_name, data_store=data_store, parent=p or self)
         if d.exec():
-            if p and hasattr(p, "save_db"): p.save_db()
+            trigger_save_db(self, data_store)
 
     def _open_derslikler(self):
         from dialogs.master_data_dialog import MasterDataDialog
@@ -788,7 +789,7 @@ class SubjectTeacherAssignmentDialog(QDialog):
                     })
                     
         p = self.parent()
-        if p and hasattr(p, "save_db"): p.save_db()
+        trigger_save_db(self, self.data_store)
         self.accept()
 
 
@@ -900,7 +901,7 @@ class SinifEditDialog(BaseEditForm):
         data_store = getattr(p, "data_store", {}) if p else {}
         d = ClassComprehensiveAssignmentDialog(class_name=c_name, data_store=data_store, parent=p or self)
         if d.exec():
-            if p and hasattr(p, "save_db"): p.save_db()
+            trigger_save_db(self, data_store)
 
     def _pick_color(self):
         c = QColorDialog.getColor(QColor(self._color), self)
@@ -1282,8 +1283,7 @@ class ClassComprehensiveAssignmentDialog(QDialog):
                 item.setCheckState(Qt.Checked)
             
         if d.exec():
-            p = self.parent()
-            if p and hasattr(p, "save_db"): p.save_db()
+            trigger_save_db(self, self.data_store)
             self._load_data()
 
     def _print_class_timetable(self):

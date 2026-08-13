@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt, QSize, QPoint
 from PySide6.QtGui import QFont, QPixmap, QPainter, QColor, QPen, QBrush, QPolygon, QIcon
 
 from dialogs.edit_forms import DersEditDialog, SinifEditDialog, OgretmenEditDialog, DerslikEditDialog
+from database import trigger_save_db
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QAbstractItemView
 
@@ -599,8 +600,8 @@ class MasterDataDialog(QDialog):
             else:
                 self.data_store["atamalar"].append(data)
                 
+            trigger_save_db(self, self.data_store)
             p = self.parent()
-            if p and hasattr(p, "save_db"): p.save_db()
             if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
 
     def _act_new(self):
@@ -642,8 +643,8 @@ class MasterDataDialog(QDialog):
                 self._add_row(self.table_ogretmen, [data.get("ad",""), data.get("kisa",""), "0", "Mevcut", data.get("sinif_ogretmeni",""), ""])
                 self._act_assign(teacher_name=data.get("ad"))
 
+        trigger_save_db(self, self.data_store)
         p = self.parent()
-        if p and hasattr(p, "save_db"): p.save_db()
         if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
 
     def _act_update(self):
@@ -726,8 +727,7 @@ class MasterDataDialog(QDialog):
                         toplam = str(totals["ogretmenler"].get(data.get("ad", ""), 0))
                         self._add_row(self.table_ogretmen, [data.get("ad",""), data.get("kisa",""), toplam, "Mevcut", data.get("sinif_ogretmeni",""), ""])
                 
-                p = self.parent()
-                if p and hasattr(p, "save_db"): p.save_db()
+                trigger_save_db(self, self.data_store)
                 if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
 
     def _act_delete(self):
@@ -788,8 +788,7 @@ class MasterDataDialog(QDialog):
             from dialogs.timeoff_dialog import TimeoffDialog
             dlg = TimeoffDialog(entity, names[idx], self.data_store, self)
             if dlg.exec() == QDialog.Accepted:
-                p = self.parent()
-                if p and hasattr(p, "save_db"): p.save_db()
+                trigger_save_db(self, self.data_store)
                 
                 # Anlık UI yenileme
                 self.table_ders.setRowCount(0)
@@ -822,8 +821,7 @@ class MasterDataDialog(QDialog):
             self.data_store[stores[idx]] = []
             if idx in (0, 1, 3):
                 self.data_store["atamalar"] = []
-            p = self.parent()
-            if p and hasattr(p, "save_db"): p.save_db()
+            trigger_save_db(self, self.data_store)
             if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
 
     def _act_groups(self):
