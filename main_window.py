@@ -148,6 +148,8 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
                 
+        self._active_view_type = "class"
+        self._active_entity_name = ""
         self.data_store = {"dersler": [], "siniflar": [], "derslikler": [], "ogretmenler": [], "atamalar": [], "settings": {}}
         
         # Eğer giriş yapılmışsa, buluttan o kuruma (uid) ait veriyi çek
@@ -370,6 +372,8 @@ class MainWindow(QMainWindow):
         self.save_db()
         self.statusBar().showMessage(f"Görünüm güncellendi: {entity_name}")
         self._restore_grid_placements(view_type, entity_name)
+        self._active_view_type = view_type
+        self._active_entity_name = entity_name
         self._refresh_tree(view_type=view_type, target_entity=entity_name)
 
     # ── Ribbon ────────────────────────────────────────────────────────────────
@@ -775,13 +779,16 @@ class MainWindow(QMainWindow):
         
         # Sync current grid view to global list
         if hasattr(self, "_grid") and hasattr(self._grid, "view_combo") and hasattr(self._grid, "entity_combo"):
-            view_type = None
-            entity_name = self._grid.entity_combo.currentText()
-            if hasattr(self._grid.view_combo, "currentText"):
-                if self._grid.view_combo.currentText() == "Sınıf Görünümü":
-                    view_type = "class"
-                elif self._grid.view_combo.currentText() == "Öğretmen Görünümü":
-                    view_type = "teacher"
+            view_type = getattr(self, "_active_view_type", None)
+            entity_name = getattr(self, "_active_entity_name", None)
+            
+            if not view_type or not entity_name:
+                entity_name = self._grid.entity_combo.currentText()
+                if hasattr(self._grid.view_combo, "currentText"):
+                    if self._grid.view_combo.currentText() == "Sınıf Görünümü":
+                        view_type = "class"
+                    elif self._grid.view_combo.currentText() == "Öğretmen Görünümü":
+                        view_type = "teacher"
                 
             if view_type and entity_name:
                 global_placements = self.data_store.setdefault("grid_placements", [])
