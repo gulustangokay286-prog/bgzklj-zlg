@@ -18,6 +18,7 @@ from dialogs.school_info import SchoolInfoDialog
 from dialogs.auto_schedule_dialog import AutoScheduleDialog
 from dialogs.print_preview import TimetablePrintPreview
 from core.timetable_data import TimetableData
+from dialogs.edit_forms import format_tr_name
 
 APP_TITLE = "BGZ Ders Planlama"
 VERSION   = "2025"
@@ -720,9 +721,6 @@ class MainWindow(QMainWindow):
                 print("DB Load Error:", e)
     
     def _restore_grid_placements(self, view_type=None, entity_name=None):
-        if not hasattr(self, "_grid"):
-            return
-        from dialogs.edit_forms import format_tr_name
         grid_data = self.data_store.get("grid_placements", [])
         self._grid.clear_grid()
         for info in grid_data:
@@ -965,9 +963,9 @@ class MainWindow(QMainWindow):
             view_type = self._grid.view_combo.currentText()
             entity_name = self._grid.entity_combo.currentText()
             if view_type == "Sınıf Görünümü" and entity_name:
-                unplaced = [u for u in unplaced if not u.get("class_name") or entity_name in u.get("class_name")]
+                unplaced = [u for u in unplaced if u.get("class_name") and u.get("class_name").strip().upper() == entity_name.strip().upper()]
             elif view_type == "Öğretmen Görünümü" and entity_name:
-                unplaced = [u for u in unplaced if not u.get("teacher") or entity_name in u.get("teacher")]
+                unplaced = [u for u in unplaced if u.get("teacher") and format_tr_name(u.get("teacher")) == format_tr_name(entity_name)]
 
         self._grid.unplaced_dock.load_unplaced(unplaced)
 

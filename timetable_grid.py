@@ -220,8 +220,8 @@ class UnplacedLessonsDock(QFrame):
                 item.widget().deleteLater()
                 
         if not lessons_data:
-            hint = QLabel("Yerleştirilecek ders kartı bulunamadı. Lütfen 'Dersler' veya 'Ders Atama' bölümünden ders ekleyin.")
-            hint.setStyleSheet("color: #BBB; font-style: italic; font-size: 12px; padding: 10px;")
+            hint = QLabel("⚠️ Bu sınıfa / öğretmene henüz hiç ders atanmadı! Lütfen 'Ders Atama' bölümünden bu sınıfa ders ve öğretmen tanımlayın.")
+            hint.setStyleSheet("color: #D32F2F; font-weight: bold; font-size: 12px; padding: 10px; background: #FFEBEE; border: 1px solid #FFCDD2; border-radius: 4px;")
             self.container_layout.addWidget(hint)
             return
 
