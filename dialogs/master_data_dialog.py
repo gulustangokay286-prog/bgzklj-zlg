@@ -245,10 +245,14 @@ class MasterDataDialog(QDialog):
             self._add_row(self.table_ogretmen, [data.get("ad",""), data.get("kisa",""), toplam, "Mevcut", data.get("sinif_ogretmeni",""), ""])
 
     def closeEvent(self, event):
-        if hasattr(self.main_window, "save_db"):
-            self.main_window.save_db()
-        if hasattr(self.main_window, "_refresh_tree"):
-            self.main_window._refresh_tree()
+        try:
+            p = self.parent() or getattr(self, "main_window", None)
+            if p and hasattr(p, "save_db"):
+                p.save_db()
+            if p and hasattr(p, "_refresh_tree"):
+                p._refresh_tree()
+        except Exception as e:
+            print("closeEvent Exception Handled:", e)
         event.accept()
 
     def _build_ui(self):
@@ -313,7 +317,15 @@ class MasterDataDialog(QDialog):
         self.btn_sil.clicked.connect(self._act_delete)
         right_panel.addWidget(self.btn_sil)
         
-        right_panel.addSpacing(20)
+        btn_yukari = ActionButton("▲ Yukarı Taşı", icon_name="edit")
+        btn_yukari.clicked.connect(lambda: self._act_move_row(-1))
+        right_panel.addWidget(btn_yukari)
+        
+        btn_asagi = ActionButton("▼ Aşağı Taşı", icon_name="edit")
+        btn_asagi.clicked.connect(lambda: self._act_move_row(1))
+        right_panel.addWidget(btn_asagi)
+        
+        right_panel.addSpacing(15)
         
         # Orijinal 2025 Dialoglarına yönlendiren butonlar
         btn_ders_atama = ActionButton("Ders Atama", icon_name="doc")
@@ -700,12 +712,32 @@ class MasterDataDialog(QDialog):
         open_extracted_dialog(dlg_id, self)
 
     def accept(self):
-        p = self.parent()
-        if p and hasattr(p, "save_db"):
-            p.save_db()
-        if p and hasattr(p, "_refresh_tree"):
-            p._refresh_tree()
+        try:
+            p = self.parent() or getattr(self, "main_window", None)
+            if p and hasattr(p, "save_db"):
+                p.save_db()
+            if p and hasattr(p, "_refresh_tree"):
+                p._refresh_tree()
+        except Exception as e:
+            print("accept Exception Handled:", e)
         super().accept()
+
+    def _act_move_row(self, direction):
+        idx = self.stack.currentIndex()
+        tables = [self.table_ders, self.table_sinif, self.table_derslik, self.table_ogretmen]
+        stores = ["dersler", "siniflar", "derslikler", "ogretmenler"]
+        table = tables[idx]
+        row = table.currentRow()
+        if row < 0:
+            return
+        target_row = row + direction
+        data_list = self.data_store.get(stores[idx], [])
+        if 0 <= target_row < len(data_list) and 0 <= row < len(data_list):
+            data_list[row], data_list[target_row] = data_list[target_row], data_list[row]
+            self._load_existing_data()
+            table.setCurrentCell(target_row, 0)
+            p = self.parent() or getattr(self, "main_window", None)
+            if p and hasattr(p, "save_db"): p.save_db()
 
     def _add_row(self, table, texts):
         r = table.rowCount()
