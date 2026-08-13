@@ -648,29 +648,39 @@ class MainWindow(QMainWindow):
                 outline: none;
             }
             QTreeWidget::item {
-                padding: 8px 10px;
+                padding: 10px 12px;
+                margin-bottom: 6px;
                 border-radius: 8px;
-                margin-bottom: 4px;
-                color: #1E293B;
+                color: #0F172A;
                 font-weight: 600;
                 font-size: 13px;
-                border: 2px solid transparent;
+                background: #FFFFFF;
+                border: 1px solid #E2E8F0;
+                border-bottom: 2px solid #CBD5E1;
             }
             QTreeWidget::item:hover {
-                background-color: #F1F5F9;
-                border: 2px solid #38BDF8;
+                background-color: #F0F9FF;
+                border: 1px solid #0284C7;
+                border-bottom: 2px solid #0284C7;
                 color: #0284C7;
             }
             QTreeWidget::item:selected {
-                background-color: #F0F9FF;
-                border: 2px solid #0284C7;
+                background-color: #E0F2FE;
+                border: 1px solid #0284C7;
+                border-left: 4px solid #0284C7;
+                border-bottom: 2px solid #0284C7;
                 color: #0369A1;
-                font-weight: bold;
+                font-weight: 700;
             }
             QTreeWidget::item:selected:hover {
-                background-color: #E0F2FE;
-                border: 2px solid #0284C7;
+                background-color: #BAE6FD;
+                border: 1px solid #0284C7;
+                border-left: 4px solid #0284C7;
+                border-bottom: 2px solid #0284C7;
                 color: #0369A1;
+            }
+            QTreeWidget::branch {
+                background: transparent;
             }
         """)
         self._tree.itemExpanded.connect(self._on_tree_item_expanded_collapsed)

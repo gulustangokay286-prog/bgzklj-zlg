@@ -453,14 +453,34 @@ class MasterDataDialog(QDialog):
         t = DragDropTableWidget(0, len(headers))
         t.setHorizontalHeaderLabels(headers)
         t.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        t.verticalHeader().setDefaultSectionSize(40)
+        t.verticalHeader().setVisible(False)
         t.setEditTriggers(QTableWidget.NoEditTriggers)
         t.setAlternatingRowColors(True)
         t.setStyleSheet("""
-            QTableWidget { border: 1px solid #D0D0D0; font-size: 9pt; gridline-color: #E0E0E0; }
+            QTableWidget {
+                border: 1px solid #E2E8F0;
+                background-color: #FFFFFF;
+                alternate-background-color: #F8FAFC;
+                gridline-color: #E2E8F0;
+                font-size: 10pt;
+                font-weight: 500;
+                color: #0F172A;
+                selection-background-color: #E0F2FE;
+                selection-color: #0369A1;
+            }
+            QTableWidget::item {
+                padding: 8px 12px;
+                border-bottom: 1px solid #E2E8F0;
+            }
             QHeaderView::section {
-                background-color: #F0F0F0;
-                border: 1px solid #D0D0D0;
-                padding: 4px; font-weight: bold; font-size: 9pt;
+                background-color: #F1F5F9;
+                color: #334155;
+                border: none;
+                border-bottom: 2px solid #CBD5E1;
+                padding: 10px 12px;
+                font-weight: 700;
+                font-size: 10pt;
             }
         """)
         t.cellDoubleClicked.connect(self._on_table_double_clicked)
