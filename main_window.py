@@ -369,6 +369,7 @@ class MainWindow(QMainWindow):
         self.save_db()
         self.statusBar().showMessage(f"Görünüm güncellendi: {entity_name}")
         self._restore_grid_placements(view_type, entity_name)
+        self._refresh_tree()
 
     # ── Ribbon ────────────────────────────────────────────────────────────────
     def _build_ribbon(self):

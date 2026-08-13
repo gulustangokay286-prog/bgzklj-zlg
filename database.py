@@ -140,6 +140,8 @@ def trigger_save_db(widget, data_store=None):
         if hasattr(curr, "save_db") and callable(getattr(curr, "save_db")):
             try:
                 curr.save_db()
+                if hasattr(curr, "_refresh_tree") and callable(getattr(curr, "_refresh_tree")):
+                    curr._refresh_tree()
                 return True
             except Exception as e:
                 print(f"[SAVE_DB_ERR] {e}")
