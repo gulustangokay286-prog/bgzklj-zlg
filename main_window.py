@@ -722,14 +722,20 @@ class MainWindow(QMainWindow):
     def _restore_grid_placements(self, view_type=None, entity_name=None):
         if not hasattr(self, "_grid"):
             return
+        from dialogs.edit_forms import format_tr_name
         grid_data = self.data_store.get("grid_placements", [])
         self._grid.clear_grid()
         for info in grid_data:
-            # Filter logic
-            if view_type == "teacher" and entity_name and info.get("teacher_name") != entity_name:
-                continue
-            if view_type == "class" and entity_name and info.get("class_name") != entity_name:
-                continue
+            t_info = info.get("teacher_name", "").strip()
+            c_info = info.get("class_name", "").strip()
+            
+            # Filter logic with case/turkish character tolerance
+            if view_type == "teacher" and entity_name:
+                if format_tr_name(t_info) != format_tr_name(entity_name):
+                    continue
+            if view_type == "class" and entity_name:
+                if c_info.upper() != entity_name.strip().upper():
+                    continue
             if view_type == "room" and entity_name: # Room support later
                 continue
                 
@@ -1330,8 +1336,12 @@ class MainWindow(QMainWindow):
             "Tüm ders yerleştirmeleri silinecek. Emin misiniz?",
             QMessageBox.Yes | QMessageBox.No)
         if r == QMessageBox.Yes:
-            self._grid.clear_grid()
-            self.statusBar().showMessage("Tablo temizlendi.")
+            self.data_store["grid_placements"] = []
+            self.save_db()
+            if hasattr(self, "_grid"):
+                self._grid.clear_grid()
+                self._restore_grid_placements()
+            self.statusBar().showMessage("Tüm çizelge dersleri temizlendi ve kaydedildi.")
 
     def _open_extracted(self, dialog_id):
         from dialogs.extracted_dialog import open_extracted_dialog
