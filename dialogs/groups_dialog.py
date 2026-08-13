@@ -94,14 +94,6 @@ class GroupsDialog(QDialog):
         
         gruplar = [g for g in self.data_store.get("gruplar", []) if g.get("sinif") == sinif_name]
         
-        # Default sub-groups if none created yet
-        if not gruplar:
-            gruplar = [
-                {"sinif": sinif_name, "ad": "1. Grup (Almanca/Sayısal)", "kisa": "GRP1", "detay": "15 Öğrenci"},
-                {"sinif": sinif_name, "ad": "2. Grup (Fransızca/Eşit Ağ.)", "kisa": "GRP2", "detay": "15 Öğrenci"}
-            ]
-            self.data_store["gruplar"].extend(gruplar)
-            
         for g in gruplar:
             r = self.table.rowCount()
             self.table.insertRow(r)

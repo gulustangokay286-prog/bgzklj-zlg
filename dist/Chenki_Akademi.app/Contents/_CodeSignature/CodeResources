@@ -390,7 +390,51 @@
 		</data>
 		<key>Resources/base_library.zip</key>
 		<data>
-		P0pce4bznqGrndjM4gHpMzdF4cc=
+		xp4z0PbF1cbBAxX0xJRZm81efR0=
+		</data>
+		<key>Resources/certifi/cacert.pem</key>
+		<data>
+		0nfN6akv62aJtWUCX1YQV2pnVAs=
+		</data>
+		<key>Resources/certifi/py.typed</key>
+		<data>
+		2jmj7l5rSw0yVb/vlWAYkK/YBwk=
+		</data>
+		<key>Resources/cryptography-50.0.0.dist-info/INSTALLER</key>
+		<data>
+		16AxQdXWseiLa1nvCLZoHfISxZk=
+		</data>
+		<key>Resources/cryptography-50.0.0.dist-info/METADATA</key>
+		<data>
+		tFRUVglP4Eo9WpVotfGe3QSh4OE=
+		</data>
+		<key>Resources/cryptography-50.0.0.dist-info/RECORD</key>
+		<data>
+		PIoxApQRrMfOiIQs6pMdCak6ylI=
+		</data>
+		<key>Resources/cryptography-50.0.0.dist-info/WHEEL</key>
+		<data>
+		GcUOcenREqKV2hAECKgHBEjGz3o=
+		</data>
+		<key>Resources/cryptography-50.0.0.dist-info/licenses/LICENSE</key>
+		<data>
+		5EIEDCbNdtG5RoIsrykBGlH3XW0=
+		</data>
+		<key>Resources/cryptography-50.0.0.dist-info/licenses/LICENSE.APACHE</key>
+		<data>
+		3jPq0r7mQ1JUTOCqnkEMDET999k=
+		</data>
+		<key>Resources/cryptography-50.0.0.dist-info/licenses/LICENSE.BSD</key>
+		<data>
+		6ltBLAnzspuh2BphuHjFwW/+adg=
+		</data>
+		<key>Resources/cryptography-50.0.0.dist-info/sboms/cryptography-rust.cyclonedx.json</key>
+		<data>
+		AUEnVVkGTiHh+abeIn1H1J7liXg=
+		</data>
+		<key>Resources/cryptography-50.0.0.dist-info/sboms/sbom.json</key>
+		<data>
+		X3IMUIyn/nEB1DnXnwqMPTCFH7U=
 		</data>
 		<key>Resources/generated-16b8a88d912e871a967319a8c543d59938b4f2fc546ecacae5536797aa715bab.icns</key>
 		<data>
@@ -399,6 +443,15 @@
 	</dict>
 	<key>files2</key>
 	<dict>
+		<key>Frameworks/81d243bd2c585b0f4821__mypyc.cpython-39-darwin.so</key>
+		<dict>
+			<key>cdhash</key>
+			<data>
+			V7EH7v54sF4DUdKxjFuqMVxqZzo=
+			</data>
+			<key>requirement</key>
+			<string>cdhash H"57b107eefe78b05e0351d2b18c5baa315c6a673a"</string>
+		</dict>
 		<key>Frameworks/PySide6/Qt/lib/QtCore.framework</key>
 		<dict>
 			<key>cdhash</key>
@@ -912,10 +965,56 @@
 			<key>symlink</key>
 			<string>PySide6/Qt/lib/QtWidgets.framework/Versions/A/QtWidgets</string>
 		</dict>
+		<key>Frameworks/_cffi_backend.cpython-39-darwin.so</key>
+		<dict>
+			<key>cdhash</key>
+			<data>
+			ccdL7tsOH9HZKAinaSQMvV0tuPY=
+			</data>
+			<key>requirement</key>
+			<string>cdhash H"71c74beedb0e1fd1d92808a769240cbd5d2db8f6"</string>
+		</dict>
 		<key>Frameworks/base_library.zip</key>
 		<dict>
 			<key>symlink</key>
 			<string>../Resources/base_library.zip</string>
+		</dict>
+		<key>Frameworks/certifi</key>
+		<dict>
+			<key>symlink</key>
+			<string>../Resources/certifi</string>
+		</dict>
+		<key>Frameworks/charset_normalizer/cd.cpython-39-darwin.so</key>
+		<dict>
+			<key>cdhash</key>
+			<data>
+			KhDvcPUo7PqM1BVQXLphNpHxOqA=
+			</data>
+			<key>requirement</key>
+			<string>cdhash H"2a10ef70f528ecfa8cd415505cba613691f13aa0"</string>
+		</dict>
+		<key>Frameworks/charset_normalizer/md.cpython-39-darwin.so</key>
+		<dict>
+			<key>cdhash</key>
+			<data>
+			be1eH5nU4Y1c3WnUvrWyJsh2SKI=
+			</data>
+			<key>requirement</key>
+			<string>cdhash H"6ded5e1f99d4e18d5cdd69d4beb5b226c87648a2"</string>
+		</dict>
+		<key>Frameworks/cryptography-50.0.0.dist-info</key>
+		<dict>
+			<key>symlink</key>
+			<string>../Resources/cryptography-50.0.0.dist-info</string>
+		</dict>
+		<key>Frameworks/cryptography/hazmat/bindings/_rust.abi3.so</key>
+		<dict>
+			<key>cdhash</key>
+			<data>
+			+JSVEx4SEseUoiv4cLUvkVFP/qg=
+			</data>
+			<key>requirement</key>
+			<string>cdhash H"f89495131e1212c794a22bf870b52f91514ffea8"</string>
 		</dict>
 		<key>Frameworks/libpyside6.abi3.6.10.dylib</key>
 		<dict>
@@ -931,6 +1030,15 @@
 		<dict>
 			<key>symlink</key>
 			<string>python3__dot__9</string>
+		</dict>
+		<key>Frameworks/python3__dot__9/lib-dynload/_asyncio.cpython-39-darwin.so</key>
+		<dict>
+			<key>cdhash</key>
+			<data>
+			jnzWexZejtxlhOvUt80zWlAR4E4=
+			</data>
+			<key>requirement</key>
+			<string>cdhash H"8e7cd67b165e8edc6584ebd4b7cd335a5011e04e"</string>
 		</dict>
 		<key>Frameworks/python3__dot__9/lib-dynload/_bisect.cpython-39-darwin.so</key>
 		<dict>
@@ -1031,6 +1139,15 @@
 			<key>requirement</key>
 			<string>cdhash H"8ede7e67eb731e2a4f14f2e6d707c4bc452f07bc"</string>
 		</dict>
+		<key>Frameworks/python3__dot__9/lib-dynload/_ctypes.cpython-39-darwin.so</key>
+		<dict>
+			<key>cdhash</key>
+			<data>
+			w++nzklJtwTc/8Uev9ovtRfi0pA=
+			</data>
+			<key>requirement</key>
+			<string>cdhash H"c3efa7ce4949b704dcffc51ebfda2fb517e2d290"</string>
+		</dict>
 		<key>Frameworks/python3__dot__9/lib-dynload/_datetime.cpython-39-darwin.so</key>
 		<dict>
 			<key>cdhash</key>
@@ -1112,6 +1229,15 @@
 			<key>requirement</key>
 			<string>cdhash H"2faaa8e49d90d13367109a0c06d4ed7702dbc42c"</string>
 		</dict>
+		<key>Frameworks/python3__dot__9/lib-dynload/_multiprocessing.cpython-39-darwin.so</key>
+		<dict>
+			<key>cdhash</key>
+			<data>
+			M8tmSLn1Jd2PNGS/bt+hGGtkEfI=
+			</data>
+			<key>requirement</key>
+			<string>cdhash H"33cb6648b9f525dd8f3464bf6edfa1186b6411f2"</string>
+		</dict>
 		<key>Frameworks/python3__dot__9/lib-dynload/_opcode.cpython-39-darwin.so</key>
 		<dict>
 			<key>cdhash</key>
@@ -1130,6 +1256,15 @@
 			<key>requirement</key>
 			<string>cdhash H"ea32685621a95074f2aad3faafa5c83cd7cf82a7"</string>
 		</dict>
+		<key>Frameworks/python3__dot__9/lib-dynload/_posixshmem.cpython-39-darwin.so</key>
+		<dict>
+			<key>cdhash</key>
+			<data>
+			1UN+PA8E88S9hrnZ132nmmy1rmw=
+			</data>
+			<key>requirement</key>
+			<string>cdhash H"d5437e3c0f04f3c4bd86b9d9d77da79a6cb5ae6c"</string>
+		</dict>
 		<key>Frameworks/python3__dot__9/lib-dynload/_posixsubprocess.cpython-39-darwin.so</key>
 		<dict>
 			<key>cdhash</key>
@@ -1138,6 +1273,15 @@
 			</data>
 			<key>requirement</key>
 			<string>cdhash H"00a995d97a913f426bad93a97611e4ab9d74097f"</string>
+		</dict>
+		<key>Frameworks/python3__dot__9/lib-dynload/_queue.cpython-39-darwin.so</key>
+		<dict>
+			<key>cdhash</key>
+			<data>
+			u3iGoPb10JAdUYCx05PZ2rdHgX0=
+			</data>
+			<key>requirement</key>
+			<string>cdhash H"bb7886a0f6f5d0901d5180b1d393d9dab747817d"</string>
 		</dict>
 		<key>Frameworks/python3__dot__9/lib-dynload/_random.cpython-39-darwin.so</key>
 		<dict>
@@ -1202,6 +1346,15 @@
 			<key>requirement</key>
 			<string>cdhash H"da6be252f2e15c6ade6e0f4720d0c4b52a11fccb"</string>
 		</dict>
+		<key>Frameworks/python3__dot__9/lib-dynload/_sqlite3.cpython-39-darwin.so</key>
+		<dict>
+			<key>cdhash</key>
+			<data>
+			te5p8fMJw9ARQNmBsdKuIf71nIs=
+			</data>
+			<key>requirement</key>
+			<string>cdhash H"b5ee69f1f309c3d01140d981b1d2ae21fef59c8b"</string>
+		</dict>
 		<key>Frameworks/python3__dot__9/lib-dynload/_ssl.cpython-39-darwin.so</key>
 		<dict>
 			<key>cdhash</key>
@@ -1264,6 +1417,15 @@
 			</data>
 			<key>requirement</key>
 			<string>cdhash H"368f66bf511a1b8e682565e84fc4e5da4ab8c55e"</string>
+		</dict>
+		<key>Frameworks/python3__dot__9/lib-dynload/mmap.cpython-39-darwin.so</key>
+		<dict>
+			<key>cdhash</key>
+			<data>
+			/QWaQCCn+71Ke2ZyCIgOMXPDlk8=
+			</data>
+			<key>requirement</key>
+			<string>cdhash H"fd059a4020a7fbbd4a7b667208880e3173c3964f"</string>
 		</dict>
 		<key>Frameworks/python3__dot__9/lib-dynload/pyexpat.cpython-39-darwin.so</key>
 		<dict>
@@ -1336,6 +1498,11 @@
 			</data>
 			<key>requirement</key>
 			<string>cdhash H"6290235dd88f178d2dcbb8445863dfdd3d897655"</string>
+		</dict>
+		<key>Resources/81d243bd2c585b0f4821__mypyc.cpython-39-darwin.so</key>
+		<dict>
+			<key>symlink</key>
+			<string>../Frameworks/81d243bd2c585b0f4821__mypyc.cpython-39-darwin.so</string>
 		</dict>
 		<key>Resources/PySide6/Qt/lib</key>
 		<dict>
@@ -2144,11 +2311,103 @@
 			<key>symlink</key>
 			<string>PySide6/Qt/lib/QtWidgets.framework/Versions/A/QtWidgets</string>
 		</dict>
+		<key>Resources/_cffi_backend.cpython-39-darwin.so</key>
+		<dict>
+			<key>symlink</key>
+			<string>../Frameworks/_cffi_backend.cpython-39-darwin.so</string>
+		</dict>
 		<key>Resources/base_library.zip</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			w8kArymuDqtpQHyE/NbFFDsJhIjyDk7y60C0Y4OT6A4=
+			ZNmY1WuHBhXFDI/JLH+cTA8zwiYgjFhhij4Mdn17dVk=
+			</data>
+		</dict>
+		<key>Resources/certifi/cacert.pem</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			u8fpwB11UbuKFZtd7dmJuO484QWv9SK2jrGwG/hUyrA=
+			</data>
+		</dict>
+		<key>Resources/certifi/py.typed</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=
+			</data>
+		</dict>
+		<key>Resources/charset_normalizer</key>
+		<dict>
+			<key>symlink</key>
+			<string>../Frameworks/charset_normalizer</string>
+		</dict>
+		<key>Resources/cryptography</key>
+		<dict>
+			<key>symlink</key>
+			<string>../Frameworks/cryptography</string>
+		</dict>
+		<key>Resources/cryptography-50.0.0.dist-info/INSTALLER</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			zuuue4knoyJ+UwPPXg8fezS7VCrXJQrAP7zeNuwvFQg=
+			</data>
+		</dict>
+		<key>Resources/cryptography-50.0.0.dist-info/METADATA</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			1ONF+Cy3g4d9cyYfADA1d83yDRMikXbC0DoKVgPLOrU=
+			</data>
+		</dict>
+		<key>Resources/cryptography-50.0.0.dist-info/RECORD</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			PPuWyS54c1ma+C9RbQAnfvEPzNbY98T28oXLUvSH1+Y=
+			</data>
+		</dict>
+		<key>Resources/cryptography-50.0.0.dist-info/WHEEL</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			wSOXHtIlzXb00d8vdPgebUNvAfrGVlcEM2AF5gHdSv8=
+			</data>
+		</dict>
+		<key>Resources/cryptography-50.0.0.dist-info/licenses/LICENSE</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			Pgx8CRqUi4JTO6mP18u0BDLW8amsv4X1ki0vmak65rs=
+			</data>
+		</dict>
+		<key>Resources/cryptography-50.0.0.dist-info/licenses/LICENSE.APACHE</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			qsc7MUj20dcRHbyjIJn2jSbGRMaBOuHk8F9leaomY/4=
+			</data>
+		</dict>
+		<key>Resources/cryptography-50.0.0.dist-info/licenses/LICENSE.BSD</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			YCxMdILeZHndLpeTzaJ15eY9dz2s0eymiSMqtwCPtPs=
+			</data>
+		</dict>
+		<key>Resources/cryptography-50.0.0.dist-info/sboms/cryptography-rust.cyclonedx.json</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			XqAapJuUXP/akz6mR2QIEtSvZLeRkMyQv4GjkkTU4Ak=
+			</data>
+		</dict>
+		<key>Resources/cryptography-50.0.0.dist-info/sboms/sbom.json</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			MqbfEzUQCZ76Hbs1DkhwvNbqDYP5knfHD8gcGf5F0Lg=
 			</data>
 		</dict>
 		<key>Resources/generated-16b8a88d912e871a967319a8c543d59938b4f2fc546ecacae5536797aa715bab.icns</key>

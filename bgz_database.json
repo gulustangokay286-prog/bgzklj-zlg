@@ -330,20 +330,5 @@
             "duration": 1
         }
     },
-    "grid_placements": {
-        "0,0": {
-            "subject_name": "Matematik",
-            "color": "#00ACC1",
-            "teacher_name": "Hüseyin Arman",
-            "class_name": "",
-            "duration": 2
-        },
-        "2,0": {
-            "subject_name": "Geometri",
-            "color": "#43A047",
-            "teacher_name": "Hüseyin Arman",
-            "class_name": "",
-            "duration": 1
-        }
-    }
+    "grid_placements": []
 }

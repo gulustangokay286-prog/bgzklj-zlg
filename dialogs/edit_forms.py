@@ -278,19 +278,19 @@ class LessonAssignmentDialog(QDialog):
         self._populate_data()
 
     def _update_tip_options(self, text):
-        h = int(text) if text.isdigit() else 2
+        h = int(text) if text.isdigit() else 1
         self.cb_tip.blockSignals(True)
         self.cb_tip.clear()
         
         patterns = {
             1: ["1"],
             2: ["2", "1+1"],
-            3: ["2+1", "1+2", "1+1+1", "3"],
-            4: ["2+2", "3+1", "1+3", "2+1+1", "1+1+1+1", "4"],
-            5: ["2+3", "3+2", "4+1", "1+4", "2+2+1", "1+1+1+1+1", "5"],
-            6: ["3+3", "2+2+2", "4+2", "2+4", "3+2+1", "6"],
-            7: ["4+3", "3+4", "3+2+2", "2+2+2+1", "7"],
-            8: ["4+4", "3+3+2", "2+2+2+2", "4+2+2", "8"]
+            3: ["3", "2+1", "1+2", "1+1+1"],
+            4: ["4", "2+2", "3+1", "1+3", "2+1+1", "1+1+1+1"],
+            5: ["5", "3+2", "2+3", "4+1", "1+4", "2+2+1", "1+1+1+1+1"],
+            6: ["6", "3+3", "2+2+2", "4+2", "2+4", "3+2+1"],
+            7: ["7", "4+3", "3+4", "3+2+2", "2+2+2+1"],
+            8: ["8", "4+4", "3+3+2", "2+2+2+2", "4+2+2"]
         }
         opts = patterns.get(h, [str(h)])
         self.cb_tip.addItems(opts)
@@ -352,7 +352,7 @@ class LessonAssignmentDialog(QDialog):
                 if c_idx >= 0:
                     self.cb_sinif.setCurrentIndex(c_idx)
                 
-                dur = str(first.get("duration", 2))
+                dur = str(first.get("duration", 1))
                 h_idx = self.cb_hafta.findText(dur)
                 if h_idx >= 0:
                     self.cb_hafta.setCurrentIndex(h_idx)

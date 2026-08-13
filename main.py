@@ -14,6 +14,7 @@ from PySide6.QtGui import QFont, QPixmap, QColor, QPainter
 from login_dialog import LoginDialog
 from main_window import MainWindow
 import traceback
+import database
 
 def global_exception_handler(exc_type, exc_value, exc_traceback):
     from PySide6.QtWidgets import QMessageBox
@@ -24,6 +25,9 @@ def global_exception_handler(exc_type, exc_value, exc_traceback):
 sys.excepthook = global_exception_handler
 
 def main():
+    # Initialize the local SQLite database
+    database.init_db()
+
     app = QApplication(sys.argv)
     
     # 1. İşletim sisteminin Karanlık Modunu (Dark Mode) yoksay ve Klasik stili zorla
@@ -79,9 +83,11 @@ def main():
     login = LoginDialog(logo_path if os.path.exists(logo_path) else None)
     if login.exec() != LoginDialog.Accepted:
         sys.exit(0)
+        
+    auth_data = getattr(login, "auth_data", None)
 
     # Main window
-    win = MainWindow(logo_path=logo_path if os.path.exists(logo_path) else None)
+    win = MainWindow(logo_path=logo_path if os.path.exists(logo_path) else None, auth_data=auth_data)
     win.show()
 
     sys.exit(app.exec())

@@ -1,5 +1,9 @@
-﻿build/
+build/
 dist/
 __pycache__/
 *.spec
 *.pyc
+*.sqlite
+*.json
+test_firebase_*.py
+.DS_Store

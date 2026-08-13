@@ -145,10 +145,18 @@ class DraggableLessonCard(QLabel):
             if data_store and "atamalar" in data_store:
                 data_store["atamalar"] = [
                     a for a in data_store["atamalar"]
-                    if not (a.get("teacher") == self.teacher and a.get("subject") == self.subject_name)
+                    if not (a.get("teacher") == self.teacher and a.get("subject") == self.subject_name and a.get("class") == self.class_name)
                 ]
+                
+                if "grid_placements" in data_store:
+                    data_store["grid_placements"] = [
+                        p for p in data_store["grid_placements"]
+                        if not (p.get("teacher_name") == self.teacher and p.get("subject_name") == self.subject_name and p.get("class_name") == self.class_name)
+                    ]
+                    
                 if hasattr(win, "save_db"): win.save_db()
                 if hasattr(win, "_refresh_tree"): win._refresh_tree()
+                if hasattr(win, "_on_tree_selection_changed"): win._on_tree_selection_changed()
             return
             
         if selected_type and data_store:
@@ -183,7 +191,7 @@ class UnplacedLessonsDock(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(85)
-        self.setStyleSheet("QFrame { background: #2B2D30; border-top: 3px solid #F39C12; }")
+        self.setStyleSheet("QFrame { background: #F8FAFC; border-top: 2px solid #CBD5E1; }")
         
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(10, 8, 10, 8)
@@ -241,13 +249,98 @@ class DropTableWidget(QTableWidget):
         else:
             event.ignore()
             
+    def _clear_highlight(self):
+        if hasattr(self, '_drag_hl_cell') and self._drag_hl_cell:
+            r, c = self._drag_hl_cell
+            item = self.item(r, c)
+            if item and getattr(item, "_is_temp_highlight", False):
+                self.setItem(r, c, None)
+            self._drag_hl_cell = None
+
+    def dragLeaveEvent(self, event):
+        self._clear_highlight()
+        super().dragLeaveEvent(event)
+            
     def dragMoveEvent(self, event):
         if event.mimeData().hasFormat("application/x-lesson"):
+            row = self.rowAt(event.pos().y())
+            col = self.columnAt(event.pos().x())
+            
+            if row >= 0 and col >= 0:
+                if getattr(self, '_drag_hl_cell', None) != (row, col):
+                    self._clear_highlight()
+                    self._drag_hl_cell = (row, col)
+                    
+                    item = self.item(row, col)
+                    if not item: # Sadece boş hücreleri boya
+                        data = json.loads(event.mimeData().data("application/x-lesson").data().decode())
+                        teacher = data.get("teacher", "")
+                        
+                        # Basit çakışma kontrolü (İleride GlobalState'den kontrol edilecek)
+                        # Şimdilik öğretmenin o saatte dersi var mı simulasyonu:
+                        # Eğer teacher doluysa ve rastgele bir conflict mantığı (Gerçek veritabanına bağlanacak)
+                        grid = self.parent()
+                        is_conflict = False
+                        if hasattr(grid, "_placed_lessons"):
+                            for (r, c_idx), info in grid._placed_lessons.items():
+                                if c_idx == col and r == row and info.get("teacher_name") == teacher:
+                                    is_conflict = True
+                                    break
+                                    
+                        hl_item = QTableWidgetItem("")
+                        hl_item._is_temp_highlight = True
+                        color = QColor(255, 0, 0, 80) if is_conflict else QColor(76, 175, 80, 80) # Kırmızı veya Yeşil
+                        hl_item.setBackground(QBrush(color))
+                        self.setItem(row, col, hl_item)
             event.accept()
         else:
             event.ignore()
             
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.drag_start_pos = event.pos()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if not (event.buttons() & Qt.LeftButton):
+            return
+        if not hasattr(self, 'drag_start_pos'):
+            return
+        if (event.pos() - self.drag_start_pos).manhattanLength() < 5:
+            return
+            
+        item = self.itemAt(self.drag_start_pos)
+        if item and item.text().strip():
+            row = self.rowAt(self.drag_start_pos.y())
+            col = self.columnAt(self.drag_start_pos.x())
+            orig_r, orig_c, orig_dur, info = self._get_lesson_origin(row, col)
+            if info:
+                from PySide6.QtGui import QDrag
+                drag = QDrag(self)
+                mime = QMimeData()
+                
+                data = dict(info)
+                data["is_move"] = True
+                data["origin_row"] = orig_r
+                data["origin_col"] = orig_c
+                data["teacher"] = info.get("teacher_name", "")
+                
+                mime.setData("application/x-lesson", QByteArray(json.dumps(data).encode()))
+                drag.setMimeData(mime)
+                
+                orig_item = self.item(orig_r, orig_c) or item
+                rect = self.visualItemRect(orig_item)
+                pixmap = self.viewport().grab(rect)
+                drag.setPixmap(pixmap)
+                
+                hotspot = event.pos() - rect.topLeft()
+                drag.setHotSpot(hotspot)
+                
+                drag.exec_(Qt.MoveAction)
+        super().mouseMoveEvent(event)
+
     def dropEvent(self, event):
+        self._clear_highlight()
         if event.mimeData().hasFormat("application/x-lesson"):
             data = event.mimeData().data("application/x-lesson").data().decode()
             lesson_info = json.loads(data)
@@ -293,6 +386,8 @@ class DropTableWidget(QTableWidget):
         if orig_item and orig_item.text().strip():
             act_edit = menu.addAction(make_context_icon("E", "#4CAF50", "#2E7D32"), "Düzenle")
             act_move = menu.addAction(make_context_icon("M", "#FFCA28", "#FF8F00"), "Taşı")
+            act_lock = menu.addAction(make_context_icon("K", "#9C27B0", "#6A1B9A"), "Kilitle (Sabitle)")
+            act_change_teacher = menu.addAction(make_context_icon("Ö", "#00BCD4", "#00838F"), "Öğretmeni Değiştir")
             menu.addSeparator()
             act_single = menu.addAction(make_context_icon("1", "#29B6F6", "#0277BD"), "Tekli Yap (1 Saat)")
             act_double = menu.addAction(make_context_icon("2", "#29B6F6", "#0277BD"), "İkili Blok Yap (2 Saat)")
@@ -330,6 +425,32 @@ class DropTableWidget(QTableWidget):
                 self._set_span(row, col, 5)
             elif action == act_edit:
                 self.cell_right_clicked.emit(orig_r, orig_c)
+            elif action == act_lock:
+                grid = self.parent()
+                if hasattr(grid, "_placed_lessons") and (orig_r, orig_c) in grid._placed_lessons:
+                    info = grid._placed_lessons[(orig_r, orig_c)]
+                    info["locked"] = not info.get("locked", False)
+                    from PySide6.QtGui import QBrush, QColor
+                    if info["locked"]:
+                        orig_item.setBackground(QBrush(QColor("#E0E0E0"))) # Grayed out / locked
+                    else:
+                        orig_item.setBackground(QBrush(QColor("#E8F4F8")))
+                    win = self.window()
+                    if hasattr(win, "save_db"): win.save_db()
+            elif action == act_change_teacher:
+                from PySide6.QtWidgets import QInputDialog
+                win = self.window()
+                if hasattr(win, "data_store"):
+                    teachers = [t.get("ad") for t in win.data_store.get("ogretmenler", [])]
+                    t_choice, ok = QInputDialog.getItem(self, "Öğretmen Değiştir", "Yeni Öğretmen Seçin:", teachers, 0, False)
+                    if ok and t_choice:
+                        grid = self.parent()
+                        if hasattr(grid, "_placed_lessons") and (orig_r, orig_c) in grid._placed_lessons:
+                            info = grid._placed_lessons[(orig_r, orig_c)]
+                            info["teacher"] = t_choice
+                            subj = info.get("subject_name", "")
+                            orig_item.setText(f"{subj}\\n{t_choice}")
+                            win.save_db()
             elif action == act_move:
                 # Instant move dialog
                 from PySide6.QtWidgets import QInputDialog
@@ -501,14 +622,14 @@ class TimetableGrid(QWidget):
         hh.setSectionResizeMode(QHeaderView.Stretch)
         hh.setDefaultAlignment(Qt.AlignCenter)
         hh.setMinimumSectionSize(100)
-        hh.setStyleSheet("QHeaderView::section { background: #D0D8E4; font-weight: bold; padding: 6px; border: 1px solid #BCC8D8; font-size: 12px; }")
+        hh.setStyleSheet("QHeaderView::section { background: #F1F5F9; font-weight: bold; padding: 6px; border: 1px solid #E2E8F0; font-size: 12px; color: #334155; }")
 
         vh = self.table.verticalHeader()
         vh.setSectionResizeMode(QHeaderView.Stretch)
         vh.setMinimumSectionSize(55)
-        vh.setStyleSheet("QHeaderView::section { background: #F5F7FA; font-weight: bold; border: 1px solid #DDD; padding: 6px; font-size: 12px; }")
+        vh.setStyleSheet("QHeaderView::section { background: #F8FAFC; font-weight: bold; border: 1px solid #E2E8F0; padding: 6px; font-size: 12px; color: #334155; }")
 
-        self.table.setStyleSheet("QTableWidget { background: #FFFFFF; gridline-color: #BCC8D8; font-size: 11px; } QTableWidget::item { padding: 4px; }")
+        self.table.setStyleSheet("QTableWidget { background: #FFFFFF; gridline-color: #E2E8F0; font-size: 12px; } QTableWidget::item { padding: 4px; }")
         
         layout.addWidget(self.table, stretch=1)
         
@@ -554,3 +675,29 @@ class TimetableGrid(QWidget):
         self.table.clearContents()
         self.table.clearSpans()
         self._placed_lessons.clear()
+        
+    def set_mode_single_entity(self, periods: int, days_list: list):
+        """Standard view: 1 entity (class/teacher), Rows=Periods, Cols=Days"""
+        self._periods = periods
+        self.table.setRowCount(periods)
+        self.table.setColumnCount(len(days_list))
+        self.table.setHorizontalHeaderLabels(days_list)
+        self.table.setVerticalHeaderLabels([f"{i+1}" for i in range(periods)])
+        self.clear_grid()
+        
+    def set_mode_all_classes(self, class_list: list, periods: int, days_list: list):
+        """Whole School View: Rows=Classes, Cols=Days*Periods"""
+        self._periods = periods
+        self.table.setRowCount(len(class_list))
+        total_cols = len(days_list) * periods
+        self.table.setColumnCount(total_cols)
+        
+        # Build headers
+        self.table.setVerticalHeaderLabels(class_list)
+        
+        col_headers = []
+        for d in days_list:
+            for p in range(periods):
+                col_headers.append(f"{d[:3]} {p+1}")
+        self.table.setHorizontalHeaderLabels(col_headers)
+        self.clear_grid()

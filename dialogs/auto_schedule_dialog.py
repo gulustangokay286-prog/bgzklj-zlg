@@ -1,112 +1,139 @@
-"""dialogs/auto_schedule_dialog.py — Otomatik Yerleştirme"""
+"""
+auto_schedule_dialog.py — Otomatik Yerleştirme (aSc Timetables stili)
+"""
 import random
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QProgressBar, QTextEdit, QComboBox, QSpinBox, QFormLayout,
-    QGroupBox, QCheckBox
+    QProgressBar, QComboBox, QFormLayout, QGroupBox, QCheckBox, QWidget, QFrame
 )
-from PySide6.QtCore import Qt, QThread, Signal, QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
-from dialogs.base_dialog import BaseDialog
 
-
-class AutoScheduleDialog(BaseDialog):
-    def __init__(self, parent=None):
-        super().__init__("Otomatik Planlama Baslatiliyor", parent=parent)
-        self.resize(640, 500)
-        self._setup()
-
-    def _setup(self):
-        # Settings group
-        grp = QGroupBox("Algoritma Ayarlari", self.content_widget)
-        grp.setFont(QFont("Segoe UI", 9, QFont.Bold))
-        grp_layout = QFormLayout(grp)
-        grp_layout.setSpacing(8)
-
-        self._algo = QComboBox()
-        self._algo.addItems(["Backtracking (Geri Izleme)", "Hizli Atama", "Hibrit Optimizasyon"])
-        self._iterasyon = QSpinBox(); self._iterasyon.setRange(100, 10000); self._iterasyon.setValue(1000); self._iterasyon.setSingleStep(100)
-        self._zaman = QSpinBox(); self._zaman.setRange(5, 300); self._zaman.setValue(60); self._zaman.setSuffix(" sn")
-
-        self._cb_ogretmen = QCheckBox("Ogretmen cakismasini engelle"); self._cb_ogretmen.setChecked(True)
-        self._cb_sinif    = QCheckBox("Sinif cakismasini engelle");    self._cb_sinif.setChecked(True)
-        self._cb_derslik  = QCheckBox("Derslik cakismasini engelle");  self._cb_derslik.setChecked(True)
-        self._cb_ardisik  = QCheckBox("Ayni dersin ust uste gelmesini engelle"); self._cb_ardisik.setChecked(True)
-
-        grp_layout.addRow("Algoritma:", self._algo)
-        grp_layout.addRow("Maks. Iterasyon:", self._iterasyon)
-        grp_layout.addRow("Zaman Siniri:", self._zaman)
-        grp_layout.addRow(self._cb_ogretmen)
-        grp_layout.addRow(self._cb_sinif)
-        grp_layout.addRow(self._cb_derslik)
-        grp_layout.addRow(self._cb_ardisik)
-
-        self.content_layout.addWidget(grp)
-
-        # Progress
-        prog_lbl = QLabel("Ilerleme:", self.content_widget)
-        prog_lbl.setFont(QFont("Segoe UI", 9))
-        self.content_layout.addWidget(prog_lbl)
-
-        self._progress = QProgressBar(self.content_widget)
-        self._progress.setRange(0, 100)
-        self._progress.setValue(0)
-        self._progress.setStyleSheet("""
-            QProgressBar { border:1px solid #CCC; border-radius:4px; background:#F5F5F5; height:20px; text-align:center; }
-            QProgressBar::chunk { background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #1E6DB5, stop:1 #2ECC71); border-radius:3px; }
+class AutoScheduleDialog(QDialog):
+    def __init__(self, data_store=None, parent=None):
+        super().__init__(parent)
+        self.data_store = data_store
+        self.setWindowTitle("Ders programı oluşturma")
+        self.resize(550, 400)
+        
+        self.setStyleSheet("""
+            QDialog { background-color: #F0F0F0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 12px; }
+            QGroupBox { border: 1px solid #B0B0B0; margin-top: 2ex; font-weight: bold; }
+            QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 3px; }
+            QPushButton { padding: 6px 16px; border: 1px solid #ADADAD; background: #E1E1E1; border-radius: 3px; font-weight: bold; }
+            QPushButton:hover { background: #E5F1FB; border: 1px solid #0078D7; }
+            QPushButton#btn_start { padding: 10px 20px; font-size: 14px; background: #E1E1E1; }
+            QComboBox { border: 1px solid #ADADAD; padding: 3px; background: white; }
+            QProgressBar { border: 1px solid #B0B0B0; text-align: center; }
+            QProgressBar::chunk { background-color: #0078D7; }
         """)
-        self.content_layout.addWidget(self._progress)
-
-        # Log
-        self._log = QTextEdit(self.content_widget)
-        self._log.setReadOnly(True)
-        self._log.setMaximumHeight(100)
-        self._log.setFont(QFont("Consolas", 8))
-        self._log.setStyleSheet("background:#1A1A2E; color:#00FF88; border:1px solid #333;")
-        self.content_layout.addWidget(self._log)
-
-        # Start button
-        btn_row = QHBoxLayout()
-        self._start_btn = QPushButton("Planlamayi Basalt")
-        self._start_btn.setFixedHeight(36)
-        self._start_btn.setFont(QFont("Segoe UI", 10, QFont.Bold))
-        self._start_btn.setStyleSheet(
-            "QPushButton{background:#2ECC71;color:white;border:none;border-radius:5px;}"
-            "QPushButton:hover{background:#27AE60;}"
-            "QPushButton:disabled{background:#95A5A6;}"
-        )
-        self._start_btn.clicked.connect(self._start)
-        btn_row.addWidget(self._start_btn)
-        self.content_layout.addLayout(btn_row)
-
-        # Timer for simulation
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self._tick)
+        
+        self._build_ui()
         self._step = 0
+        
+    def _build_ui(self):
+        main_layout = QVBoxLayout(self)
+        
+        # Parameters Group
+        grp_param = QGroupBox("Oluşturma Parametreleri")
+        form_param = QFormLayout(grp_param)
+        
+        self.cb_complexity = QComboBox()
+        self.cb_complexity.addItems([
+            "Normal (Tavsiye edilen)",
+            "Büyük",
+            "Çok büyük",
+            "Karmaşık"
+        ])
+        form_param.addRow("Karmaşıklık:", self.cb_complexity)
+        
+        self.chk_relax = QCheckBox("Sıkı koşulların gevşetilmesine izin ver")
+        self.chk_relax.setChecked(False)
+        form_param.addRow("", self.chk_relax)
+        
+        main_layout.addWidget(grp_param)
+        
+        # Progress area
+        grp_prog = QGroupBox("İlerleme")
+        prog_layout = QVBoxLayout(grp_prog)
+        
+        self.lbl_info = QLabel("Program oluşturmaya hazır.")
+        prog_layout.addWidget(self.lbl_info)
+        
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+        prog_layout.addWidget(self.progress)
+        
+        self.lbl_stats = QLabel("Yerleştirilen kart sayısı: 0 / 0")
+        prog_layout.addWidget(self.lbl_stats)
+        
+        main_layout.addWidget(grp_prog)
+        
+        main_layout.addStretch(1)
+        
+        # Buttons
+        btn_layout = QHBoxLayout()
+        self.btn_start = QPushButton("Planlamayı Başlat")
+        self.btn_start.setObjectName("btn_start")
+        self.btn_start.clicked.connect(self._start_generation)
+        
+        self.btn_cancel = QPushButton("İptal")
+        self.btn_cancel.clicked.connect(self.reject)
+        
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.btn_start)
+        btn_layout.addWidget(self.btn_cancel)
+        main_layout.addLayout(btn_layout)
+        
+    def _start_generation(self):
+        self.progress.setValue(0)
+        self.btn_start.setEnabled(False)
+        self.btn_cancel.setText("Durdur")
+        self.lbl_info.setText("Planlama algoritması çalışıyor (Yapay Zeka devrede)...")
+        self.lbl_stats.setText("Yerleştirilen kart sayısı: Hesaplanıyor...")
+        
+        from auto_scheduler import AutoSchedulerWorker
+        self.worker = AutoSchedulerWorker(self.data_store, self)
+        self.worker.progress_updated.connect(self._on_progress)
+        self.worker.finished_successfully.connect(self._on_finished)
+        self.worker.failed.connect(self._on_failed)
+        self.worker.start()
+        
+    def _on_progress(self, placed, total):
+        pct = int((placed / max(1, total)) * 100)
+        self.progress.setValue(pct)
+        self.lbl_stats.setText(f"Yerleştirilen kart sayısı: {placed} / {total}")
+        
+    def _on_finished(self, result):
+        self.progress.setValue(100)
+        self.lbl_info.setText("Program başarıyla oluşturuldu! (Çakışmalar çözüldü)")
+        self.lbl_info.setStyleSheet("color: green; font-weight: bold;")
+        
+        # Save results to data_store and close
+        schedule = result.get("schedule", [])
+        
+        # Grid'e yansıtılması için formatla: { "row,col": { class_name, teacher_name, subject_name } }
+        # Not: Bütün okul görünümü için bu yeterli değil, ama geçici olarak `grid_placements` içine ekleyebiliriz.
+        # Gerçek aSc mimarisinde her sınıfın kendi tablosu vardır.
+        self.data_store["auto_schedule_results"] = schedule
+        
+        self.btn_start.setEnabled(True)
+        self.btn_start.setText("Tamam")
+        self.btn_start.clicked.disconnect()
+        self.btn_start.clicked.connect(self.accept)
+        self.btn_cancel.setText("Kapat")
+        
+    def _on_failed(self, err_msg):
+        self.lbl_info.setText(f"Hata: {err_msg}")
+        self.lbl_info.setStyleSheet("color: red; font-weight: bold;")
+        self.btn_start.setEnabled(True)
+        self.btn_start.setText("Tekrar Dene")
+        self.btn_cancel.setText("Kapat")
 
-    def _start(self):
-        self._step = 0
-        self._progress.setValue(0)
-        self._log.clear()
-        self._start_btn.setEnabled(False)
-        self._log.append("[BASLATILDI] Kisitilamalar yukleniyor...")
-        self._timer.start(80)
+    def reject(self):
+        if hasattr(self, 'worker') and self.worker.isRunning():
+            self.worker.stop()
+            self.worker.wait()
+        super().reject()
 
-    def _tick(self):
-        self._step += random.randint(1, 4)
-        self._progress.setValue(min(self._step, 100))
-
-        msgs = [
-            f"[{self._step}%] Ogretmen cizelgesi hesaplaniyor...",
-            f"[{self._step}%] Sinif atamasi yapiliyor...",
-            f"[{self._step}%] Cakisma kontrolu...",
-            f"[{self._step}%] Derslik optimizasyonu...",
-            f"[{self._step}%] Kisitlamalar kontrol ediliyor...",
-        ]
-        self._log.append(random.choice(msgs))
-
-        if self._step >= 100:
-            self._timer.stop()
-            self._log.append("\n[TAMAMLANDI] Program basariyla olusturuldu!")
-            self._start_btn.setEnabled(True)
-            self._start_btn.setText("Yeniden Calistir")

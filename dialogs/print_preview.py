@@ -32,13 +32,15 @@ def make_font(size, bold=False):
     return f
 
 class TimetablePrintPreview(QDialog):
-    def __init__(self, data_store=None, placed_lessons=None, parent=None):
+    def __init__(self, data_store=None, placed_lessons=None, filters=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Baskı Ön İzleme ve PDF Raporu")
         self.resize(1050, 780)
         
         self.data_store = data_store or {}
         self.placed_lessons = placed_lessons or {}
+        self.filters = filters or {}
+
         
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(12, 12, 12, 12)
@@ -69,6 +71,12 @@ class TimetablePrintPreview(QDialog):
         top_bar.addWidget(self.target_combo)
         
         top_bar.addStretch(1)
+        
+        btn_html = QPushButton("HTML (Web) Çıktısı")
+        btn_html.setFixedSize(140, 32)
+        btn_html.setStyleSheet("background: #E67E22; color: white; font-weight: bold; border-radius: 4px;")
+        btn_html.clicked.connect(self._export_html)
+        top_bar.addWidget(btn_html)
         
         btn_pdf = QPushButton("PDF Olarak Kaydet")
         btn_pdf.setFixedSize(140, 32)
@@ -106,12 +114,12 @@ class TimetablePrintPreview(QDialog):
         if mode_idx in [0, 1]:  # Birebir aSc Formatları (Tüm Sınıflar / Tüm Öğretmenler)
             self.target_combo.addItem("Tümü (Çoklu Sayfa)")
         elif mode_idx in [2, 3]:  # Tekil Sınıf
-            classes = self.data_store.get("siniflar", [])
+            classes = self.filtered_classes
             self.target_combo.addItem("Tüm Sınıflar")
             for c in classes:
                 self.target_combo.addItem(c.get("ad", "Sınıf"))
         elif mode_idx == 4:  # Tekil Öğretmen
-            teachers = self.data_store.get("ogretmenler", [])
+            teachers = self.filtered_teachers
             self.target_combo.addItem("Tüm Öğretmenler")
             for t in teachers:
                 self.target_combo.addItem(t.get("ad", "Öğretmen"))
@@ -122,6 +130,23 @@ class TimetablePrintPreview(QDialog):
 
     def _repaint(self):
         self.preview.updatePreview()
+
+    @property
+    def filtered_classes(self):
+        all_classes = self.data_store.get("siniflar", [])
+        if not self.filters or not self.filters.get("classes"):
+            return all_classes
+        return [c for c in all_classes if c.get("ad") in self.filters["classes"]]
+        
+    @property
+    def filtered_teachers(self):
+        all_teachers = self.data_store.get("ogretmenler", [])
+        if not self.filters or not self.filters.get("teachers"):
+            return all_teachers
+        return [t for t in all_teachers if t.get("ad") in self.filters["teachers"]]
+
+    def _update_preview(self):
+        self.preview.print_()
 
     def _do_print(self):
         self.preview.print_()
@@ -135,6 +160,13 @@ class TimetablePrintPreview(QDialog):
             pdf_printer.setPageOrientation(QPageLayout.Orientation.Landscape)
             self._render_page(pdf_printer)
             QMessageBox.information(self, "PDF Başarılı", f"PDF raporu başarıyla kaydedildi:\n{path}")
+
+    def _export_html(self):
+        path, _ = QFileDialog.getSaveFileName(self, "HTML Web Çıktısı Olarak Kaydet", "Ders_Programi.html", "HTML Dosyaları (*.html)")
+        if path:
+            from py_export.html_exporter import export_to_html
+            export_to_html(self.filtered_classes, self.filtered_teachers, self.data_store, self.placed_lessons, path)
+            QMessageBox.information(self, "HTML Başarılı", f"Web için HTML raporu başarıyla kaydedildi:\n{path}")
 
     def _render_page(self, printer):
         painter = QPainter(printer)
@@ -235,9 +267,9 @@ class TimetablePrintPreview(QDialog):
             items = [selected_target]
         else:
             if is_teacher:
-                items = [t.get("ad", "Öğretmen") for t in self.data_store.get("ogretmenler", [])]
+                items = [t.get("ad", "Öğretmen") for t in self.filtered_teachers]
             else:
-                items = [c.get("ad", "Sınıf") for c in self.data_store.get("siniflar", [])]
+                items = [c.get("ad", "Sınıf") for c in self.filtered_classes]
             
         if not items:
             items = ["Örnek 1"]
@@ -557,7 +589,7 @@ class TimetablePrintPreview(QDialog):
         painter.drawText(QRectF(VW - 430, VH - 35, 400, 20), Qt.AlignRight, "Sayfa 1 / 1")
 
     def _render_teacher_summary_list(self, painter, VW, VH):
-        teachers = self.data_store.get("ogretmenler", [])
+        teachers = self.filtered_teachers
         atamalar = self.data_store.get("atamalar", [])
         
         painter.setPen(QPen(QColor("#CCCCCC"), 1))
@@ -602,6 +634,7 @@ class TimetablePrintPreview(QDialog):
             tot_hours = sum(a.get("duration", 1) for a in t_atamalar)
             
             cur_x = 30
+            painter.setPen(QPen(QColor("#111111"), 1))
             painter.drawText(QRectF(cur_x + 10, cur_y, cols[0][1] - 10, row_h), Qt.AlignLeft | Qt.AlignVCenter, tname)
             cur_x += cols[0][1]
             

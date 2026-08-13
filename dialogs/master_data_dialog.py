@@ -274,7 +274,7 @@ class MasterDataDialog(QDialog):
         right_panel.addWidget(btn_ders_atama)
         
         btn_zaman = ActionButton("Zaman Tablosu", icon_name="clock")
-        btn_zaman.clicked.connect(self._act_constraints)
+        btn_zaman.clicked.connect(self._act_timeoff)
         right_panel.addWidget(btn_zaman)
         
         btn_kisit = ActionButton("Kısıtlamalar", icon_name="hash")
@@ -484,6 +484,40 @@ class MasterDataDialog(QDialog):
                 p = self.parent()
                 if p and hasattr(p, "save_db"): p.save_db()
                 if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
+
+    def _act_timeoff(self):
+        idx = self.stack.currentIndex()
+        tables = [self.table_ders, self.table_sinif, self.table_derslik, self.table_ogretmen]
+        stores = ["dersler", "siniflar", "derslikler", "ogretmenler"]
+        names = ["Ders", "Sınıf", "Derslik", "Öğretmen"]
+        
+        table = tables[idx]
+        if idx == 0:
+            QMessageBox.warning(self, "Hata", "Dersler için zaman tablosu ayarlanamaz.")
+            return
+            
+        r = table.currentRow()
+        if r < 0:
+            QMessageBox.warning(self, "Hata", "Lütfen listeden bir kayıt seçin.")
+            return
+            
+        raw_text = table.item(r, 0).text()
+        entity = None
+        for e in self.data_store.get(stores[idx], []):
+            if str(e.get("id")) == raw_text or e.get("ad") == raw_text or e.get("name") == raw_text:
+                entity = e
+                break
+                
+        if not entity and self.data_store.get(stores[idx]):
+            if r < len(self.data_store[stores[idx]]):
+                entity = self.data_store[stores[idx]][r]
+        
+        if entity:
+            from dialogs.timeoff_dialog import TimeoffDialog
+            dlg = TimeoffDialog(entity, names[idx], self.data_store, self)
+            if dlg.exec() == QDialog.Accepted:
+                p = self.parent()
+                if p and hasattr(p, "save_db"): p.save_db()
 
     def _act_constraints(self):
         from dialogs.constraints_dialog import ConstraintsDialog

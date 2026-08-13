@@ -5,6 +5,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QPoint, QRect, QSize, QTimer
 from PySide6.QtGui import QPainter, QColor, QFont, QPainterPath, QPen, QBrush, QLinearGradient, QIcon, QPixmap
+import requests
+from cloud_sync import FIREBASE_API_KEY
 
 class IconLineEdit(QLineEdit):
     def __init__(self, icon_type, placeholder, parent=None):
@@ -148,31 +150,82 @@ class LoginDialog(QDialog):
             QPushButton:hover { background-color: #1A54E6; }
             QPushButton:pressed { background-color: #0A44D6; }
         """)
-        self.btn_login.clicked.connect(self.accept)
+        self.btn_login.clicked.connect(self.check_login)
+        
+        self.lbl_error = QLabel("")
+        self.lbl_error.setStyleSheet("color: #FF5252; font-size: 12px; font-weight: bold;")
+        self.lbl_error.setAlignment(Qt.AlignCenter)
+        self.lbl_error.hide()
         
         form_lay.addWidget(self.w_user)
         form_lay.addWidget(self.w_pass)
         form_lay.addSpacing(12)
         form_lay.addLayout(opt_lay)
-        form_lay.addSpacing(20)
+        form_lay.addWidget(self.lbl_error)
+        form_lay.addSpacing(10)
         form_lay.addWidget(self.btn_login)
         
         # Add to main layout
-        layout.addWidget(lbl_logo_p, 0, Qt.AlignHCenter)
-        layout.addWidget(lbl_text, 0, Qt.AlignHCenter)
-        layout.addSpacing(2)
-        layout.addWidget(lbl_yetkili, 0, Qt.AlignHCenter)
-        layout.addSpacing(40)
-        layout.addWidget(lbl_lutfen, 0, Qt.AlignHCenter)
+        layout.addWidget(lbl_logo_p)
+        layout.addWidget(lbl_text)
+        layout.addSpacing(30)
+        layout.addWidget(lbl_yetkili)
+        layout.addSpacing(8)
+        layout.addWidget(lbl_lutfen)
         layout.addSpacing(25)
         layout.addWidget(form_container, 0, Qt.AlignHCenter)
         layout.addStretch(1)
         
-        lbl_footer = QLabel("BGZ Ders Planlama © 2026 Tüm hakları saklıdır.")
-        lbl_footer.setStyleSheet("color: #5B6B7E; font-size: 10px;")
+        # FOOTER
+        lbl_footer = QLabel("Chenki Akademi © 2026")
+        lbl_footer.setStyleSheet("color: #556070; font-size: 11px;")
         lbl_footer.setAlignment(Qt.AlignCenter)
         layout.addWidget(lbl_footer)
         layout.addSpacing(20)
+
+        self.auth_data = None
+
+    def check_login(self):
+        email = self.w_user.text().strip()
+        password = self.w_pass.text().strip()
+        
+        if not email or not password:
+            self.lbl_error.setText("Lütfen E-posta ve Şifre girin.")
+            self.lbl_error.show()
+            return
+            
+        self.btn_login.setText("Giriş Yapılıyor...")
+        self.btn_login.setEnabled(False)
+        self.lbl_error.hide()
+        QTimer.singleShot(50, lambda: self._do_firebase_auth(email, password))
+        
+    def _do_firebase_auth(self, email, password):
+        url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={FIREBASE_API_KEY}"
+        payload = {"email": email, "password": password, "returnSecureToken": True}
+        
+        try:
+            resp = requests.post(url, json=payload, timeout=5)
+            if resp.status_code == 200:
+                data = resp.json()
+                self.auth_data = {
+                    "email": email,
+                    "password": password,
+                    "idToken": data.get("idToken"),
+                    "uid": data.get("localId"),
+                    "expiresIn": data.get("expiresIn", 3600)
+                }
+                self.accept()
+            else:
+                err_data = resp.json()
+                self.lbl_error.setText("E-posta veya Şifre Hatalı!")
+                self.lbl_error.show()
+                self.btn_login.setText("Giriş Yap  →")
+                self.btn_login.setEnabled(True)
+        except Exception as e:
+            self.lbl_error.setText("Bağlantı Hatası! İnterneti kontrol edin.")
+            self.lbl_error.show()
+            self.btn_login.setText("Giriş Yap  →")
+            self.btn_login.setEnabled(True)
 
     def paintEvent(self, event):
         p = QPainter(self)
