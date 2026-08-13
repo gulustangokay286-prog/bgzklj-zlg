@@ -620,10 +620,19 @@ class SinifEditDialog(BaseEditForm):
         
         so_lay = QHBoxLayout()
         so_lay.addWidget(QLabel("Sınıf Öğretmeni:"))
-        self.w_so = QLineEdit(self.existing_data.get("sinif_ogretmeni", ""))
+        
+        self.w_so = QComboBox()
+        teachers = [""]
+        if self.parent() and hasattr(self.parent(), "data_store"):
+            teachers.extend([t.get("ad", "") for t in self.parent().data_store.get("ogretmenler", []) if t.get("ad")])
+        self.w_so.addItems(teachers)
+        
+        existing_so = self.existing_data.get("sinif_ogretmeni", "")
+        idx_so = self.w_so.findText(existing_so)
+        if idx_so >= 0:
+            self.w_so.setCurrentIndex(idx_so)
+            
         so_lay.addWidget(self.w_so)
-        btn_so = QPushButton("Değiştir")
-        so_lay.addWidget(btn_so)
         self.main_layout.addLayout(so_lay)
         
         form2 = QFormLayout()
@@ -649,7 +658,7 @@ class SinifEditDialog(BaseEditForm):
         return {
             "ad": self.w_ad.text(), "kisa": self.w_kisa.text(), 
             "renk": self._color, "foto": self.cb_foto.isChecked(),
-            "sinif_ogretmeni": self.w_so.text(), "sinif_tipi": self.w_sinif.currentText(),
+            "sinif_ogretmeni": self.w_so.currentText(), "sinif_tipi": self.w_sinif.currentText(),
             "numara": self.w_num.text()
         }
 

@@ -209,7 +209,7 @@ class MasterDataDialog(QDialog):
             self._add_row(self.table_ders, [data.get("ad",""), data.get("kisa",""), toplam, "Mevcut", "İdeal", "8"])
         for data in self.data_store.get("siniflar", []):
             toplam = str(totals["siniflar"].get(data.get("ad", ""), 0))
-            self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), toplam, "Mevcut", "", data.get("sinif_ogretmeni",""), data.get("kapasite","30")])
+            self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), toplam, "Mevcut", data.get("sinif_ogretmeni",""), data.get("kapasite","30")])
         for data in self.data_store.get("derslikler", []):
             self._add_row(self.table_derslik, [data.get("ad",""), data.get("kisa",""), "0", "Mevcut", data.get("kapasite",""), "Merkez"])
         for data in self.data_store.get("ogretmenler", []):
@@ -256,7 +256,7 @@ class MasterDataDialog(QDialog):
         self.table_ders = self._create_table(["Ders Adı", "Kısa Kodu", "Toplam", "Zaman Tablosu", "Dağılım", "Max. Günlük"])
         self.stack.addWidget(self._wrap_table("Tanımlı Dersler", self.table_ders))
 
-        self.table_sinif = self._create_table(["Sınıf Adı", "Kısa Kodu", "Toplam", "Zaman Tablosu", "2. Ders", "Sınıf Öğretmeni", "Öğrenci"])
+        self.table_sinif = self._create_table(["Sınıf Adı", "Kısa Kodu", "Toplam", "Zaman Tablosu", "Sınıf Öğretmeni", "Öğrenci"])
         self.stack.addWidget(self._wrap_table("Tanımlı Sınıflar", self.table_sinif))
 
         self.table_derslik = self._create_table(["Derslik Adı", "Kısa Kodu", "Toplam", "Zaman Tablosu", "Kapasite", "Bina"])
@@ -431,7 +431,7 @@ class MasterDataDialog(QDialog):
             if d.exec():
                 data = d.get_data()
                 self.data_store["siniflar"].append(data)
-                self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), "0", "Mevcut", "", data.get("sinif_ogretmeni",""), data.get("kapasite","30")])
+                self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), "0", "Mevcut", data.get("sinif_ogretmeni",""), data.get("kapasite","30")])
         elif idx == 2:  # Derslikler
             d = DerslikEditDialog(self)
             if d.exec():
@@ -489,7 +489,7 @@ class MasterDataDialog(QDialog):
                 elif idx == 1:
                     for data in self.data_store.get("siniflar", []):
                         toplam = str(totals["siniflar"].get(data.get("ad", ""), 0))
-                        self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), toplam, "Mevcut", "", data.get("sinif_ogretmeni",""), data.get("kapasite","30")])
+                        self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), toplam, "Mevcut", data.get("sinif_ogretmeni",""), data.get("kapasite","30")])
                 elif idx == 2:
                     for data in self.data_store.get("derslikler", []):
                         self._add_row(self.table_derslik, [data.get("ad",""), data.get("kisa",""), "0", "Mevcut", data.get("kapasite",""), "Merkez"])
