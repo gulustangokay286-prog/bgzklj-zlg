@@ -193,14 +193,14 @@ class MasterDataDialog(QDialog):
         self._select_tab(start_idx)
 
     def _load_existing_data(self):
-        for data in self.data_store["dersler"]:
-            self._add_row(self.table_ders, [data.get("ad",""), data.get("kisa",""), "0", "", "Ideal", "", ""])
-        for data in self.data_store["siniflar"]:
-            self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), "0", "", "30", "", "", ""])
-        for data in self.data_store["derslikler"]:
-            self._add_row(self.table_derslik, [data.get("ad",""), data.get("kisa",""), "0", "", "Standart", "Merkez"])
-        for data in self.data_store["ogretmenler"]:
-            self._add_row(self.table_ogretmen, [data.get("ad",""), data.get("kisa",""), "0", "", "", ""])
+        for data in self.data_store.get("dersler", []):
+            self._add_row(self.table_ders, [data.get("ad",""), data.get("kisa",""), data.get("renk","")])
+        for data in self.data_store.get("siniflar", []):
+            self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), data.get("sinif_ogretmeni",""), data.get("sinif_tipi",""), data.get("renk","")])
+        for data in self.data_store.get("derslikler", []):
+            self._add_row(self.table_derslik, [data.get("ad",""), data.get("kisa",""), data.get("kapasite",""), data.get("renk","")])
+        for data in self.data_store.get("ogretmenler", []):
+            self._add_row(self.table_ogretmen, [data.get("ad",""), data.get("kisa",""), data.get("ek_dersler",""), "Evet" if data.get("es_zamanli") else "Hayır", data.get("renk","")])
 
     def closeEvent(self, event):
         if hasattr(self.main_window, "_refresh_tree"):
@@ -238,14 +238,17 @@ class MasterDataDialog(QDialog):
         self.stack = QStackedWidget(self)
         self.stack.setStyleSheet("background: #FFFFFF; border: 1px solid #D0D0D0;")
         
-        self.table_ders = self._create_table(["Adı", "Kısa Kodu", "Toplam", "Zaman Tablosu", "Dağılım", "Evde Hazırlık", "Max."])
-        self.table_sinif = self._create_table(["Adı", "Kısa Kodu", "Toplam", "Zaman Tablosu", "2. Ders", "Hazırlık", "Öğretmen", "Öğrenci"])
-        self.table_derslik = self._create_table(["Adı", "Kısa Kodu", "Toplam", "Zaman Tablosu", "Tipi", "Bina"])
-        self.table_ogretmen = self._create_table(["Adı", "Kısa Kodu", "Toplam", "Zaman Tablosu", "Sınıf Öğretmeni", "Branşı"])
-        
+        # Tables
+        self.table_ders = self._create_table(["Ders Adı", "Kısa Kodu", "Renk Kodu"])
         self.stack.addWidget(self._wrap_table("Tanımlı Dersler", self.table_ders))
+
+        self.table_sinif = self._create_table(["Sınıf Adı", "Kısa Kodu", "Sınıf Öğretmeni", "Sınıf Tipi", "Renk"])
         self.stack.addWidget(self._wrap_table("Tanımlı Sınıflar", self.table_sinif))
+
+        self.table_derslik = self._create_table(["Derslik Adı", "Kısa Kodu", "Kapasite", "Renk"])
         self.stack.addWidget(self._wrap_table("Tanımlı Derslikler", self.table_derslik))
+
+        self.table_ogretmen = self._create_table(["Öğretmen Adı", "Kısa Kodu", "Ek Dersler", "Eş Zamanlı", "Renk"])
         self.stack.addWidget(self._wrap_table("Tanımlı Öğretmenler ve Dersleri", self.table_ogretmen))
         
         center_layout.addWidget(self.stack, 1)
@@ -408,25 +411,25 @@ class MasterDataDialog(QDialog):
             if d.exec():
                 data = d.get_data()
                 self.data_store["dersler"].append(data)
-                self._add_row(self.table_ders, [data.get("ad",""), data.get("kisa",""), "0", "", "Ideal", "", ""])
+                self._add_row(self.table_ders, [data.get("ad",""), data.get("kisa",""), data.get("renk","")])
         elif idx == 1:  # Sınıflar
             d = SinifEditDialog(self)
             if d.exec():
                 data = d.get_data()
                 self.data_store["siniflar"].append(data)
-                self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), "0", "", "30", "", "", ""])
+                self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), data.get("sinif_ogretmeni",""), data.get("sinif_tipi",""), data.get("renk","")])
         elif idx == 2:  # Derslikler
             d = DerslikEditDialog(self)
             if d.exec():
                 data = d.get_data()
                 self.data_store["derslikler"].append(data)
-                self._add_row(self.table_derslik, [data.get("ad",""), data.get("kisa",""), "0", "", "Standart", "Merkez"])
+                self._add_row(self.table_derslik, [data.get("ad",""), data.get("kisa",""), data.get("kapasite",""), data.get("renk","")])
         elif idx == 3:  # Öğretmenler
             d = OgretmenEditDialog(self)
             if d.exec():
                 data = d.get_data()
                 self.data_store["ogretmenler"].append(data)
-                self._add_row(self.table_ogretmen, [data.get("ad",""), data.get("kisa",""), "0", "", "", ""])
+                self._add_row(self.table_ogretmen, [data.get("ad",""), data.get("kisa",""), data.get("ek_dersler",""), "Evet" if data.get("es_zamanli") else "Hayır", data.get("renk","")])
                 self._act_assign(teacher_name=data.get("ad"))
 
         p = self.parent()
@@ -451,11 +454,24 @@ class MasterDataDialog(QDialog):
             if d.exec():
                 new_data = d.get_data()
                 data_list[row] = new_data
-                table.item(row, 0).setText(new_data.get("ad", ""))
-                table.item(row, 1).setText(new_data.get("kisa", ""))
+                
+                # Refresh entire table to be safe
+                table.setRowCount(0)
+                if idx == 0:
+                    for data in self.data_store.get("dersler", []):
+                        self._add_row(self.table_ders, [data.get("ad",""), data.get("kisa",""), data.get("renk","")])
+                elif idx == 1:
+                    for data in self.data_store.get("siniflar", []):
+                        self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), data.get("sinif_ogretmeni",""), data.get("sinif_tipi",""), data.get("renk","")])
+                elif idx == 2:
+                    for data in self.data_store.get("derslikler", []):
+                        self._add_row(self.table_derslik, [data.get("ad",""), data.get("kisa",""), data.get("kapasite",""), data.get("renk","")])
+                elif idx == 3:
+                    for data in self.data_store.get("ogretmenler", []):
+                        self._add_row(self.table_ogretmen, [data.get("ad",""), data.get("kisa",""), data.get("ek_dersler",""), "Evet" if data.get("es_zamanli") else "Hayır", data.get("renk","")])
+                
                 p = self.parent()
                 if p and hasattr(p, "save_db"): p.save_db()
-                if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
 
     def _act_delete(self):
         from PySide6.QtWidgets import QMessageBox
