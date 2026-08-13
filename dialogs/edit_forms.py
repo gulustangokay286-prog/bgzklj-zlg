@@ -642,8 +642,11 @@ class SinifEditDialog(BaseEditForm):
         if idx >= 0: self.w_sinif.setCurrentIndex(idx)
         form2.addRow("Sınıf:", self.w_sinif)
         
-        self.w_num = QLineEdit(self.existing_data.get("numara", ""))
-        form2.addRow("Numara:", self.w_num)
+        self.w_num = QLineEdit(str(self.existing_data.get("kapasite", "30")))
+        form2.addRow("Öğrenci Sayısı (Kapasite):", self.w_num)
+        
+        self.w_max_gunluk = QLineEdit(str(self.existing_data.get("ders_bitimi", "8")))
+        form2.addRow("Ders Bitimi (Max Günlük):", self.w_max_gunluk)
         self.main_layout.addLayout(form2)
         
         self._add_bottom_buttons()
@@ -659,7 +662,7 @@ class SinifEditDialog(BaseEditForm):
             "ad": self.w_ad.text(), "kisa": self.w_kisa.text(), 
             "renk": self._color, "foto": self.cb_foto.isChecked(),
             "sinif_ogretmeni": self.w_so.currentText(), "sinif_tipi": self.w_sinif.currentText(),
-            "numara": self.w_num.text()
+            "kapasite": self.w_num.text(), "ders_bitimi": self.w_max_gunluk.text()
         }
 
 
