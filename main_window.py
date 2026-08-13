@@ -370,6 +370,19 @@ class MainWindow(QMainWindow):
             
     def _filter_grid(self, view_type, entity_name):
         self.save_db()
+        
+        if hasattr(self, "_grid") and hasattr(self._grid, "entity_combo"):
+            self._grid.entity_combo.blockSignals(True)
+            if self._grid.entity_combo.count() == 0:
+                self._on_view_combo_changed(self._grid.view_combo.currentText())
+            idx = self._grid.entity_combo.findText(entity_name)
+            if idx >= 0:
+                self._grid.entity_combo.setCurrentIndex(idx)
+            else:
+                self._grid.entity_combo.addItem(entity_name)
+                self._grid.entity_combo.setCurrentText(entity_name)
+            self._grid.entity_combo.blockSignals(False)
+            
         self.statusBar().showMessage(f"Görünüm güncellendi: {entity_name}")
         self._restore_grid_placements(view_type, entity_name)
         self._active_view_type = view_type
@@ -737,6 +750,9 @@ class MainWindow(QMainWindow):
 
                 self.statusBar().showMessage(f"Veriler yüklendi: {load_path}")
                 
+                if hasattr(self, "_grid") and hasattr(self._grid, "view_combo"):
+                    self._on_view_combo_changed(self._grid.view_combo.currentText())
+                    
                 # Restore grid placements
                 self._restore_grid_placements()
             except Exception as e:

@@ -230,15 +230,7 @@ class UnplacedLessonsDock(QFrame):
                     win = self.window()
                     grid = getattr(win, "_grid", None)
                     if grid and orig_r >= 0 and orig_c >= 0:
-                        grid.table.setSpan(orig_r, orig_c, 1, 1)
-                        for r_off in range(orig_dur):
-                            tr = orig_r + r_off
-                            if tr < grid.table.rowCount():
-                                grid.table.setItem(tr, orig_c, None)
-                        if hasattr(grid, "_placed_lessons"):
-                            grid._placed_lessons.pop((orig_r, orig_c), None)
-                        if hasattr(win, "save_db"): win.save_db()
-                        if hasattr(win, "_refresh_tree"): win._refresh_tree()
+                        grid.table._delete_lesson_at(orig_r, orig_c)
             except Exception as e:
                 print("Dock drop error:", e)
             event.accept()
@@ -408,10 +400,15 @@ class DropTableWidget(QTableWidget):
         for r_off in range(orig_dur):
             tr = orig_r + r_off
             if tr < self.rowCount():
+                self.takeItem(tr, orig_c)
                 self.setItem(tr, orig_c, None)
         grid = self.parent()
         if hasattr(grid, "_placed_lessons"):
             grid._placed_lessons.pop((orig_r, orig_c), None)
+            
+        self.viewport().update()
+        self.update()
+        
         win = self.window()
         if hasattr(win, "save_db"):
             win.save_db()
