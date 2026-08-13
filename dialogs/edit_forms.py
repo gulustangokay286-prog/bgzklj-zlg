@@ -841,9 +841,25 @@ class SinifEditDialog(BaseEditForm):
         
         self.w_max_gunluk = QLineEdit(str(self.existing_data.get("ders_bitimi", "15:30")))
         form2.addRow("Ders Bitim Saati:", self.w_max_gunluk)
-        self.main_layout.addLayout(form2)
-        
+        btn_hoca_ata = QPushButton("🎓 Bu Sınıfın Derslerini ve Öğretmenlerini Ata")
+        btn_hoca_ata.setStyleSheet("background: #0078D7; color: white; font-weight: bold; padding: 6px; border-radius: 4px;")
+        btn_hoca_ata.clicked.connect(self._assign_lessons_for_this_class)
+        self.main_layout.addWidget(btn_hoca_ata)
+
         self._add_bottom_buttons()
+
+    def _assign_lessons_for_this_class(self):
+        c_name = self.w_ad.text().strip()
+        p = self.parent()
+        data_store = getattr(p, "data_store", {}) if p else {}
+        d = LessonAssignmentDialog(data_store=data_store, parent=p or self)
+        c_idx = d.cb_sinif.findText(c_name)
+        if c_idx >= 0:
+            d.cb_sinif.setCurrentIndex(c_idx)
+        else:
+            d.cb_sinif.setCurrentText(c_name)
+        if d.exec():
+            if p and hasattr(p, "save_db"): p.save_db()
 
     def _pick_color(self):
         c = QColorDialog.getColor(QColor(self._color), self)

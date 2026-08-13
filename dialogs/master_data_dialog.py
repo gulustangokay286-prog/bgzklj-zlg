@@ -539,9 +539,21 @@ class MasterDataDialog(QDialog):
         if row < 0:
             return
             
+        item = table.item(row, 0)
+        if not item:
+            return
+        selected_name = item.text().strip()
+        
         data_list = self.data_store[stores[idx]]
-        if row < len(data_list):
-            old_data = data_list[row]
+        matched_idx = -1
+        old_data = None
+        for i, d in enumerate(data_list):
+            if d.get("ad") == selected_name or d.get("kisa") == selected_name:
+                matched_idx = i
+                old_data = d
+                break
+                
+        if matched_idx >= 0 and old_data:
             d = dialogs[idx](parent=self, existing_data=old_data)
             if d.exec():
                 new_data = d.get_data()
@@ -555,7 +567,7 @@ class MasterDataDialog(QDialog):
                             if a.get(attr) == old_name:
                                 a[attr] = new_name
 
-                data_list[row] = new_data
+                data_list[matched_idx] = new_data
                 
                 # Refresh entire table to be safe
                 table.setRowCount(0)
@@ -610,21 +622,20 @@ class MasterDataDialog(QDialog):
         row = table.currentRow()
         if row >= 0:
             item = table.item(row, 0)
-            name = item.text() if item else "Bu öğeyi"
-            r = QMessageBox.question(self, "Silme Onayı", f"{name} silmek istediğinize emin misiniz?", QMessageBox.Yes | QMessageBox.No)
+            if not item: return
+            del_name = item.text().strip()
+            r = QMessageBox.question(self, "Silme Onayı", f"{del_name} silmek istediğinize emin misiniz?", QMessageBox.Yes | QMessageBox.No)
             if r == QMessageBox.Yes:
                 table.removeRow(row)
-                if row < len(self.data_store[stores[idx]]):
-                    removed_item = self.data_store[stores[idx]].pop(row)
-                    del_name = removed_item.get("ad")
-                    if del_name:
-                        if idx == 3: # Teacher
-                            self.data_store["atamalar"] = [a for a in self.data_store.get("atamalar", []) if a.get("teacher") != del_name]
-                        elif idx == 0: # Subject
-                            self.data_store["atamalar"] = [a for a in self.data_store.get("atamalar", []) if a.get("subject") != del_name]
-                        elif idx == 1: # Class
-                            self.data_store["atamalar"] = [a for a in self.data_store.get("atamalar", []) if a.get("class") != del_name]
-                p = self.parent()
+                data_list = self.data_store[stores[idx]]
+                self.data_store[stores[idx]] = [d for d in data_list if d.get("ad") != del_name and d.get("kisa") != del_name]
+                if idx == 3: # Teacher
+                    self.data_store["atamalar"] = [a for a in self.data_store.get("atamalar", []) if a.get("teacher") != del_name]
+                elif idx == 0: # Subject
+                    self.data_store["atamalar"] = [a for a in self.data_store.get("atamalar", []) if a.get("subject") != del_name]
+                elif idx == 1: # Class
+                    self.data_store["atamalar"] = [a for a in self.data_store.get("atamalar", []) if a.get("class") != del_name]
+                p = self.parent() or getattr(self, "main_window", None)
                 if p and hasattr(p, "save_db"): p.save_db()
                 if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
 
