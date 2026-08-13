@@ -447,52 +447,14 @@ class DersEditDialog(QDialog):
         l1.setContentsMargins(12, 12, 12, 12)
         l1.setSpacing(10)
         
-        self.lay_ad = QHBoxLayout()
-        self.cmb_ad = QComboBox()
-        self.cmb_ad.setEditable(False)
-        default_subjects = ["Matematik", "Türkçe", "Edebiyat", "Fizik", "Kimya", "Biyoloji", "Tarih", "Coğrafya", "İngilizce", "Almanca", "Beden Eğitimi", "Görsel Sanatlar", "Müzik", "Din Kültürü", "Rehberlik", "Felsefe"]
-        self.cmb_ad.addItems(default_subjects)
-        
         self.txt_ad = QLineEdit()
-        self.txt_ad.hide()
-        
-        self.btn_manuel_ekle = QPushButton("Manuel Ekle")
-        self.btn_manuel_ekle.setFixedWidth(100)
-        
-        self.lay_ad.addWidget(self.cmb_ad)
-        self.lay_ad.addWidget(self.txt_ad)
-        self.lay_ad.addWidget(self.btn_manuel_ekle)
-        
-        def _toggle_manuel():
-            if self.txt_ad.isHidden():
-                self.cmb_ad.hide()
-                self.txt_ad.show()
-                self.txt_ad.setText(self.cmb_ad.currentText())
-                self.btn_manuel_ekle.setText("Listeden Seç")
-            else:
-                self.txt_ad.hide()
-                self.cmb_ad.show()
-                idx = self.cmb_ad.findText(self.txt_ad.text())
-                if idx >= 0: self.cmb_ad.setCurrentIndex(idx)
-                self.btn_manuel_ekle.setText("Manuel Ekle")
-                
-        self.btn_manuel_ekle.clicked.connect(_toggle_manuel)
-        
-        if "ad" in self.existing_data:
-            ad = self.existing_data["ad"]
-            if ad in default_subjects:
-                self.cmb_ad.setCurrentText(ad)
-            else:
-                self.txt_ad.setText(ad)
-                _toggle_manuel()
-                
+        if "ad" in self.existing_data: self.txt_ad.setText(self.existing_data["ad"])
         self.txt_ad.textChanged.connect(self._auto_short_code)
-        self.cmb_ad.currentTextChanged.connect(self._auto_short_code)
         
         self.txt_kisa = QLineEdit()
         if "kisa" in self.existing_data: self.txt_kisa.setText(self.existing_data["kisa"])
         
-        l1.addRow(QLabel("Dersin Adı"), self.lay_ad)
+        l1.addRow(QLabel("Dersin Adı"), self.txt_ad)
         l1.addRow(QLabel("Kısa Kodu"), self.txt_kisa)
         
         btn_ozel = QPushButton("Özel Alanlar")
@@ -601,10 +563,8 @@ class DersEditDialog(QDialog):
             self.color_lbl.setStyleSheet(f"background-color: {self.current_color}; border: 1px solid #AAA; border-radius: 4px;")
 
     def get_data(self):
-        ad = self.txt_ad.text() if not self.txt_ad.isHidden() else self.cmb_ad.currentText()
         return {
-            "id": self.existing_data.get("id", ""),
-            "ad": ad,
+            "ad": self.txt_ad.text(),
             "kisa": self.txt_kisa.text(),
             "renk": self.current_color
         }
@@ -673,21 +633,7 @@ class SinifEditDialog(BaseEditForm):
             self.w_so.setCurrentIndex(idx_so)
             
         so_lay.addWidget(self.w_so)
-        
-        # Sınıf öğretmeni uyarısı
-        self.lbl_so_warning = QLabel("")
-        self.lbl_so_warning.setStyleSheet("color: #D32F2F; font-size: 11px; font-weight: bold;")
-        self.lbl_so_warning.hide()
-        
-        so_vlay = QVBoxLayout()
-        so_vlay.addLayout(so_lay)
-        so_vlay.addWidget(self.lbl_so_warning)
-        
-        self.main_layout.addLayout(so_vlay)
-        
-        self.w_so.currentTextChanged.connect(self._check_teacher_assignment)
-        if existing_so:
-            self._check_teacher_assignment(existing_so)
+        self.main_layout.addLayout(so_lay)
         
         form2 = QFormLayout()
         self.w_sinif = QComboBox()
@@ -713,26 +659,11 @@ class SinifEditDialog(BaseEditForm):
             
     def get_data(self):
         return {
-            "id": self.existing_data.get("id", ""),
             "ad": self.w_ad.text(), "kisa": self.w_kisa.text(), 
             "renk": self._color, "foto": self.cb_foto.isChecked(),
             "sinif_ogretmeni": self.w_so.currentText(), "sinif_tipi": self.w_sinif.currentText(),
             "kapasite": self.w_num.text(), "ders_bitimi": self.w_max_gunluk.text()
         }
-        
-    def _check_teacher_assignment(self, teacher_name):
-        if not teacher_name or not self.parent() or not hasattr(self.parent(), "data_store"):
-            self.lbl_so_warning.hide()
-            return
-            
-        current_class_ad = self.existing_data.get("ad")
-        
-        for sinif in self.parent().data_store.get("siniflar", []):
-            if sinif.get("sinif_ogretmeni") == teacher_name and sinif.get("ad") != current_class_ad:
-                self.lbl_so_warning.setText(f"Uyarı: Bu öğretmen halihazırda {sinif.get('ad')} sınıfının öğretmeni!")
-                self.lbl_so_warning.show()
-                return
-        self.lbl_so_warning.hide()
 
 
 class OgretmenEditDialog(BaseEditForm):

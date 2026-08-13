@@ -209,8 +209,17 @@ class MainWindow(QMainWindow):
             resp = requests.get(url, timeout=5)
             if resp.status_code == 200 and resp.json():
                 cloud_data = resp.json()
-                if cloud_data != getattr(self, "data_store", None):
-                    self.data_store = cloud_data
+                local_classes = len(self.data_store.get("siniflar", []))
+                local_teachers = len(self.data_store.get("ogretmenler", []))
+                cloud_classes = len(cloud_data.get("siniflar", []))
+                cloud_teachers = len(cloud_data.get("ogretmenler", []))
+
+                # Safe merge/sync: do not wipe local non-empty data with empty cloud data
+                if (local_classes > 0 or local_teachers > 0) and (cloud_classes == 0 and cloud_teachers == 0):
+                    if hasattr(self, "cloud_worker") and self.cloud_worker and uid:
+                        self.cloud_worker.add_to_queue("institutions", uid, self.data_store)
+                elif cloud_data != getattr(self, "data_store", None):
+                    self.data_store.update(cloud_data)
                     self.save_db()
                     self._refresh_tree()
                     self._on_tree_selection_changed()
@@ -1062,15 +1071,14 @@ class MainWindow(QMainWindow):
             self._refresh_tree()
 
     def _act_new(self):
-        # Sadece boş bir veri deposu yarat
-        self.data_store = {
-            "dersler": [], "siniflar": [], "derslikler": [], 
-            "ogretmenler": [], "atamalar": [], "settings": {}
-        }
-        
         from dialogs.startup_wizard import StartupWizard
         wizard = StartupWizard(self)
         if wizard.exec():
+            # Create fresh data store ONLY when confirmed
+            self.data_store = {
+                "dersler": [], "siniflar": [], "derslikler": [], 
+                "ogretmenler": [], "atamalar": [], "settings": {}
+            }
             # Kurum adı ile kaydet
             kurum_adi = self.data_store.get("kurum", {}).get("isim", "Yeni_Kurum").replace(" ", "_")
             default_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"{kurum_adi}.roz")
