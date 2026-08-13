@@ -533,7 +533,8 @@ class TimetablePrintPreview(QDialog):
         for d_idx, day_name in enumerate(days):
             cx = grid_x + hour_col_w + d_idx * col_w
             painter.setBrush(QBrush(QColor("#D0D8E4")))
-            painter.setPen(QPen(QColor("#BCC8D8"), 1)            painter.drawRect(QRectF(cx, grid_y, col_w, header_h))
+            painter.setPen(QPen(QColor("#BCC8D8"), 1))
+            painter.drawRect(QRectF(cx, grid_y, col_w, header_h))
             
             painter.setFont(make_font(13, True))
             painter.setPen(QPen(QColor("#111111"), 1))
