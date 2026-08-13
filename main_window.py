@@ -418,7 +418,8 @@ class MainWindow(QMainWindow):
         text = item.text(0)
         parent = item.parent()
         if not parent:
-            return # Root node clicked
+            item.setExpanded(not item.isExpanded())
+            return
             
         parent_text = parent.text(0)
         entity_name = item.data(0, Qt.UserRole)
