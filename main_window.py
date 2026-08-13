@@ -1300,7 +1300,7 @@ class MainWindow(QMainWindow):
                         "subject_name": subj,
                         "color": color,
                         "teacher_name": t_name,
-                        "duration": 1,
+                        "duration": r.get("duration", 1),
                         "class_name": c_name
                     })
                 

@@ -141,11 +141,11 @@ class AutoSchedulerWorker(QThread):
                         if d not in class_day_subjects[c_name]: class_day_subjects[c_name][d] = set()
                         class_day_subjects[c_name][d].add(subj)
                         
-                        schedule.append({
-                            "class_name": c_name, "teacher_name": t_name,
-                            "subject_name": subj, "day_idx": d, "period": check_p,
-                            "duration": b_dur
-                        })
+                    schedule.append({
+                        "class_name": c_name, "teacher_name": t_name,
+                        "subject_name": subj, "day_idx": d, "period": p,
+                        "duration": b_dur
+                    })
                     placed_hours += b_dur
             
             if placed_hours > best_placed_count:
