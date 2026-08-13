@@ -1237,9 +1237,10 @@ class ClassComprehensiveAssignmentDialog(QDialog):
         d = SubjectTeacherAssignmentDialog(subject_name=subject_name, data_store=self.data_store, parent=self)
         
         # Pre-select class
-        c_chk = [chk for chk in d.class_chks if chk.text() == self.class_name]
-        if c_chk:
-            c_chk[0].setChecked(True)
+        for i in range(d.list_classes.count()):
+            item = d.list_classes.item(i)
+            if item.text() == self.class_name:
+                item.setCheckState(Qt.Checked)
             
         if d.exec():
             p = self.parent()
