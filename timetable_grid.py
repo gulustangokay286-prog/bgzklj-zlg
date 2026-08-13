@@ -402,6 +402,33 @@ class DropTableWidget(QTableWidget):
                     return r, c, dur, info
         return row, col, max(1, self.rowSpan(row, col)), None
 
+    def _delete_lesson_at(self, row, col):
+        orig_r, orig_c, orig_dur, info = self._get_lesson_origin(row, col)
+        self.setSpan(orig_r, orig_c, 1, 1)
+        for r_off in range(orig_dur):
+            tr = orig_r + r_off
+            if tr < self.rowCount():
+                self.setItem(tr, orig_c, None)
+        grid = self.parent()
+        if hasattr(grid, "_placed_lessons"):
+            grid._placed_lessons.pop((orig_r, orig_c), None)
+        win = self.window()
+        if hasattr(win, "save_db"):
+            win.save_db()
+        if hasattr(win, "_refresh_tree"):
+            win._refresh_tree()
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+            r = self.currentRow()
+            c = self.currentColumn()
+            if r >= 0 and c >= 0:
+                orig_r, orig_c, orig_dur, info = self._get_lesson_origin(r, c)
+                if info or (self.item(orig_r, orig_c) and self.item(orig_r, orig_c).text().strip()):
+                    self._delete_lesson_at(orig_r, orig_c)
+                    return
+        super().keyPressEvent(event)
+
     def _show_context_menu(self, pos):
         item = self.itemAt(pos)
         row = self.rowAt(pos.y())
@@ -435,19 +462,7 @@ class DropTableWidget(QTableWidget):
             action = menu.exec_(self.viewport().mapToGlobal(pos))
             
             if action == act_del:
-                self.setSpan(orig_r, orig_c, 1, 1)
-                for r_off in range(orig_dur):
-                    tr = orig_r + r_off
-                    if tr < self.rowCount():
-                        self.setItem(tr, orig_c, None)
-                grid = self.parent()
-                if hasattr(grid, "_placed_lessons"):
-                    grid._placed_lessons.pop((orig_r, orig_c), None)
-                win = self.window()
-                if hasattr(win, "save_db"):
-                    win.save_db()
-                if hasattr(win, "_refresh_tree"):
-                    win._refresh_tree()
+                self._delete_lesson_at(orig_r, orig_c)
             elif action == act_single:
                 self._set_span(row, col, 1)
             elif action == act_double:

@@ -743,6 +743,15 @@ class MainWindow(QMainWindow):
                 print("DB Load Error:", e)
     
     def _restore_grid_placements(self, view_type=None, entity_name=None):
+        if hasattr(self, "_grid"):
+            if not view_type and hasattr(self._grid, "view_combo"):
+                v_text = self._grid.view_combo.currentText()
+                if "Sınıf" in v_text: view_type = "class"
+                elif "Öğretmen" in v_text: view_type = "teacher"
+                elif "Derslik" in v_text: view_type = "room"
+            if not entity_name and hasattr(self._grid, "entity_combo"):
+                entity_name = self._grid.entity_combo.currentText()
+
         grid_data = self.data_store.get("grid_placements", [])
         self._grid.clear_grid()
         for info in grid_data:
