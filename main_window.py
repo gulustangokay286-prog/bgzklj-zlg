@@ -219,14 +219,15 @@ class MainWindow(QMainWindow):
                 if (local_classes > 0 or local_teachers > 0) and (cloud_classes == 0 and cloud_teachers == 0):
                     if hasattr(self, "cloud_worker") and self.cloud_worker and uid:
                         self.cloud_worker.add_to_queue("institutions", uid, self.data_store)
-                elif cloud_data != getattr(self, "data_store", None):
-                    self.data_store.update(cloud_data)
-                    self.save_db()
-                    self._refresh_tree()
-                    self._on_tree_selection_changed()
-                    self.statusBar().showMessage("Buluttan en güncel veriler çekildi ve senkronize edildi! ☁️✅")
-                    if show_message:
-                        QMessageBox.information(self, "Bulut Senkronizasyon", "Buluttan en güncel veriler başarıyla indirildi!")
+                elif show_message or (local_classes == 0 and local_teachers == 0 and (cloud_classes > 0 or cloud_teachers > 0)):
+                    if cloud_data != getattr(self, "data_store", None):
+                        self.data_store.update(cloud_data)
+                        self.save_db()
+                        self._refresh_tree()
+                        self._on_tree_selection_changed()
+                        self.statusBar().showMessage("Buluttan veriler senkronize edildi! ☁️✅")
+                        if show_message:
+                            QMessageBox.information(self, "Bulut Senkronizasyon", "Buluttan en güncel veriler başarıyla indirildi!")
             elif show_message:
                 QMessageBox.warning(self, "Bulut Senkronizasyon", f"Buluttan veri çekilemedi. Yanıt Kodu: {resp.status_code}")
         except Exception as e:
@@ -809,7 +810,8 @@ class MainWindow(QMainWindow):
             with open(save_path, "w", encoding="utf-8") as f:
                 json.dump(self.data_store, f, ensure_ascii=False, indent=4)
                 
-            self.statusBar().showMessage(f"Veritabanı başarıyla kaydedildi: {save_path}")
+            fname = os.path.basename(save_path)
+            self.statusBar().showMessage(f"💾 Tüm değişiklikler '{fname}' dosyasına kaydedildi.")
             
             # Bulut senkronizasyonu (Çoklu kurum desteği ile UID altına)
             if hasattr(self, "cloud_worker") and self.cloud_worker and hasattr(self, "auth_data") and self.auth_data:

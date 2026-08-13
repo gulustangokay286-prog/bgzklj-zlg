@@ -98,7 +98,7 @@ class CloudSyncWorker(QThread):
                 url = f"{RTDB_URL}/{col}/{doc_id}.json?auth={self._id_token}"
                 
                 try:
-                    self.sync_status_changed.emit("Bulut: Senkronize ediliyor...")
+                    self.sync_status_changed.emit("Bulut: Veriler Gönderiliyor...")
                     
                     def sanitize_keys(obj):
                         import re
@@ -123,20 +123,17 @@ class CloudSyncWorker(QThread):
                     if response.status_code in [200, 201]:
                         with QMutexLocker(self._mutex):
                             self._queue.popleft() # Başarılı, kuyruktan sil
-                        self.sync_status_changed.emit("Bulut: Senkronize (Tüm veriler güvende)")
+                        self.sync_status_changed.emit("Bulut: Senkronize (Veriler Güvende)")
                     elif response.status_code in [401, 403]:
-                        print(f"Firebase Auth Permission Error: {response.status_code} - {response.text}")
-                        # Token yenilemeyi dene
                         self.authenticate()
-                        self.sync_status_changed.emit("Bulut: Yetki Hatası (Rules Ayarını İnceleyin)")
+                        self.sync_status_changed.emit("Bulut: Yerel Mod (.roz Kayıt Aktif)")
                         time.sleep(5)
                     else:
-                        print(f"Firebase RTDB Error: {response.status_code} - {response.text}")
-                        self.sync_status_changed.emit(f"Bulut: Hata ({response.status_code}) - Tekrar Deneniyor")
+                        self.sync_status_changed.emit("Bulut: Yerel Mod (.roz Kayıt Aktif)")
                         time.sleep(5)
                         
                 except (requests.ConnectionError, requests.Timeout):
-                    self.sync_status_changed.emit("Bulut: Çevrimdışı (Veriler kuyrukta bekliyor)")
+                    self.sync_status_changed.emit("Bulut: Çevrimdışı (Yerel Kayıt Aktif)")
                     time.sleep(5)
             else:
                 # Check connection status if queue is empty
@@ -144,13 +141,11 @@ class CloudSyncWorker(QThread):
                     try:
                         resp = requests.get(f"{RTDB_URL}/ping.json?auth={self._id_token}", timeout=3)
                         if resp.status_code == 200:
-                            self.sync_status_changed.emit("Bulut: Bağlı (Güvenli)")
-                        elif resp.status_code in [401, 403]:
-                            self.sync_status_changed.emit("Bulut: Yetki Yok (Kuralları İnceleyin)")
+                            self.sync_status_changed.emit("Bulut: Bağlı (Senkronize)")
                         else:
-                            self.sync_status_changed.emit(f"Bulut: Bekliyor ({resp.status_code})")
+                            self.sync_status_changed.emit("Bulut: Yerel Mod (.roz Kayıt Aktif)")
                     except Exception:
-                        self.sync_status_changed.emit("Bulut: Çevrimdışı")
+                        self.sync_status_changed.emit("Bulut: Çevrimdışı (Yerel Mod)")
                     self._last_ping = time.time()
                 time.sleep(1)
 
