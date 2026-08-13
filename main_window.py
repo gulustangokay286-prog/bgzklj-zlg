@@ -727,7 +727,7 @@ class MainWindow(QMainWindow):
 
     def save_db(self, path=None):
         import json
-        save_path = path or self.db_path
+        save_path = path or getattr(self, "current_roz_path", None) or self.db_path
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         self._set_last_db_path(save_path)
         
@@ -735,10 +735,11 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_grid") and hasattr(self._grid, "view_combo") and hasattr(self._grid, "entity_combo"):
             view_type = None
             entity_name = self._grid.entity_combo.currentText()
-            if self._grid.view_combo.currentText() == "Sınıf Görünümü":
-                view_type = "class"
-            elif self._grid.view_combo.currentText() == "Öğretmen Görünümü":
-                view_type = "teacher"
+            if hasattr(self._grid.view_combo, "currentText"):
+                if self._grid.view_combo.currentText() == "Sınıf Görünümü":
+                    view_type = "class"
+                elif self._grid.view_combo.currentText() == "Öğretmen Görünümü":
+                    view_type = "teacher"
                 
             if view_type and entity_name:
                 global_placements = self.data_store.setdefault("grid_placements", [])
@@ -763,15 +764,10 @@ class MainWindow(QMainWindow):
                     new_global.append(p)
                     
                 self.data_store["grid_placements"] = new_global
-            
         try:
             with open(save_path, "w", encoding="utf-8") as f:
                 json.dump(self.data_store, f, ensure_ascii=False, indent=4)
                 
-            if getattr(self, "current_roz_path", None) and path != self.current_roz_path:
-                with open(self.current_roz_path, "w", encoding="utf-8") as f:
-                    json.dump(self.data_store, f, ensure_ascii=False, indent=4)
-                    
             self.statusBar().showMessage(f"Veritabanı başarıyla kaydedildi: {save_path}")
             
             # Bulut senkronizasyonu (Çoklu kurum desteği ile UID altına)
@@ -1123,10 +1119,17 @@ class MainWindow(QMainWindow):
             filters = wiz.get_selected_filters()
             from dialogs.print_preview import TimetablePrintPreview
             dlg = TimetablePrintPreview(self.data_store, self._grid.get_placed_lessons(), filters, self)
-            dlg.exec()
+            dlg.direct_print()
 
     def _act_preview(self):
-        self._act_print()
+        from PySide6.QtWidgets import QDialog
+        from dialogs.print_wizard import PrintWizardDialog
+        wiz = PrintWizardDialog(self.data_store, self)
+        if wiz.exec() == QDialog.Accepted:
+            filters = wiz.get_selected_filters()
+            from dialogs.print_preview import TimetablePrintPreview
+            dlg = TimetablePrintPreview(self.data_store, self._grid.get_placed_lessons(), filters, self)
+            dlg.exec()
 
     def _act_close(self):
         self.statusBar().showMessage("Dosya kapatıldı.")
@@ -1188,6 +1191,7 @@ class MainWindow(QMainWindow):
 
     def _act_auto_schedule(self):
         from dialogs.auto_schedule_dialog import AutoScheduleDialog
+        from PySide6.QtWidgets import QDialog
         d = AutoScheduleDialog(self.data_store, self)
         if d.exec() == QDialog.Accepted:
             # AI produced a schedule

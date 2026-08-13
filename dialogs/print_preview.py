@@ -149,7 +149,17 @@ class TimetablePrintPreview(QDialog):
         self.preview.print_()
 
     def _do_print(self):
-        self.preview.print_()
+        from PySide6.QtPrintSupport import QPrintDialog
+        dialog = QPrintDialog(self.printer, self)
+        if dialog.exec() == QPrintDialog.Accepted:
+            self._render_page(self.printer)
+            
+    def direct_print(self):
+        """Shows the OS print dialog and prints without opening the preview window."""
+        from PySide6.QtPrintSupport import QPrintDialog
+        dialog = QPrintDialog(self.printer, self)
+        if dialog.exec() == QPrintDialog.Accepted:
+            self._render_page(self.printer)
 
     def _export_pdf(self):
         path, _ = QFileDialog.getSaveFileName(self, "PDF Olarak Kaydet", "Ders_Programi.pdf", "PDF Dosyaları (*.pdf)")
@@ -602,7 +612,8 @@ class TimetablePrintPreview(QDialog):
         
         start_y = 85
         tbl_w = VW - 60
-        cols = [("Öğretmen Adı", 300), ("Kısa Kodu", 150), ("Atanan Dersler", 400), ("Toplam Saat", 190)]
+        # Updated columns to include "Zaman" mini grid
+        cols = [("Öğretmen Adı", 220), ("Kısa Kodu", 110), ("Atanan Dersler", 360), ("Topla...", 80), ("Zaman", 270)]
         
         cur_x = 30
         header_h = 32
@@ -618,6 +629,11 @@ class TimetablePrintPreview(QDialog):
         cur_y = start_y + header_h
         row_h = 30
         painter.setFont(make_font(11))
+        
+        settings = self.data_store.get("settings", {})
+        periods = int(settings.get("periods", 8))
+        days = settings.get("days", ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"])
+        d_count = len(days)
         
         for idx, t in enumerate(teachers):
             if cur_y + row_h > VH - 50:
@@ -635,14 +651,47 @@ class TimetablePrintPreview(QDialog):
             
             cur_x = 30
             painter.setPen(QPen(QColor("#111111"), 1))
+            
+            # Adı
             painter.drawText(QRectF(cur_x + 10, cur_y, cols[0][1] - 10, row_h), Qt.AlignLeft | Qt.AlignVCenter, tname)
             cur_x += cols[0][1]
             
+            # Kısa Kod
             painter.drawText(QRectF(cur_x, cur_y, cols[1][1], row_h), Qt.AlignCenter, tkisa)
             cur_x += cols[1][1]
             
-            painter.drawText(QRectF(cur_x + 10, cur_y, cols[2][1] - 10, row_h), Qt.AlignLeft | Qt.AlignVCenter, subs_str)
+            # Atanan Dersler
+            painter.drawText(QRectF(cur_x + 10, cur_y, cols[2][1] - 20, row_h), Qt.AlignLeft | Qt.AlignVCenter, subs_str)
             cur_x += cols[2][1]
             
-            painter.drawText(QRectF(cur_x, cur_y, cols[3][1], row_h), Qt.AlignCenter, f"{tot_hours} Saat")
+            # Toplam Saat
+            painter.drawText(QRectF(cur_x, cur_y, cols[3][1], row_h), Qt.AlignCenter, str(tot_hours))
+            cur_x += cols[3][1]
+            
+            # Zaman (Miniature Grid)
+            timeoff = t.get("timeoff", [])
+            grid_w = cols[4][1] - 20
+            grid_h = row_h - 10
+            
+            if d_count > 0 and periods > 0:
+                cell_w = grid_w / periods
+                cell_h = grid_h / d_count
+                start_gx = cur_x + 10
+                start_gy = cur_y + 5
+                
+                painter.setPen(QPen(QColor("#CCCCCC"), 0.5))
+                for d in range(d_count):
+                    for p in range(periods):
+                        state = 2
+                        if timeoff and d < len(timeoff) and p < len(timeoff[d]):
+                            state = timeoff[d][p]
+                            
+                        # 0: Kapalı (Kırmızı), 1: Tercih Edilmez (Sarı), 2: Uygun (Yeşil)
+                        c_fill = QColor("#22C55E")
+                        if state == 0: c_fill = QColor("#EF4444")
+                        elif state == 1: c_fill = QColor("#EAB308")
+                        
+                        painter.setBrush(QBrush(c_fill))
+                        painter.drawRect(QRectF(start_gx + p * cell_w, start_gy + d * cell_h, cell_w, cell_h))
+            cur_x += cols[4][1]
             cur_y += row_h

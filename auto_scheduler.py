@@ -33,101 +33,101 @@ class AutoSchedulerWorker(QThread):
                     "subject_name": asgn.get("ders", "")
                 })
 
-        # Rastgele dağıt (Heuristic / Backtracking tabanlı)
-        # Basit V1 Algoritması: Rastgele uygun boşluk ara
-        random.shuffle(lessons_to_place)
-        
-        placed_lessons = {} # Key: (row(period), col(day_idx)), Value: list of lesson dicts or just unique per class
-        # Actually in timetable_grid.py, placed_lessons is:
-        # { (row, col): {"class_name": ..., "teacher_name": ..., "subject_name": ...} }
-        # But wait, one cell can only hold ONE lesson in standard view?
-        # No, a cell represents (period, day). If we are placing for the whole school, multiple classes have lessons at the same time.
-        # But timetable_grid.py expects placed_lessons to be a flat dict for ONE view?
-        # No, timetable_grid.py stores EVERYTHING in `_placed_lessons`.
-        # However, the key `(row, col)` in standard view means (period, day). 
-        # If two classes have a lesson at Monday 1st period, they would both try to occupy `(0, 0)` in `_placed_lessons`.
-        # Wait, how did standard grid support multiple classes? 
-        # `TimetableGrid` only shows one class at a time, or all classes.
-        # In Bütün Okul view, row = class index, col = day * periods + period.
-        # We should store the master schedule in SQLite. For now, we will return a structure that can be saved.
-        # Structure: list of dicts: {"class_name", "teacher_name", "subject_name", "day_idx", "period"}
-        
-        schedule = []
-        teacher_schedule = {} # teacher_name -> set of (day_idx, period)
-        class_schedule = {}   # class_name -> set of (day_idx, period)
-        
+        # Öğretmen saatlerini say
+        teacher_hours = {}
+        for asgn in assignments:
+            t = asgn.get("ogretmen", "")
+            teacher_hours[t] = teacher_hours.get(t, 0) + int(asgn.get("saat", 1))
+
         # Optimize by precaching objects
         t_objs = {t["ad"]: t for t in self.data_store.get("ogretmenler", [])}
         c_objs = {c["ad"]: c for c in self.data_store.get("siniflar", [])}
         
         total = len(lessons_to_place)
-        placed_count = 0
+        best_schedule = []
+        best_placed_count = -1
         
-        for lesson in lessons_to_place:
+        # 20 kez farklı kurgularla dene (Random Restarts)
+        for attempt in range(20):
             if not self._is_running:
                 return
                 
-            c_name = lesson["class_name"]
-            t_name = lesson["teacher_name"]
-            
-            if t_name not in teacher_schedule:
-                teacher_schedule[t_name] = set()
-            if c_name not in class_schedule:
-                class_schedule[c_name] = set()
+            # Dersleri karmaşıklaştır ama öğretmeni yoğun olanlara öncelik ver
+            random.shuffle(lessons_to_place)
+            # %50 ihtimalle yoğunluğa göre sırala, %50 tamamen rastgele (çeşitlilik için)
+            if random.random() < 0.5:
+                lessons_to_place.sort(key=lambda x: teacher_hours.get(x["teacher_name"], 0), reverse=True)
                 
-            # Uygun yuva bul (Geriye Dönük Arama - Backtracking olmadan basit greedy heuristik)
-            placed = False
+            schedule = []
+            teacher_schedule = {} # t_name -> set of (day_idx, period)
+            class_schedule = {}   # c_name -> set of (day_idx, period)
+            class_day_subjects = {} # c_name -> dict of day_idx -> set of subjects
             
-            # Gün ve saatleri karıştırarak dağıtımı homojen yap
-            available_slots = [(d, p) for d in range(len(days)) for p in range(periods)]
-            random.shuffle(available_slots)
+            placed_count = 0
             
-            t_obj = t_objs.get(t_name, {})
-            c_obj = c_objs.get(c_name, {})
-            t_timeoff = t_obj.get("timeoff", [])
-            c_timeoff = c_obj.get("timeoff", [])
-            
-            for (d, p) in available_slots:
-                # Kısıtlamalar (Hard Constraints)
-                if (d, p) in teacher_schedule[t_name]:
-                    continue # Öğretmen bu saatte başka sınıfta dolu
-                if (d, p) in class_schedule[c_name]:
-                    continue # Sınıfın bu saatte zaten dersi var
+            for lesson in lessons_to_place:
+                if not self._is_running:
+                    return
                     
-                # Time-off Kısıtlamaları (0 = Kapalı/Kırmızı Çarpı)
-                if t_timeoff and d < len(t_timeoff) and p < len(t_timeoff[d]):
-                    if t_timeoff[d][p] == 0:
-                        continue
-                if c_timeoff and d < len(c_timeoff) and p < len(c_timeoff[d]):
-                    if c_timeoff[d][p] == 0:
-                        continue
+                c_name = lesson["class_name"]
+                t_name = lesson["teacher_name"]
+                subj = lesson["subject_name"]
+                
+                if t_name not in teacher_schedule: teacher_schedule[t_name] = set()
+                if c_name not in class_schedule: class_schedule[c_name] = set()
+                if c_name not in class_day_subjects: class_day_subjects[c_name] = {}
+                
+                placed = False
+                
+                available_slots = [(d, p) for d in range(len(days)) for p in range(periods)]
+                random.shuffle(available_slots)
+                
+                t_obj = t_objs.get(t_name, {})
+                c_obj = c_objs.get(c_name, {})
+                t_timeoff = t_obj.get("timeoff", [])
+                c_timeoff = c_obj.get("timeoff", [])
+                
+                # Önce aynı gün aynı dersin olmadığı slotları dene
+                best_slots = []
+                fallback_slots = []
+                for (d, p) in available_slots:
+                    if (d, p) in teacher_schedule[t_name] or (d, p) in class_schedule[c_name]: continue
+                    if t_timeoff and d < len(t_timeoff) and p < len(t_timeoff[d]) and t_timeoff[d][p] == 0: continue
+                    if c_timeoff and d < len(c_timeoff) and p < len(c_timeoff[d]) and c_timeoff[d][p] == 0: continue
                     
-                # Eğer buraya geldiyse uygundur
-                teacher_schedule[t_name].add((d, p))
-                class_schedule[c_name].add((d, p))
+                    if subj in class_day_subjects[c_name].get(d, set()):
+                        fallback_slots.append((d, p))
+                    else:
+                        best_slots.append((d, p))
+                        
+                # Best slots preferred
+                chosen_slot = None
+                if best_slots: chosen_slot = best_slots[0]
+                elif fallback_slots: chosen_slot = fallback_slots[0]
                 
-                schedule.append({
-                    "class_name": c_name,
-                    "teacher_name": t_name,
-                    "subject_name": lesson["subject_name"],
-                    "day_idx": d,
-                    "period": p
-                })
-                placed = True
-                break
+                if chosen_slot:
+                    d, p = chosen_slot
+                    teacher_schedule[t_name].add((d, p))
+                    class_schedule[c_name].add((d, p))
+                    if d not in class_day_subjects[c_name]: class_day_subjects[c_name][d] = set()
+                    class_day_subjects[c_name][d].add(subj)
+                    
+                    schedule.append({
+                        "class_name": c_name, "teacher_name": t_name,
+                        "subject_name": subj, "day_idx": d, "period": p
+                    })
+                    placed_count += 1
+            
+            if placed_count > best_placed_count:
+                best_placed_count = placed_count
+                best_schedule = schedule
+                self.progress_updated.emit(placed_count, total)
                 
-            if placed:
-                placed_count += 1
-                if placed_count % 5 == 0:
-                    self.progress_updated.emit(placed_count, total)
-                    self.msleep(10) # UI'ın güncellenmesi için ufak gecikme
-            else:
-                # Kilitlenme yaşandı (Backtracking eklenmeli)
-                # Şimdilik sadece atla
-                pass
+            if best_placed_count == total:
+                break # Tüm dersler yerleşti!
 
-        self.progress_updated.emit(placed_count, total)
-        self.finished_successfully.emit({"schedule": schedule})
+        self.progress_updated.emit(best_placed_count, total)
+        self.finished_successfully.emit({"schedule": best_schedule})
 
     def stop(self):
         self._is_running = False
