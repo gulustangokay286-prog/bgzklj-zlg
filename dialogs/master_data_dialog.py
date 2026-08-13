@@ -32,6 +32,7 @@ class DragDropTableWidget(QTableWidget):
             if selected_rows:
                 start_row = selected_rows[0]
                 self.row_dropped.emit(start_row, drop_row)
+                event.setDropAction(Qt.IgnoreAction)
                 event.accept()
                 return
         super().dropEvent(event)
