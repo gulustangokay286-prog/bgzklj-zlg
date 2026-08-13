@@ -6,7 +6,7 @@ import os
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QLabel,
     QSplitter, QTreeWidget, QTreeWidgetItem, QStatusBar,
-    QMessageBox, QTabWidget, QFrame, QSizePolicy, QMenu, QToolButton, QFileDialog
+    QMessageBox, QTabWidget, QFrame, QSizePolicy, QMenu, QToolButton, QFileDialog, QDialog
 )
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QFont, QIcon, QPixmap, QPainter, QColor, QPen, QLinearGradient, QBrush, QAction
@@ -132,7 +132,10 @@ class MainWindow(QMainWindow):
         self.tt_data = TimetableData()
         user_dir = os.path.join(os.path.expanduser("~"), ".chenki_akademi")
         os.makedirs(user_dir, exist_ok=True)
-        self.db_path = os.path.join(user_dir, "bgz_database.json")
+        self.config_path = os.path.join(user_dir, "app_config.json")
+        self.db_path = self._get_last_db_path()
+        if not self.db_path or not os.path.exists(self.db_path):
+            self.db_path = os.path.join(user_dir, "bgz_database.json")
         
         # Seed from workspace data if user database does not exist yet
         base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -144,7 +147,7 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
                 
-        self.data_store = {"dersler": [], "siniflar": [], "derslikler": [], "ogretmenler": [], "atamalar": []}
+        self.data_store = {"dersler": [], "siniflar": [], "derslikler": [], "ogretmenler": [], "atamalar": [], "settings": {}}
         
         # Eğer giriş yapılmışsa, buluttan o kuruma (uid) ait veriyi çek
         if self.auth_data and self.auth_data.get("uid"):
@@ -655,6 +658,26 @@ class MainWindow(QMainWindow):
             event.accept()
         else:
             event.ignore()
+    def _get_last_db_path(self):
+        import json
+        default_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "program.roz")
+        if os.path.exists(self.config_path):
+            try:
+                with open(self.config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                    return config.get("last_roz_path", default_path)
+            except:
+                pass
+        return default_path
+
+    def _set_last_db_path(self, path):
+        import json
+        self.db_path = path
+        try:
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump({"last_roz_path": path}, f)
+        except:
+            pass
 
     def load_db(self, path=None):
         import json
@@ -706,6 +729,7 @@ class MainWindow(QMainWindow):
         import json
         save_path = path or self.db_path
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        self._set_last_db_path(save_path)
         
         # Sync current grid view to global list
         if hasattr(self, "_grid") and hasattr(self._grid, "view_combo") and hasattr(self._grid, "entity_combo"):
@@ -1042,19 +1066,39 @@ class MainWindow(QMainWindow):
             self._refresh_tree()
 
     def _act_new(self):
+        # Sadece boş bir veri deposu yarat
+        self.data_store = {
+            "dersler": [], "siniflar": [], "derslikler": [], 
+            "ogretmenler": [], "atamalar": [], "settings": {}
+        }
+        
         from dialogs.startup_wizard import StartupWizard
         wizard = StartupWizard(self)
         if wizard.exec():
-            self.load_db()
-            self._refresh_tree()
-            self._grid.clear_grid()
-            self.statusBar().showMessage("Yeni proje sihirbazı tamamlandı.")
+            # Kurum adı ile kaydet
+            kurum_adi = self.data_store.get("kurum", {}).get("isim", "Yeni_Kurum").replace(" ", "_")
+            default_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"{kurum_adi}.roz")
+            
+            path, _ = QFileDialog.getSaveFileName(self, "Yeni Kurum Dosyası Oluştur", default_path, "BGZ Planlama Dosyaları (*.roz)")
+            if path:
+                self.save_db(path)
+                self.load_db(path)
+                self._refresh_tree()
+                self._grid.clear_grid()
+                self.statusBar().showMessage("Yeni kurum oluşturuldu ve açıldı.")
+            else:
+                self.statusBar().showMessage("Kurum oluşturma iptal edildi.")
 
     def _act_open(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Dosya Aç", "", "BGZ Planlama Dosyaları (*.roz);;Tüm Dosyalar (*)")
+        path, _ = QFileDialog.getOpenFileName(self, "Dosya Aç / Kurum Değiştir", "", "BGZ Planlama Dosyaları (*.roz);;Tüm Dosyalar (*)")
         if path:
+            self.data_store = {
+                "dersler": [], "siniflar": [], "derslikler": [], 
+                "ogretmenler": [], "atamalar": [], "settings": {}
+            }
             self.load_db(path)
             self.current_roz_path = path
+            self._set_last_db_path(path)
             self._grid.clear_grid()
             self._refresh_tree()
             self.statusBar().showMessage(f"Açıldı: {path}")

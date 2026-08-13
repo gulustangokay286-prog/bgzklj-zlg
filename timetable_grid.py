@@ -105,16 +105,7 @@ class DraggableLessonCard(QLabel):
             QMenu::separator { height: 1px; background: #DDD; margin: 3px 10px; }
         """)
         
-        act_1 = menu.addAction(make_context_icon("1", "#29B6F6", "#0277BD"), "1 Saat (Tekli)")
-        act_2 = menu.addAction(make_context_icon("2", "#29B6F6", "#0277BD"), "2 Saat (İkili Blok)")
-        act_3 = menu.addAction(make_context_icon("3", "#29B6F6", "#0277BD"), "3 Saat (Üçlü Blok)")
-        act_4 = menu.addAction(make_context_icon("4", "#29B6F6", "#0277BD"), "4 Saat (Dörtlü Blok)")
-        menu.addSeparator()
-        act_2_2 = menu.addAction(make_context_icon("2+2", "#AB47BC", "#7B1FA2"), "2+2 Saat (2 İkili Blok)")
-        act_2_1 = menu.addAction(make_context_icon("2+1", "#AB47BC", "#7B1FA2"), "2+1 Saat (1 İkili + 1 Tekli)")
-        act_2_2_1 = menu.addAction(make_context_icon("2+2+1", "#AB47BC", "#7B1FA2"), "2+2+1 Saat (5 Saat)")
-        act_3_2 = menu.addAction(make_context_icon("3+2", "#AB47BC", "#7B1FA2"), "3+2 Saat (5 Saat)")
-        act_1_1_1 = menu.addAction(make_context_icon("1+1+1", "#AB47BC", "#7B1FA2"), "1+1+1 Saat (3 Tekli)")
+        act_color = menu.addAction(make_context_icon("🎨", "#FF9800", "#F57C00"), "Ders Rengi Değiştir")
         act_custom = menu.addAction(make_context_icon("✏️", "#4CAF50", "#2E7D32"), "Özel Dağılım Yapısı Gir...")
         menu.addSeparator()
         act_del = menu.addAction(make_context_icon("X", "#EF5350", "#C62828"), "Atamayı Sil (Kaldır)")
@@ -128,15 +119,20 @@ class DraggableLessonCard(QLabel):
         data_store = getattr(win, "data_store", None)
         
         selected_type = None
-        if action == act_1: selected_type = "1"
-        elif action == act_2: selected_type = "2"
-        elif action == act_3: selected_type = "3"
-        elif action == act_4: selected_type = "4"
-        elif action == act_2_2: selected_type = "2+2"
-        elif action == act_2_1: selected_type = "2+1"
-        elif action == act_2_2_1: selected_type = "2+2+1"
-        elif action == act_3_2: selected_type = "3+2"
-        elif action == act_1_1_1: selected_type = "1+1+1"
+        if action == act_color:
+            from PySide6.QtWidgets import QColorDialog
+            from PySide6.QtGui import QColor
+            c = QColorDialog.getColor(QColor(self.color), self, "Renk Seç")
+            if c.isValid():
+                new_color = c.name()
+                if self.subject_name and data_store:
+                    for d in data_store.get("dersler", []):
+                        if d.get("ad") == self.subject_name:
+                            d["renk"] = new_color
+                    
+                    if hasattr(win, "save_db"): win.save_db()
+                    if hasattr(win, "_refresh_tree"): win._refresh_tree()
+            return
         elif action == act_custom:
             val, ok = QInputDialog.getText(self, "Özel Ders Dağılımı", "Dağılım biçimi (Örn: 2+3, 1+2+2, 2+2+2):", text=str(self.duration))
             if ok and val.strip():
