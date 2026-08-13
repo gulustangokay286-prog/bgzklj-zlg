@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QTabWidget, QFrame, QSizePolicy, QMenu, QToolButton, QFileDialog, QDialog
 )
 from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QFont, QIcon, QPixmap, QPainter, QColor, QPen, QLinearGradient, QBrush, QAction
+from PySide6.QtGui import QFont, QIcon, QPixmap, QPainter, QColor, QPen, QLinearGradient, QBrush, QAction, QPainterPath
 
 from ribbon_widget import RibbonWidget, make_icon
 from timetable_grid import TimetableGrid
@@ -57,51 +57,69 @@ def get_subject_color(subject_name: str) -> str:
     hash_val = sum(ord(c) * (i + 1) for i, c in enumerate(subject_name.strip()))
     return PASTEL_DISTINCT_COLORS[hash_val % len(PASTEL_DISTINCT_COLORS)]
 
-def make_clean_vector_icon(icon_type: str) -> QIcon:
-    pix = QPixmap(28, 28)
+def make_clean_vector_icon(icon_type: str, is_expanded: bool = True) -> QIcon:
+    pix = QPixmap(48, 28)
     pix.fill(Qt.transparent)
     p = QPainter(pix)
     p.setRenderHint(QPainter.Antialiasing)
     
+    # 1. DRAW LARGE CHEVRON ON THE FAR LEFT (x: 0..14)
+    p.setBrush(QBrush(QColor("#0284C7" if is_expanded else "#64748B")))
+    p.setPen(Qt.NoPen)
+    ch_path = QPainterPath()
+    if is_expanded:
+        ch_path.moveTo(2, 10)
+        ch_path.lineTo(12, 10)
+        ch_path.lineTo(7, 17)
+    else:
+        ch_path.moveTo(4, 7)
+        ch_path.lineTo(11, 12)
+        ch_path.lineTo(4, 17)
+    ch_path.closeSubpath()
+    p.drawPath(ch_path)
+    
+    # 2. DRAW CATEGORY VECTOR ICON ON THE RIGHT (x: 18..46)
+    ox = 18
     if icon_type == "sinif":
         p.setBrush(QBrush(QColor("#0284C7")))
-        p.setPen(Qt.NoPen)
-        p.drawRoundedRect(2, 2, 10, 10, 3, 3)
-        p.drawRoundedRect(16, 2, 10, 10, 3, 3)
-        p.drawRoundedRect(2, 16, 10, 10, 3, 3)
-        p.drawRoundedRect(16, 16, 10, 10, 3, 3)
+        p.drawRoundedRect(ox + 2, 2, 10, 10, 3, 3)
+        p.drawRoundedRect(ox + 15, 2, 10, 10, 3, 3)
+        p.drawRoundedRect(ox + 2, 15, 10, 10, 3, 3)
+        p.drawRoundedRect(ox + 15, 15, 10, 10, 3, 3)
     elif icon_type == "ogretmen":
         p.setBrush(QBrush(QColor("#10B981")))
-        p.setPen(Qt.NoPen)
-        p.drawEllipse(9, 2, 10, 10)
-        from PySide6.QtGui import QPainterPath
+        p.drawEllipse(ox + 9, 2, 10, 10)
         path = QPainterPath()
-        path.moveTo(3, 25)
-        path.cubicTo(3, 15, 25, 15, 25, 25)
-        path.lineTo(25, 26)
-        path.lineTo(3, 26)
+        path.moveTo(ox + 3, 25)
+        path.cubicTo(ox + 3, 15, ox + 25, 15, ox + 25, 25)
+        path.lineTo(ox + 25, 26)
+        path.lineTo(ox + 3, 26)
         path.closeSubpath()
         p.drawPath(path)
     elif icon_type == "ders":
         p.setBrush(QBrush(QColor("#F59E0B")))
-        p.setPen(Qt.NoPen)
-        p.drawRoundedRect(2, 4, 11, 20, 2, 2)
-        p.drawRoundedRect(15, 4, 11, 20, 2, 2)
-        p.setBrush(QBrush(QColor("#D97706")))
-        p.drawRect(12, 4, 4, 20)
+        cap_path = QPainterPath()
+        cap_path.moveTo(ox + 13, 3)
+        cap_path.lineTo(ox + 26, 9)
+        cap_path.lineTo(ox + 13, 15)
+        cap_path.lineTo(ox + 0, 9)
+        cap_path.closeSubpath()
+        p.drawPath(cap_path)
+        base_path = QPainterPath()
+        base_path.moveTo(ox + 5, 12)
+        base_path.lineTo(ox + 5, 18)
+        base_path.cubicTo(ox + 5, 23, ox + 21, 23, ox + 21, 18)
+        base_path.lineTo(ox + 21, 12)
+        p.drawPath(base_path)
     else: # derslik
         p.setBrush(QBrush(QColor("#8B5CF6")))
+        p.drawRoundedRect(ox + 2, 3, 23, 16, 3, 3)
+        p.setPen(QPen(QColor("#7C3AED"), 2))
+        p.drawLine(ox + 6, 19, ox + 3, 26)
+        p.drawLine(ox + 21, 19, ox + 24, 26)
         p.setPen(Qt.NoPen)
-        p.drawRoundedRect(3, 9, 22, 17, 3, 3)
-        from PySide6.QtGui import QPainterPath
-        path = QPainterPath()
-        path.moveTo(14, 2)
-        path.lineTo(2, 9)
-        path.lineTo(26, 9)
-        path.closeSubpath()
-        p.drawPath(path)
-        p.setBrush(QBrush(Qt.white))
-        p.drawRoundedRect(11, 16, 6, 10, 1, 1)
+        p.setBrush(QBrush(QColor("#F3E8FF")))
+        p.drawRoundedRect(ox + 4, 5, 19, 12, 1, 1)
         
     p.end()
     return QIcon(pix)
@@ -392,13 +410,9 @@ class MainWindow(QMainWindow):
         self._tree.itemClicked.connect(self._on_tree_item_clicked)
 
     def _on_tree_item_expanded_collapsed(self, item):
-        t = item.text(0)
-        if item.isExpanded():
-            if t.startswith("▸ "):
-                item.setText(0, "▾ " + t[2:])
-        else:
-            if t.startswith("▾ "):
-                item.setText(0, "▸ " + t[2:])
+        icon_type = item.data(0, Qt.UserRole + 10)
+        if icon_type:
+            item.setIcon(0, make_clean_vector_icon(icon_type, item.isExpanded()))
 
     def _on_tree_item_clicked(self, item, column):
         text = item.text(0)
@@ -641,7 +655,7 @@ class MainWindow(QMainWindow):
         self._tree.setRootIsDecorated(False)
         self._tree.setIndentation(10)
         self._tree.setAnimated(True)
-        self._tree.setIconSize(QSize(22, 22))
+        self._tree.setIconSize(QSize(48, 28))
         self._tree.setSelectionBehavior(QAbstractItemView.SelectRows)
         self._tree.setStyleSheet("""
             QTreeWidget {
@@ -935,35 +949,39 @@ class MainWindow(QMainWindow):
         d_list = self.data_store.get("dersler", [])
         r_list = self.data_store.get("derslikler", [])
         
-        icon_s = make_clean_vector_icon("sinif")
-        icon_t = make_clean_vector_icon("ogretmen")
-        icon_d = make_clean_vector_icon("ders")
-        icon_r = make_clean_vector_icon("derslik")
+        icon_s = make_clean_vector_icon("sinif", True)
+        icon_t = make_clean_vector_icon("ogretmen", True)
+        icon_d = make_clean_vector_icon("ders", True)
+        icon_r = make_clean_vector_icon("derslik", True)
         
-        root_s = QTreeWidgetItem(self._tree, [f"▾  Sınıflar ({len(s_list)})"])
+        root_s = QTreeWidgetItem(self._tree, [f"Sınıflar ({len(s_list)})"])
         root_s.setIcon(0, icon_s)
+        root_s.setData(0, Qt.UserRole + 10, "sinif")
         for c in s_list:
-            item = QTreeWidgetItem(root_s, [f"   {c.get('ad', '')}"])
+            item = QTreeWidgetItem(root_s, [f"{c.get('ad', '')}"])
             item.setData(0, Qt.UserRole, c.get("ad", ""))
             
-        root_t = QTreeWidgetItem(self._tree, [f"▾  Öğretmenler ({len(t_list)})"])
+        root_t = QTreeWidgetItem(self._tree, [f"Öğretmenler ({len(t_list)})"])
         root_t.setIcon(0, icon_t)
+        root_t.setData(0, Qt.UserRole + 10, "ogretmen")
         for t in t_list:
             t_name = t.get("ad", "")
             w_load = workloads.get(t_name, 0)
-            item = QTreeWidgetItem(root_t, [f"   {t_name} ({w_load} Saat)"])
+            item = QTreeWidgetItem(root_t, [f"{t_name} ({w_load} Saat)"])
             item.setData(0, Qt.UserRole, t_name)
             
-        root_d = QTreeWidgetItem(self._tree, [f"▾  Dersler ({len(d_list)})"])
+        root_d = QTreeWidgetItem(self._tree, [f"Dersler ({len(d_list)})"])
         root_d.setIcon(0, icon_d)
+        root_d.setData(0, Qt.UserRole + 10, "ders")
         for d in d_list:
-            item = QTreeWidgetItem(root_d, [f"   {d.get('ad', '')}"])
+            item = QTreeWidgetItem(root_d, [f"{d.get('ad', '')}"])
             item.setData(0, Qt.UserRole, d.get("ad", ""))
             
-        root_r = QTreeWidgetItem(self._tree, [f"▾  Derslikler ({len(r_list)})"])
+        root_r = QTreeWidgetItem(self._tree, [f"Derslikler ({len(r_list)})"])
         root_r.setIcon(0, icon_r)
+        root_r.setData(0, Qt.UserRole + 10, "derslik")
         for r in r_list:
-            item = QTreeWidgetItem(root_r, [f"   {r.get('ad', '')}"])
+            item = QTreeWidgetItem(root_r, [f"{r.get('ad', '')}"])
             item.setData(0, Qt.UserRole, r.get("ad", ""))
         
         self._tree.expandAll()
