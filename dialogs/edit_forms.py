@@ -2,10 +2,10 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QLabel,
     QLineEdit, QComboBox, QCheckBox, QColorDialog, QFrame, QFormLayout, QGridLayout,
-    QScrollArea
+    QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtGui import QFont, QColor, QBrush
 
 PASTEL_DISTINCT_COLORS = [
     "#1E88E5", "#43A047", "#FB8C00", "#8E24AA", "#E53935",
