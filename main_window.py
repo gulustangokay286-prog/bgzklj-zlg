@@ -1146,9 +1146,18 @@ class MainWindow(QMainWindow):
         wiz = PrintWizardDialog(self.data_store, self)
         if wiz.exec() == QDialog.Accepted:
             filters = wiz.get_selected_filters()
-            from dialogs.print_preview import TimetablePrintPreview
             dlg = TimetablePrintPreview(self.data_store, self._grid.get_placed_lessons(), filters, self)
             dlg.exec()
+
+    def _act_close(self):
+        self.data_store = {
+            "dersler": [], "siniflar": [], "derslikler": [], 
+            "ogretmenler": [], "atamalar": [], "settings": {}
+        }
+        if hasattr(self, "_grid"):
+            self._grid.clear_grid()
+        self._refresh_tree()
+        self.statusBar().showMessage("Dosya kapatıldı.")
 
     def _push_undo_state(self):
         import copy
