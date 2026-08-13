@@ -546,8 +546,8 @@ class MainWindow(QMainWindow):
         l_layout.addWidget(header_card)
 
         self._tree = QTreeWidget(left)
-        from PySide6.QtWidgets import QStyleFactory, QAbstractItemView
-        self._tree.setStyle(QStyleFactory.create("Fusion"))
+        from PySide6.QtWidgets import QAbstractItemView
+        self._tree.setMouseTracking(True)
         self._tree.setHeaderHidden(True)
         self._tree.setIndentation(20)
         self._tree.setAnimated(True)
@@ -569,19 +569,22 @@ class MainWindow(QMainWindow):
                 margin-bottom: 4px;
                 color: #1E293B;
                 font-weight: 600;
-                font-size: 15px;
+                font-size: 14px;
                 border: 1px solid transparent;
             }
             QTreeWidget::item:hover {
-                background-color: #F8FAFC;
-                border: 1px solid #CBD5E1;
+                background-color: #E2E8F0;
+                border: 1px solid #94A3B8;
                 color: #0F172A;
             }
             QTreeWidget::item:selected {
-                background-color: #F1F5F9;
-                border: 1px solid #E2E8F0;
-                color: #0284C7;
-                font-weight: 700;
+                background-color: #0284C7;
+                color: #FFFFFF;
+                font-weight: bold;
+            }
+            QTreeWidget::item:selected:hover {
+                background-color: #0369A1;
+                color: #FFFFFF;
             }
             QTreeWidget::branch {
                 background-color: transparent;
@@ -943,23 +946,7 @@ class MainWindow(QMainWindow):
                     "duration": block_dur
                 })
             
-        # 2. Add defined subjects from self.data_store["dersler"] if not already in atamalar
-        defined_subjects = self.data_store.get("dersler", [])
-        assigned_subj_names = {a.get("subject") for a in atamalar}
-        
-        for idx, ders in enumerate(defined_subjects):
-            sname = ders.get("kisa") or ders.get("ad")
-            if sname and (sname not in assigned_subj_names and ders.get("ad") not in assigned_subj_names):
-                unplaced.append({
-                    "id": len(unplaced),
-                    "subject_name": sname,
-                    "color": get_subject_color(sname),
-                    "teacher": "Öğretmen",
-                    "class_name": "",
-                    "duration": 2
-                })
-                
-        # 3. Filter unplaced cards by currently selected class / teacher view if active
+        # 2. Filter unplaced cards by currently selected class / teacher view if active
         if hasattr(self, "_grid") and hasattr(self._grid, "view_combo") and hasattr(self._grid, "entity_combo"):
             view_type = self._grid.view_combo.currentText()
             entity_name = self._grid.entity_combo.currentText()
