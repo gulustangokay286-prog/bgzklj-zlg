@@ -473,8 +473,6 @@ class MasterDataDialog(QDialog):
         stores = ["dersler", "siniflar", "derslikler", "ogretmenler"]
         data_list = self.data_store.get(stores[idx], [])
         if 0 <= start < len(data_list):
-            if dest > start:
-                dest -= 1 # Adjust for shifting elements
             dest = max(0, min(dest, len(data_list) - 1))
             
             # Pop and insert manually in memory
