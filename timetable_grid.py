@@ -31,6 +31,40 @@ def make_context_icon(symbol: str, color1: str, color2: str) -> QIcon:
 
 DAYS = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"]
 
+def get_subject_abbr(subject_name: str) -> str:
+    if not subject_name: return ""
+    s = subject_name.strip()
+    
+    mapping = {
+        "MATEMATİK": "MAT", "FİZİK": "FİZ", "BİYOLOJİ": "BİY", "KİMYA": "KİM",
+        "GEOMETRİ": "GEO", "TARİH": "TAR", "COĞRAFYA": "COĞ", "TÜRKÇE": "TÜR",
+        "EDEBİYAT": "EDB", "TÜRK DİLİ VE EDEBİYATI": "TDE", "GÖRSEL SANATLAR": "GÖR",
+        "İNGİLİZCE": "İNG", "ALMANCA": "ALM", "FRANSIZCA": "FRA", "DİN": "DİN",
+        "DİN KÜLTÜRÜ": "DİN", "FELSEFE": "FEL", "BEDEN": "BDN", "BEDEN EĞİTİMİ": "BDN",
+        "MÜZİK": "MÜZ", "REHBERLİK": "REH", "SAĞLIK": "SAĞ", "ASTRONOMİ": "AST"
+    }
+    
+    import re
+    m = re.search(r'^(.*?)\s*(\d+)$', s)
+    num_suffix = ""
+    if m:
+        base_title = m.group(1).strip().upper()
+        num_suffix = m.group(2)
+    else:
+        base_title = s.upper()
+        
+    if base_title in mapping:
+        return f"{mapping[base_title]}{num_suffix}"
+        
+    for k, v in mapping.items():
+        if base_title.startswith(k):
+            return f"{v}{num_suffix}"
+            
+    if len(base_title) >= 3:
+        return f"{base_title[:3]}{num_suffix}"
+    return f"{base_title}{num_suffix}"
+
+
 class DraggableLessonCard(QLabel):
     def __init__(self, lesson_id: int, subject_name: str, color: str, duration: int = 1, teacher: str = "", class_name: str = "", parent=None):
         super().__init__(parent)
@@ -41,15 +75,24 @@ class DraggableLessonCard(QLabel):
         self.teacher = teacher
         self.class_name = class_name
         
-        display_text = f"{subject_name}"
+        abbr = get_subject_abbr(subject_name)
+        t_short = ""
         if teacher and teacher != "Öğretmen":
-            display_text += f"\n{teacher}"
+            parts = teacher.strip().split()
+            if len(parts) >= 2:
+                t_short = f"{parts[0]} {parts[-1][0]}."
+            else:
+                t_short = parts[0]
+                
+        display_text = f"<b>{abbr}</b>"
+        if t_short:
+            display_text += f"<br><span style='font-weight:normal; font-size:10px; opacity:0.9;'>{t_short}</span>"
         if duration > 1:
-            display_text += f" ({duration} Saat)"
+            display_text += f" <span style='background:rgba(255,255,255,0.35); border-radius:3px; padding:1px 4px; font-size:9px; font-weight:bold;'>{duration}h</span>"
             
         self.setText(display_text)
         self.setAlignment(Qt.AlignCenter)
-        card_width = max(90, 80 + (duration - 1)*35)
+        card_width = max(85, 75 + (duration - 1)*30)
         self.setFixedSize(card_width, 54)
         
         c = QColor(color)
@@ -60,10 +103,10 @@ class DraggableLessonCard(QLabel):
             QLabel {{
                 background-color: {color};
                 color: {text_color};
-                font-weight: bold;
-                border: 1px solid rgba(0, 0, 0, 0.25);
-                border-radius: 6px;
+                font-family: system-ui, -apple-system, sans-serif;
                 font-size: 11px;
+                border: 1px solid rgba(0, 0, 0, 0.18);
+                border-radius: 8px;
                 padding: 4px;
             }}
             QLabel:hover {{
@@ -192,16 +235,43 @@ class UnplacedLessonsDock(QFrame):
         super().__init__(parent)
         self.setFixedHeight(85)
         self.setAcceptDrops(True)
-        self.setStyleSheet("QFrame { background: #F8FAFC; border-top: 2px solid #CBD5E1; }")
+        self.setStyleSheet("QFrame { background: #F8FAFC; border-top: 2px solid #E2E8F0; }")
         
         self.layout = QHBoxLayout(self)
-        self.layout.setContentsMargins(10, 8, 10, 8)
+        self.layout.setContentsMargins(12, 6, 12, 6)
         self.layout.setSpacing(10)
         
         # Scroll area for unplaced lessons
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        scroll.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background: transparent;
+            }
+            QScrollBar:horizontal {
+                height: 6px;
+                background: #E2E8F0;
+                border-radius: 3px;
+            }
+            QScrollBar::handle:horizontal {
+                background: #94A3B8;
+                border-radius: 3px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background: #64748B;
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                width: 0px;
+                background: none;
+            }
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+                background: none;
+            }
+            QScrollBar:vertical {
+                width: 0px;
+            }
+        """)
         
         self.container = QWidget()
         self.container.setStyleSheet("background: transparent;")

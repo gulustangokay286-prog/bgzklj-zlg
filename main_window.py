@@ -57,6 +57,41 @@ def get_subject_color(subject_name: str) -> str:
     hash_val = sum(ord(c) * (i + 1) for i, c in enumerate(subject_name.strip()))
     return PASTEL_DISTINCT_COLORS[hash_val % len(PASTEL_DISTINCT_COLORS)]
 
+def make_3d_category_icon(icon_type: str) -> QIcon:
+    pix = QPixmap(36, 36)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    
+    if icon_type == "sinif":
+        c1, c2 = "#0EA5E9", "#0284C7"
+        label_text = "🏫"
+    elif icon_type == "ogretmen":
+        c1, c2 = "#10B981", "#059669"
+        label_text = "👨‍🏫"
+    elif icon_type == "ders":
+        c1, c2 = "#F59E0B", "#D97706"
+        label_text = "📚"
+    else: # derslik
+        c1, c2 = "#8B5CF6", "#6D28D9"
+        label_text = "🏛️"
+        
+    p.setBrush(QBrush(QColor(0, 0, 0, 35)))
+    p.setPen(Qt.NoPen)
+    p.drawRoundedRect(3, 5, 30, 30, 8, 8)
+    
+    grad = QLinearGradient(0, 0, 0, 36)
+    grad.setColorAt(0, QColor(c1))
+    grad.setColorAt(1, QColor(c2))
+    p.setBrush(QBrush(grad))
+    p.setPen(QPen(QColor(255, 255, 255, 140), 1.5))
+    p.drawRoundedRect(2, 2, 32, 32, 8, 8)
+    
+    p.setFont(QFont("Segoe UI Emoji", 15))
+    p.drawText(2, 2, 32, 32, Qt.AlignCenter, label_text)
+    p.end()
+    return QIcon(pix)
+
 def make_menu_icon(symbol: str, color1: str, color2: str) -> QIcon:
     pix = QPixmap(32, 32)
     pix.fill(Qt.transparent)
@@ -574,7 +609,6 @@ class MainWindow(QMainWindow):
         lbl_sub.setStyleSheet("color: #0F172A; font-size: 14px; font-weight: 700; border: none;")
         
         h_lay.addWidget(lbl_title)
-        h_lay.addWidget(lbl_sub)
         l_layout.addWidget(header_card)
 
         self._tree = QTreeWidget(left)
@@ -583,7 +617,7 @@ class MainWindow(QMainWindow):
         self._tree.setHeaderHidden(True)
         self._tree.setIndentation(20)
         self._tree.setAnimated(True)
-        self._tree.setIconSize(QSize(24, 24))
+        self._tree.setIconSize(QSize(32, 32))
         self._tree.setSelectionBehavior(QAbstractItemView.SelectItems)
         self._tree.setStyleSheet("""
             QTreeWidget {
@@ -596,33 +630,43 @@ class MainWindow(QMainWindow):
                 outline: none;
             }
             QTreeWidget::item {
-                padding: 10px 12px;
+                padding: 8px 12px;
                 border-radius: 8px;
                 margin-bottom: 4px;
                 color: #1E293B;
                 font-weight: 600;
                 font-size: 14px;
-                border: 1px solid transparent;
+                border: 2px solid transparent;
             }
             QTreeWidget::item:hover {
-                background-color: #E2E8F0;
-                border: 1px solid #94A3B8;
-                color: #0F172A;
+                background-color: #F1F5F9;
+                border: 2px solid #38BDF8;
+                color: #0284C7;
             }
             QTreeWidget::item:selected {
-                background-color: #0284C7;
-                color: #FFFFFF;
+                background-color: #F0F9FF;
+                border: 2px solid #0284C7;
+                color: #0369A1;
                 font-weight: bold;
             }
             QTreeWidget::item:selected:hover {
-                background-color: #0369A1;
-                color: #FFFFFF;
+                background-color: #E0F2FE;
+                border: 2px solid #0284C7;
+                color: #0369A1;
             }
             QTreeWidget::branch {
-                background-color: transparent;
+                background: transparent;
             }
             QTreeWidget::branch:selected {
-                background-color: transparent;
+                background: transparent;
+            }
+            QTreeWidget::branch:has-children:closed:has-siblings,
+            QTreeWidget::branch:has-children:closed:no-siblings {
+                image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748B' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='9 18 15 12 9 6'></polyline></svg>");
+            }
+            QTreeWidget::branch:has-children:open:has-siblings,
+            QTreeWidget::branch:has-children:open:no-siblings {
+                image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%230284C7' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>");
             }
         """)
         l_layout.addWidget(self._tree)
@@ -879,13 +923,10 @@ class MainWindow(QMainWindow):
         d_list = self.data_store.get("dersler", [])
         r_list = self.data_store.get("derslikler", [])
         
-        from dialogs.school_info import draw_placeholder_icon
-        from PySide6.QtGui import QIcon
-        
-        icon_s = QIcon(draw_placeholder_icon("grid"))
-        icon_t = QIcon(draw_placeholder_icon("list"))
-        icon_d = QIcon(draw_placeholder_icon("list"))
-        icon_r = QIcon(draw_placeholder_icon("bank"))
+        icon_s = make_3d_category_icon("sinif")
+        icon_t = make_3d_category_icon("ogretmen")
+        icon_d = make_3d_category_icon("ders")
+        icon_r = make_3d_category_icon("derslik")
         
         root_s = QTreeWidgetItem(self._tree, [f" Sınıflar ({len(s_list)})"])
         root_s.setIcon(0, icon_s)
