@@ -207,17 +207,21 @@ class MasterDataDialog(QDialog):
         for data in self.data_store.get("dersler", []):
             toplam = str(totals["dersler"].get(data.get("ad", ""), 0))
             self._add_row(self.table_ders, [data.get("ad",""), data.get("kisa",""), toplam, "Mevcut", "İdeal", "8"])
+        settings = self.data_store.get("settings", {})
+        days = settings.get("days", ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"])
+        periods = int(settings.get("periods", 8))
+        total_default = len(days) * periods
+        
         for data in self.data_store.get("siniflar", []):
             toplam = str(totals["siniflar"].get(data.get("ad", ""), 0))
             timeoff = data.get("timeoff", [])
             if not timeoff:
-                zaman_str = "Uygun"
+                zaman_str = f"{total_default} Ders"
             else:
-                total_cells = sum(len(r) for r in timeoff)
                 open_cells = sum(1 for r in timeoff for c in r if c > 0)
-                zaman_str = f"Açık: {open_cells}/{total_cells}" if open_cells < total_cells else "Uygun"
+                zaman_str = f"{open_cells} Ders"
                 
-            self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), toplam, zaman_str, data.get("ders_bitimi","8"), data.get("sinif_ogretmeni",""), data.get("kapasite","30")])
+            self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), toplam, zaman_str, data.get("ders_bitimi","15:30"), data.get("sinif_ogretmeni",""), data.get("kapasite","30")])
         for data in self.data_store.get("derslikler", []):
             self._add_row(self.table_derslik, [data.get("ad",""), data.get("kisa",""), "0", "Mevcut", data.get("kapasite",""), "Merkez"])
         for data in self.data_store.get("ogretmenler", []):
@@ -264,7 +268,7 @@ class MasterDataDialog(QDialog):
         self.table_ders = self._create_table(["Ders Adı", "Kısa Kodu", "Toplam", "Zaman Tablosu", "Dağılım", "Max. Günlük"])
         self.stack.addWidget(self._wrap_table("Tanımlı Dersler", self.table_ders))
 
-        self.table_sinif = self._create_table(["Sınıf Adı", "Kısa Kodu", "Toplam", "Zaman Tablosu", "Ders Bitimi", "Sınıf Öğretmeni", "Öğrenci"])
+        self.table_sinif = self._create_table(["Sınıf Adı", "Kısa Kodu", "Toplam", "Zaman Tablosu", "Ders Bitim Saati", "Sınıf Öğretmeni", "Öğrenci"])
         self.stack.addWidget(self._wrap_table("Tanımlı Sınıflar", self.table_sinif))
 
         self.table_derslik = self._create_table(["Derslik Adı", "Kısa Kodu", "Toplam", "Zaman Tablosu", "Kapasite", "Bina"])
@@ -440,15 +444,17 @@ class MasterDataDialog(QDialog):
                 data = d.get_data()
                 self.data_store["siniflar"].append(data)
                 
+                settings = self.data_store.get("settings", {})
+                total_default = len(settings.get("days", ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"])) * int(settings.get("periods", 8))
+                
                 timeoff = data.get("timeoff", [])
                 if not timeoff:
-                    zaman_str = "Uygun"
+                    zaman_str = f"{total_default} Ders"
                 else:
-                    total_cells = sum(len(r) for r in timeoff)
                     open_cells = sum(1 for r in timeoff for c in r if c > 0)
-                    zaman_str = f"Açık: {open_cells}/{total_cells}" if open_cells < total_cells else "Uygun"
+                    zaman_str = f"{open_cells} Ders"
                     
-                self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), "0", zaman_str, data.get("ders_bitimi","8"), data.get("sinif_ogretmeni",""), data.get("kapasite","30")])
+                self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), "0", zaman_str, data.get("ders_bitimi","15:30"), data.get("sinif_ogretmeni",""), data.get("kapasite","30")])
         elif idx == 2:  # Derslikler
             d = DerslikEditDialog(self)
             if d.exec():
@@ -504,18 +510,19 @@ class MasterDataDialog(QDialog):
                         toplam = str(totals["dersler"].get(data.get("ad", ""), 0))
                         self._add_row(self.table_ders, [data.get("ad",""), data.get("kisa",""), toplam, "Mevcut", "İdeal", "8"])
                 elif idx == 1:
+                    settings = self.data_store.get("settings", {})
+                    total_default = len(settings.get("days", ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"])) * int(settings.get("periods", 8))
                     for data in self.data_store.get("siniflar", []):
                         toplam = str(totals["siniflar"].get(data.get("ad", ""), 0))
                         
                         timeoff = data.get("timeoff", [])
                         if not timeoff:
-                            zaman_str = "Uygun"
+                            zaman_str = f"{total_default} Ders"
                         else:
-                            total_cells = sum(len(r) for r in timeoff)
                             open_cells = sum(1 for r in timeoff for c in r if c > 0)
-                            zaman_str = f"Açık: {open_cells}/{total_cells}" if open_cells < total_cells else "Uygun"
+                            zaman_str = f"{open_cells} Ders"
                             
-                        self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), toplam, zaman_str, data.get("ders_bitimi","8"), data.get("sinif_ogretmeni",""), data.get("kapasite","30")])
+                        self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), toplam, zaman_str, data.get("ders_bitimi","15:30"), data.get("sinif_ogretmeni",""), data.get("kapasite","30")])
                 elif idx == 2:
                     for data in self.data_store.get("derslikler", []):
                         self._add_row(self.table_derslik, [data.get("ad",""), data.get("kisa",""), "0", "Mevcut", data.get("kapasite",""), "Merkez"])

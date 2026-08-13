@@ -645,8 +645,8 @@ class SinifEditDialog(BaseEditForm):
         self.w_num = QLineEdit(str(self.existing_data.get("kapasite", "30")))
         form2.addRow("Öğrenci Sayısı (Kapasite):", self.w_num)
         
-        self.w_max_gunluk = QLineEdit(str(self.existing_data.get("ders_bitimi", "8")))
-        form2.addRow("Ders Bitimi (Max Günlük):", self.w_max_gunluk)
+        self.w_max_gunluk = QLineEdit(str(self.existing_data.get("ders_bitimi", "15:30")))
+        form2.addRow("Ders Bitim Saati:", self.w_max_gunluk)
         self.main_layout.addLayout(form2)
         
         self._add_bottom_buttons()
