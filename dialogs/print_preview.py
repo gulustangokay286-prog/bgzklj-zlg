@@ -240,37 +240,61 @@ class TimetablePrintPreview(QDialog):
     def _get_pseudo_placements(self, target_name, is_teacher):
         """Fetches actual grid cell placements for target class or teacher, indexed as (day_idx, period_idx)."""
         res = {}
-        raw_placed = self.placed_lessons or self.data_store.get("grid_placements", {})
+        raw_placed = self.placed_lessons or self.data_store.get("grid_placements", [])
         
-        for key, data in raw_placed.items():
-            if isinstance(key, str) and "," in key:
-                parts = key.split(",")
-                r, c = int(parts[0]), int(parts[1])
-            elif isinstance(key, (tuple, list)) and len(key) >= 2:
-                r, c = int(key[0]), int(key[1])
-            else:
-                continue
+        if isinstance(raw_placed, list):
+            for data in raw_placed:
+                if not isinstance(data, dict):
+                    continue
+                t_name = data.get("teacher") or data.get("teacher_name", "")
+                c_name = data.get("class") or data.get("class_name", "")
+                s_name = data.get("subject") or data.get("subject_name", "")
+                scolor = data.get("color", "")
+                day_idx = int(data.get("day", 0))
+                period_idx = int(data.get("period", 0))
+                dur = int(data.get("duration", 1))
                 
-            # Key format in grid_placements / _placed_lessons: r=period_idx (0..7), c=day_idx (0..4)
-            period_idx = r
-            day_idx = c
-            
-            t_name = data.get("teacher") or data.get("teacher_name", "")
-            c_name = data.get("class") or data.get("class_name", "")
-            s_name = data.get("subject") or data.get("subject_name", "")
-            scolor = data.get("color", "")
-            dur = int(data.get("duration", 1))
-            
-            match = (t_name == target_name) if is_teacher else (c_name == target_name or not c_name)
-            if match:
-                for d_off in range(dur):
-                    p_curr = period_idx + d_off
-                    if p_curr < 8:
-                        res[(day_idx, p_curr)] = {
-                            "subject_name": s_name,
-                            "teacher_name": c_name if is_teacher else t_name,
-                            "color": scolor
-                        }
+                match = (t_name == target_name) if is_teacher else (c_name == target_name or not c_name)
+                if match:
+                    for d_off in range(dur):
+                        p_curr = period_idx + d_off
+                        if p_curr < 8:
+                            res[(day_idx, p_curr)] = {
+                                "subject_name": s_name,
+                                "teacher_name": c_name if is_teacher else t_name,
+                                "color": scolor
+                            }
+        elif isinstance(raw_placed, dict):
+            for key, data in raw_placed.items():
+                if not isinstance(data, dict):
+                    continue
+                if isinstance(key, str) and "," in key:
+                    parts = key.split(",")
+                    r, c = int(parts[0]), int(parts[1])
+                elif isinstance(key, (tuple, list)) and len(key) >= 2:
+                    r, c = int(key[0]), int(key[1])
+                else:
+                    continue
+                    
+                period_idx = r
+                day_idx = c
+                
+                t_name = data.get("teacher") or data.get("teacher_name", "")
+                c_name = data.get("class") or data.get("class_name", "")
+                s_name = data.get("subject") or data.get("subject_name", "")
+                scolor = data.get("color", "")
+                dur = int(data.get("duration", 1))
+                
+                match = (t_name == target_name) if is_teacher else (c_name == target_name or not c_name)
+                if match:
+                    for d_off in range(dur):
+                        p_curr = period_idx + d_off
+                        if p_curr < 8:
+                            res[(day_idx, p_curr)] = {
+                                "subject_name": s_name,
+                                "teacher_name": c_name if is_teacher else t_name,
+                                "color": scolor
+                            }
                         
         if res:
             return res

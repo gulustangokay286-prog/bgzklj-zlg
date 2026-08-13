@@ -869,12 +869,7 @@ class SinifEditDialog(BaseEditForm):
         c_name = self.w_ad.text().strip()
         p = self.parent()
         data_store = getattr(p, "data_store", {}) if p else {}
-        d = LessonAssignmentDialog(data_store=data_store, parent=p or self)
-        c_idx = d.cb_sinif.findText(c_name)
-        if c_idx >= 0:
-            d.cb_sinif.setCurrentIndex(c_idx)
-        else:
-            d.cb_sinif.setCurrentText(c_name)
+        d = ClassComprehensiveAssignmentDialog(class_name=c_name, data_store=data_store, parent=p or self)
         if d.exec():
             if p and hasattr(p, "save_db"): p.save_db()
 
@@ -1101,3 +1096,147 @@ class DerslikEditDialog(BaseEditForm):
             "renk": self._color, "kapasite": self.w_cap.text(),
             "numara": self.w_num.text()
         }
+
+
+class ClassComprehensiveAssignmentDialog(QDialog):
+    """
+    Sınıfa Bütünsel Ders ve Öğretmen Atama Paneli
+    (Örn: 9A Sınıfının Tüm Derslerini & Öğretmenlerini Tek Ekrandan Yönetme)
+    """
+    def __init__(self, class_name="", data_store=None, parent=None):
+        super().__init__(parent)
+        self.class_name = class_name
+        self.data_store = data_store or {}
+        self.setWindowTitle(f"🎓 {self.class_name} Sınıfı - Ders ve Öğretmen Atama Paneli")
+        self.setFixedSize(880, 640)
+        self.setStyleSheet("""
+            QDialog { background-color: #F4F6F9; font-family: system-ui, -apple-system, sans-serif; font-size: 13px; }
+            QLabel { color: #333; font-size: 13px; font-weight: bold; }
+            QTableWidget { border: 1px solid #D0D7DE; background: #FFFFFF; gridline-color: #E0E0E0; font-size: 12px; }
+            QHeaderView::section { background-color: #F0F4F8; border: 1px solid #D0D7DE; padding: 6px; font-weight: bold; font-size: 12px; color: #0078D7; }
+            QPushButton { min-height: 28px; padding: 4px 12px; border: 1px solid #CCCCCC; border-radius: 4px; background: #F8F9FA; font-size: 12px; }
+            QPushButton:hover { background: #EAEAEA; }
+        """)
+        self._build_ui()
+        self._load_data()
+
+    def _build_ui(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 16, 16, 16)
+        lay.setSpacing(12)
+        
+        # Header Banner
+        top_frame = QFrame()
+        top_frame.setStyleSheet("QFrame { background: #FFFFFF; border: 1px solid #0078D7; border-radius: 6px; padding: 6px; }")
+        top_lay = QHBoxLayout(top_frame)
+        
+        lbl_title = QLabel(f"🎓 {self.class_name} Sınıfı - Tüm Dersler ve Öğretmen Tanımlama Tablosu")
+        lbl_title.setStyleSheet("font-size: 15px; color: #0078D7; font-weight: bold;")
+        top_lay.addWidget(lbl_title)
+        top_lay.addStretch(1)
+        
+        btn_print = QPushButton("🖨️ Bu Sınıfın Çizelgesini ve Öğretmenlerini Yazdır")
+        btn_print.setStyleSheet("background: #27AE60; color: white; font-weight: bold; padding: 6px 14px; border-radius: 4px;")
+        btn_print.clicked.connect(self._print_class_timetable)
+        top_lay.addWidget(btn_print)
+        
+        lay.addWidget(top_frame)
+        
+        # Table of All Subjects
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["Ders Adı", "Atanan Öğretmen(ler)", "Haftalık Saat / Tip", "İşlem"])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
+        self.table.setColumnWidth(0, 180)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.table.setColumnWidth(2, 140)
+        self.table.setColumnWidth(3, 180)
+        self.table.setAlternatingRowColors(True)
+        lay.addWidget(self.table, 1)
+
+        # Bottom Actions
+        bot_lay = QHBoxLayout()
+        self.lbl_summary = QLabel("Toplam Atanan Saat: 0 Ders")
+        self.lbl_summary.setStyleSheet("color: #27AE60; font-size: 13px; font-weight: bold;")
+        bot_lay.addWidget(self.lbl_summary)
+        bot_lay.addStretch(1)
+        
+        btn_close = QPushButton("Kapat ve Kaydet")
+        btn_close.setStyleSheet("background: #0078D7; color: white; font-weight: bold; padding: 6px 20px; font-size: 13px;")
+        btn_close.clicked.connect(self.accept)
+        bot_lay.addWidget(btn_close)
+        
+        lay.addLayout(bot_lay)
+
+    def _load_data(self):
+        self.table.setRowCount(0)
+        subjects = [d.get("ad", "") for d in self.data_store.get("dersler", []) if d.get("ad")]
+        atamalar = self.data_store.get("atamalar", [])
+        
+        # Class assignments map: subject_name -> list of assignment dicts
+        class_atamalar = {}
+        for a in atamalar:
+            if a.get("class") == self.class_name:
+                s = a.get("subject", "")
+                if s:
+                    class_atamalar.setdefault(s, []).append(a)
+                    
+        total_class_hours = 0
+
+        for subj in sorted(subjects):
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            
+            # 0. Subject Name
+            item_subj = QTableWidgetItem(subj)
+            item_subj.setFlags(item_subj.flags() ^ Qt.ItemIsEditable)
+            item_subj.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+            self.table.setItem(row, 0, item_subj)
+            
+            # 1. Teachers
+            assigned_list = class_atamalar.get(subj, [])
+            teachers = [a.get("teacher", "") for a in assigned_list if a.get("teacher")]
+            teachers_str = ", ".join(teachers) if teachers else "❌ Atama Yok"
+            
+            item_teachers = QTableWidgetItem(teachers_str)
+            item_teachers.setFlags(item_teachers.flags() ^ Qt.ItemIsEditable)
+            if not teachers:
+                item_teachers.setForeground(QBrush(QColor("#999999")))
+            else:
+                item_teachers.setForeground(QBrush(QColor("#111111")))
+            self.table.setItem(row, 1, item_teachers)
+            
+            # 2. Hours / Type
+            dur_sum = sum(a.get("duration", 1) for a in assigned_list)
+            total_class_hours += dur_sum
+            dur_str = f"{dur_sum} Saat" if dur_sum > 0 else "—"
+            item_dur = QTableWidgetItem(dur_str)
+            item_dur.setTextAlignment(Qt.AlignCenter)
+            item_dur.setFlags(item_dur.flags() ^ Qt.ItemIsEditable)
+            self.table.setItem(row, 2, item_dur)
+            
+            # 3. Action Button
+            btn_edit = QPushButton("✏️ Öğretmen Seç & Saat")
+            btn_edit.setStyleSheet("background: #EBF3FA; color: #0078D7; border: 1px solid #B0D4F1; font-weight: bold;")
+            btn_edit.clicked.connect(lambda chk=False, s=subj: self._edit_subject_assignment(s))
+            self.table.setCellWidget(row, 3, btn_edit)
+
+        self.lbl_summary.setText(f"Toplam Atanan Ders Saati: {total_class_hours} Saat")
+
+    def _edit_subject_assignment(self, subject_name):
+        d = SubjectTeacherAssignmentDialog(subject_name=subject_name, data_store=self.data_store, parent=self)
+        
+        # Pre-select class
+        c_chk = [chk for chk in d.class_chks if chk.text() == self.class_name]
+        if c_chk:
+            c_chk[0].setChecked(True)
+            
+        if d.exec():
+            p = self.parent()
+            if p and hasattr(p, "save_db"): p.save_db()
+            self._load_data()
+
+    def _print_class_timetable(self):
+        from dialogs.print_preview import TimetablePrintPreview
+        filters = {"entity_type": "class", "classes": [self.class_name], "selected_items": [self.class_name]}
+        dlg = TimetablePrintPreview(data_store=self.data_store, filters=filters, parent=self)
+        dlg.exec()
