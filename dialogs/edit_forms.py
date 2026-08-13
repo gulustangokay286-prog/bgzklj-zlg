@@ -2,7 +2,8 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QLabel,
     QLineEdit, QComboBox, QCheckBox, QColorDialog, QFrame, QFormLayout, QGridLayout,
-    QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView
+    QLineEdit, QComboBox, QCheckBox, QColorDialog, QFrame, QFormLayout, QGridLayout,
+    QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView, QListWidget, QListWidgetItem
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QColor, QBrush
@@ -672,47 +673,31 @@ class SubjectTeacherAssignmentDialog(QDialog):
         lbl.setStyleSheet("font-size: 14px; color: #0078D7;")
         lay.addWidget(lbl)
         
-        # 1. Teachers Selection (Checkboxes)
-        f_t = QFrame()
-        f_t.setStyleSheet("QFrame { background: #FFFFFF; border: 1px solid #D0D7DE; border-radius: 6px; }")
-        l_t = QVBoxLayout(f_t)
-        l_t.addWidget(QLabel("Atanacak Öğretmenler (Çoklu Seçim):"))
-        
-        scroll_t = QScrollArea()
-        scroll_t.setWidgetResizable(True)
-        w_t = QWidget()
-        v_t = QVBoxLayout(w_t)
-        self.teacher_chks = []
+        # 1. Teachers Selection (ListWidget)
+        lay.addWidget(QLabel("Atanacak Öğretmenler (Çoklu Seçim):"))
+        self.list_teachers = QListWidget()
+        self.list_teachers.setStyleSheet("QListWidget { background: #FFFFFF; border: 1px solid #D0D7DE; border-radius: 4px; }")
         for t in self.data_store.get("ogretmenler", []):
             t_name = t.get("ad")
             if t_name:
-                chk = QCheckBox(t_name)
-                v_t.addWidget(chk)
-                self.teacher_chks.append(chk)
-        scroll_t.setWidget(w_t)
-        l_t.addWidget(scroll_t)
-        lay.addWidget(f_t)
+                item = QListWidgetItem(t_name)
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Unchecked)
+                self.list_teachers.addItem(item)
+        lay.addWidget(self.list_teachers)
 
-        # 2. Classes Selection (Checkboxes)
-        f_c = QFrame()
-        f_c.setStyleSheet("QFrame { background: #FFFFFF; border: 1px solid #D0D7DE; border-radius: 6px; }")
-        l_c = QVBoxLayout(f_c)
-        l_c.addWidget(QLabel("Atanacak Sınıflar (Çoklu Seçim):"))
-        
-        scroll_c = QScrollArea()
-        scroll_c.setWidgetResizable(True)
-        w_c = QWidget()
-        v_c = QVBoxLayout(w_c)
-        self.class_chks = []
+        # 2. Classes Selection (ListWidget)
+        lay.addWidget(QLabel("Atanacak Sınıflar (Çoklu Seçim):"))
+        self.list_classes = QListWidget()
+        self.list_classes.setStyleSheet("QListWidget { background: #FFFFFF; border: 1px solid #D0D7DE; border-radius: 4px; }")
         for c in self.data_store.get("siniflar", []):
             c_name = c.get("ad")
             if c_name:
-                chk = QCheckBox(c_name)
-                v_c.addWidget(chk)
-                self.class_chks.append(chk)
-        scroll_c.setWidget(w_c)
-        l_c.addWidget(scroll_c)
-        lay.addWidget(f_c)
+                item = QListWidgetItem(c_name)
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Unchecked)
+                self.list_classes.addItem(item)
+        lay.addWidget(self.list_classes)
         
         # 3. Hours Selection
         h_lay = QHBoxLayout()
@@ -722,6 +707,27 @@ class SubjectTeacherAssignmentDialog(QDialog):
         self.cb_hafta.setCurrentText("2")
         h_lay.addWidget(self.cb_hafta)
         lay.addLayout(h_lay)
+
+        # Pre-check existing teachers & classes for this subject
+        existing_atamalar = [a for a in self.data_store.get("atamalar", []) if a.get("subject") == self.subject_name]
+        assigned_teachers = {format_tr_name(a.get("teacher", "")) for a in existing_atamalar}
+        assigned_classes = {a.get("class", "") for a in existing_atamalar}
+        
+        for i in range(self.list_teachers.count()):
+            item = self.list_teachers.item(i)
+            if format_tr_name(item.text()) in assigned_teachers:
+                item.setCheckState(Qt.Checked)
+                
+        for i in range(self.list_classes.count()):
+            item = self.list_classes.item(i)
+            if item.text() in assigned_classes:
+                item.setCheckState(Qt.Checked)
+                
+        if existing_atamalar:
+            dur_val = str(existing_atamalar[0].get("duration", 2))
+            idx = self.cb_hafta.findText(dur_val)
+            if idx >= 0:
+                self.cb_hafta.setCurrentIndex(idx)
 
         # Bottom Buttons
         bot = QHBoxLayout()
@@ -737,8 +743,8 @@ class SubjectTeacherAssignmentDialog(QDialog):
         lay.addLayout(bot)
 
     def _save_assignments(self):
-        sel_teachers = [chk.text() for chk in self.teacher_chks if chk.isChecked()]
-        sel_classes = [chk.text() for chk in self.class_chks if chk.isChecked()]
+        sel_teachers = [self.list_teachers.item(i).text() for i in range(self.list_teachers.count()) if self.list_teachers.item(i).checkState() == Qt.Checked]
+        sel_classes = [self.list_classes.item(i).text() for i in range(self.list_classes.count()) if self.list_classes.item(i).checkState() == Qt.Checked]
         
         atamalar = self.data_store.setdefault("atamalar", [])
         
@@ -1242,6 +1248,6 @@ class ClassComprehensiveAssignmentDialog(QDialog):
 
     def _print_class_timetable(self):
         from dialogs.print_preview import TimetablePrintPreview
-        filters = {"entity_type": "class", "classes": [self.class_name], "selected_items": [self.class_name]}
+        filters = {"entity_type": "class_list", "classes": [self.class_name], "selected_items": [self.class_name]}
         dlg = TimetablePrintPreview(data_store=self.data_store, filters=filters, parent=self)
         dlg.exec()

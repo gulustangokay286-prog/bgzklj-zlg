@@ -64,6 +64,8 @@ class TimetablePrintPreview(QDialog):
         
         if self.filters.get("entity_type") == "class":
             self.mode_combo.setCurrentIndex(3)
+        elif self.filters.get("entity_type") == "class_list":
+            self.mode_combo.setCurrentIndex(2)
         elif self.filters.get("entity_type") == "teacher":
             self.mode_combo.setCurrentIndex(4)
             
