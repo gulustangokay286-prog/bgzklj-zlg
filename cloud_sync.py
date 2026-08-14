@@ -24,6 +24,10 @@ class CloudSyncWorker(QThread):
         self._is_running = True
         self._queue = deque()
         self._mutex = QMutex()
+        self.auth_data = None
+        
+    def set_auth(self, auth_data):
+        self.auth_data = auth_data
         
     def add_to_queue(self, collection: str, document_id: str, data: dict):
         """Yerel SQLite'da yapılan değişiklikleri bulut kuyruğına ekler"""
@@ -48,13 +52,15 @@ class CloudSyncWorker(QThread):
                 doc_id = item_to_sync["document_id"]
                 data = item_to_sync["data"]
                 
-                # Use PUT to overwrite the specific node in RTDB. Remove API key, we use rules.
                 url = f"{RTDB_URL}/{col}/{doc_id}.json"
+                params = {}
+                if self.auth_data and "idToken" in self.auth_data:
+                    params["auth"] = self.auth_data["idToken"]
                 
                 try:
                     self.sync_status_changed.emit("Bulut: Senkronize ediliyor...")
                     # RTDB directly accepts raw JSON
-                    response = requests.put(url, json=data, timeout=5)
+                    response = requests.put(url, json=data, params=params, timeout=5)
                     
                     if response.status_code in [200, 201]:
                         with QMutexLocker(self._mutex):
