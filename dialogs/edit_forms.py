@@ -740,11 +740,15 @@ class SubjectTeacherAssignmentDialog(QDialog):
             item = self.list_teachers.item(i)
             if format_tr_name(item.text()) in assigned_teachers:
                 item.setCheckState(Qt.Checked)
+            else:
+                item.setCheckState(Qt.Unchecked)
                 
         for i in range(self.list_classes.count()):
             item = self.list_classes.item(i)
             if item.text() in assigned_classes:
                 item.setCheckState(Qt.Checked)
+            else:
+                item.setCheckState(Qt.Unchecked)
                 
         if existing_atamalar:
             dur_val = str(existing_atamalar[0].get("duration", 2))
@@ -787,13 +791,12 @@ class SubjectTeacherAssignmentDialog(QDialog):
         
         atamalar = self.data_store.setdefault("atamalar", [])
         
-        # Purge previous assignments for this subject for the selected classes
-        if sel_classes:
-            self.data_store["atamalar"] = [
-                a for a in atamalar
-                if not (a.get("subject") == self.subject_name and a.get("class") in sel_classes)
-            ]
-            atamalar = self.data_store["atamalar"]
+        # Purge ALL previous assignments for this subject
+        self.data_store["atamalar"] = [
+            a for a in atamalar
+            if not (a.get("subject") == self.subject_name)
+        ]
+        atamalar = self.data_store["atamalar"]
 
         if sel_teachers and sel_classes:
             dur = int(self.cb_hafta.currentText()) if self.cb_hafta.currentText().isdigit() else 2
@@ -808,7 +811,6 @@ class SubjectTeacherAssignmentDialog(QDialog):
                         "color": get_subject_color(self.subject_name)
                     })
                     
-        p = self.parent()
         trigger_save_db(self, self.data_store)
         self.accept()
 
