@@ -732,7 +732,8 @@ class SubjectTeacherAssignmentDialog(QDialog):
         lay.addLayout(h_lay)
 
         # Pre-check existing teachers & classes for this subject
-        existing_atamalar = [a for a in self.data_store.get("atamalar", []) if a.get("subject") == self.subject_name]
+        subj_target = format_tr_name(self.subject_name)
+        existing_atamalar = [a for a in self.data_store.get("atamalar", []) if format_tr_name(a.get("subject", "")) == subj_target]
         assigned_teachers = {format_tr_name(a.get("teacher", "")) for a in existing_atamalar}
         assigned_classes = {a.get("class", "") for a in existing_atamalar}
         
@@ -777,7 +778,8 @@ class SubjectTeacherAssignmentDialog(QDialog):
 
     def _clear_assignments(self):
         atamalar = self.data_store.setdefault("atamalar", [])
-        self.data_store["atamalar"] = [a for a in atamalar if not (a.get("subject") == self.subject_name)]
+        subj_target = format_tr_name(self.subject_name)
+        self.data_store["atamalar"] = [a for a in atamalar if format_tr_name(a.get("subject", "")) != subj_target]
         for i in range(self.list_teachers.count()):
             self.list_teachers.item(i).setCheckState(Qt.Unchecked)
         for i in range(self.list_classes.count()):
@@ -790,11 +792,12 @@ class SubjectTeacherAssignmentDialog(QDialog):
         sel_classes = [self.list_classes.item(i).text() for i in range(self.list_classes.count()) if self.list_classes.item(i).checkState() == Qt.Checked]
         
         atamalar = self.data_store.setdefault("atamalar", [])
+        subj_target = format_tr_name(self.subject_name)
         
-        # Purge ALL previous assignments for this subject
+        # Purge ALL previous assignments for this subject using format_tr_name
         self.data_store["atamalar"] = [
             a for a in atamalar
-            if not (a.get("subject") == self.subject_name)
+            if format_tr_name(a.get("subject", "")) != subj_target
         ]
         atamalar = self.data_store["atamalar"]
 
