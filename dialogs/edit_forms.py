@@ -1348,7 +1348,7 @@ class ClassComprehensiveAssignmentDialog(QDialog):
         super().__init__(parent)
         self.class_name = class_name
         self.data_store = data_store or {}
-        self.setWindowTitle(f"🎓 {self.class_name} Sınıfı - Ders ve Öğretmen Atama Paneli")
+        self.setWindowTitle(f"Sınıfın Dersleri - {self.class_name}")
         self.setFixedSize(920, 680)
         self.setStyleSheet("""
             QDialog { background-color: #F8FAFC; font-family: system-ui, -apple-system, sans-serif; }

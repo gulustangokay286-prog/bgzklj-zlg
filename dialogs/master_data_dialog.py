@@ -595,6 +595,28 @@ class MasterDataDialog(QDialog):
         # All actions are kept enabled for now as they are universally valid in this design
 
     def _act_assign(self, teacher_name=None):
+        idx = self.stack.currentIndex()
+        if idx == 1:  # Sınıflar tab
+            r = self.table_sinif.currentRow()
+            c_name = ""
+            if r >= 0:
+                item = self.table_sinif.item(r, 0)
+                if item: c_name = item.text().strip()
+            if not c_name:
+                from PySide6.QtWidgets import QInputDialog
+                classes = [c.get("ad", "") for c in self.data_store.get("siniflar", []) if c.get("ad")]
+                if classes:
+                    c_choice, ok = QInputDialog.getItem(self, "Sınıfın Dersleri", "Derslerini Düzenleyeceğiniz Sınıfı Seçin:", sorted(classes), 0, False)
+                    if ok and c_choice: c_name = c_choice
+            if c_name:
+                from dialogs.edit_forms import ClassComprehensiveAssignmentDialog
+                d = ClassComprehensiveAssignmentDialog(class_name=c_name, data_store=self.data_store, parent=self)
+                if d.exec():
+                    trigger_save_db(self, self.data_store)
+                    p = self.parent()
+                    if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
+            return
+
         from dialogs.edit_forms import LessonAssignmentDialog
         if not teacher_name and hasattr(self, "table_ogretmen"):
             r = self.table_ogretmen.currentRow()

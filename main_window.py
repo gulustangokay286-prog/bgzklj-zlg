@@ -479,6 +479,7 @@ class MainWindow(QMainWindow):
         p1.add_divider()
         p1.add_button("Dersler",        "ders",     self._open_subjects)
         p1.add_button("Sınıflar",       "sinif",    self._open_classes)
+        p1.add_button("Sınıfın\nDersleri", "sinif", self._open_class_assignments)
         p1.add_button("Derslikler",     "derslik",  self._open_rooms)
         p1.add_button("Öğretmenler",    "ogretmen", self._open_teachers)
         p1.add_button("Seçmeli\nDersler","ders",    self._open_electives)
@@ -522,6 +523,7 @@ class MainWindow(QMainWindow):
         p3.add_divider()
         p3.add_button("Dersler",    "ders",   self._open_subjects)
         p3.add_button("Sınıflar",   "sinif",  self._open_classes)
+        p3.add_button("Sınıfın\nDersleri", "sinif", self._open_class_assignments)
         p3.add_button("Derslikler", "derslik",self._open_rooms)
         p3.add_button("Öğretmenler","ogretmen",self._open_teachers)
         p3.add_button("Seçmeli\nDersler","ders",self._open_electives)
@@ -682,6 +684,8 @@ class MainWindow(QMainWindow):
         """)
         self._tree.itemExpanded.connect(self._on_tree_item_expanded_collapsed)
         self._tree.itemCollapsed.connect(self._on_tree_item_expanded_collapsed)
+        self._tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self._tree.customContextMenuRequested.connect(self._show_tree_context_menu)
         l_layout.addWidget(self._tree)
 
         # Right panel  
@@ -1361,6 +1365,60 @@ class MainWindow(QMainWindow):
         d.exec()
         self.save_db()
         self._refresh_tree()
+
+    def _open_class_assignments(self, target_class=None):
+        from dialogs.edit_forms import ClassComprehensiveAssignmentDialog
+        from PySide6.QtWidgets import QInputDialog
+        
+        classes = [c.get("ad", "") for c in self.data_store.get("siniflar", []) if c.get("ad")]
+        if not classes:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "Bilgi", "Henüz tanımlı hiçbir sınıf bulunmamaktadır.")
+            return
+            
+        selected_class = target_class
+        if not selected_class:
+            curr_item = self._tree.currentItem()
+            if curr_item and curr_item.parent() and curr_item.parent().data(0, Qt.UserRole + 10) == "sinif":
+                selected_class = curr_item.text(0)
+                
+        if not selected_class or selected_class not in classes:
+            c_choice, ok = QInputDialog.getItem(self, "Sınıfın Dersleri", "Derslerini ve Öğretmenlerini Yönetmek İstediğiniz Sınıfı Seçin:", sorted(classes), 0, False)
+            if ok and c_choice:
+                selected_class = c_choice
+            else:
+                return
+                
+        d = ClassComprehensiveAssignmentDialog(class_name=selected_class, data_store=self.data_store, parent=self)
+        if d.exec():
+            self.save_db()
+            self._refresh_tree()
+
+    def _show_tree_context_menu(self, pos):
+        from PySide6.QtWidgets import QMenu
+        item = self._tree.itemAt(pos)
+        if not item: return
+        parent = item.parent()
+        if not parent: return
+        
+        parent_text = parent.text(0)
+        entity_name = item.data(0, Qt.UserRole)
+        
+        menu = QMenu(self)
+        if "Sınıflar" in parent_text:
+            act = menu.addAction(f"🎓 {entity_name} Sınıfının Dersleri (Atama Paneli)")
+            chosen = menu.exec_(self._tree.mapToGlobal(pos))
+            if chosen == act:
+                self._open_class_assignments(target_class=entity_name)
+        elif "Öğretmenler" in parent_text:
+            act = menu.addAction(f"🎓 {entity_name} Öğretmenin Atamaları")
+            chosen = menu.exec_(self._tree.mapToGlobal(pos))
+            if chosen == act:
+                from dialogs.edit_forms import LessonAssignmentDialog
+                d = LessonAssignmentDialog(data_store=self.data_store, parent=self, selected_teacher=entity_name)
+                if d.exec():
+                    self.save_db()
+                    self._refresh_tree()
 
     def _open_rooms(self):
         d = MasterDataDialog(2, self)
