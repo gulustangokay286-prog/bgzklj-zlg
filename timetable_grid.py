@@ -691,50 +691,6 @@ class DropTableWidget(QTableWidget):
             win._refresh_tree()
 
 
-class LessonCellWidget(QFrame):
-    def __init__(self, subject_name, color, teacher_name="", class_name="", parent=None):
-        super().__init__(parent)
-        c = QColor(color) if color else QColor("#0284C7")
-        bg_hex = c.name()
-        luminance = (0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue())
-        text_color = "#FFFFFF" if luminance < 165 else "#0F172A"
-        sub_text_color = "#E0F2FE" if luminance < 165 else "#334155"
-        
-        self.setStyleSheet(f"""
-            QFrame {{
-                background-color: {bg_hex};
-                border-radius: 6px;
-                border: 1px solid rgba(0,0,0,0.12);
-                margin: 2px;
-            }}
-            QFrame:hover {{
-                border: 1.5px solid #0284C7;
-            }}
-        """)
-        
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(1)
-        layout.setAlignment(Qt.AlignCenter)
-        
-        lbl_subj = QLabel(subject_name, self)
-        lbl_subj.setAlignment(Qt.AlignCenter)
-        lbl_subj.setStyleSheet(f"color: {text_color}; font-weight: 800; font-size: 11px; border: none; background: transparent;")
-        layout.addWidget(lbl_subj)
-        
-        if teacher_name and teacher_name != "Öğretmen":
-            lbl_t = QLabel(teacher_name, self)
-            lbl_t.setAlignment(Qt.AlignCenter)
-            lbl_t.setStyleSheet(f"color: {sub_text_color}; font-size: 10px; font-weight: 600; border: none; background: transparent;")
-            layout.addWidget(lbl_t)
-            
-        if class_name:
-            lbl_c = QLabel(f"[{class_name}]", self)
-            lbl_c.setAlignment(Qt.AlignCenter)
-            lbl_c.setStyleSheet(f"color: {sub_text_color}; font-size: 9px; font-weight: 600; border: none; background: transparent;")
-            layout.addWidget(lbl_c)
-
-
 class TimetableGrid(QWidget):
     cell_right_clicked = Signal(int, int)
 
@@ -800,36 +756,43 @@ class TimetableGrid(QWidget):
         layout.addWidget(self.unplaced_dock)
 
     def set_cell(self, row, col, subject_name, color, teacher_name="", duration=1, class_name=""):
+        display_text = f"{subject_name}"
+        if teacher_name and teacher_name != "Öğretmen":
+            display_text += f"\n{teacher_name}"
+            
+        item = QTableWidgetItem(display_text)
+        item.setTextAlignment(Qt.AlignCenter)
+        item.setBackground(QBrush(QColor(color)))
+        
+        c = QColor(color)
+        luminance = (0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue())
+        text_color = Qt.white if luminance < 160 else Qt.black
+        item.setForeground(QBrush(text_color))
+        
+        font = QFont("Segoe UI", 9)
+        font.setBold(True)
+        item.setFont(font)
+        
+        # Set span
         max_span = min(duration, self.table.rowCount() - row)
         if max_span > 1:
             self.table.setSpan(row, col, max_span, 1)
-            
-        item = QTableWidgetItem(subject_name)
-        item.setTextAlignment(Qt.AlignCenter)
         self.table.setItem(row, col, item)
-        
-        widget = LessonCellWidget(subject_name, color, teacher_name, class_name, self.table)
-        self.table.setCellWidget(row, col, widget)
         
         # Track placed lesson
         self._placed_lessons[(row, col)] = {
             "subject_name": subject_name, "color": color,
             "teacher_name": teacher_name, "class_name": class_name, "duration": max_span
         }
-        self.table.viewport().update()
         
     def get_placed_lessons(self):
         """Return dict of placed lessons for printing"""
         return self._placed_lessons
         
     def clear_grid(self):
-        for r in range(self.table.rowCount()):
-            for c in range(self.table.columnCount()):
-                self.table.removeCellWidget(r, c)
         self.table.clearContents()
         self.table.clearSpans()
         self._placed_lessons.clear()
-        self.table.viewport().update()
         
     def set_mode_single_entity(self, periods: int, days_list: list):
         """Standard view: 1 entity (class/teacher), Rows=Periods, Cols=Days"""
