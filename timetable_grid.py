@@ -783,48 +783,15 @@ class TimetableGrid(QWidget):
         hh = self.table.horizontalHeader()
         hh.setSectionResizeMode(QHeaderView.Stretch)
         hh.setDefaultAlignment(Qt.AlignCenter)
-        hh.setMinimumSectionSize(110)
-        hh.setStyleSheet("""
-            QHeaderView::section {
-                background: #F8FAFC;
-                font-weight: 700;
-                padding: 10px;
-                border: 1px solid #CBD5E1;
-                border-bottom: 2px solid #0284C7;
-                font-size: 13px;
-                color: #0F172A;
-            }
-        """)
+        hh.setMinimumSectionSize(100)
+        hh.setStyleSheet("QHeaderView::section { background: #F1F5F9; font-weight: bold; padding: 6px; border: 1px solid #E2E8F0; font-size: 12px; color: #334155; }")
 
         vh = self.table.verticalHeader()
         vh.setSectionResizeMode(QHeaderView.Stretch)
-        vh.setMinimumSectionSize(60)
-        vh.setStyleSheet("""
-            QHeaderView::section {
-                background: #F1F5F9;
-                font-weight: 700;
-                border: 1px solid #CBD5E1;
-                padding: 6px;
-                font-size: 13px;
-                color: #334155;
-            }
-        """)
+        vh.setMinimumSectionSize(55)
+        vh.setStyleSheet("QHeaderView::section { background: #F8FAFC; font-weight: bold; border: 1px solid #E2E8F0; padding: 6px; font-size: 12px; color: #334155; }")
 
-        self.table.setStyleSheet("""
-            QTableWidget {
-                background: #FFFFFF;
-                gridline-color: #CBD5E1;
-                border: 1px solid #CBD5E1;
-                font-size: 12px;
-            }
-            QTableWidget::item {
-                padding: 4px;
-                border: none;
-            }
-            QTableWidget::item:selected {
-                outline: 2px solid #0284C7;
-            }
-        """)
+        self.table.setStyleSheet("QTableWidget { background: #FFFFFF; gridline-color: #E2E8F0; font-size: 12px; } QTableWidget::item { padding: 4px; }")
         
         layout.addWidget(self.table, stretch=1)
         
