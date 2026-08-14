@@ -388,7 +388,7 @@ class MasterDataDialog(QDialog):
         
         right_panel.addSpacing(15)
         
-        # Orijinal 2025 Dialoglarına yönlendiren butonlar
+        # Orijinal 2026 - 2027 Dialoglarına yönlendiren butonlar
         btn_ders_atama = ActionButton("Ders Atama", icon_name="doc")
         btn_ders_atama.clicked.connect(self._act_assign)
         right_panel.addWidget(btn_ders_atama)
@@ -855,7 +855,7 @@ class MasterDataDialog(QDialog):
         dlg = AutoScheduleDialog(self.data_store, self)
         dlg.exec()
 
-    def _open_2025_dialog(self, dlg_id):
+    def _open_2026 - 2027_dialog(self, dlg_id):
         from dialogs.extracted_dialog import open_extracted_dialog
         open_extracted_dialog(dlg_id, self)
 
@@ -931,8 +931,12 @@ class TeacherIndividualTimetableDialog(QDialog):
         top_bar.addWidget(btn_yazdir)
         lay.addLayout(top_bar)
         
-        days = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"]
-        periods = 8
+        settings = self.data_store.get("settings", {})
+        periods = int(settings.get("periods", 8))
+        days_count = int(settings.get("days_count", 5))
+        
+        from timetable_grid import DAYS
+        days = DAYS[:days_count]
         
         table = QTableWidget(periods, len(days))
         table.setHorizontalHeaderLabels(days)

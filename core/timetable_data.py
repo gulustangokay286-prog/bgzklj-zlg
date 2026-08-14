@@ -66,7 +66,7 @@ class TimetableSlot:
 @dataclass
 class TimetableData:
     school_name: str = "Chenki Akademi"
-    academic_year: str = "2025/2026"
+    academic_year: str = "2026 - 2027/2026"
     periods_per_day: int = 8
     days_per_week: int = 5
     period_labels: List[str] = field(default_factory=lambda: [

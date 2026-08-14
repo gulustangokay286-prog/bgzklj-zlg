@@ -29,7 +29,7 @@ def make_context_icon(symbol: str, color1: str, color2: str) -> QIcon:
     return QIcon(pix)
 
 
-DAYS = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"]
+DAYS = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
 
 def get_subject_abbr(subject_name: str) -> str:
     if not subject_name: return ""
@@ -518,6 +518,7 @@ class DropTableWidget(QTableWidget):
             act_move = menu.addAction(make_context_icon("M", "#FFCA28", "#FF8F00"), "Taşı")
             act_lock = menu.addAction(make_context_icon("K", "#9C27B0", "#6A1B9A"), "Kilitle (Sabitle)")
             act_change_teacher = menu.addAction(make_context_icon("Ö", "#00BCD4", "#00838F"), "Öğretmeni Değiştir")
+            act_color = menu.addAction(make_context_icon("R", "#EC407A", "#C2185B"), "Renk Paleti Ayarla")
             menu.addSeparator()
             act_single = menu.addAction(make_context_icon("1", "#29B6F6", "#0277BD"), "Tekli Yap (1 Saat)")
             act_double = menu.addAction(make_context_icon("2", "#29B6F6", "#0277BD"), "İkili Blok Yap (2 Saat)")
@@ -555,6 +556,29 @@ class DropTableWidget(QTableWidget):
                         orig_item.setBackground(QBrush(QColor("#E8F4F8")))
                     win = self.window()
                     if hasattr(win, "save_db"): win.save_db()
+            elif action == act_color:
+                from PySide6.QtWidgets import QColorDialog
+                grid = self.parent()
+                if hasattr(grid, "_placed_lessons") and (orig_r, orig_c) in grid._placed_lessons:
+                    info = grid._placed_lessons[(orig_r, orig_c)]
+                    current_color = QColor(info.get("color", "#1E88E5"))
+                    new_color = QColorDialog.getColor(current_color, self, "Ders Rengini Seçin")
+                    if new_color.isValid():
+                        hex_color = new_color.name()
+                        info["color"] = hex_color
+                        # update visual instantly
+                        orig_item.setBackground(QBrush(new_color))
+                        lum = (0.299 * new_color.red() + 0.587 * new_color.green() + 0.114 * new_color.blue())
+                        orig_item.setForeground(QBrush(Qt.white if lum < 160 else Qt.black))
+                        # also update the subject color globally for consistency if needed
+                        win = self.window()
+                        if hasattr(win, "data_store"):
+                            for d in win.data_store.get("dersler", []):
+                                if d.get("ad") == info.get("subject_name"):
+                                    d["renk"] = hex_color
+                                    break
+                            win.save_db()
+                            if hasattr(win, "_refresh_tree"): win._refresh_tree()
             elif action == act_change_teacher:
                 from PySide6.QtWidgets import QInputDialog
                 win = self.window()
@@ -567,12 +591,16 @@ class DropTableWidget(QTableWidget):
                             info = grid._placed_lessons[(orig_r, orig_c)]
                             info["teacher"] = t_choice
                             subj = info.get("subject_name", "")
-                            orig_item.setText(f"{subj}\\n{t_choice}")
+                            orig_item.setText(f"{subj}\n{t_choice}")
                             win.save_db()
             elif action == act_move:
                 # Instant move dialog
                 from PySide6.QtWidgets import QInputDialog
-                days = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"]
+                days = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
+                win = self.window()
+                if hasattr(win, "data_store"):
+                    settings = win.data_store.get("settings", {})
+                    days = settings.get("days", ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"])
                 day_choice, ok1 = QInputDialog.getItem(self, "Dersi Taşı", "Hedef Gün:", days, 0, False)
                 if ok1 and day_choice:
                     target_col = days.index(day_choice)
@@ -591,7 +619,6 @@ class DropTableWidget(QTableWidget):
                             if hasattr(self.parent(), "_placed_lessons"):
                                 self.parent()._placed_lessons.pop((orig_r, orig_c), None)
                             self.parent().set_cell(target_row, target_col, txt.split('\n')[0], bg, txt.split('\n')[1] if '\n' in txt else "", duration=orig_dur)
-                            win = self.window()
                             if hasattr(win, "save_db"):
                                 win.save_db()
                             if hasattr(win, "_refresh_tree"):

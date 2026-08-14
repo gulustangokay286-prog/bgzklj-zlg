@@ -268,21 +268,21 @@ class AdvancedWizard(QDialog):
         
         right_panel.addSpacing(20)
         
-        # Orijinal 2025 Dialoglarına yönlendiren butonlar
+        # Orijinal 2026 - 2027 Dialoglarına yönlendiren butonlar
         btn_ders_atama = ActionButton("Ders Atama", icon_name="doc")
-        btn_ders_atama.clicked.connect(lambda: self._open_2025_dialog("130"))
+        btn_ders_atama.clicked.connect(lambda: self._open_2026 - 2027_dialog("130"))
         right_panel.addWidget(btn_ders_atama)
         
         btn_zaman = ActionButton("Zaman Tablosu", icon_name="clock")
-        btn_zaman.clicked.connect(lambda: self._open_2025_dialog("135"))
+        btn_zaman.clicked.connect(lambda: self._open_2026 - 2027_dialog("135"))
         right_panel.addWidget(btn_zaman)
         
         btn_kisit = ActionButton("Kısıtlamalar", icon_name="hash")
-        btn_kisit.clicked.connect(lambda: self._open_2025_dialog("124"))
+        btn_kisit.clicked.connect(lambda: self._open_2026 - 2027_dialog("124"))
         right_panel.addWidget(btn_kisit)
         
         self.btn_gruplar = ActionButton("Gruplar", icon_name="branch")
-        self.btn_gruplar.clicked.connect(lambda: self._open_2025_dialog("136"))
+        self.btn_gruplar.clicked.connect(lambda: self._open_2026 - 2027_dialog("136"))
         right_panel.addWidget(self.btn_gruplar)
         
         self.btn_tumunu_sil = ActionButton("Tümünü Sil", icon_name="minus")
@@ -426,7 +426,7 @@ class AdvancedWizard(QDialog):
             if row < len(self.data_store[stores[idx]]):
                 self.data_store[stores[idx]].pop(row)
 
-    def _open_2025_dialog(self, dlg_id):
+    def _open_2026 - 2027_dialog(self, dlg_id):
         from dialogs.extracted_dialog import open_extracted_dialog
         open_extracted_dialog(dlg_id, self)
 

@@ -411,10 +411,16 @@ class TimetablePrintPreview(QDialog):
         painter.drawText(QRectF(x, y + title_h * 0.25, w, title_h), Qt.AlignCenter, target_name)
         
         painter.setFont(make_font(top_font_size))
-        painter.drawText(QRectF(x, y, w, title_h * 0.5), Qt.AlignRight | Qt.AlignBottom, "Ders Planı: 2025")
+        painter.drawText(QRectF(x, y, w, title_h * 0.5), Qt.AlignRight | Qt.AlignBottom, "Ders Planı: 2026 - 2027")
         
-        days = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"] if is_single else ["Pa", "Sa", "Ça", "Pe", "Cu"]
-        periods = 8
+        settings = self.data_store.get("settings", {})
+        periods = int(settings.get("periods", 8))
+        days_count = int(settings.get("days_count", 5))
+        
+        from timetable_grid import DAYS
+        full_days = DAYS[:days_count]
+        short_days = [d[:2] for d in full_days]
+        days = full_days if is_single else short_days
         
         header_space = 50 if is_single else 45
         grid_x = x
@@ -585,7 +591,7 @@ class TimetablePrintPreview(QDialog):
         painter.setPen(QPen(QColor("#777777"), 1))
         painter.setFont(make_font(9))
         painter.drawText(QRectF(30, VH - 35, 400, 20), Qt.AlignLeft, f"Toplam Atanan Ders Sayısı: {len(atamalar)}")
-        painter.drawText(QRectF(VW - 430, VH - 35, 400, 20), Qt.AlignRight, "BGZ Ders Planlama System v2025")
+        painter.drawText(QRectF(VW - 430, VH - 35, 400, 20), Qt.AlignRight, "BGZ Ders Planlama System v2026 - 2027")
 
     def _render_weekly_grid(self, painter, VW, VH, is_teacher=False):
         """Eski Tam Sayfa Renkli Grid"""
@@ -600,9 +606,19 @@ class TimetablePrintPreview(QDialog):
         painter.setFont(make_font(10))
         painter.drawText(QRectF(30, 48, 600, 18), Qt.AlignLeft, school_name)
         
-        days = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"]
-        periods = 8
+        settings = self.data_store.get("settings", {})
+        periods = int(settings.get("periods", 8))
+        days_count = int(settings.get("days_count", 5))
+        
+        from timetable_grid import DAYS
+        days = DAYS[:days_count]
+        
+        # Auto-generate times if they don't match periods
         times = ["08:00-08:45", "08:55-09:40", "09:50-10:35", "10:45-11:30", "11:40-12:25", "13:15-14:00", "14:10-14:55", "15:05-15:50"]
+        if periods > len(times):
+            times.extend([f"{16+i}:00-{16+i}:45" for i in range(periods - len(times))])
+        elif periods < len(times):
+            times = times[:periods]
         
         grid_x, grid_y = 30, 70
         grid_w, grid_h = VW - 60, VH - 120
@@ -668,7 +684,7 @@ class TimetablePrintPreview(QDialog):
 
         painter.setFont(make_font(9))
         painter.setPen(QPen(QColor("#777777"), 1))
-        painter.drawText(QRectF(30, VH - 35, 400, 20), Qt.AlignLeft, "BGZ Ders Planlama Yazılımı v2025")
+        painter.drawText(QRectF(30, VH - 35, 400, 20), Qt.AlignLeft, "BGZ Ders Planlama Yazılımı v2026 - 2027")
         painter.drawText(QRectF(VW - 430, VH - 35, 400, 20), Qt.AlignRight, "Sayfa 1 / 1")
 
     def _render_teacher_summary_list(self, painter, VW, VH):
@@ -816,5 +832,5 @@ class TimetablePrintPreview(QDialog):
         painter.setPen(QPen(QColor("#777777"), 1))
         painter.setFont(make_font(9))
         painter.drawText(QRectF(30, VH - 35, 400, 20), Qt.AlignLeft, f"Toplam Atanan Ders Kaydı: {len(sorted_atamalar)} | Toplam Saat: {total_hours}")
-        painter.drawText(QRectF(VW - 430, VH - 35, 400, 20), Qt.AlignRight, "BGZ Ders Planlama Yazılımı v2025")
+        painter.drawText(QRectF(VW - 430, VH - 35, 400, 20), Qt.AlignRight, "BGZ Ders Planlama Yazılımı v2026 - 2027")
 

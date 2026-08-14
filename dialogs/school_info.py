@@ -265,18 +265,43 @@ class SchoolInfoDialog(QDialog):
         if kurum.get("yetkili"):
             self.txt_yetkili_ad.setText(kurum.get("yetkili"))
             
+        settings = self.data_store.get("settings", {})
+        if settings.get("periods"):
+            self.cb_ders_saati.setCurrentText(str(settings.get("periods")))
+        if settings.get("days_count"):
+            self.cb_gun_sayisi.setCurrentText(str(settings.get("days_count")))
+        if settings.get("weekend"):
+            idx = self.cb_hafta_sonu.findText(settings.get("weekend"))
+            if idx >= 0: self.cb_hafta_sonu.setCurrentIndex(idx)
+        if settings.get("multi_week"):
+            self.chk_cok_donem.setChecked(settings.get("multi_week"))
+        if settings.get("school_type") == "fakulte":
+            self.radio_fakulte.setChecked(True)
+        else:
+            self.radio_okul.setChecked(True)
+            
     def _save_and_accept(self):
         if self.data_store is not None:
             if "kurum" not in self.data_store:
                 self.data_store["kurum"] = {}
             self.data_store["kurum"]["isim"] = self.txt_kurum_adi.text().strip()
             self.data_store["kurum"]["yetkili"] = self.txt_yetkili_ad.text().strip()
+            
+            if "settings" not in self.data_store:
+                self.data_store["settings"] = {}
+            
+            self.data_store["settings"]["periods"] = int(self.cb_ders_saati.currentText())
+            self.data_store["settings"]["days_count"] = int(self.cb_gun_sayisi.currentText())
+            self.data_store["settings"]["weekend"] = self.cb_hafta_sonu.currentText()
+            self.data_store["settings"]["multi_week"] = self.chk_cok_donem.isChecked()
+            self.data_store["settings"]["school_type"] = "okul" if self.radio_okul.isChecked() else "fakulte"
+            
         self.accept()
 
     def get_data(self):
         return {
             "okul_adi": self.txt_yetkili_ad.text(), # For backwards compatibility if needed
-            "yil": 2025,
+            "yil": 2026 - 2027,
             "gun_sayisi": int(self.cb_gun_sayisi.currentText()),
             "ders_saati": int(self.cb_ders_saati.currentText()),
         }

@@ -21,7 +21,7 @@ from core.timetable_data import TimetableData
 from dialogs.edit_forms import format_tr_name
 
 APP_TITLE = "BGZ Ders Planlama"
-VERSION   = "2025"
+VERSION   = "2026 - 2027"
 
 PASTEL_DISTINCT_COLORS = [
     "#1E88E5", "#43A047", "#FB8C00", "#8E24AA", "#E53935",
@@ -146,7 +146,7 @@ class TitleBar(QWidget):
     """Working file menu button + Title bar"""
     def __init__(self, logo_path, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(28)
+        self.setFixedHeight(36)
         self.setStyleSheet("background: #F0F0F0; border-bottom: 1px solid #D0D0D0;")
         layout = QHBoxLayout(self)
         layout.setContentsMargins(4, 0, 8, 0)
@@ -156,11 +156,12 @@ class TitleBar(QWidget):
         # Use a nice 3D icon instead of text
         self.file_btn.setIcon(make_menu_icon("M", "#0078D7", "#005A9E"))
         self.file_btn.setIconSize(QSize(28, 28))
-        self.file_btn.setFixedSize(32, 32)
+        self.file_btn.setFixedSize(32, 40)
         self.file_btn.setStyleSheet("""
             QToolButton {
                 border: none;
                 border-radius: 4px;
+                margin-top: 8px;
             }
             QToolButton:hover { background: #E5F1FB; }
             QToolButton::menu-indicator { image: none; }
@@ -228,6 +229,8 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._restore_grid_placements()
         self._refresh_tree()
+        if hasattr(self, "_grid") and hasattr(self._grid, "view_combo"):
+            self._on_view_combo_changed(self._grid.view_combo.currentText())
         
         # Setup StatusBar and Cloud Worker
         self.statusBar().showMessage("Hazır")
@@ -489,8 +492,8 @@ class MainWindow(QMainWindow):
         p1.add_divider()
         p1.add_button("Temel\nBilgiler",  "bilgi",    self._open_school_info)
         p1.add_button("Evden Kod\nGüncelle", "internet", self._act_check_updates)
-        p1.add_button("İnternet\nHesabı","internet", lambda: self._open_extracted(140))
-        p1.add_button("Sorular?\nYorumlar?","yardim",lambda: self._open_extracted(141))
+        p1.add_button("İnternet\nHesabı","internet", lambda: __import__('webbrowser').open("https://chenki.net/"))
+        p1.add_button("Sorular?\nYorumlar?","yardim",lambda: __import__('dialogs.faq_dialog', fromlist=['FAQDialog']).FAQDialog(self).exec())
         p1.add_stretch()
 
         # ── 2. Dosya İşlemleri ───────────────────────────────────────────────
@@ -508,7 +511,7 @@ class MainWindow(QMainWindow):
         p2.add_button("Aktar",      "internet",self._act_nyi)
         p2.add_button("Karşılaştırma", "bilgi", self._act_compare)
         p2.add_button("E-Mail\nGönder","internet",self._act_nyi)
-        p2.add_button("İnternet\nHesabı","internet",self._act_nyi)
+        p2.add_button("İnternet\nHesabı","internet", lambda: __import__('webbrowser').open("https://chenki.net/"))
         p2.add_stretch()
 
         # ── 3. Tanımlama İşlemleri ───────────────────────────────────────────
@@ -698,7 +701,9 @@ class MainWindow(QMainWindow):
         """)
 
         # Main timetable grid
-        self._grid = TimetableGrid(8, right)
+        settings = self.data_store.get("settings", {})
+        periods = int(settings.get("periods", 8))
+        self._grid = TimetableGrid(periods, right)
         self._tab_widget.addTab(self._grid, "Haftalık Program")
         
         # Connect drop signal
@@ -822,6 +827,13 @@ class MainWindow(QMainWindow):
                 elif "Derslik" in v_text: view_type = "room"
             if not entity_name and hasattr(self._grid, "entity_combo"):
                 entity_name = self._grid.entity_combo.currentText()
+                
+            settings = self.data_store.get("settings", {})
+            periods = int(settings.get("periods", 8))
+            days_count = int(settings.get("days_count", 5))
+            from timetable_grid import DAYS
+            current_days = DAYS[:days_count]
+            self._grid.set_mode_single_entity(periods, current_days)
 
         grid_data = self.data_store.get("grid_placements", [])
         self._grid.clear_grid()

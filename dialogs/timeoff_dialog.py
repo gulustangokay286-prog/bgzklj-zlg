@@ -36,7 +36,11 @@ class TimeoffDialog(QDialog):
         """)
         
         self.settings = self.data_store.get("settings", {})
-        self.days = self.settings.get("days", ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"])
+        
+        days_count = int(self.settings.get("days_count", 5))
+        from timetable_grid import DAYS
+        self.days = DAYS[:days_count]
+        
         self.periods = int(self.settings.get("periods", 8))
         
         # `timeoff` verisini yükle veya oluştur

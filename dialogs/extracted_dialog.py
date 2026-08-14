@@ -25,7 +25,7 @@ try:
         STRINGS_DATA = json.load(f)
     STRING_MAP = {1000 + idx: s for idx, s in enumerate(STRINGS_DATA)}
 except Exception as e:
-    print(f"Error loading 2025 data: {e}")
+    print(f"Error loading 2026 - 2027 data: {e}")
 
 
 def resolve_text(text_val):
@@ -43,7 +43,7 @@ def resolve_text(text_val):
 
 
 class ExtractedDialog(QDialog):
-    """Dynamically builds native Qt windows from aSc 2025 Decompiled JSON data."""
+    """Dynamically builds native Qt windows from aSc 2026 - 2027 Decompiled JSON data."""
     def __init__(self, dlg_id, dlg_info, parent=None):
         super().__init__(parent)
         self.dlg_id = dlg_id
@@ -136,7 +136,7 @@ class ExtractedDialog(QDialog):
 
 def open_extracted_dialog(dlg_id, parent):
     if not DIALOGS_DATA:
-        QMessageBox.warning(parent, "Veri Hatası", "2025 Decompile verileri yüklenemedi (dialogs.json eksik).")
+        QMessageBox.warning(parent, "Veri Hatası", "2026 - 2027 Decompile verileri yüklenemedi (dialogs.json eksik).")
         return
         
     dlg_info = DIALOGS_DATA.get(str(dlg_id))
