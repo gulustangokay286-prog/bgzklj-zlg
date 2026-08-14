@@ -380,6 +380,27 @@ class TimetablePrintPreview(QDialog):
             placements = self._get_pseudo_placements(item_name, is_teacher)
             self._draw_mini_grid(painter, x, y, cell_w, cell_h, item_name, school_name, placements, is_single=False)
 
+    def _get_kisa_subject(self, name):
+        if not name: return ""
+        for d in self.data_store.get("dersler", []):
+            if d.get("ad") == name or d.get("kisa") == name:
+                return d.get("kisa") or name[:4].upper()
+        return name[:4].upper()
+
+    def _get_kisa_teacher(self, name):
+        if not name: return ""
+        for t in self.data_store.get("ogretmenler", []):
+            if t.get("ad") == name or t.get("kisa") == name:
+                return t.get("kisa") or name[:4].upper()
+        return name[:4].upper()
+
+    def _get_kisa_class(self, name):
+        if not name: return ""
+        for c in self.data_store.get("siniflar", []):
+            if c.get("ad") == name or c.get("kisa") == name:
+                return c.get("kisa") or name
+        return name
+
     def _draw_mini_grid(self, painter, x, y, w, h, target_name, school_name, placements, is_single=False):
         top_font_size = 10 if is_single else 7
         title_font_size = 24 if is_single else 18
@@ -443,8 +464,8 @@ class TimetablePrintPreview(QDialog):
                 # Fetch lesson at (day_idx, period_idx)
                 lesson = placements.get((d_idx, p_idx))
                 if lesson:
-                    sname = lesson.get("subject_name", "")
-                    tname = lesson.get("teacher_name", "")
+                    sname = self._get_kisa_subject(lesson.get("subject_name", ""))
+                    tname = self._get_kisa_teacher(lesson.get("teacher_name", "")) if not is_teacher else self._get_kisa_class(lesson.get("teacher_name", ""))
                     
                     subj_font_size = 14 if is_single else 9
                     teacher_font_size = 11 if is_single else 7

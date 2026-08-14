@@ -773,12 +773,11 @@ class TimetableGrid(QWidget):
                 font-size: 12px;
             }
             QTableWidget::item {
-                padding: 6px;
+                padding: 4px;
                 border: none;
             }
             QTableWidget::item:selected {
-                background-color: #E0F2FE;
-                color: #0369A1;
+                outline: 2px solid #0284C7;
             }
         """)
         
@@ -789,21 +788,24 @@ class TimetableGrid(QWidget):
         layout.addWidget(self.unplaced_dock)
         
     def set_cell(self, row, col, subject_name, color, teacher_name="", duration=1, class_name=""):
-        display_text = f"{subject_name}"
+        text_parts = [f"{subject_name}"]
         if teacher_name and teacher_name != "Öğretmen":
-            display_text += f"\n{teacher_name}"
+            text_parts.append(f"{teacher_name}")
+        if class_name:
+            text_parts.append(f"[{class_name}]")
+        display_text = "\n".join(text_parts)
             
         item = QTableWidgetItem(display_text)
         item.setTextAlignment(Qt.AlignCenter)
-        item.setBackground(QBrush(QColor(color)))
         
-        c = QColor(color)
+        c = QColor(color) if color else QColor("#0284C7")
+        item.setBackground(QBrush(c))
+        
         luminance = (0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue())
-        text_color = Qt.white if luminance < 160 else Qt.black
+        text_color = QColor("#FFFFFF") if luminance < 165 else QColor("#0F172A")
         item.setForeground(QBrush(text_color))
         
-        font = QFont("Segoe UI", 9)
-        font.setBold(True)
+        font = QFont("Segoe UI", 9, QFont.Bold)
         item.setFont(font)
         
         # Set span
@@ -817,6 +819,7 @@ class TimetableGrid(QWidget):
             "subject_name": subject_name, "color": color,
             "teacher_name": teacher_name, "class_name": class_name, "duration": max_span
         }
+        self.table.viewport().update()
         
     def get_placed_lessons(self):
         """Return dict of placed lessons for printing"""

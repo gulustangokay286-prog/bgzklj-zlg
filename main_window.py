@@ -648,30 +648,29 @@ class MainWindow(QMainWindow):
                 outline: none;
             }
             QTreeWidget::item {
-                padding: 8px 10px;
-                margin-bottom: 4px;
-                border-radius: 8px;
+                padding: 7px 10px;
+                margin-bottom: 3px;
+                border-radius: 6px;
                 color: #1E293B;
                 font-weight: 600;
                 font-size: 13px;
-                border: 1px solid transparent;
+                background: transparent;
+                border: 1.5px dashed transparent;
             }
             QTreeWidget::item:hover {
-                background-color: #F1F5F9;
-                border: 1px solid #CBD5E1;
+                background: transparent;
+                border: 1.5px dashed #0284C7;
                 color: #0284C7;
             }
             QTreeWidget::item:selected {
-                background-color: #E0F2FE;
-                border: 1px solid #0284C7;
-                border-left: 4px solid #0284C7;
+                background: transparent;
+                border: 1.5px dashed #0284C7;
                 color: #0369A1;
                 font-weight: 700;
             }
             QTreeWidget::item:selected:hover {
-                background-color: #BAE6FD;
-                border: 1px solid #0284C7;
-                border-left: 4px solid #0284C7;
+                background: transparent;
+                border: 1.5px dashed #0284C7;
                 color: #0369A1;
             }
             QTreeWidget::branch {

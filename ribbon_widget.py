@@ -478,26 +478,34 @@ class RibbonWidget(QWidget):
     def _update_tab_styles(self):
         for i, btn in enumerate(self._tab_buttons):
             if i == self._active:
-                btn.setStyleSheet(f"""
-                    QPushButton {{
-                        background: {TAB_ACTIVE_BG};
-                        color: {TAB_ACTIVE_TEXT};
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background: #FFFFFF;
+                        color: #0284C7;
                         border: none;
-                        border-bottom: 3px solid {TAB_ACTIVE_LINE};
-                        padding: 0 12px;
-                        font-weight: bold;
-                    }}
+                        border-bottom: 2.5px solid #0284C7;
+                        padding: 2px 14px;
+                        font-weight: 700;
+                        font-size: 13px;
+                        border-top-left-radius: 6px;
+                        border-top-right-radius: 6px;
+                    }
                 """)
             else:
-                btn.setStyleSheet(f"""
-                    QPushButton {{
-                        background: {TAB_INACTIVE_BG};
-                        color: {TAB_TEXT};
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background: transparent;
+                        color: #475569;
                         border: none;
-                        border-bottom: 3px solid transparent;
-                        padding: 0 12px;
-                    }}
-                    QPushButton:hover {{
-                        background: #E8E8E8;
-                    }}
+                        border-bottom: 2.5px solid transparent;
+                        padding: 2px 14px;
+                        font-weight: 600;
+                        font-size: 13px;
+                        border-top-left-radius: 6px;
+                        border-top-right-radius: 6px;
+                    }
+                    QPushButton:hover {
+                        background: #F1F5F9;
+                        color: #0F172A;
+                    }
                 """)
