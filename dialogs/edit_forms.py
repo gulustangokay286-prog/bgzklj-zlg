@@ -1005,7 +1005,13 @@ class SinifEditDialog(BaseEditForm):
     def get_data(self):
         return {
             "ad": self.w_ad.text(), "kisa": self.w_kisa.text(), 
-   class OgretmenEditDialog(BaseEditForm):
+            "renk": self._color, "foto": self.cb_foto.isChecked(),
+            "sinif_ogretmeni": self.w_so.currentText(), "sinif_tipi": self.w_sinif.currentText(),
+            "kapasite": self.w_num.text(), "ders_bitimi": self.w_max_gunluk.text()
+        }
+
+
+class OgretmenEditDialog(BaseEditForm):
     def __init__(self, parent=None, existing_data=None):
         super().__init__("Öğretmen Düzenle", parent, existing_data)
         self.resize(600, 680)

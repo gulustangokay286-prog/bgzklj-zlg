@@ -422,10 +422,15 @@ imported by:
  &#8226;   <a href="#PySide6.QtWidgets">PySide6.QtWidgets</a>
  &#8226;   <a href="#auto_scheduler">auto_scheduler</a>
  &#8226;   <a href="#cloud_sync">cloud_sync</a>
+ &#8226;   <a href="#dialogs.advanced_wizard">dialogs.advanced_wizard</a>
  &#8226;   <a href="#dialogs.auto_schedule_dialog">dialogs.auto_schedule_dialog</a>
  &#8226;   <a href="#dialogs.compare_dialog">dialogs.compare_dialog</a>
+ &#8226;   <a href="#dialogs.constraints_dialog">dialogs.constraints_dialog</a>
+ &#8226;   <a href="#dialogs.edit_forms">dialogs.edit_forms</a>
  &#8226;   <a href="#dialogs.electives_dialog">dialogs.electives_dialog</a>
  &#8226;   <a href="#dialogs.extracted_dialog">dialogs.extracted_dialog</a>
+ &#8226;   <a href="#dialogs.groups_dialog">dialogs.groups_dialog</a>
+ &#8226;   <a href="#dialogs.master_data_dialog">dialogs.master_data_dialog</a>
  &#8226;   <a href="#dialogs.print_preview">dialogs.print_preview</a>
  &#8226;   <a href="#dialogs.print_wizard">dialogs.print_wizard</a>
  &#8226;   <a href="#dialogs.relations_dialog">dialogs.relations_dialog</a>
@@ -433,6 +438,7 @@ imported by:
  &#8226;   <a href="#dialogs.startup_wizard">dialogs.startup_wizard</a>
  &#8226;   <a href="#dialogs.statistics_dialog">dialogs.statistics_dialog</a>
  &#8226;   <a href="#dialogs.test_timetable_dialog">dialogs.test_timetable_dialog</a>
+ &#8226;   <a href="#dialogs.timeoff_dialog">dialogs.timeoff_dialog</a>
  &#8226;   <a href="#dialogs.verify_timetable_dialog">dialogs.verify_timetable_dialog</a>
  &#8226;   <a href="#login_dialog">login_dialog</a>
  &#8226;   <a href="#main.py">main.py</a>
@@ -489,14 +495,20 @@ imported by:
     <a href="#PySide6.QtGui">PySide6.QtGui</a>
  &#8226;   <a href="#PySide6.QtPrintSupport">PySide6.QtPrintSupport</a>
  &#8226;   <a href="#PySide6.QtWidgets">PySide6.QtWidgets</a>
+ &#8226;   <a href="#dialogs.advanced_wizard">dialogs.advanced_wizard</a>
  &#8226;   <a href="#dialogs.auto_schedule_dialog">dialogs.auto_schedule_dialog</a>
  &#8226;   <a href="#dialogs.compare_dialog">dialogs.compare_dialog</a>
+ &#8226;   <a href="#dialogs.constraints_dialog">dialogs.constraints_dialog</a>
+ &#8226;   <a href="#dialogs.edit_forms">dialogs.edit_forms</a>
  &#8226;   <a href="#dialogs.electives_dialog">dialogs.electives_dialog</a>
+ &#8226;   <a href="#dialogs.groups_dialog">dialogs.groups_dialog</a>
+ &#8226;   <a href="#dialogs.master_data_dialog">dialogs.master_data_dialog</a>
  &#8226;   <a href="#dialogs.print_preview">dialogs.print_preview</a>
  &#8226;   <a href="#dialogs.relations_dialog">dialogs.relations_dialog</a>
  &#8226;   <a href="#dialogs.school_info">dialogs.school_info</a>
  &#8226;   <a href="#dialogs.startup_wizard">dialogs.startup_wizard</a>
  &#8226;   <a href="#dialogs.test_timetable_dialog">dialogs.test_timetable_dialog</a>
+ &#8226;   <a href="#dialogs.timeoff_dialog">dialogs.timeoff_dialog</a>
  &#8226;   <a href="#dialogs.verify_timetable_dialog">dialogs.verify_timetable_dialog</a>
  &#8226;   <a href="#login_dialog">login_dialog</a>
  &#8226;   <a href="#main.py">main.py</a>
@@ -577,10 +589,15 @@ imports:
 imported by:
     <a href="#PySide6.QtPrintSupport">PySide6.QtPrintSupport</a>
  &#8226;   <a href="#PySide6.QtWidgets">PySide6.QtWidgets</a>
+ &#8226;   <a href="#dialogs.advanced_wizard">dialogs.advanced_wizard</a>
  &#8226;   <a href="#dialogs.auto_schedule_dialog">dialogs.auto_schedule_dialog</a>
  &#8226;   <a href="#dialogs.compare_dialog">dialogs.compare_dialog</a>
+ &#8226;   <a href="#dialogs.constraints_dialog">dialogs.constraints_dialog</a>
+ &#8226;   <a href="#dialogs.edit_forms">dialogs.edit_forms</a>
  &#8226;   <a href="#dialogs.electives_dialog">dialogs.electives_dialog</a>
  &#8226;   <a href="#dialogs.extracted_dialog">dialogs.extracted_dialog</a>
+ &#8226;   <a href="#dialogs.groups_dialog">dialogs.groups_dialog</a>
+ &#8226;   <a href="#dialogs.master_data_dialog">dialogs.master_data_dialog</a>
  &#8226;   <a href="#dialogs.print_preview">dialogs.print_preview</a>
  &#8226;   <a href="#dialogs.print_wizard">dialogs.print_wizard</a>
  &#8226;   <a href="#dialogs.relations_dialog">dialogs.relations_dialog</a>
@@ -588,6 +605,7 @@ imported by:
  &#8226;   <a href="#dialogs.startup_wizard">dialogs.startup_wizard</a>
  &#8226;   <a href="#dialogs.statistics_dialog">dialogs.statistics_dialog</a>
  &#8226;   <a href="#dialogs.test_timetable_dialog">dialogs.test_timetable_dialog</a>
+ &#8226;   <a href="#dialogs.timeoff_dialog">dialogs.timeoff_dialog</a>
  &#8226;   <a href="#dialogs.verify_timetable_dialog">dialogs.verify_timetable_dialog</a>
  &#8226;   <a href="#login_dialog">login_dialog</a>
  &#8226;   <a href="#main.py">main.py</a>
@@ -5205,7 +5223,9 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#dialogs.print_wizard">dialogs.print_wizard</a>
+    <a href="#dialogs.edit_forms">dialogs.edit_forms</a>
+ &#8226;   <a href="#dialogs.master_data_dialog">dialogs.master_data_dialog</a>
+ &#8226;   <a href="#dialogs.print_wizard">dialogs.print_wizard</a>
  &#8226;   <a href="#dialogs.startup_wizard">dialogs.startup_wizard</a>
  &#8226;   <a href="#main.py">main.py</a>
 
@@ -5294,11 +5314,14 @@ imported by:
   <a target="code" href="/Users/fookay/ders%20program/dialogs/__init__.py" type="text/plain"><tt>dialogs</tt></a>
 <span class="moduletype">Package</span>  <div class="import">
 imported by:
-    <a href="#dialogs.auto_schedule_dialog">dialogs.auto_schedule_dialog</a>
+    <a href="#dialogs.advanced_wizard">dialogs.advanced_wizard</a>
+ &#8226;   <a href="#dialogs.auto_schedule_dialog">dialogs.auto_schedule_dialog</a>
  &#8226;   <a href="#dialogs.compare_dialog">dialogs.compare_dialog</a>
+ &#8226;   <a href="#dialogs.constraints_dialog">dialogs.constraints_dialog</a>
  &#8226;   <a href="#dialogs.edit_forms">dialogs.edit_forms</a>
  &#8226;   <a href="#dialogs.electives_dialog">dialogs.electives_dialog</a>
  &#8226;   <a href="#dialogs.extracted_dialog">dialogs.extracted_dialog</a>
+ &#8226;   <a href="#dialogs.groups_dialog">dialogs.groups_dialog</a>
  &#8226;   <a href="#dialogs.master_data_dialog">dialogs.master_data_dialog</a>
  &#8226;   <a href="#dialogs.print_preview">dialogs.print_preview</a>
  &#8226;   <a href="#dialogs.print_wizard">dialogs.print_wizard</a>
@@ -5307,7 +5330,29 @@ imported by:
  &#8226;   <a href="#dialogs.startup_wizard">dialogs.startup_wizard</a>
  &#8226;   <a href="#dialogs.statistics_dialog">dialogs.statistics_dialog</a>
  &#8226;   <a href="#dialogs.test_timetable_dialog">dialogs.test_timetable_dialog</a>
+ &#8226;   <a href="#dialogs.timeoff_dialog">dialogs.timeoff_dialog</a>
  &#8226;   <a href="#dialogs.verify_timetable_dialog">dialogs.verify_timetable_dialog</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="dialogs.advanced_wizard"></a>
+  <a target="code" href="/Users/fookay/ders%20program/dialogs/advanced_wizard.py" type="text/plain"><tt>dialogs.advanced_wizard</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#PySide6.QtCore">PySide6.QtCore</a>
+ &#8226;   <a href="#PySide6.QtGui">PySide6.QtGui</a>
+ &#8226;   <a href="#PySide6.QtWidgets">PySide6.QtWidgets</a>
+ &#8226;   <a href="#dialogs">dialogs</a>
+ &#8226;   <a href="#dialogs.edit_forms">dialogs.edit_forms</a>
+ &#8226;   <a href="#dialogs.extracted_dialog">dialogs.extracted_dialog</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#dialogs.edit_forms">dialogs.edit_forms</a>
 
   </div>
 
@@ -5328,7 +5373,9 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#main_window">main_window</a>
+    <a href="#dialogs.edit_forms">dialogs.edit_forms</a>
+ &#8226;   <a href="#dialogs.master_data_dialog">dialogs.master_data_dialog</a>
+ &#8226;   <a href="#main_window">main_window</a>
 
   </div>
 
@@ -5355,16 +5402,50 @@ imported by:
 </div>
 
 <div class="node">
-  <a name="dialogs.edit_forms"></a>
-  <a target="code" href="/Users/fookay/ders%20program/dialogs/edit_forms.py" type="text/plain"><tt>dialogs.edit_forms</tt></a>
-<span class="moduletype">InvalidSourceModule</span>  <div class="import">
+  <a name="dialogs.constraints_dialog"></a>
+  <a target="code" href="/Users/fookay/ders%20program/dialogs/constraints_dialog.py" type="text/plain"><tt>dialogs.constraints_dialog</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
 imports:
-    <a href="#dialogs">dialogs</a>
+    <a href="#PySide6.QtCore">PySide6.QtCore</a>
+ &#8226;   <a href="#PySide6.QtGui">PySide6.QtGui</a>
+ &#8226;   <a href="#PySide6.QtWidgets">PySide6.QtWidgets</a>
+ &#8226;   <a href="#dialogs">dialogs</a>
+ &#8226;   <a href="#timetable_grid">timetable_grid</a>
 
   </div>
   <div class="import">
 imported by:
-    <a href="#main_window">main_window</a>
+    <a href="#dialogs.edit_forms">dialogs.edit_forms</a>
+ &#8226;   <a href="#dialogs.master_data_dialog">dialogs.master_data_dialog</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="dialogs.edit_forms"></a>
+  <a target="code" href="/Users/fookay/ders%20program/dialogs/edit_forms.py" type="text/plain"><tt>dialogs.edit_forms</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#PySide6.QtCore">PySide6.QtCore</a>
+ &#8226;   <a href="#PySide6.QtGui">PySide6.QtGui</a>
+ &#8226;   <a href="#PySide6.QtWidgets">PySide6.QtWidgets</a>
+ &#8226;   <a href="#database">database</a>
+ &#8226;   <a href="#dialogs">dialogs</a>
+ &#8226;   <a href="#dialogs.advanced_wizard">dialogs.advanced_wizard</a>
+ &#8226;   <a href="#dialogs.auto_schedule_dialog">dialogs.auto_schedule_dialog</a>
+ &#8226;   <a href="#dialogs.constraints_dialog">dialogs.constraints_dialog</a>
+ &#8226;   <a href="#dialogs.master_data_dialog">dialogs.master_data_dialog</a>
+ &#8226;   <a href="#dialogs.print_preview">dialogs.print_preview</a>
+ &#8226;   <a href="#main_window">main_window</a>
+ &#8226;   <a href="#re">re</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#dialogs.advanced_wizard">dialogs.advanced_wizard</a>
+ &#8226;   <a href="#dialogs.master_data_dialog">dialogs.master_data_dialog</a>
+ &#8226;   <a href="#main_window">main_window</a>
 
   </div>
 
@@ -5404,7 +5485,28 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#main_window">main_window</a>
+    <a href="#dialogs.advanced_wizard">dialogs.advanced_wizard</a>
+ &#8226;   <a href="#dialogs.master_data_dialog">dialogs.master_data_dialog</a>
+ &#8226;   <a href="#main_window">main_window</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="dialogs.groups_dialog"></a>
+  <a target="code" href="/Users/fookay/ders%20program/dialogs/groups_dialog.py" type="text/plain"><tt>dialogs.groups_dialog</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#PySide6.QtCore">PySide6.QtCore</a>
+ &#8226;   <a href="#PySide6.QtGui">PySide6.QtGui</a>
+ &#8226;   <a href="#PySide6.QtWidgets">PySide6.QtWidgets</a>
+ &#8226;   <a href="#dialogs">dialogs</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#dialogs.master_data_dialog">dialogs.master_data_dialog</a>
 
   </div>
 
@@ -5413,14 +5515,28 @@ imported by:
 <div class="node">
   <a name="dialogs.master_data_dialog"></a>
   <a target="code" href="/Users/fookay/ders%20program/dialogs/master_data_dialog.py" type="text/plain"><tt>dialogs.master_data_dialog</tt></a>
-<span class="moduletype">InvalidSourceModule</span>  <div class="import">
+<span class="moduletype">SourceModule</span>  <div class="import">
 imports:
-    <a href="#dialogs">dialogs</a>
+    <a href="#PySide6.QtCore">PySide6.QtCore</a>
+ &#8226;   <a href="#PySide6.QtGui">PySide6.QtGui</a>
+ &#8226;   <a href="#PySide6.QtWidgets">PySide6.QtWidgets</a>
+ &#8226;   <a href="#database">database</a>
+ &#8226;   <a href="#dialogs">dialogs</a>
+ &#8226;   <a href="#dialogs.auto_schedule_dialog">dialogs.auto_schedule_dialog</a>
+ &#8226;   <a href="#dialogs.constraints_dialog">dialogs.constraints_dialog</a>
+ &#8226;   <a href="#dialogs.edit_forms">dialogs.edit_forms</a>
+ &#8226;   <a href="#dialogs.extracted_dialog">dialogs.extracted_dialog</a>
+ &#8226;   <a href="#dialogs.groups_dialog">dialogs.groups_dialog</a>
+ &#8226;   <a href="#dialogs.print_preview">dialogs.print_preview</a>
+ &#8226;   <a href="#dialogs.timeoff_dialog">dialogs.timeoff_dialog</a>
+ &#8226;   <a href="#re">re</a>
+ &#8226;   <a href="#timetable_grid">timetable_grid</a>
 
   </div>
   <div class="import">
 imported by:
-    <a href="#dialogs.startup_wizard">dialogs.startup_wizard</a>
+    <a href="#dialogs.edit_forms">dialogs.edit_forms</a>
+ &#8226;   <a href="#dialogs.startup_wizard">dialogs.startup_wizard</a>
  &#8226;   <a href="#main_window">main_window</a>
 
   </div>
@@ -5445,7 +5561,9 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#main_window">main_window</a>
+    <a href="#dialogs.edit_forms">dialogs.edit_forms</a>
+ &#8226;   <a href="#dialogs.master_data_dialog">dialogs.master_data_dialog</a>
+ &#8226;   <a href="#main_window">main_window</a>
 
   </div>
 
@@ -5566,6 +5684,26 @@ imports:
   <div class="import">
 imported by:
     <a href="#main_window">main_window</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="dialogs.timeoff_dialog"></a>
+  <a target="code" href="/Users/fookay/ders%20program/dialogs/timeoff_dialog.py" type="text/plain"><tt>dialogs.timeoff_dialog</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#PySide6.QtCore">PySide6.QtCore</a>
+ &#8226;   <a href="#PySide6.QtGui">PySide6.QtGui</a>
+ &#8226;   <a href="#PySide6.QtWidgets">PySide6.QtWidgets</a>
+ &#8226;   <a href="#dialogs">dialogs</a>
+ &#8226;   <a href="#timetable_grid">timetable_grid</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#dialogs.master_data_dialog">dialogs.master_data_dialog</a>
 
   </div>
 
@@ -10012,7 +10150,8 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#main.py">main.py</a>
+    <a href="#dialogs.edit_forms">dialogs.edit_forms</a>
+ &#8226;   <a href="#main.py">main.py</a>
  &#8226;   <a href="#main_window">main_window</a>
 
   </div>
@@ -11599,6 +11738,8 @@ imported by:
  &#8226;   <a href="#cryptography.x509.name">cryptography.x509.name</a>
  &#8226;   <a href="#csv">csv</a>
  &#8226;   <a href="#dataclasses">dataclasses</a>
+ &#8226;   <a href="#dialogs.edit_forms">dialogs.edit_forms</a>
+ &#8226;   <a href="#dialogs.master_data_dialog">dialogs.master_data_dialog</a>
  &#8226;   <a href="#email._encoded_words">email._encoded_words</a>
  &#8226;   <a href="#email._header_value_parser">email._header_value_parser</a>
  &#8226;   <a href="#email.feedparser">email.feedparser</a>
@@ -13195,7 +13336,10 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#dialogs.print_preview">dialogs.print_preview</a>
+    <a href="#dialogs.constraints_dialog">dialogs.constraints_dialog</a>
+ &#8226;   <a href="#dialogs.master_data_dialog">dialogs.master_data_dialog</a>
+ &#8226;   <a href="#dialogs.print_preview">dialogs.print_preview</a>
+ &#8226;   <a href="#dialogs.timeoff_dialog">dialogs.timeoff_dialog</a>
  &#8226;   <a href="#main_window">main_window</a>
 
   </div>

@@ -301,7 +301,7 @@ class SchoolInfoDialog(QDialog):
     def get_data(self):
         return {
             "okul_adi": self.txt_yetkili_ad.text(), # For backwards compatibility if needed
-            "yil": 2026 - 2027,
+            "yil": 2026,
             "gun_sayisi": int(self.cb_gun_sayisi.currentText()),
             "ders_saati": int(self.cb_ders_saati.currentText()),
         }

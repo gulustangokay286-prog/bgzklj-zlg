@@ -53,5 +53,3 @@ missing module named chardet - imported by requests.compat (optional), requests 
 missing module named 'pyodide.ffi' - imported by urllib3.contrib.emscripten.fetch (delayed, optional)
 missing module named pyodide - imported by urllib3.contrib.emscripten.fetch (top-level)
 missing module named js - imported by urllib3.contrib.emscripten.fetch (top-level)
-invalid module named dialogs.edit_forms - imported by main_window (top-level)
-invalid module named dialogs.master_data_dialog - imported by main_window (top-level), dialogs.startup_wizard (delayed)

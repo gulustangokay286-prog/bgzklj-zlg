@@ -855,7 +855,7 @@ class MasterDataDialog(QDialog):
         dlg = AutoScheduleDialog(self.data_store, self)
         dlg.exec()
 
-    def _open_2026 - 2027_dialog(self, dlg_id):
+    def _open_2025_dialog(self, dlg_id):
         from dialogs.extracted_dialog import open_extracted_dialog
         open_extracted_dialog(dlg_id, self)
 

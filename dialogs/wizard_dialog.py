@@ -49,8 +49,8 @@ class WizardDialog(QWizard):
         form = QFormLayout(page)
         form.setSpacing(10)
 
-        self._w_okul = QLineEdit(); self._w_okul.setPlaceholderText("Ornek Anadolu Lisesi")
-        self._w_yil  = QSpinBox(); self._w_yil.setRange(2020, 2035); self._w_yil.setValue(2026 - 2027)
+        self._w_okul = QLineEdit(); self._w_okul.setPlaceholderText("Örn: Atatürk Anadolu Lisesi")
+        self._w_yil  = QSpinBox(); self._w_yil.setRange(2020, 2035); self._w_yil.setValue(2026)
         self._w_gun  = QSpinBox(); self._w_gun.setRange(1, 6); self._w_gun.setValue(5)
         self._w_ders = QSpinBox(); self._w_ders.setRange(4, 12); self._w_ders.setValue(8)
 
