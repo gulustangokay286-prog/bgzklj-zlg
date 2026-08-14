@@ -378,7 +378,7 @@ class TimetablePrintPreview(QDialog):
             y = margin_y + row_idx * (cell_h + spacing_y)
             
             placements = self._get_pseudo_placements(item_name, is_teacher)
-            self._draw_mini_grid(painter, x, y, cell_w, cell_h, item_name, school_name, placements, is_single=False)
+            self._draw_mini_grid(painter, x, y, cell_w, cell_h, item_name, school_name, placements, is_single=False, is_teacher=is_teacher)
 
     def _get_kisa_subject(self, name):
         if not name: return ""
@@ -401,7 +401,7 @@ class TimetablePrintPreview(QDialog):
                 return c.get("kisa") or name
         return name
 
-    def _draw_mini_grid(self, painter, x, y, w, h, target_name, school_name, placements, is_single=False):
+    def _draw_mini_grid(self, painter, x, y, w, h, target_name, school_name, placements, is_single=False, is_teacher=False):
         top_font_size = 10 if is_single else 7
         title_font_size = 24 if is_single else 18
         

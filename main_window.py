@@ -1412,15 +1412,14 @@ class MainWindow(QMainWindow):
                 # Update datastore and save
                 self.data_store["grid_placements"] = grid_placements
                 self.save_db()
+                self._refresh_tree()
+                self._restore_grid_placements()
                 
-                # Reload the current view so the new placements show up immediately
-                if hasattr(self, "_grid"):
-                    if hasattr(self._grid, "entity_combo") and self._grid.entity_combo.count() > 0:
-                        self._on_entity_combo_changed(self._grid.entity_combo.currentText())
-                    else:
-                        self._restore_grid_placements()
-                        
-                self.statusBar().showMessage("Yapay Zeka yerleşimi tamamlandı.")
+                QMessageBox.information(
+                    self, "Otomatik Planlama Tamamlandı",
+                    f"🎉 Otomatik planlama başarıyla oluşturuldu!\n\nToplam {len(grid_placements)} ders kartı çakışmasız olarak çizelgeye yerleştirildi."
+                )
+                self.statusBar().showMessage(f"Otomatik planlama başarıyla oluşturuldu ({len(grid_placements)} ders yerleştirildi).")
 
     def _act_statistics(self):
         from dialogs.statistics_dialog import StatisticsDialog

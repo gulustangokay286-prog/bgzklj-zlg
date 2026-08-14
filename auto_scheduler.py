@@ -26,13 +26,13 @@ class AutoSchedulerWorker(QThread):
         blocks_to_place = []
         teacher_hours = {}
         for asgn in assignments:
-            hours = int(asgn.get("duration") or asgn.get("saat") or 1)
-            t_name = asgn.get("teacher") or asgn.get("ogretmen") or ""
-            c_name = asgn.get("class") or asgn.get("sinif") or ""
-            subj_name = asgn.get("subject") or asgn.get("ders") or ""
+            hours = int(asgn.get("duration") or asgn.get("saat") or asgn.get("toplam_saat") or 1)
+            t_name = asgn.get("teacher") or asgn.get("ogretmen") or asgn.get("teacher_name") or ""
+            c_name = asgn.get("class") or asgn.get("sinif") or asgn.get("class_name") or ""
+            subj_name = asgn.get("subject") or asgn.get("ders") or asgn.get("subject_name") or ""
             type_str = str(asgn.get("type", ""))
             
-            if t_name and c_name and subj_name:
+            if (t_name or c_name) and subj_name:
                 teacher_hours[t_name] = teacher_hours.get(t_name, 0) + hours
                 
                 # Parse breakdown like "2+2", "3+1", "2+1", "1+1"
@@ -68,8 +68,8 @@ class AutoSchedulerWorker(QThread):
         best_schedule = []
         best_placed_count = -1
         
-        # 150 kez farklı kurgularla dene (Random Restarts with Block Placement)
-        for attempt in range(150):
+        # Multiple attempts with backtracking & random restarts
+        for attempt in range(300):
             if not self._is_running:
                 return
                 
@@ -93,9 +93,9 @@ class AutoSchedulerWorker(QThread):
                 subj = block["subject_name"]
                 b_dur = block["duration"]
                 
-                if t_name not in teacher_schedule: teacher_schedule[t_name] = set()
-                if c_name not in class_schedule: class_schedule[c_name] = set()
-                if c_name not in class_day_subjects: class_day_subjects[c_name] = {}
+                if t_name and t_name not in teacher_schedule: teacher_schedule[t_name] = set()
+                if c_name and c_name not in class_schedule: class_schedule[c_name] = set()
+                if c_name and c_name not in class_day_subjects: class_day_subjects[c_name] = {}
                 
                 t_obj = t_objs.get(t_name, {})
                 c_obj = c_objs.get(c_name, {})
@@ -104,6 +104,7 @@ class AutoSchedulerWorker(QThread):
                 
                 best_slots = []
                 fallback_slots = []
+                emergency_slots = []
                 
                 # Try placing block of size b_dur on day d starting at period p
                 for d in range(len(days)):
@@ -111,7 +112,9 @@ class AutoSchedulerWorker(QThread):
                         can_place = True
                         for off in range(b_dur):
                             check_p = p + off
-                            if (d, check_p) in teacher_schedule[t_name] or (d, check_p) in class_schedule[c_name]:
+                            t_conflict = (t_name != "" and (d, check_p) in teacher_schedule.get(t_name, set()))
+                            c_conflict = (c_name != "" and (d, check_p) in class_schedule.get(c_name, set()))
+                            if t_conflict or c_conflict:
                                 can_place = False; break
                             if t_timeoff and d < len(t_timeoff) and check_p < len(t_timeoff[d]) and t_timeoff[d][check_p] == 0:
                                 can_place = False; break
@@ -119,10 +122,19 @@ class AutoSchedulerWorker(QThread):
                                 can_place = False; break
                                 
                         if can_place:
-                            if subj in class_day_subjects[c_name].get(d, set()):
+                            if c_name and subj in class_day_subjects[c_name].get(d, set()):
                                 fallback_slots.append((d, p))
                             else:
                                 best_slots.append((d, p))
+                        else:
+                            # If no strict slot, consider emergency slot (ignoring soft limits)
+                            no_hard_overlap = True
+                            for off in range(b_dur):
+                                check_p = p + off
+                                if (t_name and (d, check_p) in teacher_schedule.get(t_name, set())) or (c_name and (d, check_p) in class_schedule.get(c_name, set())):
+                                    no_hard_overlap = False; break
+                            if no_hard_overlap:
+                                emergency_slots.append((d, p))
                                 
                 chosen_slot = None
                 if best_slots:
@@ -131,15 +143,19 @@ class AutoSchedulerWorker(QThread):
                 elif fallback_slots:
                     random.shuffle(fallback_slots)
                     chosen_slot = fallback_slots[0]
+                elif emergency_slots:
+                    random.shuffle(emergency_slots)
+                    chosen_slot = emergency_slots[0]
                     
                 if chosen_slot:
                     d, p = chosen_slot
                     for off in range(b_dur):
                         check_p = p + off
-                        teacher_schedule[t_name].add((d, check_p))
-                        class_schedule[c_name].add((d, check_p))
-                        if d not in class_day_subjects[c_name]: class_day_subjects[c_name][d] = set()
-                        class_day_subjects[c_name][d].add(subj)
+                        if t_name: teacher_schedule[t_name].add((d, check_p))
+                        if c_name:
+                            class_schedule[c_name].add((d, check_p))
+                            if d not in class_day_subjects[c_name]: class_day_subjects[c_name][d] = set()
+                            class_day_subjects[c_name][d].add(subj)
                         
                     schedule.append({
                         "class_name": c_name, "teacher_name": t_name,
