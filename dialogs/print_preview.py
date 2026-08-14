@@ -25,6 +25,12 @@ def get_subject_color(subject_name: str, custom_color: str = None) -> str:
     hash_val = sum(ord(c) for c in subject_name)
     return SUBJECT_COLORS[hash_val % len(SUBJECT_COLORS)]
 
+def format_tr_name(val):
+    if not val:
+        return ""
+    val = str(val).strip()
+    return val.replace("i", "İ").replace("ı", "I").upper()
+
 def make_font(size, bold=False):
     f = QFont("Arial")
     f.setPixelSize(size)
@@ -352,7 +358,7 @@ class TimetablePrintPreview(QDialog):
             margin_x = (VW - cell_w) / 2
             margin_y = (VH - cell_h) / 2
             placements = self._get_pseudo_placements(items[0], is_teacher)
-            self._draw_mini_grid(painter, margin_x, margin_y, cell_w, cell_h, items[0], school_name, placements, is_single=True)
+            self._draw_mini_grid(painter, margin_x, margin_y, cell_w, cell_h, items[0], school_name, placements, is_single=True, is_teacher=is_teacher)
             return
 
         # Multi-grid layout (6 per page)
