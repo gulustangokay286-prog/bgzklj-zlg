@@ -1326,13 +1326,6 @@ class ClassComprehensiveAssignmentDialog(QDialog):
 
     def _edit_subject_assignment(self, subject_name):
         d = SubjectTeacherAssignmentDialog(subject_name=subject_name, data_store=self.data_store, parent=self)
-        
-        # Pre-select class
-        for i in range(d.list_classes.count()):
-            item = d.list_classes.item(i)
-            if item.text() == self.class_name:
-                item.setCheckState(Qt.Checked)
-            
         if d.exec():
             trigger_save_db(self, self.data_store)
             self._load_data()
