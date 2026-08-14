@@ -51,6 +51,14 @@ def format_tr_name(name_str: str) -> str:
         
     return " ".join(formatted)
 
+def normalize_class_name(cls_name: str) -> str:
+    """Normalizes class names (e.g. '12 / A' -> '12/A', '9 - B' -> '9/B') for consistent matching."""
+    if not cls_name:
+        return ""
+    s = str(cls_name).strip().upper().replace(" ", "")
+    s = s.replace("-", "/").replace("\\", "/")
+    return s
+
 def get_subject_color(subject_name: str) -> str:
     """Returns a deterministic, vibrant, distinct color for any subject name."""
     if not subject_name:
@@ -846,12 +854,12 @@ class MainWindow(QMainWindow):
             t_info = info.get("teacher_name", "").strip()
             c_info = info.get("class_name", "").strip()
             
-            # Filter logic with case/turkish character tolerance
+            # Filter logic with case/turkish character and whitespace tolerance
             if view_type == "teacher" and entity_name:
                 if format_tr_name(t_info) != format_tr_name(entity_name):
                     continue
             if view_type == "class" and entity_name:
-                if c_info.upper() != entity_name.strip().upper():
+                if normalize_class_name(c_info) != normalize_class_name(entity_name):
                     continue
             if view_type == "room" and entity_name: # Room support later
                 continue
@@ -866,7 +874,7 @@ class MainWindow(QMainWindow):
                 class_name=info.get("class_name", "")
             )
 
-    def save_db(self, path=None):
+    def save_db(self, path=None, sync_from_grid=True):
         import json
         if hasattr(self, "_push_undo_state"):
             self._push_undo_state()
@@ -874,8 +882,8 @@ class MainWindow(QMainWindow):
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         self._set_last_db_path(save_path)
         
-        # Sync current grid view to global list
-        if hasattr(self, "_grid") and hasattr(self._grid, "view_combo") and hasattr(self._grid, "entity_combo"):
+        # Sync current grid view to global list ONLY when sync_from_grid is True
+        if sync_from_grid and hasattr(self, "_grid") and hasattr(self._grid, "view_combo") and hasattr(self._grid, "entity_combo"):
             view_type = getattr(self, "_active_view_type", None)
             entity_name = getattr(self, "_active_entity_name", None)
             
@@ -892,7 +900,7 @@ class MainWindow(QMainWindow):
                 new_global = []
                 # 1. Retain everything except the current entity's lessons
                 for p in global_placements:
-                    if view_type == "class" and p.get("class_name", "").strip().upper() == entity_name.strip().upper():
+                    if view_type == "class" and normalize_class_name(p.get("class_name", "")) == normalize_class_name(entity_name):
                         continue
                     if view_type == "teacher" and format_tr_name(p.get("teacher_name", "")) == format_tr_name(entity_name):
                         continue
@@ -1461,36 +1469,45 @@ class MainWindow(QMainWindow):
             if results:
                 grid_placements = []
                 for r in results:
-                    c_name = r["class_name"]
-                    t_name = r["teacher_name"]
-                    subj = r["subject_name"]
-                    d_idx = r["day_idx"]
-                    p_idx = r["period"]
-                    
-                    from main_window import get_subject_color
+                    c_name = r.get("class_name", r.get("class", ""))
+                    t_name = format_tr_name(r.get("teacher_name", r.get("teacher", "")))
+                    subj = r.get("subject_name", r.get("subject", ""))
+                    d_idx = r.get("day_idx") if "day_idx" in r else r.get("day", r.get("col", 0))
+                    p_idx = r.get("period") if "period" in r else r.get("row", 0)
+                    dur = int(r.get("duration", 1))
                     color = get_subject_color(subj)
                     
                     grid_placements.append({
                         "period": p_idx,
                         "day": d_idx,
+                        "row": p_idx,
+                        "col": d_idx,
                         "subject_name": subj,
+                        "subject": subj,
                         "color": color,
                         "teacher_name": t_name,
-                        "duration": r.get("duration", 1),
-                        "class_name": c_name
+                        "teacher": t_name,
+                        "duration": dur,
+                        "class_name": c_name,
+                        "class": c_name
                     })
                 
-                # Update datastore and save
+                # Update datastore and save cleanly
                 self.data_store["grid_placements"] = grid_placements
-                self.save_db()
-                self._refresh_tree()
+                self.save_db(sync_from_grid=False)
                 self._restore_grid_placements()
+                self._refresh_tree()
                 
+                total_hours = sum(p.get("duration", 1) for p in grid_placements)
                 QMessageBox.information(
                     self, "Otomatik Planlama Tamamlandı",
-                    f"🎉 Otomatik planlama başarıyla oluşturuldu!\n\nToplam {len(grid_placements)} ders kartı çakışmasız olarak çizelgeye yerleştirildi."
+                    f"🎉 Otomatik planlama başarıyla oluşturuldu!\n\nToplam {total_hours} ders saati ({len(grid_placements)} ders kartı) çakışmasız olarak çizelgeye yerleştirildi."
                 )
-                self.statusBar().showMessage(f"Otomatik planlama başarıyla oluşturuldu ({len(grid_placements)} ders yerleştirildi).")
+                self.statusBar().showMessage(f"Otomatik planlama başarıyla oluşturuldu ({total_hours} ders saati yerleştirildi).")
+            else:
+                self.save_db(sync_from_grid=False)
+                self._restore_grid_placements()
+                self._refresh_tree()
 
     def _act_statistics(self):
         from dialogs.statistics_dialog import StatisticsDialog
@@ -1521,11 +1538,14 @@ class MainWindow(QMainWindow):
             QMessageBox.Yes | QMessageBox.No)
         if r == QMessageBox.Yes:
             self.data_store["grid_placements"] = []
+            self.data_store["auto_schedule_results"] = []
+            self.data_store["yerlesim"] = {}
             if hasattr(self, "_grid"):
                 self._grid.clear_grid()
+                self._grid._placed_lessons = {}
             self._active_view_type = "class"
             self._active_entity_name = ""
-            self.save_db()
+            self.save_db(sync_from_grid=False)
             self._restore_grid_placements()
             self._refresh_tree()
             self.statusBar().showMessage("🧹 Tüm çizelge dersleri başarıyla sıfırlandı ve kaydedildi.")

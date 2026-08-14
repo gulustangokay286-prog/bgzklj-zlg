@@ -228,50 +228,93 @@ class TimetablePrintPreview(QDialog):
     # BİREBİR aSc MULTI-GRID KAĞIT TASARRUFU RENDERER
     # =======================================================
     def _get_pseudo_placements(self, target_name, is_teacher):
-        """Fetches actual grid cell placements for target class or teacher."""
+        """Fetches actual grid cell placements for target class or teacher strictly from real data."""
         res = {}
-        raw_placed = self.placed_lessons or self.data_store.get("yerlesim", {})
         
-        for key, data in raw_placed.items():
-            if isinstance(key, str) and "," in key:
-                parts = key.split(",")
-                r, c = int(parts[0]), int(parts[1])
-            elif isinstance(key, (tuple, list)) and len(key) >= 2:
-                r, c = int(key[0]), int(key[1])
-            else:
-                continue
-                
-            t_name = data.get("teacher") or data.get("teacher_name", "")
-            c_name = data.get("class") or data.get("class_name", "")
-            s_name = data.get("subject") or data.get("subject_name", "")
+        try:
+            from main_window import format_tr_name, get_subject_color, normalize_class_name
+        except ImportError:
+            format_tr_name = lambda t: str(t).strip()
+            normalize_class_name = lambda c: str(c).strip().upper().replace(" ", "").replace("-", "/").replace("\\", "/")
+            get_subject_color = lambda s, c=None: c or "#1E88E5"
             
-            if is_teacher:
-                if t_name == target_name:
-                    res[(c, r)] = {"subject_name": s_name, "teacher_name": c_name}
-            else:
-                if c_name == target_name or not c_name:
-                    res[(c, r)] = {"subject_name": s_name, "teacher_name": t_name}
+        # 1. Try reading from data_store["grid_placements"] (list of placement dicts)
+        grid_data = self.data_store.get("grid_placements", [])
+        if isinstance(grid_data, list) and grid_data:
+            for item in grid_data:
+                if not isinstance(item, dict):
+                    continue
+                r = item.get("period", item.get("row", 0))
+                c = item.get("day", item.get("col", 0))
+                dur = int(item.get("duration", 1))
+                t_name = item.get("teacher_name") or item.get("teacher", "")
+                c_name = item.get("class_name") or item.get("class", "")
+                s_name = item.get("subject_name") or item.get("subject", "")
+                scolor = item.get("color") or get_subject_color(s_name)
                 
-        if res:
-            return res
-
-        # Fallback if grid has no placed cards for this item yet
-        atamalar = self.data_store.get("atamalar", [])
-        filtered = [a for a in atamalar if (is_teacher and a.get("teacher") == target_name) or (not is_teacher and a.get("class") == target_name)]
-        r, c = 0, 0
-        for item in filtered:
-            dur = int(item.get("duration", 1))
-            sname = item.get("subject", "")
-            tname = item.get("teacher", "") if not is_teacher else item.get("class", "")
-            for _ in range(dur):
-                while (r, c) in res:
-                    r += 1
-                    if r >= 8: r = 0; c += 1
-                    if c >= 5: break
-                if c >= 5: break
-                res[(r, c)] = {"subject_name": sname, "teacher_name": tname}
-                r += 1
-                if r >= 8: r = 0; c += 1
+                match = False
+                if is_teacher:
+                    if format_tr_name(t_name) == format_tr_name(target_name):
+                        match = True
+                        other_name = c_name
+                else:
+                    if normalize_class_name(c_name) == normalize_class_name(target_name):
+                        match = True
+                        other_name = t_name
+                        
+                if match:
+                    for d_off in range(dur):
+                        p_curr = r + d_off
+                        if p_curr < 8:
+                            res[(c, p_curr)] = {
+                                "subject_name": s_name,
+                                "teacher_name": other_name,
+                                "color": scolor,
+                                "duration": dur
+                            }
+            if res:
+                return res
+            
+        # 2. Try reading from placed_lessons dict or yerlesim
+        raw_placed = self.placed_lessons or self.data_store.get("yerlesim", {})
+        if isinstance(raw_placed, dict) and raw_placed:
+            for key, data in raw_placed.items():
+                if isinstance(key, str) and "," in key:
+                    parts = key.split(",")
+                    r, c = int(parts[0]), int(parts[1])
+                elif isinstance(key, (tuple, list)) and len(key) >= 2:
+                    r, c = int(key[0]), int(key[1])
+                else:
+                    continue
+                    
+                t_name = data.get("teacher") or data.get("teacher_name", "")
+                c_name = data.get("class") or data.get("class_name", "")
+                s_name = data.get("subject") or data.get("subject_name", "")
+                dur = int(data.get("duration", 1))
+                scolor = data.get("color") or get_subject_color(s_name)
+                
+                match = False
+                if is_teacher:
+                    if format_tr_name(t_name) == format_tr_name(target_name):
+                        match = True
+                        other_name = c_name
+                else:
+                    if c_name.strip().upper() == str(target_name).strip().upper() or not c_name:
+                        match = True
+                        other_name = t_name
+                        
+                if match:
+                    for d_off in range(dur):
+                        p_curr = r + d_off
+                        if p_curr < 8:
+                            res[(c, p_curr)] = {
+                                "subject_name": s_name,
+                                "teacher_name": other_name,
+                                "color": scolor,
+                                "duration": dur
+                            }
+                            
+        # Returns empty if timetable was cleared/reset (NO fake fallback)
         return res
 
     def _render_asc_multi_grid(self, painter, printer, VW, VH, is_teacher=False):
@@ -526,6 +569,8 @@ class TimetablePrintPreview(QDialog):
             painter.setPen(QPen(QColor("#111111"), 1))
             painter.drawText(QRectF(cx, grid_y, col_w, header_h), Qt.AlignCenter, day_name)
 
+        placements = self._get_pseudo_placements(target_name, is_teacher)
+        
         for p_idx in range(periods):
             ry = grid_y + header_h + p_idx * row_h
             painter.setBrush(QBrush(QColor("#F5F7FA")))
@@ -546,11 +591,11 @@ class TimetablePrintPreview(QDialog):
                 painter.setPen(QPen(QColor("#E0E0E0"), 1))
                 painter.drawRect(QRectF(cx, ry, col_w, row_h))
                 
-                lesson = self.placed_lessons.get((p_idx, d_idx)) or self.placed_lessons.get((d_idx, p_idx))
+                lesson = placements.get((d_idx, p_idx))
                 if lesson:
                     sname = lesson.get("subject_name", lesson.get("subject", ""))
                     tname = lesson.get("teacher_name", lesson.get("teacher", ""))
-                    scolor = get_subject_color(sname, lesson.get("color"))
+                    scolor = lesson.get("color") or get_subject_color(sname)
                     
                     painter.setBrush(QBrush(QColor(scolor)))
                     painter.setPen(QPen(QColor(scolor).darker(120), 1))

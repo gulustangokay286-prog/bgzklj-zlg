@@ -103,46 +103,52 @@ class AutoScheduleDialog(QDialog):
     def _on_progress(self, placed, total):
         pct = int((placed / max(1, total)) * 100)
         self.progress.setValue(pct)
-        self.lbl_stats.setText(f"Yerleştirilen kart sayısı: {placed} / {total}")
+        self.lbl_stats.setText(f"Yerleştirilen ders saati: {placed} / {total} Saat")
         
     def _on_finished(self, result):
         self.progress.setValue(100)
+        schedule = result.get("schedule", [])
+        total_hrs = result.get("placed_hours") or sum(item.get("duration", 1) for item in schedule)
         self.lbl_info.setText("Program başarıyla oluşturuldu! (Çakışmalar çözüldü)")
         self.lbl_info.setStyleSheet("color: green; font-weight: bold;")
-        
-        schedule = result.get("schedule", [])
+        self.lbl_stats.setText(f"Yerleştirilen ders saati: {total_hrs} / {total_hrs} Saat ({len(schedule)} Ders Kartı)")
         self.data_store["auto_schedule_results"] = schedule
         
         new_placements = []
+        try:
+            from main_window import get_subject_color, format_tr_name
+        except ImportError:
+            get_subject_color = lambda s: "#1E88E5"
+            format_tr_name = lambda t: t
+            
         for item in schedule:
             if isinstance(item, dict):
-                r = item.get("row") if "row" in item else item.get("period")
-                c = item.get("col") if "col" in item else item.get("day")
-                t = item.get("teacher_name") or item.get("teacher") or ""
+                r = item.get("period") if "period" in item else item.get("row", 0)
+                c = item.get("day_idx") if "day_idx" in item else item.get("day", item.get("col", 0))
+                t = format_tr_name(item.get("teacher_name") or item.get("teacher") or "")
                 s = item.get("subject_name") or item.get("subject") or ""
                 cl = item.get("class_name") or item.get("class") or ""
-                color = item.get("color", "#2563EB")
+                dur = int(item.get("duration", 1))
+                color = get_subject_color(s)
                 new_placements.append({
                     "row": r, "col": c, "period": r, "day": c,
                     "teacher_name": t, "teacher": t,
                     "subject_name": s, "subject": s,
                     "class_name": cl, "class": cl,
-                    "color": color
+                    "color": color,
+                    "duration": dur
                 })
                 
         self.data_store["grid_placements"] = new_placements
         
-        from dialogs.edit_forms import trigger_save_db
-        trigger_save_db(self, self.data_store)
-        
         p = self.parent()
         if p:
-            if hasattr(p, "save_db"): p.save_db()
-            if hasattr(p, "_load_data"): p._load_data()
-            if hasattr(p, "_refresh_tree"): p._refresh_tree()
-            if hasattr(p, "_restore_grid_placements"): p._restore_grid_placements()
-            if hasattr(p, "_grid") and hasattr(p._grid, "load_placements"):
-                p._grid.load_placements(new_placements)
+            if hasattr(p, "save_db"):
+                p.save_db(sync_from_grid=False)
+            if hasattr(p, "_restore_grid_placements"):
+                p._restore_grid_placements()
+            if hasattr(p, "_refresh_tree"):
+                p._refresh_tree()
                 
         self.btn_start.setEnabled(True)
         self.btn_start.setText("Tamam")
