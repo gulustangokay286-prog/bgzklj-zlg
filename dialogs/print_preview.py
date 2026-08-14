@@ -270,9 +270,16 @@ class TimetablePrintPreview(QDialog):
                 c_name = data.get("class") or data.get("class_name", "")
                 s_name = data.get("subject") or data.get("subject_name", "")
                 scolor = data.get("color", "")
-                day_idx = int(data.get("day", 0))
-                period_idx = int(data.get("period", 0))
-                dur = int(data.get("duration", 1))
+                try:
+                    day_idx = int(data.get("day") or 0)
+                    period_idx = int(data.get("period") or 0)
+                except (TypeError, ValueError):
+                    day_idx, period_idx = 0, 0
+                
+                try:
+                    dur = int(data.get("duration") or 1)
+                except (TypeError, ValueError):
+                    dur = 1
                 
                 match = (format_tr_name(t_name) == target_norm) if is_teacher else (format_tr_name(c_name) == target_norm)
                 if match:
@@ -303,7 +310,10 @@ class TimetablePrintPreview(QDialog):
                 c_name = data.get("class") or data.get("class_name", "")
                 s_name = data.get("subject") or data.get("subject_name", "")
                 scolor = data.get("color", "")
-                dur = int(data.get("duration", 1))
+                try:
+                    dur = int(data.get("duration") or 1)
+                except (TypeError, ValueError):
+                    dur = 1
                 
                 match = (format_tr_name(t_name) == target_norm) if is_teacher else (format_tr_name(c_name) == target_norm)
                 if match:
@@ -764,7 +774,7 @@ class TimetablePrintPreview(QDialog):
         cur_y = start_y + header_h
         painter.setFont(make_font(10))
         
-        sorted_atamalar = sorted(atamalar, key=lambda a: (a.get("class", ""), a.get("teacher", "")))
+        sorted_atamalar = sorted(atamalar, key=lambda a: (str(a.get("class") or ""), str(a.get("teacher") or "")))
         
         total_hours = 0
         if not sorted_atamalar:
