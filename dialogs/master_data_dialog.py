@@ -925,14 +925,17 @@ class TeacherIndividualTimetableDialog(QDialog):
     def __init__(self, teacher_name, data_store=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle(f"Öğretmen Çizelgesi - {teacher_name}")
-        self.setFixedSize(720, 540)
+        self.setMinimumSize(850, 600)
+        self.resize(850, 600)
         self.teacher_name = teacher_name
         self.data_store = data_store or {}
         self.setStyleSheet("""
-            QDialog { background-color: #F4F6F9; font-family: system-ui, -apple-system, sans-serif; font-size: 13px; }
-            QLabel { color: #333; font-size: 13px; font-weight: bold; }
-            QPushButton { min-height: 28px; padding: 4px 12px; border: 1px solid #CCCCCC; border-radius: 4px; background: #F8F9FA; font-size: 13px; }
-            QPushButton:hover { background: #EAEAEA; }
+            QDialog { background-color: #F8FAFC; font-family: system-ui, -apple-system, sans-serif; font-size: 13px; }
+            QLabel { color: #334155; font-size: 13px; font-weight: bold; }
+            QPushButton { min-height: 32px; padding: 6px 14px; border: 1px solid #CBD5E1; border-radius: 6px; background: #FFFFFF; font-size: 13px; font-weight: bold; color: #475569; }
+            QPushButton:hover { background: #F1F5F9; }
+            QTableWidget { border: 1px solid #E2E8F0; background: #FFFFFF; gridline-color: #E2E8F0; font-size: 12px; border-radius: 8px; }
+            QHeaderView::section { background-color: #F1F5F9; border: none; border-bottom: 2px solid #E2E8F0; padding: 8px; font-weight: bold; font-size: 13px; color: #475569; }
         """)
         self._build_ui()
 
@@ -943,12 +946,12 @@ class TeacherIndividualTimetableDialog(QDialog):
         
         top_bar = QHBoxLayout()
         lbl = QLabel(f"👨‍🏫 {self.teacher_name} - Haftalık Ders Çizelgesi")
-        lbl.setStyleSheet("font-size: 15px; color: #0078D7;")
+        lbl.setStyleSheet("font-size: 16px; color: #2563EB; font-weight: bold;")
         top_bar.addWidget(lbl)
         top_bar.addStretch(1)
         
         btn_yazdir = QPushButton("🖨️ Bu Öğretmenin Çizelgesini Yazdır")
-        btn_yazdir.setStyleSheet("background: #0078D7; color: white; font-weight: bold; padding: 6px 14px; border-radius: 4px;")
+        btn_yazdir.setStyleSheet("background: #2563EB; color: white; font-weight: bold; padding: 6px 16px; border-radius: 6px; border: none;")
         btn_yazdir.clicked.connect(self._print_teacher_timetable)
         top_bar.addWidget(btn_yazdir)
         lay.addLayout(top_bar)
@@ -966,21 +969,63 @@ class TeacherIndividualTimetableDialog(QDialog):
         table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         table.setEditTriggers(QTableWidget.NoEditTriggers)
         table.setAlternatingRowColors(True)
+        table.verticalHeader().setDefaultSectionSize(48)
         
         from dialogs.edit_forms import format_tr_name, get_subject_color
         from PySide6.QtGui import QBrush, QColor
         
-        placements = self.data_store.get("grid_placements", [])
-        for p in placements:
-            if format_tr_name(p.get("teacher", "")) == format_tr_name(self.teacher_name):
-                r = p.get("row", 0)
-                c = p.get("col", 0)
-                if 0 <= r < periods and 0 <= c < len(days):
-                    item = QTableWidgetItem(f"{p.get('subject_name','')}\n({p.get('class_name','')})")
-                    item.setTextAlignment(Qt.AlignCenter)
-                    item.setBackground(QBrush(QColor(p.get("color", "#C4C4F0"))))
-                    table.setItem(r, c, item)
-                    
+        target_norm = format_tr_name(self.teacher_name)
+
+        # 1. Gather placements from parent main window if grid has placed items
+        parent_mw = self.parent()
+        while parent_mw and not hasattr(parent_mw, "_grid"):
+            parent_mw = parent_mw.parent()
+            
+        if parent_mw and hasattr(parent_mw, "_grid") and hasattr(parent_mw._grid, "get_placed_lessons"):
+            grid_placed = parent_mw._grid.get_placed_lessons()
+            for (r, c), info in grid_placed.items():
+                if isinstance(info, dict):
+                    t_name = info.get("teacher_name") or info.get("teacher", "")
+                    if format_tr_name(t_name) == target_norm:
+                        s_name = info.get("subject_name") or info.get("subject", "")
+                        c_name = info.get("class_name") or info.get("class", "")
+                        color = info.get("color") or get_subject_color(s_name)
+                        if 0 <= r < periods and 0 <= c < len(days):
+                            item = QTableWidgetItem(f"{s_name}\n({c_name})")
+                            item.setTextAlignment(Qt.AlignCenter)
+                            item.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+                            item.setBackground(QBrush(QColor(color)))
+                            table.setItem(r, c, item)
+
+        # 2. Gather placements from data_store["grid_placements"]
+        placements_list = self.data_store.get("grid_placements", [])
+        for p in placements_list:
+            if not isinstance(p, dict):
+                continue
+            t_name = p.get("teacher_name") or p.get("teacher", "")
+            if format_tr_name(t_name) == target_norm:
+                r_val = p.get("period") if "period" in p else p.get("row")
+                c_val = p.get("day") if "day" in p else p.get("col")
+                if r_val is not None and c_val is not None:
+                    try:
+                        r = int(r_val)
+                        c = int(c_val)
+                    except (ValueError, TypeError):
+                        continue
+                    if 0 <= r < periods and 0 <= c < len(days):
+                        s_name = p.get("subject_name") or p.get("subject", "")
+                        c_name = p.get("class_name") or p.get("class", "")
+                        dur = int(p.get("duration") or 1)
+                        color = p.get("color") or get_subject_color(s_name)
+                        for d_off in range(dur):
+                            p_curr = r + d_off
+                            if p_curr < periods:
+                                item = QTableWidgetItem(f"{s_name}\n({c_name})")
+                                item.setTextAlignment(Qt.AlignCenter)
+                                item.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+                                item.setBackground(QBrush(QColor(color)))
+                                table.setItem(p_curr, c, item)
+                                
         lay.addWidget(table, 1)
         
         bot = QHBoxLayout()
@@ -994,4 +1039,4 @@ class TeacherIndividualTimetableDialog(QDialog):
         from dialogs.print_preview import TimetablePrintPreview
         filters = {"entity_type": "teacher", "selected_items": [self.teacher_name]}
         dlg = TimetablePrintPreview(self.data_store, {}, filters, self)
-        dlg.direct_print()
+        dlg.exec()

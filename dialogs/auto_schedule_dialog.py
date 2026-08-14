@@ -110,14 +110,40 @@ class AutoScheduleDialog(QDialog):
         self.lbl_info.setText("Program başarıyla oluşturuldu! (Çakışmalar çözüldü)")
         self.lbl_info.setStyleSheet("color: green; font-weight: bold;")
         
-        # Save results to data_store and close
         schedule = result.get("schedule", [])
-        
-        # Grid'e yansıtılması için formatla: { "row,col": { class_name, teacher_name, subject_name } }
-        # Not: Bütün okul görünümü için bu yeterli değil, ama geçici olarak `grid_placements` içine ekleyebiliriz.
-        # Gerçek aSc mimarisinde her sınıfın kendi tablosu vardır.
         self.data_store["auto_schedule_results"] = schedule
         
+        new_placements = []
+        for item in schedule:
+            if isinstance(item, dict):
+                r = item.get("row") if "row" in item else item.get("period")
+                c = item.get("col") if "col" in item else item.get("day")
+                t = item.get("teacher_name") or item.get("teacher") or ""
+                s = item.get("subject_name") or item.get("subject") or ""
+                cl = item.get("class_name") or item.get("class") or ""
+                color = item.get("color", "#2563EB")
+                new_placements.append({
+                    "row": r, "col": c, "period": r, "day": c,
+                    "teacher_name": t, "teacher": t,
+                    "subject_name": s, "subject": s,
+                    "class_name": cl, "class": cl,
+                    "color": color
+                })
+                
+        self.data_store["grid_placements"] = new_placements
+        
+        from dialogs.edit_forms import trigger_save_db
+        trigger_save_db(self, self.data_store)
+        
+        p = self.parent()
+        if p:
+            if hasattr(p, "save_db"): p.save_db()
+            if hasattr(p, "_load_data"): p._load_data()
+            if hasattr(p, "_refresh_tree"): p._refresh_tree()
+            if hasattr(p, "_restore_grid_placements"): p._restore_grid_placements()
+            if hasattr(p, "_grid") and hasattr(p._grid, "load_placements"):
+                p._grid.load_placements(new_placements)
+                
         self.btn_start.setEnabled(True)
         self.btn_start.setText("Tamam")
         self.btn_start.clicked.disconnect()

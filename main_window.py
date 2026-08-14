@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QTabWidget, QFrame, QSizePolicy, QMenu, QToolButton, QFileDialog, QDialog
 )
 from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QFont, QIcon, QPixmap, QPainter, QColor, QPen, QLinearGradient, QBrush, QAction, QPainterPath
+from PySide6.QtGui import QFont, QIcon, QPixmap, QPainter, QColor, QPen, QLinearGradient, QBrush, QAction, QPainterPath, QPainterPath
 
 from ribbon_widget import RibbonWidget, make_icon
 from timetable_grid import TimetableGrid
@@ -18,6 +18,7 @@ from dialogs.school_info import SchoolInfoDialog
 from dialogs.auto_schedule_dialog import AutoScheduleDialog
 from dialogs.print_preview import TimetablePrintPreview
 from core.timetable_data import TimetableData
+from dialogs.edit_forms import format_tr_name
 from dialogs.edit_forms import format_tr_name
 
 APP_TITLE = "BGZ Ders Planlama"
@@ -229,6 +230,8 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._restore_grid_placements()
         self._refresh_tree()
+        if hasattr(self, "_grid") and hasattr(self._grid, "view_combo"):
+            self._on_view_combo_changed(self._grid.view_combo.currentText())
         if hasattr(self, "_grid") and hasattr(self._grid, "view_combo"):
             self._on_view_combo_changed(self._grid.view_combo.currentText())
         
@@ -479,7 +482,6 @@ class MainWindow(QMainWindow):
         p1.add_divider()
         p1.add_button("Dersler",        "ders",     self._open_subjects)
         p1.add_button("Sınıflar",       "sinif",    self._open_classes)
-        p1.add_button("Sınıfın\nDersleri", "sinif", self._open_class_assignments)
         p1.add_button("Derslikler",     "derslik",  self._open_rooms)
         p1.add_button("Öğretmenler",    "ogretmen", self._open_teachers)
         p1.add_button("Seçmeli\nDersler","ders",    self._open_electives)
@@ -523,7 +525,6 @@ class MainWindow(QMainWindow):
         p3.add_divider()
         p3.add_button("Dersler",    "ders",   self._open_subjects)
         p3.add_button("Sınıflar",   "sinif",  self._open_classes)
-        p3.add_button("Sınıfın\nDersleri", "sinif", self._open_class_assignments)
         p3.add_button("Derslikler", "derslik",self._open_rooms)
         p3.add_button("Öğretmenler","ogretmen",self._open_teachers)
         p3.add_button("Seçmeli\nDersler","ders",self._open_electives)

@@ -7,6 +7,8 @@ from PySide6.QtCore import Qt, QPoint, QRect, QSize, QTimer
 from PySide6.QtGui import QPainter, QColor, QFont, QPainterPath, QPen, QBrush, QLinearGradient, QIcon, QPixmap
 import requests
 from cloud_sync import FIREBASE_API_KEY
+import requests
+from cloud_sync import FIREBASE_API_KEY
 
 class IconLineEdit(QLineEdit):
     def __init__(self, icon_type, placeholder, parent=None):

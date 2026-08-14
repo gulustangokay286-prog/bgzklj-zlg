@@ -4,8 +4,7 @@ from PySide6.QtWidgets import (
     QPushButton, QTabWidget, QWidget, QCheckBox, QRadioButton, QFrame, QButtonGroup
 )
 from PySide6.QtCore import Qt, QPoint
-from PySide6.QtGui import QFont, QPixmap, QPainter, QColor, QPen
-from PySide6.QtGui import QLinearGradient
+from PySide6.QtGui import QFont, QPixmap, QPainter, QColor, QPen, QLinearGradient
 
 def draw_placeholder_icon(icon_type):
     pix = QPixmap(64, 64)
@@ -13,7 +12,6 @@ def draw_placeholder_icon(icon_type):
     p = QPainter(pix)
     p.setRenderHint(QPainter.Antialiasing)
     
-    # Common shadow
     p.setPen(Qt.NoPen)
     p.setBrush(QColor(0, 0, 0, 50))
     p.drawRoundedRect(6, 6, 52, 52, 12, 12)
@@ -26,7 +24,6 @@ def draw_placeholder_icon(icon_type):
         p.setPen(QColor("#475569"))
         p.drawRoundedRect(10, 10, 44, 44, 10, 10)
         
-        # Draw a classic bank/school icon
         p.setBrush(QColor("#FFFFFF"))
         p.drawPolygon([QPoint(32, 16), QPoint(18, 28), QPoint(46, 28)])
         p.drawRect(20, 28, 24, 4)
@@ -42,14 +39,12 @@ def draw_placeholder_icon(icon_type):
         p.setPen(QColor("#0284C7"))
         p.drawRoundedRect(10, 10, 44, 44, 10, 10)
         
-        # Grid lines
         p.setPen(QPen(QColor("#FFFFFF"), 2))
         p.drawLine(10, 25, 54, 25)
         p.drawLine(10, 40, 54, 40)
         p.drawLine(25, 10, 25, 54)
         p.drawLine(40, 10, 40, 54)
         
-        # Highlight cell
         p.setBrush(QColor("#FDE047"))
         p.setPen(Qt.NoPen)
         p.drawRect(27, 27, 11, 11)
@@ -110,13 +105,11 @@ class SchoolInfoDialog(QDialog):
         
         main_layout.addWidget(self.tabs)
         
-        # Status Bar Fake
         self.lbl_status = QLabel("k12kbs.com Üyelik Durumu : Pasif")
         self.lbl_status.setObjectName("status_lbl")
         self.lbl_status.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(self.lbl_status)
         
-        # Buttons
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         
@@ -138,7 +131,7 @@ class SchoolInfoDialog(QDialog):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(15)
         
-        # --- Section 1: Basic Info ---
+        # Section 1: Basic Info
         sec1 = QHBoxLayout()
         icon1 = QLabel()
         icon1.setPixmap(draw_placeholder_icon("bank"))
@@ -171,15 +164,10 @@ class SchoolInfoDialog(QDialog):
         sec1.addLayout(grid1)
         sec1.addStretch()
         layout.addLayout(sec1)
-
-    def _load_data(self):
-        if not self.data_store: return
-        kurum = self.data_store.get("kurum", {})
-        if kurum.get("isim"):
-            self.txt_kurum_adi.setText(kurum.get("isim"))
+        
         line1 = QFrame(); line1.setObjectName("h_line"); layout.addWidget(line1)
         
-        # --- Section 2: Time Settings ---
+        # Section 2: Time Settings
         sec2 = QHBoxLayout()
         icon2 = QLabel()
         icon2.setPixmap(draw_placeholder_icon("grid"))
@@ -220,7 +208,7 @@ class SchoolInfoDialog(QDialog):
         
         line2 = QFrame(); line2.setObjectName("h_line"); layout.addWidget(line2)
         
-        # --- Section 3: Multi-week ---
+        # Section 3: Multi-week
         sec3 = QHBoxLayout()
         icon3 = QLabel()
         icon3.setPixmap(draw_placeholder_icon("calendar"))
@@ -240,7 +228,7 @@ class SchoolInfoDialog(QDialog):
         
         line3 = QFrame(); line3.setObjectName("h_line"); layout.addWidget(line3)
         
-        # --- Section 4: School Type ---
+        # Section 4: School Type
         sec4 = QVBoxLayout()
         self.radio_okul = QRadioButton("Okul / Kolej / Diğer")
         self.radio_fakulte = QRadioButton("Fakülte / Yüksek Okul")
@@ -265,42 +253,19 @@ class SchoolInfoDialog(QDialog):
         if kurum.get("yetkili"):
             self.txt_yetkili_ad.setText(kurum.get("yetkili"))
             
-        settings = self.data_store.get("settings", {})
-        if settings.get("periods"):
-            self.cb_ders_saati.setCurrentText(str(settings.get("periods")))
-        if settings.get("days_count"):
-            self.cb_gun_sayisi.setCurrentText(str(settings.get("days_count")))
-        if settings.get("weekend"):
-            idx = self.cb_hafta_sonu.findText(settings.get("weekend"))
-            if idx >= 0: self.cb_hafta_sonu.setCurrentIndex(idx)
-        if settings.get("multi_week"):
-            self.chk_cok_donem.setChecked(settings.get("multi_week"))
-        if settings.get("school_type") == "fakulte":
-            self.radio_fakulte.setChecked(True)
-        else:
-            self.radio_okul.setChecked(True)
-            
     def _save_and_accept(self):
         if self.data_store is not None:
             if "kurum" not in self.data_store:
                 self.data_store["kurum"] = {}
             self.data_store["kurum"]["isim"] = self.txt_kurum_adi.text().strip()
             self.data_store["kurum"]["yetkili"] = self.txt_yetkili_ad.text().strip()
-            
-            if "settings" not in self.data_store:
-                self.data_store["settings"] = {}
-            
-            self.data_store["settings"]["periods"] = int(self.cb_ders_saati.currentText())
-            self.data_store["settings"]["days_count"] = int(self.cb_gun_sayisi.currentText())
-            self.data_store["settings"]["weekend"] = self.cb_hafta_sonu.currentText()
-            self.data_store["settings"]["multi_week"] = self.chk_cok_donem.isChecked()
-            self.data_store["settings"]["school_type"] = "okul" if self.radio_okul.isChecked() else "fakulte"
-            
+            self.data_store["ders_saati"] = int(self.cb_ders_saati.currentText())
+            self.data_store["gun_sayisi"] = int(self.cb_gun_sayisi.currentText())
         self.accept()
 
     def get_data(self):
         return {
-            "okul_adi": self.txt_yetkili_ad.text(), # For backwards compatibility if needed
+            "okul_adi": self.txt_kurum_adi.text(),
             "yil": 2026,
             "gun_sayisi": int(self.cb_gun_sayisi.currentText()),
             "ders_saati": int(self.cb_ders_saati.currentText()),

@@ -1,14 +1,14 @@
 import sqlite3
-import json
 import os
-import sys
+import json
 
 def get_base_dir():
+    import sys
     if getattr(sys, 'frozen', False):
-        base_dir = os.path.dirname(sys.executable)
-        if sys.platform == "darwin" and base_dir.endswith("Contents/MacOS"):
-            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(base_dir)))
-        return base_dir
+        base = os.path.dirname(sys.executable)
+        if "Contents/MacOS" in base:
+            return os.path.abspath(os.path.join(base, "../../.."))
+        return base
     return os.path.dirname(os.path.abspath(__file__))
 
 DB_PATH = os.path.join(get_base_dir(), "bgz_local_database.sqlite")
@@ -161,5 +161,3 @@ def trigger_save_db(widget, data_store=None):
         except Exception as e:
             print(f"[TRIGGER_SAVE_DB_FALLBACK_ERR] {e}")
     return False
-
-

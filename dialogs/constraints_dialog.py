@@ -26,13 +26,6 @@ class ConstraintsDialog(QDialog):
         if "kisitlamalar" not in self.data_store:
             self.data_store["kisitlamalar"] = {}
             
-        settings = self.data_store.get("settings", {})
-        self.periods = int(settings.get("periods", 8))
-        days_count = int(settings.get("days_count", 5))
-        
-        from timetable_grid import DAYS
-        self.days = DAYS[:days_count]
-            
         self._build_ui()
         self._populate_combo()
 
@@ -46,8 +39,8 @@ class ConstraintsDialog(QDialog):
         header_layout.addWidget(QLabel("Seçilen Kişi/Birim:", self))
         
         self.combo_target = QComboBox(self)
-        self.combo_target.setMinimumWidth(200)
-        self.combo_target.currentTextChanged.connect(self._on_target_changed)
+        self.combo_target.setMinimumWidth(220)
+        self.combo_target.currentIndexChanged.connect(self._on_target_changed)
         header_layout.addWidget(self.combo_target)
         
         header_layout.addStretch(1)
@@ -56,20 +49,18 @@ class ConstraintsDialog(QDialog):
         btn_clear_all.setStyleSheet("background: #E8F5E9; color: #2E7D32; font-weight: bold; border: 1px solid #A5D6A7; padding: 4px 10px; border-radius: 4px;")
         btn_clear_all.clicked.connect(self._make_all_available)
         header_layout.addWidget(btn_clear_all)
+        
         layout.addLayout(header_layout)
         
-        info_lbl = QLabel(
-            "<b>Bilgi:</b> Çizelgede kırmızı olan saatler, öğretmenin (veya sınıfın) o saatte "
-            "<i>çalışamayacağını (kapalı olduğunu)</i> ifade eder.<br>"
-            "Yeşil alanlar müsaittir. Değiştirmek için hücrelere tıklayın."
-        )
-        info_lbl.setStyleSheet("color: #444444; font-size: 12px; margin-bottom: 8px;")
-        layout.addWidget(info_lbl)
+        # Hint Label
+        hint = QLabel("💡 İpucu: Kısıtlamak/Kapatmak istediğiniz hücreye tıklayın. (Yeşil ✓ = Müsait, Kırmızı ✗ = Kapalı/Kısıtlı)")
+        hint.setStyleSheet("color: #555; font-style: italic; font-size: 11px;")
+        layout.addWidget(hint)
         
-        # Table Grid
-        self.table = QTableWidget(self.periods, len(self.days), self)
-        self.table.setHorizontalHeaderLabels(self.days)
-        self.table.setVerticalHeaderLabels([f"{i+1}. Ders" for i in range(self.periods)])
+        # Table Grid (5 days x 8 periods)
+        self.table = QTableWidget(PERIODS, len(DAYS), self)
+        self.table.setHorizontalHeaderLabels(DAYS)
+        self.table.setVerticalHeaderLabels([f"{i+1}. Ders" for i in range(PERIODS)])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table.verticalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -129,8 +120,8 @@ class ConstraintsDialog(QDialog):
         
         entity_constraints = self.data_store["kisitlamalar"].get(name, {})
         
-        for p in range(self.periods):
-            for d in range(len(self.days)):
+        for p in range(PERIODS):
+            for d in range(len(DAYS)):
                 cell_key = f"{d},{p}"
                 is_available = entity_constraints.get(cell_key, True)
                 self._set_cell_state(p, d, is_available)

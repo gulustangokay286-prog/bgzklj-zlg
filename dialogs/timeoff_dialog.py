@@ -141,28 +141,6 @@ class TimeoffDialog(QDialog):
         item = self.table.item(row, col)
         self._update_item_visuals(item, new_state)
         
-    def _toggle_column(self, col):
-        all_two = all(self.timeoff_data[r][col] == 2 for r in range(len(self.days)))
-        new_state = 0 if all_two else 2
-        for r in range(len(self.days)):
-            self.timeoff_data[r][col] = new_state
-            item = self.table.item(r, col)
-            self._update_item_visuals(item, new_state)
-
-    def _toggle_row(self, row):
-        all_two = all(self.timeoff_data[row][c] == 2 for c in range(self.periods))
-        new_state = 0 if all_two else 2
-        for c in range(self.periods):
-            self.timeoff_data[row][c] = new_state
-            item = self.table.item(row, c)
-            self._update_item_visuals(item, new_state)
-
     def _save_data(self):
         # Kaydet: dict zaten referans tipli olduğu için self.entity_dict["timeoff"] güncellendi bile.
-        p = self.parent()
-        if p:
-            if hasattr(p, "save_db"):
-                p.save_db()
-            elif hasattr(p, "parent") and hasattr(p.parent(), "save_db"):
-                p.parent().save_db()
         self.accept()

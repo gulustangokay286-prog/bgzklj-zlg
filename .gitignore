@@ -6,4 +6,7 @@ __pycache__/
 *.sqlite
 *.json
 test_firebase_*.py
+.DS_Store*.sqlite
+*.json
+test_firebase_*.py
 .DS_Store

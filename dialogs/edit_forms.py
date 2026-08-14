@@ -150,33 +150,64 @@ class LessonAssignmentDialog(QDialog):
         l1.addWidget(self._create_icon_label("grad_hat"))
         
         v1 = QVBoxLayout()
-        v1.addWidget(QLabel("Öğretmen"))
+        lbl_ogr = QLabel("Atanacak Öğretmen(ler)")
+        lbl_ogr.setStyleSheet("font-weight: bold; color: #334155;")
+        v1.addWidget(lbl_ogr)
         self.cb_ogretmen = QComboBox()
         self.cb_ogretmen.setMinimumWidth(250)
         v1.addWidget(self.cb_ogretmen)
         l1.addLayout(v1)
         l1.addStretch(1)
-        btn_ortak_ogr = QPushButton("Ortak Öğretmen")
+        btn_ortak_ogr = QPushButton("👥 Ortak Öğretmen")
+        btn_ortak_ogr.setStyleSheet("background: #F0F7FF; color: #0265DC; font-weight: bold; border: 1px solid #D6E8FB; border-radius: 4px; padding: 6px 12px;")
         l1.addWidget(btn_ortak_ogr, alignment=Qt.AlignBottom)
         scroll_layout.addWidget(row1)
         
-        # 2. Ders Row
+        # 2. Ders ve Haftalık Saat Row
         row2 = self._create_row_frame()
         l2 = QHBoxLayout(row2)
         l2.setContentsMargins(12, 10, 12, 10)
         l2.addWidget(self._create_icon_label("book"))
+        
+        v2_ders = QVBoxLayout()
+        lbl_ders = QLabel("Atanacak Ders")
+        lbl_ders.setStyleSheet("font-weight: bold; color: #334155;")
+        v2_ders.addWidget(lbl_ders)
+        
         self.v2 = QVBoxLayout()
-        self.v2.addWidget(QLabel("Ders"))
+        self.v2.setContentsMargins(0,0,0,0)
         self.cb_ders = QComboBox()
-        self.cb_ders.setMinimumWidth(250)
+        self.cb_ders.setMinimumWidth(200)
         self.cb_ders.setEditable(True)
         self.v2.addWidget(self.cb_ders)
         self.extra_ders_combos = []
-        l2.addLayout(self.v2)
+        v2_ders.addLayout(self.v2)
+        l2.addLayout(v2_ders)
+        
+        l2.addSpacing(15)
+        
+        v2_saat = QVBoxLayout()
+        lbl_saat = QLabel("Haftalık Saat / Dağılım Tipi")
+        lbl_saat.setStyleSheet("font-weight: bold; color: #334155;")
+        v2_saat.addWidget(lbl_saat)
+        h_saat = QHBoxLayout()
+        self.cb_hafta = QComboBox()
+        self.cb_hafta.setMinimumWidth(60)
+        self.cb_hafta.addItems(["1", "2", "3", "4", "5", "6", "7", "8"])
+        self.cb_tip = QComboBox()
+        self.cb_tip.setMinimumWidth(80)
+        self.cb_tip.setEditable(True)
+        self.cb_hafta.currentTextChanged.connect(self._update_tip_options)
+        self._update_tip_options(self.cb_hafta.currentText())
+        h_saat.addWidget(self.cb_hafta)
+        h_saat.addWidget(self.cb_tip)
+        v2_saat.addLayout(h_saat)
+        l2.addLayout(v2_saat)
+        
         l2.addStretch(1)
         
-        btn_daha_fazla_ders = QPushButton("Daha Fazla Ders Atama")
-        btn_daha_fazla_ders.setStyleSheet("background: #EBF3FB; color: #0078D7; font-weight: bold; border: 1px solid #0078D7; border-radius: 4px;")
+        btn_daha_fazla_ders = QPushButton("➕ Daha Fazla Ders")
+        btn_daha_fazla_ders.setStyleSheet("background: #E8F5E9; color: #2E7D32; font-weight: bold; border: 1px solid #C8E6C9; border-radius: 4px; padding: 6px 12px;")
         btn_daha_fazla_ders.clicked.connect(self._add_extra_subject_dialog)
         l2.addWidget(btn_daha_fazla_ders, alignment=Qt.AlignBottom)
         
@@ -188,41 +219,30 @@ class LessonAssignmentDialog(QDialog):
         l3.setContentsMargins(12, 10, 12, 10)
         l3.addWidget(self._create_icon_label("teachers"))
         v3 = QVBoxLayout()
-        lbl_sinif = QLabel("Sınıf / Sınıflarım")
-        lbl_sinif.setToolTip("Seçilen veya birleştirilen sınıflar burada görünür.")
+        lbl_sinif = QLabel("Atanacak Sınıf / Sınıflar")
+        lbl_sinif.setStyleSheet("font-weight: bold; color: #334155;")
         v3.addWidget(lbl_sinif)
         self.cb_sinif = QComboBox()
-        self.cb_sinif.setMinimumWidth(250)
+        self.cb_sinif.setMinimumWidth(450)
         v3.addWidget(self.cb_sinif)
         l3.addLayout(v3)
         l3.addStretch(1)
-        btn_birl_sinif = QPushButton("Birleşik Sınıflar")
+        btn_birl_sinif = QPushButton("🔗 Birleşik Sınıflar")
+        btn_birl_sinif.setStyleSheet("background: #FFF8E1; color: #F57F17; font-weight: bold; border: 1px solid #FFECB3; border-radius: 4px; padding: 6px 12px;")
         btn_birl_sinif.clicked.connect(self._select_combined_classes)
         l3.addWidget(btn_birl_sinif, alignment=Qt.AlignBottom)
         scroll_layout.addWidget(row3)
         
-        # 4. Haftalık Ders Row
-        row4 = self._create_row_frame()
-        l4 = QHBoxLayout(row4)
-        l4.setContentsMargins(12, 10, 12, 10)
-        l4.addWidget(self._create_icon_label("arrow")) 
-        v4 = QVBoxLayout()
-        v4.addWidget(QLabel("Haftalık Ders (Saat / Tip)"))
-        h4 = QHBoxLayout()
-        self.cb_hafta = QComboBox()
-        self.cb_hafta.addItems(["1", "2", "3", "4", "5", "6", "7", "8"])
-        self.cb_tip = QComboBox()
-        self.cb_tip.setEditable(True)
-        self.cb_hafta.currentTextChanged.connect(self._update_tip_options)
-        self._update_tip_options(self.cb_hafta.currentText())
-        h4.addWidget(self.cb_hafta)
-        h4.addWidget(self.cb_tip)
-        v4.addLayout(h4)
-        l4.addLayout(v4)
-        l4.addStretch(1)
-        lbl_coklu = QLabel("Çoklu Hafta/Dönem")
-        l4.addWidget(lbl_coklu, alignment=Qt.AlignBottom)
-        scroll_layout.addWidget(row4)
+        # 4. Otomatik Eşleşme Bar
+        self.lbl_ozet = QLabel("🎯 Otomatik Eşleşme: -")
+        self.lbl_ozet.setStyleSheet("background: #F0F7FF; color: #0265DC; font-weight: bold; border-radius: 4px; padding: 10px;")
+        scroll_layout.addWidget(self.lbl_ozet)
+        
+        self.cb_ogretmen.currentTextChanged.connect(self._update_ozet)
+        self.cb_ders.currentTextChanged.connect(self._update_ozet)
+        self.cb_sinif.currentTextChanged.connect(self._update_ozet)
+        self.cb_hafta.currentTextChanged.connect(self._update_ozet)
+        self.cb_tip.currentTextChanged.connect(self._update_ozet)
         
         # 5. Derslik Row
         row5 = self._create_row_frame()
@@ -234,7 +254,6 @@ class LessonAssignmentDialog(QDialog):
         chk_lay = QGridLayout()
         self.chk_sinif = QCheckBox("Sınıfın Dersliği")
         self.chk_sinif.setChecked(True)
-        self.chk_sinif.setToolTip("Ders, seçilen sınıfın ana dersliğinde işlenir.")
         self.chk_ogr = QCheckBox("Öğretmenin Derslikleri")
         self.chk_ortak = QCheckBox("Ortak Derslik")
         self.chk_derse_ait = QCheckBox("Derse Ait Derslik")
@@ -248,9 +267,9 @@ class LessonAssignmentDialog(QDialog):
         h5 = QHBoxLayout()
         self.txt_farkli = QLineEdit()
         self.txt_farkli.setPlaceholderText("Derslik Seç (Opsiyonel)")
-        self.txt_farkli.setToolTip("Özel bir derslik girmek için kullanın.")
         h5.addWidget(self.txt_farkli)
         btn_daha = QPushButton("Daha Fazla Derslik")
+        btn_daha.setStyleSheet("font-weight: bold; color: #475569;")
         h5.addWidget(btn_daha)
         v5.addLayout(h5)
         
@@ -261,19 +280,21 @@ class LessonAssignmentDialog(QDialog):
         scroll.setWidget(scroll_content)
         main_layout.addWidget(scroll)
         
-        # Bottom Buttons (Single clean set)
+        # Bottom Buttons
         bot_lay = QHBoxLayout()
         
         btn_iptal = QPushButton("İptal")
-        btn_iptal.setFixedSize(90, 32)
+        btn_iptal.setFixedSize(100, 36)
+        btn_iptal.setStyleSheet("font-weight: bold; color: #475569;")
         btn_iptal.clicked.connect(self.reject)
         
         btn_yardim = QPushButton("Yardım")
-        btn_yardim.setFixedSize(90, 32)
+        btn_yardim.setFixedSize(100, 36)
+        btn_yardim.setStyleSheet("font-weight: bold; color: #475569;")
         
-        btn_tamam = QPushButton("Tamam")
-        btn_tamam.setFixedSize(120, 32)
-        btn_tamam.setStyleSheet("QPushButton { border: 2px solid #0078D7; color: #0078D7; background: #FFFFFF; font-weight: bold; border-radius: 4px; } QPushButton:hover { background: #EBF3FB; }")
+        btn_tamam = QPushButton("✅ Tamam ve Kaydet")
+        btn_tamam.setFixedSize(160, 36)
+        btn_tamam.setStyleSheet("background: #0066FF; color: white; font-weight: bold; border-radius: 4px;")
         btn_tamam.clicked.connect(self.accept)
         
         bot_lay.addWidget(btn_iptal)
@@ -284,6 +305,15 @@ class LessonAssignmentDialog(QDialog):
         main_layout.addLayout(bot_lay)
         
         self._populate_data()
+        self._update_ozet()
+
+    def _update_ozet(self, *_):
+        t = self.cb_ogretmen.currentText() or "-"
+        d = self.cb_ders.currentText() or "-"
+        s = self.cb_sinif.currentText() or "-"
+        h = self.cb_hafta.currentText() or "1"
+        tip = self.cb_tip.currentText() or "1"
+        self.lbl_ozet.setText(f"🎯 Otomatik Eşleşme: {t} ➔ {d} ➔ {s} ({h} Saat / Tip: {tip})")
 
     def _update_tip_options(self, text):
         h = int(text) if text.isdigit() else 1
@@ -309,12 +339,14 @@ class LessonAssignmentDialog(QDialog):
         new_cb.setMinimumWidth(250)
         new_cb.setEditable(True)
         
-        subjects = ["Matematik", "Geometri", "Fizik", "Kimya", "Biyoloji", "Türkçe", "Edebiyat", "Tarih", "Coğrafya", "Felsefe", "İngilizce", "Almanca", "Matematik 1", "Matematik 2", "Paragraf", "Problem"]
+        subjects = ["Lütfen Ders Seçiniz", "Matematik", "Geometri", "Fizik", "Kimya", "Biyoloji", "Türkçe", "Edebiyat", "Tarih", "Coğrafya", "Felsefe", "İngilizce", "Almanca", "Matematik 1", "Matematik 2", "Paragraf", "Problem"]
         if self.data_store:
             for d in self.data_store.get("dersler", []):
                 if d.get("ad") and d.get("ad") not in subjects:
                     subjects.append(d.get("ad"))
-        for s in subjects:
+        
+        sorted_subjects = ["Lütfen Ders Seçiniz"] + sorted([s for s in subjects if s != "Lütfen Ders Seçiniz"])
+        for s in sorted_subjects:
             new_cb.addItem(s)
             
         self.v2.addWidget(new_cb)
@@ -322,29 +354,32 @@ class LessonAssignmentDialog(QDialog):
 
     def _populate_data(self):
         if self.data_store:
-            for t in self.data_store.get("ogretmenler", []):
-                self.cb_ogretmen.addItem(t.get("ad", ""), t)
+            teacher_names = sorted([t.get("ad", "") for t in self.data_store.get("ogretmenler", []) if t.get("ad")])
+            for t_name in teacher_names:
+                t_obj = next((t for t in self.data_store.get("ogretmenler", []) if t.get("ad") == t_name), None)
+                self.cb_ogretmen.addItem(t_name, t_obj)
             
             if self.selected_teacher:
                 idx = self.cb_ogretmen.findText(self.selected_teacher)
                 if idx >= 0:
                     self.cb_ogretmen.setCurrentIndex(idx)
-            elif self.data_store.get("ogretmenler"):
-                # Select the latest added teacher by default!
-                last_t = self.data_store["ogretmenler"][-1].get("ad")
-                idx = self.cb_ogretmen.findText(last_t)
-                if idx >= 0:
-                    self.cb_ogretmen.setCurrentIndex(idx)
+            elif teacher_names:
+                # Fallback to the first teacher since it's alphabetical
+                self.cb_ogretmen.setCurrentIndex(0)
             
-            subjects = ["Matematik", "Geometri", "Fizik", "Kimya", "Biyoloji", "Türkçe", "Edebiyat", "Tarih", "Coğrafya", "Felsefe", "İngilizce", "Almanca", "Matematik 1", "Matematik 2", "Paragraf", "Problem"]
+            subjects = ["Lütfen Ders Seçiniz", "Matematik", "Geometri", "Fizik", "Kimya", "Biyoloji", "Türkçe", "Edebiyat", "Tarih", "Coğrafya", "Felsefe", "İngilizce", "Almanca", "Matematik 1", "Matematik 2", "Paragraf", "Problem"]
             for d in self.data_store.get("dersler", []):
                 if d.get("ad") and d.get("ad") not in subjects:
                     subjects.append(d.get("ad"))
-            for s in subjects:
+            
+            sorted_subjects = ["Lütfen Ders Seçiniz"] + sorted([s for s in subjects if s != "Lütfen Ders Seçiniz"])
+            for s in sorted_subjects:
                 self.cb_ders.addItem(s)
 
-            for c in self.data_store.get("siniflar", []):
-                self.cb_sinif.addItem(c.get("ad", ""), c)
+            class_names = sorted([c.get("ad", "") for c in self.data_store.get("siniflar", []) if c.get("ad")])
+            for c_name in class_names:
+                c_obj = next((c for c in self.data_store.get("siniflar", []) if c.get("ad") == c_name), None)
+                self.cb_sinif.addItem(c_name, c_obj)
             
             # Load existing assignments for this teacher
             teacher_name = self.cb_ogretmen.currentText()
@@ -384,7 +419,7 @@ class LessonAssignmentDialog(QDialog):
                         last_cb.setCurrentText(extra.get("subject", ""))
 
     def _select_combined_classes(self):
-        from PySide6.QtWidgets import QDialog, QVBoxLayout, QCheckBox, QPushButton, QHBoxLayout, QScrollArea, QWidget, QLabel
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QCheckBox, QPushButton, QHBoxLayout, QScrollArea, QWidget, QLabel, QMessageBox
         d = QDialog(self)
         d.setWindowTitle("Birleşik Sınıflar Seçimi")
         d.setFixedSize(380, 440)
@@ -397,7 +432,7 @@ class LessonAssignmentDialog(QDialog):
         w = QWidget()
         v_lay = QVBoxLayout(w)
         
-        classes = [c.get("ad", "") for c in self.data_store.get("siniflar", []) if c.get("ad")]
+        classes = sorted([c.get("ad", "") for c in self.data_store.get("siniflar", []) if c.get("ad")])
         chks = []
         for c in classes:
             chk = QCheckBox(c)
@@ -410,6 +445,7 @@ class LessonAssignmentDialog(QDialog):
         bot = QHBoxLayout()
         btn_yoksay = QPushButton("Çakışmayı Yoksay ve Birleştir")
         btn_yoksay.setStyleSheet("background: #FB8C00; color: white; font-weight: bold; padding: 6px;")
+        btn_yoksay.setEnabled(False) # Only enable if conflict logic applies, or let's say >= 3 classes? 
         btn_ok = QPushButton("Tamam")
         btn_ok.setStyleSheet("background: #0078D7; color: white; font-weight: bold; padding: 6px;")
         
@@ -417,11 +453,25 @@ class LessonAssignmentDialog(QDialog):
         bot.addWidget(btn_ok)
         lay.addLayout(bot)
         
+        def on_chk_changed():
+            sel_count = sum(1 for c in chks if c.isChecked())
+            if sel_count >= 3:
+                btn_yoksay.setEnabled(True)
+            else:
+                btn_yoksay.setEnabled(False)
+                
+        for chk in chks:
+            chk.stateChanged.connect(on_chk_changed)
+        
         selected_res = []
         
         def do_accept(bypass_conflict=False):
             nonlocal selected_res
             selected_res = [chk.text() for chk in chks if chk.isChecked()]
+            if len(selected_res) < 2:
+                QMessageBox.warning(d, "Uyarı", "Birleşik sınıf oluşturmak için en az 2 sınıf seçmelisiniz.")
+                selected_res = []
+                return
             if bypass_conflict:
                 self.bypass_conflict = True
             d.accept()
