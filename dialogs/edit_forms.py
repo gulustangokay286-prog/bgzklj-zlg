@@ -1099,7 +1099,7 @@ class OgretmenEditDialog(BaseEditForm):
         ad_formatted = format_tr_name(raw_ad)
         return {
             "ad": ad_formatted, "kisa": self.w_kisa.text(),
-            "renk": self._color, "sinif_ogretmeni": self.w_so.text(),
+            "renk": self._color, "sinif_ogretmeni": self.w_so.currentText(),
             "ek_dersler": self.w_ek_dersler.text(),
             "es_zamanli": self.chk_es_zamanli.isChecked(),
             "numara": self.w_num.text()
