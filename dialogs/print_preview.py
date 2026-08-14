@@ -258,6 +258,9 @@ class TimetablePrintPreview(QDialog):
         """Fetches actual grid cell placements for target class or teacher, indexed as (day_idx, period_idx)."""
         res = {}
         raw_placed = self.placed_lessons or self.data_store.get("grid_placements", [])
+        target_norm = format_tr_name(target_name)
+        if not target_norm:
+            return {}
         
         if isinstance(raw_placed, list):
             for data in raw_placed:
@@ -271,7 +274,7 @@ class TimetablePrintPreview(QDialog):
                 period_idx = int(data.get("period", 0))
                 dur = int(data.get("duration", 1))
                 
-                match = (t_name == target_name) if is_teacher else (c_name == target_name or not c_name)
+                match = (format_tr_name(t_name) == target_norm) if is_teacher else (format_tr_name(c_name) == target_norm)
                 if match:
                     for d_off in range(dur):
                         p_curr = period_idx + d_off
@@ -302,7 +305,7 @@ class TimetablePrintPreview(QDialog):
                 scolor = data.get("color", "")
                 dur = int(data.get("duration", 1))
                 
-                match = (t_name == target_name) if is_teacher else (c_name == target_name or not c_name)
+                match = (format_tr_name(t_name) == target_norm) if is_teacher else (format_tr_name(c_name) == target_norm)
                 if match:
                     for d_off in range(dur):
                         p_curr = period_idx + d_off
@@ -312,28 +315,6 @@ class TimetablePrintPreview(QDialog):
                                 "teacher_name": c_name if is_teacher else t_name,
                                 "color": scolor
                             }
-                        
-        if res:
-            return res
-
-        # Fallback if grid has no placed cards for this item yet, pull from atamalar
-        atamalar = self.data_store.get("atamalar", [])
-        filtered = [a for a in atamalar if (is_teacher and a.get("teacher") == target_name) or (not is_teacher and a.get("class") == target_name)]
-        for item in filtered:
-            dur = int(item.get("duration", 1))
-            sname = item.get("subject", "")
-            tname = item.get("teacher", "") if not is_teacher else item.get("class", "")
-            scolor = item.get("color", "")
-            r, c = 0, 0
-            for d_off in range(dur):
-                while (c, r) in res:
-                    r += 1
-                    if r >= 8: r = 0; c += 1
-                    if c >= 5: break
-                if c >= 5: break
-                res[(c, r)] = {"subject_name": sname, "teacher_name": tname, "color": scolor}
-                r += 1
-                if r >= 8: r = 0; c += 1
         return res
 
     def _render_asc_multi_grid(self, painter, printer, VW, VH, is_teacher=False):
