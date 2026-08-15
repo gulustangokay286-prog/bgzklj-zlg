@@ -434,7 +434,9 @@ class MainWindow(QMainWindow):
         parent_text = parent.text(0)
         entity_name = item.data(0, Qt.UserRole)
         
+        view_type = "class"
         if "Öğretmenler" in parent_text:
+            view_type = "teacher"
             if hasattr(self, "_grid"):
                 self._grid._set_view_mode("teachers")
                 # Scroll to teacher row if found
@@ -445,6 +447,7 @@ class MainWindow(QMainWindow):
                         self._grid.table.scrollToItem(self._grid.table.item(r, 0) or item_lbl)
                         break
         elif "Sınıflar" in parent_text:
+            view_type = "class"
             if hasattr(self, "_grid"):
                 self._grid._set_view_mode("classes")
                 # Scroll to class row if found

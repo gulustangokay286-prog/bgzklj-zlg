@@ -69,36 +69,62 @@ def get_subject_abbr(subject_name: str) -> str:
 from PySide6.QtCore import QRect
 
 class AsCTimetableHeader(QHeaderView):
-    """aSc Timetables style two-level header: Days on top spanning 8 periods, Period numbers below."""
+    """aSc Timetables style two-level header: Days on top spanning periods, Period numbers below."""
     def __init__(self, periods: int = 8, days_list: list = None, parent=None):
         super().__init__(Qt.Horizontal, parent)
-        self.periods = periods
+        self.periods = max(1, int(periods))
         self.days_list = days_list or DAYS[:5]
-        self.setFixedHeight(34)
+        self.setFixedHeight(36)
         self.setSectionResizeMode(QHeaderView.Fixed)
         self.setDefaultSectionSize(44)
         self.setMinimumSectionSize(20)
 
     def set_config(self, periods: int, days_list: list):
-        self.periods = periods
+        self.periods = max(1, int(periods))
         self.days_list = days_list
         self.viewport().update()
+
+    def paintSection(self, painter, rect, logicalIndex):
+        pass  # Suppress default section painting to prevent overlapping/glitched text
 
     def paintEvent(self, event):
         painter = QPainter(self.viewport())
         painter.setRenderHint(QPainter.Antialiasing, False)
         
-        # Header background
-        painter.fillRect(self.rect(), QColor("#D0D0D0"))
+        vw = self.viewport().width()
+        vh = self.viewport().height()
         
-        periods = self.periods
-        days_list = self.days_list
+        # Fill header background
+        painter.fillRect(self.viewport().rect(), QColor("#CBD5E1"))
+        
         total_sections = self.count()
-        if total_sections == 0 or periods <= 0:
+        if total_sections == 0:
             painter.end()
             return
             
-        # 1. Day headers (Top row: y=0..17)
+        periods = self.periods
+        days_list = self.days_list
+        
+        # ── SINGLE ENTITY VIEW (1 column per day)
+        if total_sections == len(days_list):
+            for col_idx, day_name in enumerate(days_list):
+                x = self.sectionViewportPosition(col_idx)
+                w = self.sectionSize(col_idx)
+                if x + w <= 0 or x >= vw:
+                    continue
+                rect = QRect(x, 0, w, vh)
+                painter.setPen(QPen(QColor("#94A3B8"), 1))
+                painter.setBrush(QBrush(QColor("#E2E8F0")))
+                painter.drawRect(rect)
+                
+                painter.setPen(QPen(QColor("#0F172A")))
+                painter.setFont(QFont("Segoe UI", 9, QFont.Bold))
+                painter.drawText(rect, Qt.AlignCenter, day_name)
+            painter.end()
+            return
+            
+        # ── MULTI-SHEET VIEW (Days on top row y=0..18, Period numbers on bottom row y=18..36)
+        # 1. Day headers (Top row)
         for d_idx, day_name in enumerate(days_list):
             start_col = d_idx * periods
             end_col = start_col + periods - 1
@@ -109,34 +135,42 @@ class AsCTimetableHeader(QHeaderView):
             x_end = self.sectionViewportPosition(actual_end_col) + self.sectionSize(actual_end_col)
             day_w = x_end - x_start
             
-            day_rect = QRect(x_start, 0, day_w, 17)
-            painter.setPen(QPen(QColor("#777777"), 1))
-            painter.setBrush(QBrush(QColor("#C8C8C8")))
+            if x_end <= 0 or x_start >= vw:
+                continue
+                
+            day_rect = QRect(x_start, 0, day_w, 18)
+            painter.setPen(QPen(QColor("#94A3B8"), 1))
+            painter.setBrush(QBrush(QColor("#E2E8F0")))
             painter.drawRect(day_rect)
             
-            painter.setPen(QPen(QColor("#111111")))
+            painter.setPen(QPen(QColor("#0F172A")))
             font_day = QFont("Segoe UI", 8, QFont.Bold)
             painter.setFont(font_day)
             
-            # Keep day label centered in the visible portion of the section while scrolling
-            vis_rect = day_rect.intersected(self.rect())
-            if not vis_rect.isEmpty() and vis_rect.width() >= 25:
-                painter.drawText(vis_rect, Qt.AlignCenter, day_name)
-            elif not day_rect.isEmpty():
-                painter.drawText(day_rect, Qt.AlignCenter, day_name)
+            # Keep day label visible and centered in the viewport portion of that day
+            vis_left = max(x_start, 0)
+            vis_right = min(x_end, vw)
+            if vis_right > vis_left:
+                vis_rect = QRect(vis_left, 0, vis_right - vis_left, 18)
+                if vis_rect.width() >= 25:
+                    painter.drawText(vis_rect, Qt.AlignCenter, day_name)
+                elif not day_rect.isEmpty():
+                    painter.drawText(day_rect, Qt.AlignCenter, day_name)
             
-        # 2. Period headers (Bottom row: y=17..34)
+        # 2. Period headers (Bottom row)
         for col_idx in range(total_sections):
             x = self.sectionViewportPosition(col_idx)
             w = self.sectionSize(col_idx)
+            if x + w <= 0 or x >= vw:
+                continue
             period_num = (col_idx % periods) + 1
             
-            period_rect = QRect(x, 17, w, 17)
-            painter.setPen(QPen(QColor("#888888"), 1))
-            painter.setBrush(QBrush(QColor("#E2E2E2")))
+            period_rect = QRect(x, 18, w, 18)
+            painter.setPen(QPen(QColor("#CBD5E1"), 1))
+            painter.setBrush(QBrush(QColor("#F8FAFC")))
             painter.drawRect(period_rect)
             
-            painter.setPen(QPen(QColor("#222222")))
+            painter.setPen(QPen(QColor("#334155")))
             font_p = QFont("Segoe UI", 7, QFont.Bold)
             painter.setFont(font_p)
             painter.drawText(period_rect, Qt.AlignCenter, str(period_num))
@@ -1086,7 +1120,6 @@ class TimetableGrid(QWidget):
         # ── Table (aSc-style gray compact grid)
         self.table = DropTableWidget(self._periods, len(DAYS), self)
         self.table.cell_right_clicked.connect(self.cell_right_clicked)
-        self.table.setHorizontalHeaderLabels(DAYS)
         self.table.setVerticalHeaderLabels([f"{i+1}" for i in range(self._periods)])
 
         self.table.setShowGrid(True)
@@ -1295,7 +1328,8 @@ class TimetableGrid(QWidget):
         self._periods = periods
         self.table.setRowCount(periods)
         self.table.setColumnCount(len(days_list))
-        self.table.setHorizontalHeaderLabels(days_list)
+        if hasattr(self.table, "asc_header"):
+            self.table.asc_header.set_config(1, days_list)
         self.table.setVerticalHeaderLabels([f"{i+1}" for i in range(periods)])
         self.clear_grid()
         
