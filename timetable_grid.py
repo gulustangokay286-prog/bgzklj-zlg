@@ -661,13 +661,14 @@ class UnplacedLessonsDock(QFrame):
             return
         atamalar = data_store.get("atamalar", [])
         grid_placements = data_store.get("grid_placements", [])
+        from dialogs.color_picker_dialog import resolve_subject_color
         unplaced_cards = []
         for idx, a in enumerate(atamalar):
             s_name = a.get("subject", "")
             c_name = a.get("class", "")
             t_name = a.get("teacher", "")
             dur = int(a.get("duration", 1))
-            color = a.get("color") or "#1E88E5"
+            color = resolve_subject_color(s_name, data_store)
             
             placed_count = 0
             for p in grid_placements:
@@ -706,12 +707,13 @@ class TimetableCellDelegate(QStyledItemDelegate):
         col = index.column()
         
         # Check placed lesson info
-        info = None
-        if grid and hasattr(grid, "_placed_lessons"):
+        orig_r, orig_c, orig_dur, info = table._get_lesson_origin(row, col) if hasattr(table, "_get_lesson_origin") else (row, col, 1, None)
+        if not info and grid and hasattr(grid, "_placed_lessons"):
             info = grid._placed_lessons.get((row, col))
             
         bg_brush = index.data(Qt.BackgroundRole)
         text = index.data(Qt.DisplayRole)
+        clean_str = str(text).replace("🔒", "").strip() if text else ""
         
         is_locked = False
         if info and info.get("locked"):
@@ -721,7 +723,14 @@ class TimetableCellDelegate(QStyledItemDelegate):
             
         # 1. Determine cell background color
         cell_color = None
-        if info and info.get("color"):
+        win = table.window() if table and hasattr(table, "window") else None
+        data_store = getattr(win, "data_store", None)
+        
+        if clean_str:
+            from dialogs.color_picker_dialog import resolve_subject_color
+            resolved_hex = resolve_subject_color(clean_str, data_store)
+            cell_color = QColor(resolved_hex)
+        elif info and info.get("color"):
             c = QColor(info["color"])
             if c.isValid():
                 cell_color = c
@@ -731,18 +740,7 @@ class TimetableCellDelegate(QStyledItemDelegate):
                 cell_color = c
                 
         if not cell_color or not cell_color.isValid():
-            if text and str(text).strip():
-                clean_t = str(text).strip().replace("🔒", "")
-                hash_val = sum(ord(ch) * (i + 1) for i, ch in enumerate(clean_t))
-                pastel_palette = [
-                    "#3B82F6", "#EF4444", "#10B981", "#F59E0B", "#8B5CF6",
-                    "#EC4899", "#06B6D4", "#6366F1", "#14B8A6", "#F97316",
-                    "#84CC16", "#0EA5E9", "#A855F7", "#F43F5E", "#22C55E",
-                    "#EAB308", "#64748B", "#2563EB", "#D97706", "#7C3AED"
-                ]
-                cell_color = QColor(pastel_palette[hash_val % len(pastel_palette)])
-            else:
-                cell_color = QColor("#D1D5DB") # Neutral empty slot
+            cell_color = QColor("#D1D5DB") # Neutral empty slot
                 
         # 2. Fill background
         painter.fillRect(rect, cell_color)
@@ -758,8 +756,7 @@ class TimetableCellDelegate(QStyledItemDelegate):
             painter.drawRect(rect.adjusted(1, 1, -2, -2))
             
         # 5. Draw text
-        if text and str(text).strip():
-            clean_str = str(text).replace("🔒", "").strip()
+        if clean_str:
             lum = (0.299 * cell_color.red() + 0.587 * cell_color.green() + 0.114 * cell_color.blue())
             text_color = QColor("#FFFFFF") if lum < 155 else QColor("#111827")
             painter.setPen(text_color)
@@ -1388,21 +1385,42 @@ class TimetableGrid(QWidget):
             c = self.table.currentColumn()
             if r >= 0 and c >= 0:
                 _, _, _, info = self.table._get_lesson_origin(r, c)
+                
+        win = self.window()
+        data_store = getattr(win, "data_store", None)
+        
+        s_name = ""
+        cur_color = "#2563EB"
         if info:
             s_name = info.get("subject_name", "")
-            if s_name:
-                from dialogs.color_picker_dialog import ModernColorPickerDialog, update_subject_color_globally
-                win = self.window()
-                data_store = getattr(win, "data_store", None)
-                new_color = ModernColorPickerDialog.pick_color(
-                    initial_color=info.get("color", "#1E88E5"),
-                    parent=self,
-                    title=f"{s_name} — Renk Seçimi",
-                    data_store=data_store,
-                    subject_name=s_name
-                )
-                if new_color and new_color.isValid():
-                    update_subject_color_globally(self, data_store, s_name, new_color.name())
+            cur_color = info.get("color", "#2563EB")
+        elif self.info_subject_lbl.text().strip():
+            txt = self.info_subject_lbl.text().replace("🔒", "").strip()
+            if " - " in txt:
+                s_name = txt.split(" - ")[-1].strip()
+            else:
+                s_name = txt
+                
+        if not s_name and data_store and data_store.get("dersler"):
+            s_name = data_store["dersler"][0].get("ad", "")
+            cur_color = data_store["dersler"][0].get("color", "#2563EB")
+            
+        if s_name:
+            from dialogs.color_picker_dialog import ModernColorPickerDialog, update_subject_color_globally, resolve_subject_color
+            cur_color = resolve_subject_color(s_name, data_store)
+            new_color = ModernColorPickerDialog.pick_color(
+                initial_color=cur_color,
+                parent=self,
+                title=f"{s_name} — Renk Seçimi",
+                data_store=data_store,
+                subject_name=s_name
+            )
+            if new_color and new_color.isValid():
+                new_hex = new_color.name()
+                if info:
+                    info["color"] = new_hex
+                self.info_color_box.setStyleSheet(f"background: {new_hex}; border: 2px solid #334155; border-radius: 4px;")
+                update_subject_color_globally(self, data_store, s_name, new_hex)
 
     def _update_view_btn_styles(self):
         active_style = "QPushButton { background-color: #2563EB; color: #FFFFFF; border: none; border-radius: 4px; padding: 4px 14px; font-weight: bold; } QPushButton:hover { background-color: #1D4ED8; }"
@@ -1435,11 +1453,13 @@ class TimetableGrid(QWidget):
             if hasattr(win, "_refresh_grid"):
                 win._refresh_grid()
         if hasattr(win, "statusBar"):
-            win.statusBar().showMessage("🔓 Tüm derslerin kilitleri açıldı.")
+            win.statusBar().showMessage("Tüm derslerin kilitleri açıldı.")
 
     def _on_cell_clicked(self, row, col):
         """Show lesson info in the bottom-left panel when a cell is clicked (aSc-style)."""
-        info = self._placed_lessons.get((row, col))
+        orig_r, orig_c, orig_dur, info = self.table._get_lesson_origin(row, col) if hasattr(self.table, "_get_lesson_origin") else (row, col, 1, None)
+        if not info:
+            info = self._placed_lessons.get((row, col))
         if not info:
             for (r, c), lesson_info in self._placed_lessons.items():
                 dur = lesson_info.get("duration", 1)
@@ -1447,15 +1467,23 @@ class TimetableGrid(QWidget):
                     info = lesson_info
                     break
         
+        self._current_selected_lesson_info = info
+        self._current_selected_pos = (row, col)
+        
         if info:
             subj = info.get("subject_name", "")
             teacher = info.get("teacher_name", "")
             cls = info.get("class_name", "")
-            color = info.get("color", "#C0C0C0")
+            
+            win = self.window()
+            data_store = getattr(win, "data_store", None)
+            from dialogs.color_picker_dialog import resolve_subject_color
+            color = info.get("color") or resolve_subject_color(subj, data_store)
+            info["color"] = color
             is_locked = info.get("locked", False)
             
             abbr = get_subject_abbr(subj)
-            self.info_color_box.setStyleSheet(f"background: {color}; border: 1px solid #666;")
+            self.info_color_box.setStyleSheet(f"background: {color}; border: 2px solid #334155; border-radius: 4px;")
             lock_prefix = "🔒 " if is_locked else ""
             self.info_subject_lbl.setText(f"{lock_prefix}{abbr} - {subj.upper()}")
             self.info_class_lbl.setText(cls.upper() if cls else "")
@@ -1469,7 +1497,7 @@ class TimetableGrid(QWidget):
                     t_display = teacher
             self.info_teacher_lbl.setText(t_display)
         else:
-            self.info_color_box.setStyleSheet("background: transparent; border: 1px solid #666;")
+            self.info_color_box.setStyleSheet("background: transparent; border: 1px solid #666; border-radius: 3px;")
             self.info_subject_lbl.setText("")
             self.info_class_lbl.setText("")
             self.info_teacher_lbl.setText("")

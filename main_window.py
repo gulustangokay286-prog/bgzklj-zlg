@@ -59,12 +59,12 @@ def normalize_class_name(cls_name: str) -> str:
     s = s.replace("-", "/").replace("\\", "/")
     return s
 
-def get_subject_color(subject_name: str) -> str:
-    """Returns a deterministic, vibrant, distinct color for any subject name."""
+def get_subject_color(subject_name: str, data_store: dict = None) -> str:
+    """Returns the persistent color for a subject, checking data_store first."""
     if not subject_name:
-        return "#1E88E5"
-    hash_val = sum(ord(c) * (i + 1) for i, c in enumerate(subject_name.strip()))
-    return PASTEL_DISTINCT_COLORS[hash_val % len(PASTEL_DISTINCT_COLORS)]
+        return "#2563EB"
+    from dialogs.color_picker_dialog import resolve_subject_color
+    return resolve_subject_color(subject_name, data_store)
 
 def make_clean_vector_icon(icon_type: str, is_expanded: bool = True) -> QIcon:
     pix = QPixmap(48, 28)
@@ -830,6 +830,9 @@ class MainWindow(QMainWindow):
         new_global = []
         for (r, c), info in placed.items():
             p = dict(info)
+            s_name = p.get("subject_name") or p.get("subject", "")
+            p["color"] = get_subject_color(s_name, self.data_store)
+            
             # aSc multi-sheet görünümünde row = Sınıf indexi, c = Gün * period + saat
             if r < len(class_names):
                 cls_name = class_names[r]
@@ -895,7 +898,8 @@ class MainWindow(QMainWindow):
                             
                 if matching_row >= 0:
                     actual_col = col * periods + period
-                    color = item.get("color") or get_subject_color(s_name)
+                    color = get_subject_color(s_name, self.data_store)
+                    item["color"] = color
                     for ext in range(dur):
                         target_c = actual_col + ext
                         if target_c < len(days_list) * periods:
@@ -932,7 +936,8 @@ class MainWindow(QMainWindow):
                                 
                     if matching_row >= 0:
                         actual_col = col * periods + period
-                        color = item.get("color") or get_subject_color(s_name)
+                        color = get_subject_color(s_name, self.data_store)
+                        item["color"] = color
                         for ext in range(dur):
                             target_c = actual_col + ext
                             if target_c < len(days_list) * periods:
@@ -1876,7 +1881,7 @@ class MainWindow(QMainWindow):
         s_name = lesson_info.get("subject_name") or lesson_info.get("subject", "")
         t_name = lesson_info.get("teacher") or lesson_info.get("teacher_name", "")
         c_name = lesson_info.get("class_name") or lesson_info.get("class", "")
-        color = lesson_info.get("color") or get_subject_color(s_name)
+        color = lesson_info.get("color") or get_subject_color(s_name, self.data_store)
         is_locked = bool(lesson_info.get("locked") or lesson_info.get("is_locked"))
         
         if lesson_info.get("is_move"):

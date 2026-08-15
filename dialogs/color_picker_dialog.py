@@ -44,15 +44,61 @@ class ColorSwatchButton(QPushButton):
         """)
 
 
+def normalize_subject_name(s: str) -> str:
+    if not s:
+        return ""
+    s_str = str(s).strip().upper().replace("🔒", "").strip()
+    if " - " in s_str:
+        parts = s_str.split(" - ")
+        s_str = parts[-1].strip()
+    tr_map = str.maketrans({
+        'i': 'İ', 'ı': 'I', 'ş': 'Ş', 'ğ': 'Ğ', 'ü': 'Ü', 'ö': 'Ö', 'ç': 'Ç'
+    })
+    cleaned = s_str.translate(tr_map)
+    return "".join(c for c in cleaned if c.isalnum())
+
+
 def normalize_subject_match(s1, s2):
     if not s1 or not s2:
         return False
-    tr_map = str.maketrans({'İ': 'i', 'I': 'ı', 'ı': 'i', 'Ş': 's', 'ş': 's', 'Ğ': 'g', 'ğ': 'g', 'Ü': 'u', 'ü': 'u', 'Ö': 'o', 'ö': 'o', 'Ç': 'c', 'ç': 'c'})
-    c1 = "".join(c for c in str(s1).translate(tr_map).lower() if c.isalnum())
-    c2 = "".join(c for c in str(s2).translate(tr_map).lower() if c.isalnum())
-    if not c1 or not c2:
+    n1 = normalize_subject_name(s1)
+    n2 = normalize_subject_name(s2)
+    if not n1 or not n2:
         return False
-    return c1 == c2 or (len(c1) >= 3 and len(c2) >= 3 and (c1 in c2 or c2 in c1))
+    if n1 == n2:
+        return True
+    if len(n1) >= 2 and len(n2) >= 2 and (n1.startswith(n2) or n2.startswith(n1)):
+        return True
+    return False
+
+
+def resolve_subject_color(subject_name: str, data_store: dict = None) -> str:
+    """Returns the persistent color for a subject by inspecting data_store."""
+    if not subject_name:
+        return "#2563EB"
+    if data_store and isinstance(data_store, dict):
+        # 1. Check dersler
+        for d in data_store.get("dersler", []):
+            if normalize_subject_match(d.get("ad"), subject_name) or normalize_subject_match(d.get("kisa"), subject_name):
+                c = d.get("color") or d.get("renk")
+                if c and QColor(c).isValid() and str(c).upper() not in ("#FFFFFF", "#000000", "#C0C0C0", "#B4B4B8", "#D0D0D0"):
+                    return c
+        # 2. Check atamalar
+        for a in data_store.get("atamalar", []):
+            if normalize_subject_match(a.get("subject"), subject_name):
+                c = a.get("color")
+                if c and QColor(c).isValid() and str(c).upper() not in ("#FFFFFF", "#000000", "#C0C0C0", "#B4B4B8", "#D0D0D0"):
+                    return c
+        # 3. Check grid_placements
+        for p in data_store.get("grid_placements", []):
+            if normalize_subject_match(p.get("subject_name") or p.get("subject"), subject_name):
+                c = p.get("color")
+                if c and QColor(c).isValid() and str(c).upper() not in ("#FFFFFF", "#000000", "#C0C0C0", "#B4B4B8", "#D0D0D0"):
+                    return c
+                    
+    # Fallback to deterministic curated color
+    hash_val = sum(ord(ch) * (i + 1) for i, ch in enumerate(subject_name.strip()))
+    return CURATED_PALETTE[hash_val % len(CURATED_PALETTE)]
 
 
 def update_subject_color_globally(widget_or_parent, data_store: dict, subject_name: str, new_hex: str):
@@ -64,7 +110,7 @@ def update_subject_color_globally(widget_or_parent, data_store: dict, subject_na
     4. data_store["yerlesim"]
     5. active grid _placed_lessons and table cells
     6. active unplaced dock cards
-    7. writes to disk database JSON file
+    7. writes to disk database file
     """
     if not subject_name or not new_hex:
         return
@@ -100,10 +146,23 @@ def update_subject_color_globally(widget_or_parent, data_store: dict, subject_na
 
     if data_store:
         # 1. Update dersler
+        found_in_dersler = False
+        if "dersler" not in data_store:
+            data_store["dersler"] = []
+            
         for d in data_store.get("dersler", []):
             if normalize_subject_match(d.get("ad"), subject_name) or normalize_subject_match(d.get("kisa"), subject_name):
                 d["renk"] = new_hex
                 d["color"] = new_hex
+                found_in_dersler = True
+                
+        if not found_in_dersler:
+            data_store["dersler"].append({
+                "ad": subject_name.strip(),
+                "kisa": subject_name.strip()[:3].upper(),
+                "renk": new_hex,
+                "color": new_hex
+            })
                 
         # 2. Update atamalar
         for a in data_store.get("atamalar", []):
@@ -134,15 +193,29 @@ def update_subject_color_globally(widget_or_parent, data_store: dict, subject_na
                         lum = (0.299 * QColor(new_hex).red() + 0.587 * QColor(new_hex).green() + 0.114 * QColor(new_hex).blue())
                         item.setForeground(QBrush(Qt.white if lum < 160 else Qt.black))
                         
-        if hasattr(win, "_load_unplaced_lessons"):
-            win._load_unplaced_lessons()
-        elif hasattr(grid, "unplaced_dock") and hasattr(grid.unplaced_dock, "_rebuild_cards"):
-            grid.unplaced_dock._rebuild_cards()
+        if hasattr(grid, "table"):
+            for r in range(grid.table.rowCount()):
+                for c in range(grid.table.columnCount()):
+                    it = grid.table.item(r, c)
+                    if it and it.text().strip():
+                        clean_text = it.text().replace("🔒", "").strip()
+                        if normalize_subject_match(clean_text, subject_name):
+                            it.setBackground(QBrush(QColor(new_hex)))
+            grid.table.viewport().update()
+            grid.table.update()
+            
+        if hasattr(grid, "info_color_box"):
+            grid.info_color_box.setStyleSheet(f"background: {new_hex}; border: 2px solid #334155; border-radius: 4px;")
+            
+        if hasattr(grid, "unplaced_dock") and hasattr(grid.unplaced_dock, "update_list"):
+            grid.unplaced_dock.update_list(data_store)
             
         if hasattr(win, "save_db"):
             win.save_db(sync_from_grid=False)
         if hasattr(win, "_refresh_tree"):
             win._refresh_tree()
+        if hasattr(win, "_refresh_grid"):
+            win._refresh_grid()
     else:
         from database import trigger_save_db
         trigger_save_db(widget_or_parent, data_store or {})
