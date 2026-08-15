@@ -78,6 +78,8 @@ class AsCTimetableHeader(QHeaderView):
         self.setSectionResizeMode(QHeaderView.Fixed)
         self.setDefaultSectionSize(44)
         self.setMinimumSectionSize(20)
+        self.sectionResized.connect(lambda *args: self.viewport().update())
+        self.geometriesChanged.connect(lambda *args: self.viewport().update())
 
     def set_config(self, periods: int, days_list: list):
         self.periods = max(1, int(periods))
@@ -90,6 +92,7 @@ class AsCTimetableHeader(QHeaderView):
     def paintEvent(self, event):
         painter = QPainter(self.viewport())
         painter.setRenderHint(QPainter.Antialiasing, False)
+        painter.setClipping(False)  # Completely disable painter clipping so the entire header area is cleanly repainted
         
         vw = self.viewport().width()
         vh = self.viewport().height()
@@ -602,6 +605,7 @@ class DropTableWidget(QTableWidget):
         self.customContextMenuRequested.connect(self._show_context_menu)
         self.asc_header = AsCTimetableHeader(8, DAYS[:5], self)
         self.setHorizontalHeader(self.asc_header)
+        self.horizontalScrollBar().valueChanged.connect(lambda: self.asc_header.viewport().update())
         self.setItemDelegate(TimetableCellDelegate(self))
         
     def dragEnterEvent(self, event):
