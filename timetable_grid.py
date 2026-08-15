@@ -431,6 +431,37 @@ class UnplacedLessonsDock(QFrame):
             card = DraggableLessonCard(l["id"], l["subject_name"], l["color"], duration=dur, teacher=teacher, class_name=cls_name)
             self.container_layout.addWidget(card)
 
+    def update_list(self, data_store: dict = None):
+        if not data_store:
+            return
+        atamalar = data_store.get("atamalar", [])
+        grid_placements = data_store.get("grid_placements", [])
+        unplaced_cards = []
+        for idx, a in enumerate(atamalar):
+            s_name = a.get("subject", "")
+            c_name = a.get("class", "")
+            t_name = a.get("teacher", "")
+            dur = int(a.get("duration", 1))
+            color = a.get("color") or "#1E88E5"
+            
+            placed_count = 0
+            for p in grid_placements:
+                if (p.get("subject_name") == s_name or p.get("subject") == s_name) and \
+                   (p.get("class_name") == c_name or p.get("class") == c_name):
+                    placed_count += int(p.get("duration", 1))
+                    
+            remaining = dur - placed_count
+            if remaining > 0:
+                unplaced_cards.append({
+                    "id": idx,
+                    "subject_name": s_name,
+                    "color": color,
+                    "duration": remaining,
+                    "teacher": t_name,
+                    "class_name": c_name
+                })
+        self.load_unplaced(unplaced_cards, has_assignments=bool(atamalar))
+
 
 class DropTableWidget(QTableWidget):
     lesson_dropped = Signal(int, int, dict) # row, col, lesson_info
