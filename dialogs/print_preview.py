@@ -460,10 +460,22 @@ class TimetablePrintPreview(QDialog):
             items = [c.get("ad", "Sınıf") for c in (self.filtered_classes if self.filtered_classes else self.data_store.get("siniflar", []))]
             
         if not items:
-            items = ["Örnek 1", "Örnek 2"]
+            items = ["Örnek 1"]
             
         school_name = self.data_store.get("okul_adi") or self.data_store.get("settings", {}).get("school_name", "Özel Öğretim Kurumu")
         
+        # Single entity selected (e.g. 9A or single teacher) -> Center full page with high scale!
+        if len(items) == 1:
+            margin_x = 35
+            margin_y = 25
+            cell_w = VW - (2 * margin_x)
+            cell_h = VH - (2 * margin_y)
+            x = margin_x
+            y = margin_y
+            placements = self._get_pseudo_placements(items[0], is_teacher)
+            self._draw_mini_grid(painter, x, y, cell_w, cell_h, items[0], school_name, placements, is_teacher=is_teacher, is_single_page=True)
+            return
+
         # Grid layout math: 2 columns x 3 rows (6 boxes per page on A4 Landscape)
         cols, rows = 2, 3
         per_page = cols * rows
@@ -497,25 +509,25 @@ class TimetablePrintPreview(QDialog):
         year_short = acad_year[:4] if len(acad_year) >= 4 else "2026"
         
         # 1. Header Row
-        header_h = 32 if is_single_page else 18
+        header_h = 36 if is_single_page else 18
         
         # Top Left: Date (e.g. 12/09/2026)
-        painter.setFont(make_font(13 if is_single_page else 8, False))
+        painter.setFont(make_font(14 if is_single_page else 8, False))
         painter.setPen(QPen(QColor("#000000"), 1))
         painter.drawText(QRectF(x, y, w * 0.35, header_h), Qt.AlignLeft | Qt.AlignVCenter, date_str)
         
         # Top Center: Class / Teacher Name (e.g. 9A, 11A, Hüseyin Arman)
-        painter.setFont(make_font(26 if is_single_page else 16, True))
+        painter.setFont(make_font(32 if is_single_page else 16, True))
         painter.setPen(QPen(QColor("#000000"), 1))
-        painter.drawText(QRectF(x, y - (4 if is_single_page else 0), w, header_h + (10 if is_single_page else 4)), Qt.AlignCenter, str(target_name).upper())
+        painter.drawText(QRectF(x, y - (2 if is_single_page else 0), w, header_h + (12 if is_single_page else 4)), Qt.AlignCenter, str(target_name).upper())
         
         # Top Right: Ders Planı : 2026
-        painter.setFont(make_font(13 if is_single_page else 8, False))
+        painter.setFont(make_font(14 if is_single_page else 8, False))
         painter.setPen(QPen(QColor("#000000"), 1))
         painter.drawText(QRectF(x + w * 0.65, y, w * 0.35, header_h), Qt.AlignRight | Qt.AlignVCenter, f"Ders Planı : {year_short}")
         
         # 2. Table Grid
-        top_gap = 42 if is_single_page else 22
+        top_gap = 48 if is_single_page else 22
         grid_x = x
         grid_y = y + top_gap
         grid_w = w
@@ -524,13 +536,13 @@ class TimetablePrintPreview(QDialog):
         days = ["Pa", "Sa", "Ça", "Pe", "Cu"]
         periods = int(self.data_store.get("settings", {}).get("periods", 8))
         
-        hour_col_w = max(40, grid_w * (0.07 if is_single_page else 0.08))
-        col_header_h = max(24, grid_h * (0.10 if is_single_page else 0.14))
+        hour_col_w = max(55 if is_single_page else 40, grid_w * (0.08 if is_single_page else 0.08))
+        col_header_h = max(32 if is_single_page else 24, grid_h * (0.10 if is_single_page else 0.14))
         
         col_w = (grid_w - hour_col_w) / periods
         row_h = (grid_h - col_header_h) / len(days)
         
-        painter.setPen(QPen(QColor("#000000"), 1.2 if is_single_page else 1.0))
+        painter.setPen(QPen(QColor("#000000"), 1.4 if is_single_page else 1.0))
         painter.setBrush(Qt.NoBrush)
         
         # Top-Left Corner Box
@@ -547,11 +559,11 @@ class TimetablePrintPreview(QDialog):
             cx = grid_x + hour_col_w + p_idx * col_w
             painter.drawRect(QRectF(cx, grid_y, col_w, col_header_h))
             
-            painter.setFont(make_font(18 if is_single_page else 10, True))
+            painter.setFont(make_font(20 if is_single_page else 10, True))
             painter.drawText(QRectF(cx, grid_y + 1, col_w, col_header_h * 0.55), Qt.AlignCenter | Qt.AlignBottom, str(p_idx + 1))
             
             t_str = times[p_idx] if p_idx < len(times) else f"{8+p_idx}:00-{8+p_idx}:40"
-            painter.setFont(make_font(11 if is_single_page else 6, False))
+            painter.setFont(make_font(12 if is_single_page else 6, False))
             painter.drawText(QRectF(cx, grid_y + col_header_h * 0.56, col_w, col_header_h * 0.42), Qt.AlignCenter | Qt.AlignTop, t_str)
             
         # Left Day Column Headers & Content Cells
@@ -559,7 +571,7 @@ class TimetablePrintPreview(QDialog):
             ry = grid_y + col_header_h + d_idx * row_h
             painter.drawRect(QRectF(grid_x, ry, hour_col_w, row_h))
             
-            painter.setFont(make_font(20 if is_single_page else 12, True))
+            painter.setFont(make_font(24 if is_single_page else 12, True))
             painter.drawText(QRectF(grid_x, ry, hour_col_w, row_h), Qt.AlignCenter, day_name)
             
             for p_idx in range(periods):
@@ -573,7 +585,7 @@ class TimetablePrintPreview(QDialog):
                     
                     # Line 1: Subject Short Code in Bold (e.g. BİYO 1, BED, GÖR, MAT)
                     short_subj = get_subject_badge(sname, self.data_store)
-                    painter.setFont(make_font(18 if is_single_page else 10, True))
+                    painter.setFont(make_font(20 if is_single_page else 10, True))
                     painter.setPen(QPen(QColor("#000000"), 1))
                     painter.drawText(QRectF(cx + 2, ry + 2, col_w - 4, row_h * 0.52), Qt.AlignCenter | Qt.AlignVCenter, short_subj)
                     
@@ -584,7 +596,7 @@ class TimetablePrintPreview(QDialog):
                         else:
                             display_other = other_name.replace(" ", "").replace("/", "").replace("-", "").upper()
                             
-                        painter.setFont(make_font(14 if is_single_page else 7.5, False))
+                        painter.setFont(make_font(15 if is_single_page else 7.5, False))
                         painter.setPen(QPen(QColor("#111111"), 1))
                         painter.drawText(QRectF(cx + 2, ry + row_h * 0.5, col_w - 4, row_h * 0.46), Qt.AlignCenter | Qt.AlignVCenter, display_other)
 
@@ -791,8 +803,8 @@ class TimetablePrintPreview(QDialog):
         school_name = self.data_store.get("okul_adi") or self.data_store.get("settings", {}).get("school_name", "Özel Öğretim Kurumu")
         placements = self._get_pseudo_placements(target_name, is_teacher)
         
-        margin_x = 40
-        margin_y = 35
+        margin_x = 35
+        margin_y = 25
         grid_w = VW - (2 * margin_x)
         grid_h = VH - (2 * margin_y)
         
