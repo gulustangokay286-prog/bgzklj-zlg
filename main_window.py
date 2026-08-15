@@ -838,21 +838,7 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 print("DB Load Error:", e)
 
-        # Update entity combo without triggering premature saves
-        if hasattr(self, "_grid") and hasattr(self._grid, "view_combo"):
-            self._grid.entity_combo.blockSignals(True)
-            self._grid.view_combo.blockSignals(True)
-            self._on_view_combo_changed(self._grid.view_combo.currentText(), initial_load=True)
-            if self._grid.entity_combo.count() > 0:
-                self._active_entity_name = self._grid.entity_combo.currentText()
-                v_text = self._grid.view_combo.currentText()
-                if "Sınıf" in v_text: self._active_view_type = "class"
-                elif "Öğretmen" in v_text: self._active_view_type = "teacher"
-                elif "Derslik" in v_text: self._active_view_type = "room"
-            self._grid.view_combo.blockSignals(False)
-            self._grid.entity_combo.blockSignals(False)
-            
-        self._restore_grid_placements()
+        self._refresh_grid()
         self._refresh_tree()
         self._is_loading = False
 
@@ -865,9 +851,9 @@ class MainWindow(QMainWindow):
         settings = self.data_store.get("settings", {})
         periods = int(settings.get("periods", 8))
         classes = self.data_store.get("siniflar", [])
-        class_names = [c.get("ad", "") for c in classes if c.get("ad")]
+        class_names = [c.get("ad", "").strip() for c in classes if c.get("ad")]
         if not class_names:
-            class_names = ["Sınıf 1"]
+            class_names = ["9A", "9B", "10A", "10B", "11A", "11B", "11C", "12A", "12B"]
             
         placed = self._grid.get_placed_lessons()
         new_global = []
@@ -890,8 +876,62 @@ class MainWindow(QMainWindow):
         self.data_store["grid_placements"] = new_global
 
     def _restore_grid_placements(self, view_type=None, entity_name=None):
-        # We handle restoring inside _refresh_grid directly now
-        pass
+        self._refresh_grid()
+
+    def _refresh_grid(self):
+        if not hasattr(self, "_grid"):
+            return
+            
+        settings = self.data_store.get("settings", {})
+        periods = int(settings.get("periods", 8))
+        days_count = int(settings.get("days_count", 5))
+        
+        from timetable_grid import DAYS
+        days_list = DAYS[:days_count]
+        
+        classes = self.data_store.get("siniflar", [])
+        class_names = [c.get("ad", "").strip() for c in classes if c.get("ad")]
+        
+        # If no classes in data store yet, provide default demo classes
+        if not class_names:
+            class_names = ["9A", "9B", "10A", "10B", "11A", "11B", "11C", "12A", "12B"]
+            
+        self._grid.set_mode_all_classes(class_names, periods, days_list)
+        
+        # Draw placed lessons
+        grid_data = self.data_store.get("grid_placements", [])
+        if not grid_data and self.data_store.get("auto_schedule_results"):
+            grid_data = self.data_store.get("auto_schedule_results")
+            
+        for item in grid_data:
+            s_name = item.get("subject_name") or item.get("subject") or ""
+            c_name = (item.get("class_name") or item.get("class") or "").strip()
+            t_name = item.get("teacher_name") or item.get("teacher") or ""
+            dur = int(item.get("duration", 1))
+            col = int(item.get("day", item.get("col", 0)))
+            period = int(item.get("period", item.get("row", 0)))
+            
+            # Find matching class row (with tolerance)
+            matching_row = -1
+            if c_name in class_names:
+                matching_row = class_names.index(c_name)
+            else:
+                for idx, cn in enumerate(class_names):
+                    if cn.upper() == c_name.upper():
+                        matching_row = idx
+                        break
+                        
+            if matching_row >= 0:
+                actual_col = col * periods + period
+                color = item.get("color") or get_subject_color(s_name)
+                for ext in range(dur):
+                    target_c = actual_col + ext
+                    if target_c < len(days_list) * periods:
+                        self._grid.set_cell(matching_row, target_c, s_name, color, t_name, 1, c_name)
+        
+        # Update unplaced dock
+        if hasattr(self._grid, "unplaced_dock"):
+            self._grid.unplaced_dock.update_list(self.data_store)
 
 
 

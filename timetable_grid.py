@@ -36,11 +36,12 @@ def get_subject_abbr(subject_name: str) -> str:
     s = subject_name.strip()
     
     mapping = {
-        "MATEMATİK": "MAT", "FİZİK": "FİZ", "BİYOLOJİ": "BİY", "KİMYA": "KİM",
+        "MATEMATİK": "MAT", "FİZİK": "F", "FİZ": "F", "BİYOLOJİ": "BİY", "KİMYA": "KİM",
         "GEOMETRİ": "GEO", "TARİH": "TAR", "COĞRAFYA": "COĞ", "TÜRKÇE": "TÜR",
         "EDEBİYAT": "EDB", "TÜRK DİLİ VE EDEBİYATI": "TDE", "GÖRSEL SANATLAR": "GÖR",
         "İNGİLİZCE": "İNG", "ALMANCA": "ALM", "FRANSIZCA": "FRA", "DİN": "DİN",
-        "DİN KÜLTÜRÜ": "DİN", "FELSEFE": "FEL", "BEDEN": "BDN", "BEDEN EĞİTİMİ": "BDN",
+        "DİN KÜLTÜRÜ": "DİN", "DİN KÜLTÜRÜ VE AHLAK BİLGİSİ": "DİN", "FELSEFE": "FEL",
+        "BEDEN": "BDN", "BEDEN EĞİTİMİ": "BDN", "BEDEN EĞİTİMİ VE SPOR": "BDN",
         "MÜZİK": "MÜZ", "REHBERLİK": "REH", "SAĞLIK": "SAĞ", "ASTRONOMİ": "AST"
     }
     
@@ -63,6 +64,78 @@ def get_subject_abbr(subject_name: str) -> str:
     if len(base_title) >= 3:
         return f"{base_title[:3]}{num_suffix}"
     return f"{base_title}{num_suffix}"
+
+
+from PySide6.QtCore import QRect
+
+class AsCTimetableHeader(QHeaderView):
+    """aSc Timetables style two-level header: Days on top spanning 8 periods, Period numbers below."""
+    def __init__(self, periods: int = 8, days_list: list = None, parent=None):
+        super().__init__(Qt.Horizontal, parent)
+        self.periods = periods
+        self.days_list = days_list or DAYS[:5]
+        self.setFixedHeight(34)
+        self.setSectionResizeMode(QHeaderView.Fixed)
+        self.setDefaultSectionSize(32)
+        self.setMinimumSectionSize(18)
+
+    def set_config(self, periods: int, days_list: list):
+        self.periods = periods
+        self.days_list = days_list
+        self.viewport().update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self.viewport())
+        painter.setRenderHint(QPainter.Antialiasing, False)
+        
+        # Header background
+        painter.fillRect(self.rect(), QColor("#D0D0D0"))
+        
+        periods = self.periods
+        days_list = self.days_list
+        total_sections = self.count()
+        if total_sections == 0 or periods <= 0:
+            painter.end()
+            return
+            
+        # 1. Day headers (Top row: y=0..17)
+        for d_idx, day_name in enumerate(days_list):
+            start_col = d_idx * periods
+            end_col = start_col + periods - 1
+            if start_col >= total_sections:
+                break
+            actual_end_col = min(end_col, total_sections - 1)
+            x_start = self.sectionPosition(start_col)
+            x_end = self.sectionPosition(actual_end_col) + self.sectionSize(actual_end_col)
+            day_w = x_end - x_start
+            
+            day_rect = QRect(x_start, 0, day_w, 17)
+            painter.setPen(QPen(QColor("#777777"), 1))
+            painter.setBrush(QBrush(QColor("#C8C8C8")))
+            painter.drawRect(day_rect)
+            
+            painter.setPen(QPen(QColor("#111111")))
+            font_day = QFont("Segoe UI", 8, QFont.Bold)
+            painter.setFont(font_day)
+            painter.drawText(day_rect, Qt.AlignCenter, day_name)
+            
+        # 2. Period headers (Bottom row: y=17..34)
+        for col_idx in range(total_sections):
+            x = self.sectionPosition(col_idx)
+            w = self.sectionSize(col_idx)
+            period_num = (col_idx % periods) + 1
+            
+            period_rect = QRect(x, 17, w, 17)
+            painter.setPen(QPen(QColor("#888888"), 1))
+            painter.setBrush(QBrush(QColor("#E2E2E2")))
+            painter.drawRect(period_rect)
+            
+            painter.setPen(QPen(QColor("#222222")))
+            font_p = QFont("Segoe UI", 7, QFont.Bold)
+            painter.setFont(font_p)
+            painter.drawText(period_rect, Qt.AlignCenter, str(period_num))
+            
+        painter.end()
 
 
 class DraggableLessonCard(QLabel):
@@ -368,6 +441,8 @@ class DropTableWidget(QTableWidget):
         self.setAcceptDrops(True)
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
+        self.asc_header = AsCTimetableHeader(8, DAYS[:5], self)
+        self.setHorizontalHeader(self.asc_header)
         
     def dragEnterEvent(self, event):
         if event.mimeData().hasFormat("application/x-lesson"):
@@ -963,20 +1038,15 @@ class TimetableGrid(QWidget):
         text_color = Qt.white if luminance < 160 else Qt.black
         item.setForeground(QBrush(text_color))
         
-        font = QFont("Segoe UI", 9)
-        font.setBold(True)
+        font = QFont("Segoe UI", 8, QFont.Bold)
         item.setFont(font)
         
-        # Set span
-        max_span = min(duration, self.table.rowCount() - row)
-        if max_span > 1:
-            self.table.setSpan(row, col, max_span, 1)
         self.table.setItem(row, col, item)
         
         # Track placed lesson
         self._placed_lessons[(row, col)] = {
             "subject_name": subject_name, "color": color,
-            "teacher_name": teacher_name, "class_name": class_name, "duration": max_span
+            "teacher_name": teacher_name, "class_name": class_name, "duration": 1
         }
         
     def get_placed_lessons(self):
@@ -1000,26 +1070,21 @@ class TimetableGrid(QWidget):
     def set_mode_all_classes(self, class_list: list, periods: int, days_list: list):
         """Whole School View (aSc Çarşaf): Rows=Classes, Cols=Days*Periods"""
         self._periods = periods
+        self.class_list = class_list
         self.table.setRowCount(len(class_list))
+        self.table.setVerticalHeaderLabels(class_list)
         total_cols = len(days_list) * periods
         self.table.setColumnCount(total_cols)
         
-        # Build headers
-        self.table.setVerticalHeaderLabels(class_list)
+        # Configure AsCTimetableHeader
+        if hasattr(self.table, "asc_header"):
+            self.table.asc_header.set_config(periods, days_list)
         
-        col_headers = []
-        for d in days_list:
-            for p in range(periods):
-                # Put day on first line, period on second line
-                col_headers.append(f"{d}\n{p+1}")
-        self.table.setHorizontalHeaderLabels(col_headers)
-        
-        # Set compact column widths and taller header
-        hh = self.table.horizontalHeader()
-        hh.setMinimumSectionSize(20)
-        hh.setFixedHeight(40) # Taller to fit two lines of text
+        # Set compact column widths and row heights
         for i in range(total_cols):
-            self.table.setColumnWidth(i, 35)
+            self.table.setColumnWidth(i, 32)
+        for r in range(len(class_list)):
+            self.table.setRowHeight(r, 26)
             
         self.clear_grid()
 
