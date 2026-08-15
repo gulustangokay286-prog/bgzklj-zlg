@@ -407,7 +407,9 @@ class TimetablePrintPreview(QDialog):
                         res[(c, r + off)] = {
                             "subject_name": s_name,
                             "teacher_name": other_name,
-                            "color": scolor
+                            "color": scolor,
+                            "is_start": (off == 0),
+                            "duration": dur
                         }
                         
             if res:
@@ -441,7 +443,9 @@ class TimetablePrintPreview(QDialog):
                         res[(c, r + off)] = {
                             "subject_name": s_name,
                             "teacher_name": other_name,
-                            "color": scolor
+                            "color": scolor,
+                            "is_start": (off == 0),
+                            "duration": dur
                         }
             if res:
                 return res
@@ -475,7 +479,9 @@ class TimetablePrintPreview(QDialog):
                             res[(c, r + off)] = {
                                 "subject_name": s_name,
                                 "teacher_name": other_name,
-                                "color": scolor
+                                "color": scolor,
+                                "is_start": (off == 0),
+                                "duration": dur
                             }
                     except Exception:
                         pass
@@ -603,12 +609,19 @@ class TimetablePrintPreview(QDialog):
             painter.setFont(make_font(24 if is_single_page else 12, True))
             painter.drawText(QRectF(grid_x, ry, hour_col_w, row_h), Qt.AlignCenter, day_name)
             
-            for p_idx in range(periods):
-                cx = grid_x + hour_col_w + p_idx * col_w
-                painter.drawRect(QRectF(cx, ry, col_w, row_h))
-                
+            p_idx = 0
+            while p_idx < periods:
                 lesson = placements.get((d_idx, p_idx)) or placements.get((p_idx, d_idx))
-                if lesson:
+                
+                cx = grid_x + hour_col_w + p_idx * col_w
+                
+                if lesson and lesson.get("is_start", True):
+                    dur = lesson.get("duration", 1)
+                    dur = min(dur, periods - p_idx)
+                    block_w = col_w * dur
+                    
+                    painter.drawRect(QRectF(cx, ry, block_w, row_h))
+                    
                     sname = lesson.get("subject_name", "")
                     other_name = lesson.get("teacher_name", "")
                     
@@ -616,7 +629,7 @@ class TimetablePrintPreview(QDialog):
                     short_subj = get_subject_badge(sname, self.data_store)
                     painter.setFont(make_font(20 if is_single_page else 10, True))
                     painter.setPen(QPen(QColor("#000000"), 1))
-                    painter.drawText(QRectF(cx + 2, ry + 2, col_w - 4, row_h * 0.52), Qt.AlignCenter | Qt.AlignVCenter, short_subj)
+                    painter.drawText(QRectF(cx + 2, ry + 2, block_w - 4, row_h * 0.52), Qt.AlignCenter | Qt.AlignVCenter, short_subj)
                     
                     # Line 2: Teacher / Class Name
                     if other_name:
@@ -627,7 +640,13 @@ class TimetablePrintPreview(QDialog):
                             
                         painter.setFont(make_font(15 if is_single_page else 7.5, False))
                         painter.setPen(QPen(QColor("#111111"), 1))
-                        painter.drawText(QRectF(cx + 2, ry + row_h * 0.5, col_w - 4, row_h * 0.46), Qt.AlignCenter | Qt.AlignVCenter, display_other)
+                        painter.drawText(QRectF(cx + 2, ry + row_h * 0.5, block_w - 4, row_h * 0.46), Qt.AlignCenter | Qt.AlignVCenter, display_other)
+                    
+                    p_idx += dur
+                else:
+                    if not lesson:
+                        painter.drawRect(QRectF(cx, ry, col_w, row_h))
+                    p_idx += 1
 
     def _render_class_lessons_list(self, painter, VW, VH):
         """Sınıfın Dersleri / Öğretmen Atama Listesi Formatı (Fotoğraftaki Birebir aSc Dikey Formu)"""
