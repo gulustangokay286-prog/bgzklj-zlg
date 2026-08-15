@@ -57,6 +57,10 @@ class AutoScheduleDialog(QDialog):
         self.chk_relax.setChecked(False)
         form_param.addRow("", self.chk_relax)
         
+        self.chk_fill_empty = QCheckBox("Eksik ders saatlerini 'Boş/Serbest' ile tam 40 saate tamamla")
+        self.chk_fill_empty.setChecked(True)
+        form_param.addRow("", self.chk_fill_empty)
+        
         main_layout.addWidget(grp_param)
         
         # Progress area
@@ -100,7 +104,8 @@ class AutoScheduleDialog(QDialog):
         self.lbl_stats.setText("Yerleştirilen ders saati: Hesaplanıyor...")
         
         from auto_scheduler import AutoSchedulerWorker
-        self.worker = AutoSchedulerWorker(self.data_store, target_class=self.target_class, parent=self)
+        fill_empty = self.chk_fill_empty.isChecked()
+        self.worker = AutoSchedulerWorker(self.data_store, target_class=self.target_class, parent=self, fill_empty=fill_empty)
         self.worker.progress_updated.connect(self._on_progress)
         self.worker.finished_successfully.connect(self._on_finished)
         self.worker.failed.connect(self._on_failed)

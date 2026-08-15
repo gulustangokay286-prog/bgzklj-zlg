@@ -18,10 +18,11 @@ class AutoSchedulerWorker(QThread):
     finished_successfully = Signal(dict) # Returns results dict
     failed = Signal(str)
 
-    def __init__(self, data_store, target_class=None, parent=None):
+    def __init__(self, data_store, target_class=None, parent=None, fill_empty=False):
         super().__init__(parent)
         self.data_store = data_store
         self.target_class = normalize_class_name(target_class) if target_class else None
+        self.fill_empty = fill_empty
         self._is_running = True
 
     def run(self):
@@ -191,6 +192,15 @@ class AutoSchedulerWorker(QThread):
                             break
                 if found_idx != -1:
                     candidate_blocks.pop(found_idx)
+
+            if getattr(self, "fill_empty", False):
+                total_duration = sum(b.get("duration", 1) for b in candidate_blocks)
+                if slots_needed > total_duration:
+                    diff = slots_needed - total_duration
+                    while diff > 0:
+                        b_dur = 2 if diff >= 2 else 1
+                        candidate_blocks.append({"subject": "Boş", "teacher": "Atanmadı", "duration": b_dur})
+                        diff -= b_dur
 
             c_timeoff = c_objs.get(cn, {}).get("timeoff", [])
 
