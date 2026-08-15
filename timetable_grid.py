@@ -1009,15 +1009,19 @@ class TimetableGrid(QWidget):
         
         col_headers = []
         for d in days_list:
+            short_day = d[:3]  # e.g., Paz, Sal, Çar, Per, Cum
+            if d == "Pazartesi": short_day = "Pzt"
+            elif d == "Perşembe": short_day = "Prş"
+            elif d == "Çarşamba": short_day = "Çar"
             for p in range(periods):
-                col_headers.append(str(p + 1))
+                col_headers.append(f"{short_day}-{p+1}")
         self.table.setHorizontalHeaderLabels(col_headers)
         
         # Set compact column widths
         hh = self.table.horizontalHeader()
         hh.setMinimumSectionSize(18)
         for i in range(total_cols):
-            self.table.setColumnWidth(i, 24)
+            self.table.setColumnWidth(i, 35)
             
         self.clear_grid()
 

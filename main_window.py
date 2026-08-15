@@ -1502,8 +1502,10 @@ class MainWindow(QMainWindow):
             self.save_db(sync_from_grid=True)
         from PySide6.QtWidgets import QDialog
         from dialogs.print_wizard import PrintWizardDialog
-        curr_view = self._grid.view_combo.currentText() if hasattr(self, "_grid") else ""
-        curr_entity = self._grid.entity_combo.currentText() if hasattr(self, "_grid") else ""
+        
+        curr_view = "Sınıf Görünümü"
+        curr_entity = ""
+        
         wiz = PrintWizardDialog(self.data_store, default_entity=curr_entity, default_view=curr_view, parent=self)
         if wiz.exec() == QDialog.Accepted:
             filters = wiz.get_selected_filters()
