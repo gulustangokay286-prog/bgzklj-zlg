@@ -1800,20 +1800,52 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Bulut Tabanlı Planlama", "Bulut tabanlı planlama modülünü kullanabilmek için aktif bir Dijisa hesabı gereklidir.")
 
     def _act_clear_schedule(self):
-        r = QMessageBox.question(self, "Çizelgeyi Sıfırla / Temizle",
-            "Tüm sınıflar ve öğretmenler için yerleştirilmiş derslerin TAMAMI çizelgeden kaldırılacak ve alt havuza aktarılacak.\n\nEmin misiniz?",
-            QMessageBox.Yes | QMessageBox.No)
+        view = self._grid.view_combo.currentText()
+        entity = self._grid.entity_combo.currentText()
+        
+        if view == "Genel Görünüm" or not entity:
+            msg = "Tüm sınıflar ve öğretmenler için yerleştirilmiş derslerin TAMAMI çizelgeden kaldırılacak.\nEmin misiniz?"
+            target_entity = None
+            target_type = None
+        else:
+            msg = f"Sadece '{entity}' için yerleştirilmiş dersler çizelgeden kaldırılacak.\nEmin misiniz?\n\n(Tüm okulu sıfırlamak için Genel Görünüm'e geçebilirsiniz)"
+            target_entity = entity
+            if view == "Sınıf Görünümü": target_type = "class_name"
+            elif view == "Öğretmen Görünümü": target_type = "teacher_name"
+            else: target_type = "room_name"
+
+        r = QMessageBox.question(self, "Çizelgeyi Sıfırla / Temizle", msg, QMessageBox.Yes | QMessageBox.No)
+        
         if r == QMessageBox.Yes:
-            self.data_store["grid_placements"] = []
-            self.data_store["auto_schedule_results"] = []
-            self.data_store["yerlesim"] = {}
+            if target_entity is None:
+                self.data_store["grid_placements"] = []
+                self.data_store["auto_schedule_results"] = []
+                self.data_store["yerlesim"] = {}
+                msg_toast = "🧹 Tüm çizelge dersleri başarıyla sıfırlandı."
+            else:
+                from auto_scheduler import normalize_class_name
+                new_placements = []
+                for p in self.data_store.get("grid_placements", []):
+                    # Check if this placement belongs to the target entity
+                    p_val = p.get(target_type, "")
+                    if target_type == "class_name":
+                        if normalize_class_name(p_val) == normalize_class_name(target_entity):
+                            continue # Skip this one (remove it)
+                    else:
+                        if p_val == target_entity:
+                            continue # Skip this one (remove it)
+                    new_placements.append(p)
+                
+                self.data_store["grid_placements"] = new_placements
+                msg_toast = f"🧹 {entity} çizelgesi başarıyla sıfırlandı."
+
             if hasattr(self, "_grid"):
                 self._grid.clear_grid()
                 self._grid._placed_lessons = {}
             self.save_db(sync_from_grid=False)
             self._restore_grid_placements()
             self._refresh_tree()
-            self.statusBar().showMessage("🧹 Tüm çizelge dersleri başarıyla sıfırlandı ve kaydedildi.")
+            self.statusBar().showMessage(msg_toast)
 
     def _open_extracted(self, dialog_id):
         from dialogs.extracted_dialog import open_extracted_dialog
