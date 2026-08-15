@@ -1114,6 +1114,105 @@ class MainWindow(QMainWindow):
 
         self._grid.unplaced_dock.load_unplaced(unplaced, has_assignments=has_assignments)
 
+    def _check_planning_relations(self, subject, teacher, class_name, day, period, duration, is_move=False, orig_r=-1, orig_c=-1):
+        """
+        Validates active Planning Relations (planlama_iliskileri) in real-time for manual placements.
+        Returns (is_valid, violation_message).
+        """
+        relations = [r for r in self.data_store.get("planlama_iliskileri", []) if r.get("aktif", True)]
+        if not relations:
+            return True, ""
+            
+        from timetable_grid import DAYS
+        day_name = DAYS[day] if 0 <= day < len(DAYS) else f"{day+1}. Gün"
+        
+        placed = self._grid.get_placed_lessons()
+        current_day_lessons = []
+        for (r, c), data in placed.items():
+            if is_move and r == orig_r and c == orig_c:
+                continue
+            if c == day:
+                current_day_lessons.append((r, data))
+                
+        subj_daily_hours = duration
+        for r, data in current_day_lessons:
+            d_subj = data.get("subject_name", data.get("subject", ""))
+            d_cls = data.get("class_name", data.get("class", ""))
+            if d_subj == subject and (not class_name or d_cls == class_name):
+                subj_daily_hours += data.get("duration", 1)
+
+        for rel in relations:
+            r_type = rel.get("kural", "")
+            val = rel.get("deger", 1)
+            f_subjs = [s.strip().upper() for s in rel.get("dersler", []) if s.strip()]
+            f_teach = [t.strip().upper() for t in rel.get("ogretmenler", []) if t.strip()]
+            f_classes = [c.strip().upper() for c in rel.get("siniflar", []) if c.strip()]
+            
+            match_subj = (not f_subjs) or (subject.upper() in f_subjs)
+            match_teach = (not f_teach) or (teacher.upper() in f_teach)
+            match_class = (not f_classes) or (class_name.upper() in f_classes)
+            
+            if not (match_subj and match_teach and match_class):
+                continue
+                
+            # Rule 1: Günde maksimum ders sayısı
+            if "Günde maksimum ders sayısı" in r_type or "Günlük maksimum" in r_type:
+                max_h = int(val) if str(val).isdigit() else 2
+                if subj_daily_hours > max_h:
+                    return False, f"⚠️ <b>'Günde maksimum ders sayısı'</b> kuralına göre <b>{subject}</b> dersi günde en fazla <b>{max_h} saat</b> olabilir. (Bu yerleşimle {subj_daily_hours} saat oluyor!)"
+
+            # Rule 2: Beden Eğitimi / Uygulamalı dersler günde en fazla 2 saat olsun
+            elif "Uygulamalı dersler" in r_type or "Beden Eğitimi" in r_type:
+                if subj_daily_hours > 2:
+                    return False, f"⚠️ <b>'Uygulamalı dersler günde en fazla 2 saat'</b> kuralına göre <b>{subject}</b> dersi bu gün 2 saati aşıyor!"
+
+            # Rule 3: Aynı ders aynı gün tekrar etmesin (Tek blok kuralı)
+            elif "tekrar etmesin" in r_type:
+                for r, data in current_day_lessons:
+                    d_subj = data.get("subject_name", data.get("subject", ""))
+                    if d_subj.upper() == subject.upper():
+                        return False, f"⚠️ <b>'Aynı ders aynı gün tekrar etmesin'</b> kuralına göre <b>{subject}</b> dersi {day_name} gününde zaten mevcuttur ({r+1}. saat)!"
+
+            # Rule 4: İki ders aynı güne gelmesin
+            elif "aynı güne gelmesin" in r_type or "İki ders aynı güne" in r_type:
+                other_subjs = [s for s in f_subjs if s != subject.upper()]
+                for r, data in current_day_lessons:
+                    d_subj = data.get("subject_name", data.get("subject", "")).upper()
+                    if d_subj in other_subjs:
+                        return False, f"⚠️ <b>'İki ders aynı güne gelmesin'</b> kuralına göre <b>{subject}</b> ve <b>{d_subj}</b> dersleri {day_name} gününde birlikte bulunamaz!"
+
+            # Rule 5: Öğretmenin dersleri öğleden önce toplansın (Period < 4)
+            elif "öğleden önce toplansın" in r_type or "Sabah" in r_type:
+                if period >= 4:
+                    return False, f"⚠️ <b>'Öğretmenin dersleri öğleden önce toplansın'</b> kuralına göre <b>{teacher}</b> öğretmeninin dersi öğleden sonraki saatlere ({period+1}. saat) konulamaz!"
+
+            # Rule 6: Öğretmenin dersleri öğleden sonra toplansın (Period >= 4)
+            elif "öğleden sonra toplansın" in r_type:
+                if period < 4:
+                    return False, f"⚠️ <b>'Öğretmenin dersleri öğleden sonra toplansın'</b> kuralına göre <b>{teacher}</b> öğretmeninin dersi sabah saatlerine ({period+1}. saat) konulamaz!"
+
+            # Rule 7: Son ders saatine zor ders konulmasın
+            elif "Son ders saatine zor ders" in r_type:
+                last_period = self._grid.table.rowCount() - 1
+                HARD_KEYWORDS = ["MAT", "FİZ", "KİM", "BİYO", "GEO"]
+                is_hard = any(k in subject.upper() for k in HARD_KEYWORDS)
+                if (period + duration - 1 >= last_period) and is_hard:
+                    return False, f"⚠️ <b>'Son ders saatine zor ders konulmasın'</b> kuralına göre <b>{subject}</b> gibi zor bir ders günün son saatine ({last_period+1}. saat) konulamaz!"
+
+            # Rule 8: İki zor ders art arda gelmesin
+            elif "İki zor ders art arda" in r_type:
+                HARD_KEYWORDS = ["MAT", "FİZ", "KİM", "BİYO", "GEO"]
+                is_hard = any(k in subject.upper() for k in HARD_KEYWORDS)
+                if is_hard:
+                    prev_data = placed.get((period - 1, day))
+                    next_data = placed.get((period + duration, day))
+                    if prev_data and any(k in prev_data.get("subject_name", "").upper() for k in HARD_KEYWORDS):
+                        return False, f"⚠️ <b>'İki zor ders art arda gelmesin'</b> kuralına göre <b>{subject}</b> dersi öncesindeki <b>{prev_data.get('subject_name')}</b> dersiyle peş peşe gelemez!"
+                    if next_data and any(k in next_data.get("subject_name", "").upper() for k in HARD_KEYWORDS):
+                        return False, f"⚠️ <b>'İki zor ders art arda gelmesin'</b> kuralına göre <b>{subject}</b> dersi sonrasındaki <b>{next_data.get('subject_name')}</b> dersiyle peş peşe gelemez!"
+
+        return True, ""
+
     def _on_lesson_dropped(self, row, col, lesson_info):
         subject_name = lesson_info.get("subject_name", "Ders")
         color = get_subject_color(subject_name)
@@ -1178,6 +1277,29 @@ class MainWindow(QMainWindow):
                     f"⚠️ '{teacher}' öğretmeninin {day_name} günü {row+1}. ders saatinde 'ÇALIŞAMAZ / KAPALI' kısıtlaması bulunmaktadır!\nDers yerleştirilemez."
                 )
                 self.statusBar().showMessage(f"Kısıtlama engeli: {teacher} - {day_name} {row+1}. saat kapalı!")
+                return
+                
+        # 2. Check Active Planning Relations in Real Time
+        is_rel_ok, rel_msg = self._check_planning_relations(
+            subject=subject_name, teacher=teacher, class_name=cls_name,
+            day=col, period=row, duration=duration,
+            is_move=is_move, orig_r=orig_r, orig_c=orig_c
+        )
+        if not is_rel_ok:
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("Planlama İlişkisi Uyarısı")
+            msg_box.setIcon(QMessageBox.Warning)
+            msg_box.setText(
+                f"{rel_msg}<br><br>"
+                f"Tanımlanmış aktif bir <b>Planlama İlişkisi</b> kuralı ihlal edilmektedir.<br>"
+                f"Ne yapmak istersiniz?"
+            )
+            btn_ignore = msg_box.addButton("⚠️ Kuralı Yoksay ve Yerleştir", QMessageBox.AcceptRole)
+            btn_cancel = msg_box.addButton("❌ İptal Et / Engelle", QMessageBox.RejectRole)
+            msg_box.setDefaultButton(btn_cancel)
+            msg_box.exec()
+            if msg_box.clickedButton() != btn_ignore:
+                self.statusBar().showMessage("Planlama ilişkisi kuralı nedeniyle işlem iptal edildi.")
                 return
                 
         # 2. Check Teacher Conflict (Is teacher already placed elsewhere at this slot across ANY class?)
