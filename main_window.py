@@ -730,7 +730,12 @@ class MainWindow(QMainWindow):
         splitter.setSizes([220, 1060])
 
         # Wire up grid toggle button
-        self._grid.toggle_panel_btn.clicked.connect(lambda: left.setVisible(not left.isVisible()))
+        def toggle_sidebar():
+            is_vis = left.isVisible()
+            left.setVisible(not is_vis)
+            splitter.setSizes([220, 1060] if not is_vis else [0, 1060])
+            
+        self._grid.toggle_panel_btn.clicked.connect(toggle_sidebar)
         # Set initial left panel hidden (kapalı başlasın)
         left.setVisible(False)
         splitter.setSizes([0, 1060])
