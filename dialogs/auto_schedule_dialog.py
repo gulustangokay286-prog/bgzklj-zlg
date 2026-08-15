@@ -151,7 +151,17 @@ class AutoScheduleDialog(QDialog):
                     "duration": dur
                 })
                 
-        self.data_store["grid_placements"] = new_placements
+        # Do not overwrite the entire grid_placements! Only replace the classes that were scheduled.
+        existing_placements = self.data_store.get("grid_placements", [])
+        if self.target_class:
+            # We only scheduled one class, so keep all other classes
+            from auto_scheduler import normalize_class_name
+            target_norm = normalize_class_name(self.target_class)
+            filtered_placements = [p for p in existing_placements if normalize_class_name(p.get("class_name", "")) != target_norm]
+            self.data_store["grid_placements"] = filtered_placements + new_placements
+        else:
+            # We scheduled ALL classes, so it's safe to overwrite
+            self.data_store["grid_placements"] = new_placements
         
         p = self.parent()
         if p:
