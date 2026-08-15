@@ -6,7 +6,8 @@ import os
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QLabel,
     QSplitter, QTreeWidget, QTreeWidgetItem, QStatusBar,
-    QMessageBox, QTabWidget, QFrame, QSizePolicy, QMenu, QToolButton, QFileDialog, QDialog
+    QMessageBox, QTabWidget, QFrame, QSizePolicy, QMenu, QToolButton, QFileDialog, QDialog,
+    QTableWidgetItem
 )
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QFont, QIcon, QPixmap, QPainter, QColor, QPen, QLinearGradient, QBrush, QAction, QPainterPath, QPainterPath
@@ -870,67 +871,34 @@ class MainWindow(QMainWindow):
             
         from dialogs.edit_forms import format_tr_name
         
-        if mode == "teachers":
-            teachers = self.data_store.get("ogretmenler", [])
-            teacher_names = [t.get("ad", "").strip() for t in teachers if t.get("ad")]
-            if not teacher_names:
-                teacher_names = ["Öğretmen 1"]
-            self._grid.set_mode_all_teachers(teacher_names, periods, days_list)
+        # Batch UI updates for instantaneous rendering (0ms lag)
+        if hasattr(self._grid, "table"):
+            self._grid.table.setUpdatesEnabled(False)
             
-            for item in grid_data:
-                s_name = item.get("subject_name") or item.get("subject") or ""
-                c_name = (item.get("class_name") or item.get("class") or "").strip()
-                t_name = (item.get("teacher_name") or item.get("teacher") or "").strip()
-                dur = int(item.get("duration", 1))
-                col = int(item.get("day", item.get("col", 0)))
-                period = int(item.get("period", item.get("row", 0)))
-                is_locked = bool(item.get("locked", False))
+        try:
+            if mode == "teachers":
+                teachers = self.data_store.get("ogretmenler", [])
+                teacher_names = [t.get("ad", "").strip() for t in teachers if t.get("ad")]
+                if not teacher_names:
+                    teacher_names = ["Öğretmen 1"]
+                self._grid.set_mode_all_teachers(teacher_names, periods, days_list)
                 
-                # Find matching teacher row
-                matching_row = -1
-                if t_name in teacher_names:
-                    matching_row = teacher_names.index(t_name)
-                else:
-                    for idx, tn in enumerate(teacher_names):
-                        if format_tr_name(tn) == format_tr_name(t_name):
-                            matching_row = idx
-                            break
-                            
-                if matching_row >= 0:
-                    actual_col = col * periods + period
-                    color = get_subject_color(s_name, self.data_store)
-                    item["color"] = color
-                    for ext in range(dur):
-                        target_c = actual_col + ext
-                        if target_c < len(days_list) * periods:
-                            self._grid.set_cell(matching_row, target_c, s_name, color, t_name, 1, c_name, display_mode="teachers", locked=is_locked)
-        else:
-            classes = self.data_store.get("siniflar", [])
-            class_names = [c.get("ad", "").strip() for c in classes if c.get("ad")]
-            if not class_names:
-                class_names = ["9A", "9B", "10A", "10B", "11A", "11B", "11C", "12A", "12B"]
-                
-            self._grid.set_mode_all_classes(class_names, periods, days_list)
-            
-            for item in grid_data:
-                s_name = item.get("subject_name") or item.get("subject") or ""
-                c_name = (item.get("class_name") or item.get("class") or "").strip()
-                t_name = (item.get("teacher_name") or item.get("teacher") or "").strip()
-                dur = int(item.get("duration", 1))
-                col = int(item.get("day", item.get("col", 0)))
-                period = int(item.get("period", item.get("row", 0)))
-                is_locked = bool(item.get("locked", False))
-                
-                # Support combined classes if comma or ampersand separated
-                from auto_scheduler import matches_class
-                target_classes = [c.strip() for c in c_name.replace("&", ",").split(",") if c.strip()] if ("," in c_name or "&" in c_name) else [c_name]
-                for tc in target_classes:
+                for item in grid_data:
+                    s_name = item.get("subject_name") or item.get("subject") or ""
+                    c_name = (item.get("class_name") or item.get("class") or "").strip()
+                    t_name = (item.get("teacher_name") or item.get("teacher") or "").strip()
+                    dur = int(item.get("duration", 1))
+                    col = int(item.get("day", item.get("col", 0)))
+                    period = int(item.get("period", item.get("row", 0)))
+                    is_locked = bool(item.get("locked", False))
+                    
+                    # Find matching teacher row
                     matching_row = -1
-                    if tc in class_names:
-                        matching_row = class_names.index(tc)
+                    if t_name in teacher_names:
+                        matching_row = teacher_names.index(t_name)
                     else:
-                        for idx, cn in enumerate(class_names):
-                            if matches_class(cn, tc) or matches_class(tc, cn):
+                        for idx, tn in enumerate(teacher_names):
+                            if format_tr_name(tn) == format_tr_name(t_name):
                                 matching_row = idx
                                 break
                                 
@@ -941,7 +909,49 @@ class MainWindow(QMainWindow):
                         for ext in range(dur):
                             target_c = actual_col + ext
                             if target_c < len(days_list) * periods:
-                                self._grid.set_cell(matching_row, target_c, s_name, color, t_name, 1, tc, display_mode="classes", locked=is_locked)
+                                self._grid.set_cell(matching_row, target_c, s_name, color, t_name, 1, c_name, display_mode="teachers", locked=is_locked)
+            else:
+                classes = self.data_store.get("siniflar", [])
+                class_names = [c.get("ad", "").strip() for c in classes if c.get("ad")]
+                if not class_names:
+                    class_names = ["9A", "9B", "10A", "10B", "11A", "11B", "11C", "12A", "12B"]
+                    
+                self._grid.set_mode_all_classes(class_names, periods, days_list)
+                
+                for item in grid_data:
+                    s_name = item.get("subject_name") or item.get("subject") or ""
+                    c_name = (item.get("class_name") or item.get("class") or "").strip()
+                    t_name = (item.get("teacher_name") or item.get("teacher") or "").strip()
+                    dur = int(item.get("duration", 1))
+                    col = int(item.get("day", item.get("col", 0)))
+                    period = int(item.get("period", item.get("row", 0)))
+                    is_locked = bool(item.get("locked", False))
+                    
+                    # Support combined classes if comma or ampersand separated
+                    from auto_scheduler import matches_class
+                    target_classes = [c.strip() for c in c_name.replace("&", ",").split(",") if c.strip()] if ("," in c_name or "&" in c_name) else [c_name]
+                    for tc in target_classes:
+                        matching_row = -1
+                        if tc in class_names:
+                            matching_row = class_names.index(tc)
+                        else:
+                            for idx, cn in enumerate(class_names):
+                                if matches_class(cn, tc) or matches_class(tc, cn):
+                                    matching_row = idx
+                                    break
+                                    
+                        if matching_row >= 0:
+                            actual_col = col * periods + period
+                            color = get_subject_color(s_name, self.data_store)
+                            item["color"] = color
+                            for ext in range(dur):
+                                target_c = actual_col + ext
+                                if target_c < len(days_list) * periods:
+                                    self._grid.set_cell(matching_row, target_c, s_name, color, t_name, 1, tc, display_mode="classes", locked=is_locked)
+        finally:
+            if hasattr(self._grid, "table"):
+                self._grid.table.setUpdatesEnabled(True)
+                self._grid.table.viewport().update()
         
         # Update unplaced dock
         if hasattr(self._grid, "unplaced_dock"):

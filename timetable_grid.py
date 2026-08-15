@@ -326,7 +326,7 @@ class AsCTimetableHeader(QHeaderView):
 
 
 class DraggableLessonCard(QLabel):
-    def __init__(self, lesson_id: int, subject_name: str, color: str, duration: int = 1, teacher: str = "", class_name: str = "", parent=None):
+    def __init__(self, lesson_id: int, subject_name: str, color: str, duration: int = 1, teacher: str = "", class_name: str = "", display_mode: str = "classes", parent=None):
         super().__init__(parent)
         self.lesson_id = lesson_id
         self.subject_name = subject_name
@@ -334,6 +334,7 @@ class DraggableLessonCard(QLabel):
         self.duration = duration
         self.teacher = teacher
         self.class_name = class_name
+        self.display_mode = display_mode
         
         abbr = get_subject_abbr(subject_name)
         t_short = ""
@@ -344,15 +345,23 @@ class DraggableLessonCard(QLabel):
             else:
                 t_short = parts[0]
                 
-        display_text = f"<b>{abbr}</b>"
-        if t_short:
-            display_text += f" <span style='font-weight:normal; font-size:8.5px; opacity:0.95;'>{t_short}</span>"
+        if display_mode == "teachers":
+            # For teacher view, highlight class name in bold and subject name as subtitle
+            c_clean = class_name.replace(" ", "").upper()
+            display_text = f"<b>{c_clean}</b>"
+            if abbr:
+                display_text += f" <span style='font-weight:normal; font-size:8.5px; opacity:0.95;'>{abbr}</span>"
+        else:
+            display_text = f"<b>{abbr}</b>"
+            if t_short:
+                display_text += f" <span style='font-weight:normal; font-size:8.5px; opacity:0.95;'>{t_short}</span>"
+                
         if duration > 1:
             display_text += f" <span style='background:rgba(255,255,255,0.35); border-radius:2px; padding:0 3px; font-size:8px; font-weight:bold;'>{duration}h</span>"
             
         self.setText(display_text)
         self.setAlignment(Qt.AlignCenter)
-        card_width = max(56, 50 + (duration - 1)*18)
+        card_width = max(58, 52 + (duration - 1)*18)
         self.setFixedSize(card_width, 32)
         
         c = QColor(color)
@@ -428,11 +437,11 @@ class DraggableLessonCard(QLabel):
         data_store = getattr(win, "data_store", None)
         
         if action == act_palette:
-            from dialogs.color_picker_dialog import ModernColorPickerDialog
+            from dialogs.color_picker_dialog import ModernColorPickerDialog, update_subject_color_globally
             new_color = ModernColorPickerDialog.pick_color(
                 initial_color=self.color,
                 parent=win or self,
-                title=f"🎨 {self.subject_name} — Renk Seçimi",
+                title=f"{self.subject_name} — Renk Seçimi",
                 data_store=data_store,
                 subject_name=self.subject_name
             )
@@ -455,133 +464,82 @@ class DraggableLessonCard(QLabel):
                         border: 2px solid #0078D7;
                     }}
                 """)
-                if data_store:
-                    if "dersler" in data_store:
-                        for d in data_store["dersler"]:
-                            if d.get("ad", "").strip().upper() == self.subject_name.strip().upper():
-                                d["color"] = new_hex
-                                d["renk"] = new_hex
-                    if "atamalar" in data_store:
-                        for a in data_store["atamalar"]:
-                            if a.get("subject", "").strip().upper() == self.subject_name.strip().upper():
-                                a["color"] = new_hex
-                    if "grid_placements" in data_store:
-                        for p in data_store["grid_placements"]:
-                            if (p.get("subject_name") or p.get("subject") or "").strip().upper() == self.subject_name.strip().upper():
-                                p["color"] = new_hex
-                if win:
-                    if hasattr(win, "save_db"): win.save_db(sync_from_grid=False)
-                    if hasattr(win, "_refresh_tree"): win._refresh_tree()
-                    if hasattr(win, "_refresh_grid"): win._refresh_grid()
-                    grid = getattr(win, "_grid", None)
-                    if grid and hasattr(grid, "unplaced_dock"):
-                        grid.unplaced_dock.update_list(data_store)
+                update_subject_color_globally(self, data_store, self.subject_name, new_hex)
             return
 
-        selected_type = None
-        if action == act_2_2: selected_type = "2+2"
-        elif action == act_2_1: selected_type = "2+1"
-        elif action == act_2_2_1: selected_type = "2+2+1"
-        elif action == act_3_2: selected_type = "3+2"
-        elif action == act_1_1_1: selected_type = "1+1+1"
+        parts = None
+        if action == act_2_2:
+            parts = [2, 2]
+        elif action == act_2_1:
+            parts = [2, 1]
+        elif action == act_2_2_1:
+            parts = [2, 2, 1]
+        elif action == act_3_2:
+            parts = [3, 2]
+        elif action == act_1_1_1:
+            parts = [1, 1, 1]
         elif action == act_custom:
-            val, ok = QInputDialog.getText(self, "Özel Ders Dağılımı", "Dağılım biçimi (Örn: 2+3, 1+2+2, 2+2+2):", text=str(self.duration))
+            val, ok = QInputDialog.getText(self, "Özel Dağılım", "Saat Dağılımı (Örn: 2+2 veya 1+1+1):", text=f"{self.duration}")
             if ok and val.strip():
-                selected_type = val.strip()
+                try:
+                    parts = [int(p.strip()) for p in val.replace(",", "+").split("+") if p.strip()]
+                except Exception:
+                    pass
         elif action == act_del:
             if data_store and "atamalar" in data_store:
                 data_store["atamalar"] = [
-                    a for a in data_store["atamalar"]
-                    if not (a.get("teacher") == self.teacher and a.get("subject") == self.subject_name and a.get("class") == self.class_name)
+                    a for a in data_store["atamalar"] 
+                    if not (a.get("subject", "").strip().upper() == self.subject_name.strip().upper() and 
+                            a.get("class", "").strip().upper() == self.class_name.strip().upper() and
+                            a.get("teacher", "").strip().upper() == self.teacher.strip().upper())
                 ]
-                
-                if "grid_placements" in data_store:
-                    data_store["grid_placements"] = [
-                        p for p in data_store["grid_placements"]
-                        if not (p.get("teacher_name") == self.teacher and p.get("subject_name") == self.subject_name and p.get("class_name") == self.class_name)
-                    ]
-                    
-                if hasattr(win, "save_db"): win.save_db()
-                if hasattr(win, "_refresh_tree"): win._refresh_tree()
-                if hasattr(win, "_on_tree_selection_changed"): win._on_tree_selection_changed()
+                if win:
+                    if hasattr(win, "save_db"): win.save_db()
+                    if hasattr(win, "_refresh_tree"): win._refresh_tree()
+                    if hasattr(win, "_refresh_grid"): win._refresh_grid()
             return
             
-        if selected_type and data_store:
-            if "atamalar" not in data_store:
-                data_store["atamalar"] = []
-                
-            updated = False
-            for a in data_store["atamalar"]:
-                if (a.get("teacher") == self.teacher or not self.teacher or self.teacher == "Öğretmen") and a.get("subject") == self.subject_name:
-                    a["type"] = selected_type
-                    parts = [int(p.strip()) for p in selected_type.split("+") if p.strip().isdigit()]
-                    a["duration"] = sum(parts) if parts else (int(selected_type) if selected_type.isdigit() else 1)
-                    updated = True
-                    break
-                    
-            if not updated:
-                parts = [int(p.strip()) for p in selected_type.split("+") if p.strip().isdigit()]
-                tot_dur = sum(parts) if parts else (int(selected_type) if selected_type.isdigit() else 1)
-                data_store["atamalar"].append({
-                    "teacher": self.teacher or "Öğretmen",
-                    "subject": self.subject_name,
-                    "class": self.class_name,
-                    "duration": tot_dur,
-                    "type": selected_type,
-                    "color": self.color
-                })
-                
-            if hasattr(win, "save_db"): win.save_db()
-            if hasattr(win, "_refresh_tree"): win._refresh_tree()
+        if parts and data_store:
+            if "atamalar" in data_store:
+                for a in data_store["atamalar"]:
+                    if (a.get("subject", "").strip().upper() == self.subject_name.strip().upper() and 
+                        a.get("class", "").strip().upper() == self.class_name.strip().upper() and
+                        a.get("teacher", "").strip().upper() == self.teacher.strip().upper()):
+                        a["type"] = "+".join(map(str, parts))
+                        a["distribution"] = parts
+                        a["duration"] = sum(parts)
+                        break
+            if win:
+                if hasattr(win, "save_db"): win.save_db()
+                if hasattr(win, "_refresh_tree"): win._refresh_tree()
+                if hasattr(win, "_refresh_grid"): win._refresh_grid()
 
 
-class UnplacedLessonsDock(QFrame):
+class UnplacedLessonsDock(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(46)
         self.setAcceptDrops(True)
-        self.setStyleSheet("QFrame { background: #F8FAFC; border-top: 1px solid #CBD5E1; }")
+        self.setFixedHeight(54)
         
         self.layout = QHBoxLayout(self)
-        self.layout.setContentsMargins(6, 2, 6, 2)
-        self.layout.setSpacing(6)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(0)
         
-        # Scroll area for unplaced lessons
-        scroll = QScrollArea(self)
+        scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setStyleSheet("""
-            QScrollArea {
-                border: none;
-                background: transparent;
-            }
-            QScrollBar:horizontal {
-                height: 6px;
-                background: #E2E8F0;
-                border-radius: 3px;
-            }
-            QScrollBar::handle:horizontal {
-                background: #94A3B8;
-                border-radius: 3px;
-            }
-            QScrollBar::handle:horizontal:hover {
-                background: #64748B;
-            }
-            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
-                width: 0px;
-                background: none;
-            }
-            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
-                background: none;
-            }
-            QScrollBar:vertical {
-                width: 0px;
-            }
+            QScrollArea { border: none; background: transparent; }
+            QScrollBar:horizontal { height: 5px; background: transparent; margin: 0; }
+            QScrollBar::handle:horizontal { background: #CBD5E1; border-radius: 2px; }
+            QScrollBar::handle:horizontal:hover { background: #94A3B8; }
         """)
         
         self.container = QWidget()
         self.container.setStyleSheet("background: transparent;")
         self.container_layout = QHBoxLayout(self.container)
-        self.container_layout.setContentsMargins(0, 0, 0, 0)
+        self.container_layout.setContentsMargins(8, 0, 8, 0)
         self.container_layout.setSpacing(8)
         self.container_layout.setAlignment(Qt.AlignLeft)
         
@@ -601,7 +559,6 @@ class UnplacedLessonsDock(QFrame):
                 if data.get("is_move"):
                     orig_r = data.get("origin_row", -1)
                     orig_c = data.get("origin_col", -1)
-                    orig_dur = data.get("duration", 1)
                     win = self.window()
                     grid = getattr(win, "_grid", None)
                     if grid and orig_r >= 0 and orig_c >= 0:
@@ -610,55 +567,63 @@ class UnplacedLessonsDock(QFrame):
                 print("Dock drop error:", e)
             event.accept()
 
-    def load_unplaced(self, lessons_data, has_assignments=True):
-        # clear existing
-        while self.container_layout.count():
-            item = self.container_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+    def load_unplaced(self, lessons_data, has_assignments=True, display_mode="classes"):
+        self.container.setUpdatesEnabled(False)
+        try:
+            # clear existing
+            while self.container_layout.count():
+                item = self.container_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+                    
+            if not lessons_data:
+                self.container_layout.setAlignment(Qt.AlignCenter)
+                msg_widget = QWidget()
+                msg_widget.setStyleSheet("background: transparent;")
+                msg_layout = QHBoxLayout(msg_widget)
+                msg_layout.setContentsMargins(0, 0, 0, 0)
+                msg_layout.setSpacing(8)
+                msg_layout.setAlignment(Qt.AlignCenter)
                 
-        if not lessons_data:
-            self.container_layout.setAlignment(Qt.AlignCenter)
-            msg_widget = QWidget()
-            msg_widget.setStyleSheet("background: transparent;")
-            msg_layout = QHBoxLayout(msg_widget)
-            msg_layout.setContentsMargins(0, 0, 0, 0)
-            msg_layout.setSpacing(8)
-            msg_layout.setAlignment(Qt.AlignCenter)
-            
-            icon_lbl = QLabel()
-            icon_lbl.setStyleSheet("background: transparent; border: none;")
-            text_lbl = QLabel()
-            text_lbl.setStyleSheet("background: transparent; border: none;")
-            
-            if not has_assignments:
-                icon_lbl.setPixmap(make_grid_action_icon("alert_triangle", 20).pixmap(20, 20))
-                text_lbl.setText("Bu sınıfa / öğretmene henüz hiç ders atanmadı. Lütfen 'Ders Atama' bölümünden tanımlayın.")
-                text_lbl.setFont(QFont("Segoe UI", 9, QFont.Bold))
-                text_lbl.setStyleSheet("color: #B45309; background: transparent; border: none;")
-            else:
-                icon_lbl.setPixmap(make_grid_action_icon("check_circle", 20).pixmap(20, 20))
-                text_lbl.setText("Bu sınıfın / öğretmenin tüm dersleri başarıyla programa yerleştirildi.")
-                text_lbl.setFont(QFont("Segoe UI", 9, QFont.Bold))
-                text_lbl.setStyleSheet("color: #15803D; background: transparent; border: none;")
+                icon_lbl = QLabel()
+                icon_lbl.setStyleSheet("background: transparent; border: none;")
+                text_lbl = QLabel()
+                text_lbl.setStyleSheet("background: transparent; border: none;")
                 
-            msg_layout.addWidget(icon_lbl)
-            msg_layout.addWidget(text_lbl)
-            
-            self.container_layout.addWidget(msg_widget)
-            return
+                if not has_assignments:
+                    icon_lbl.setPixmap(make_grid_action_icon("alert_triangle", 20).pixmap(20, 20))
+                    text_lbl.setText("Bu sınıfa / öğretmene henüz hiç ders atanmadı. Lütfen 'Ders Atama' bölümünden tanımlayın.")
+                    text_lbl.setFont(QFont("Segoe UI", 9, QFont.Bold))
+                    text_lbl.setStyleSheet("color: #B45309; background: transparent; border: none;")
+                else:
+                    icon_lbl.setPixmap(make_grid_action_icon("check_circle", 20).pixmap(20, 20))
+                    text_lbl.setText("Bu sınıfın / öğretmenin tüm dersleri başarıyla programa yerleştirildi.")
+                    text_lbl.setFont(QFont("Segoe UI", 9, QFont.Bold))
+                    text_lbl.setStyleSheet("color: #15803D; background: transparent; border: none;")
+                    
+                msg_layout.addWidget(icon_lbl)
+                msg_layout.addWidget(text_lbl)
+                
+                self.container_layout.addWidget(msg_widget)
+                return
 
-        self.container_layout.setAlignment(Qt.AlignLeft)
-        for l in lessons_data:
-            dur = l.get("duration", 1)
-            teacher = l.get("teacher", "")
-            cls_name = l.get("class_name", "")
-            card = DraggableLessonCard(l["id"], l["subject_name"], l["color"], duration=dur, teacher=teacher, class_name=cls_name)
-            self.container_layout.addWidget(card)
+            self.container_layout.setAlignment(Qt.AlignLeft)
+            for l in lessons_data:
+                dur = l.get("duration", 1)
+                teacher = l.get("teacher", "")
+                cls_name = l.get("class_name", "")
+                card = DraggableLessonCard(l["id"], l["subject_name"], l["color"], duration=dur, teacher=teacher, class_name=cls_name, display_mode=display_mode)
+                self.container_layout.addWidget(card)
+        finally:
+            self.container.setUpdatesEnabled(True)
 
-    def update_list(self, data_store: dict = None):
+    def update_list(self, data_store: dict = None, display_mode: str = None):
         if not data_store:
             return
+        if display_mode is None:
+            grid = self.parent()
+            display_mode = getattr(grid, "current_view_mode", "classes") if grid else "classes"
+            
         atamalar = data_store.get("atamalar", [])
         grid_placements = data_store.get("grid_placements", [])
         from dialogs.color_picker_dialog import resolve_subject_color
@@ -688,7 +653,7 @@ class UnplacedLessonsDock(QFrame):
                     "teacher": t_name,
                     "class_name": c_name
                 })
-        self.load_unplaced(unplaced_cards, has_assignments=bool(atamalar))
+        self.load_unplaced(unplaced_cards, has_assignments=bool(atamalar), display_mode=display_mode)
 
 
 class TimetableCellDelegate(QStyledItemDelegate):
@@ -715,11 +680,7 @@ class TimetableCellDelegate(QStyledItemDelegate):
         text = index.data(Qt.DisplayRole)
         clean_str = str(text).replace("🔒", "").strip() if text else ""
         
-        is_locked = False
-        if info and info.get("locked"):
-            is_locked = True
-        elif text and str(text).startswith("🔒"):
-            is_locked = True
+        is_locked = bool(info and info.get("locked"))
             
         # 1. Determine cell background color
         cell_color = None
@@ -1029,25 +990,48 @@ class DropTableWidget(QTableWidget):
                     info = grid._placed_lessons[(orig_r, orig_c)]
                     info["locked"] = True
                     win = self.window()
-                    if hasattr(win, "save_db"): win.save_db()
-                    if hasattr(win, "statusBar"): win.statusBar().showMessage("Ders kilitlendi (Otomatik oluşturma bu dersi taşımayacak).")
+                    if hasattr(win, "data_store") and win.data_store:
+                        s_name = info.get("subject_name", "")
+                        c_name = info.get("class_name", "")
+                        for p in win.data_store.get("grid_placements", []):
+                            if (p.get("subject_name") or p.get("subject")) == s_name and (p.get("class_name") or p.get("class")) == c_name:
+                                p["locked"] = True
+                    if hasattr(win, "save_db"): win.save_db(sync_from_grid=False)
+                    if hasattr(win, "statusBar"): win.statusBar().showMessage("🔒 Ders kilitlendi.")
                     self.viewport().update()
+                    self.update()
             elif action == act_unlock:
                 if hasattr(grid, "_placed_lessons") and (orig_r, orig_c) in grid._placed_lessons:
                     info = grid._placed_lessons[(orig_r, orig_c)]
                     info["locked"] = False
+                    if orig_item:
+                        orig_item.setText(orig_item.text().replace("🔒", ""))
                     win = self.window()
-                    if hasattr(win, "save_db"): win.save_db()
-                    if hasattr(win, "statusBar"): win.statusBar().showMessage("Dersin kilidi açıldı.")
+                    if hasattr(win, "data_store") and win.data_store:
+                        s_name = info.get("subject_name", "")
+                        c_name = info.get("class_name", "")
+                        for p in win.data_store.get("grid_placements", []):
+                            if (p.get("subject_name") or p.get("subject")) == s_name and (p.get("class_name") or p.get("class")) == c_name:
+                                p["locked"] = False
+                    if hasattr(win, "save_db"): win.save_db(sync_from_grid=False)
+                    if hasattr(win, "statusBar"): win.statusBar().showMessage("🔓 Dersin kilidi kaldırıldı.")
                     self.viewport().update()
+                    self.update()
             elif action == act_unlock_all:
                 if hasattr(grid, "_placed_lessons"):
                     for (r, c), p_info in grid._placed_lessons.items():
                         p_info["locked"] = False
+                        it = self.item(r, c)
+                        if it:
+                            it.setText(it.text().replace("🔒", ""))
                     win = self.window()
-                    if hasattr(win, "save_db"): win.save_db()
-                    if hasattr(win, "statusBar"): win.statusBar().showMessage("Tüm derslerin kilitleri açıldı.")
+                    if hasattr(win, "data_store") and win.data_store:
+                        for p in win.data_store.get("grid_placements", []):
+                            p["locked"] = False
+                    if hasattr(win, "save_db"): win.save_db(sync_from_grid=False)
+                    if hasattr(win, "statusBar"): win.statusBar().showMessage("🔓 Tüm derslerin kilitleri açıldı.")
                     self.viewport().update()
+                    self.update()
             elif action == act_color:
                 from dialogs.color_picker_dialog import ModernColorPickerDialog, update_subject_color_globally
                 grid = self.parent()

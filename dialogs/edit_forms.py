@@ -1649,11 +1649,12 @@ class CombinedClassesAssignDialog(QDialog):
 
 class SubjectTeacherAssignmentDialog(QDialog):
     """Modernize Edilmiş Öğretmen Seç, Saat ve Sınıf Eşleştirme Sheet Ekranı"""
-    def __init__(self, subject_name="", data_store=None, parent=None, current_class=""):
+    def __init__(self, subject_name="", data_store=None, parent=None, current_class="", preselect_class="", preselect_teacher="", **kwargs):
         super().__init__(parent)
         self.subject_name = subject_name
         self.data_store = data_store or {}
-        self.current_class = current_class
+        self.current_class = current_class or preselect_class or ""
+        self.preselect_teacher = preselect_teacher or ""
         self.setWindowTitle(f"Öğretmen Seç & Saat Ata — {self.subject_name}")
         self.resize(920, 580)
         self.setStyleSheet("""

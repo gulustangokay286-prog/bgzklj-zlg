@@ -41,69 +41,52 @@ def get_subject_badge(subj_name, data_store=None):
     if not subj_name:
         return ""
         
-    s_clean = subj_name.strip()
-    s_upper = s_clean.upper()
+    s_clean = str(subj_name).strip()
     
-    import re
-    # Specific Turkish Curriculum Short Code Dictionary
-    SHORT_OVERRIDES = {
-        "BİYOLOJİ": "BİYO", "BIYOLOJI": "BİYO", "BIY": "BİYO", "BİY": "BİYO",
-        "KİMYA": "KİM", "KIMYA": "KİM", "KIM": "KİM", "KİM": "KİM",
-        "FİZİK": "FİZ", "FIZIK": "FİZ", "FIZ": "FİZ", "FİZ": "FİZ",
-        "MATEMATİK": "MAT", "MATEMATIK": "MAT", "MAT": "MAT",
-        "GEOMETRİ": "GEO", "GEOMETRI": "GEO", "GEO": "GEO",
-        "TÜRKÇE": "TRK", "TURKCE": "TRK",
-        "EDEBİYAT": "EDB", "TÜRK DİLİ VE EDEBİYATI": "EDB",
-        "PARAGRAF": "PRG",
-        "BEDEN": "BED", "BEDEN EĞİTİMİ": "BED",
-        "GÖRSEL SANATLAR": "GÖR", "GÖRSEL": "GÖR", "RESİM": "GÖR",
-        "MÜZİK": "MÜZ", "MUZIK": "MÜZ",
-        "DİN": "DİN", "DIN": "DİN", "DİN KÜLTÜRÜ": "DİN",
-        "FELSEFE": "FEL",
-        "İNGİLİZCE": "İNG", "INGILIZCE": "İNG", "ING": "İNG", "İNG": "İNG",
-        "ALMANCA": "ALM",
-        "TARİH": "TAR", "TARIH": "TAR",
-        "COĞRAFYA": "COĞ", "COGRAFYA": "COĞ",
-        "REHBERLİK": "REHBERLİK", "REHBERLIK": "REHBERLİK", "REH": "REHBERLİK"
-    }
-
-    # Check if manual short code exists in data_store and is a valid short code
+    # 1. If manual short code exists in data_store and is short (<= 5 chars), return it
     if data_store and "dersler" in data_store:
         for d in data_store["dersler"]:
             if d.get("ad", "").strip().lower() == s_clean.lower():
                 kisa = (d.get("kisa") or "").strip().upper()
-                if kisa and len(kisa) <= 10 and kisa.lower() != d.get("ad", "").strip().lower():
-                    return re.sub(r'([A-ZÇĞİÖŞÜa-zçğıöşü])(\d+)', r'\1 \2', kisa)
+                if kisa and len(kisa) <= 5 and kisa.lower() != d.get("ad", "").strip().lower():
+                    return kisa
 
-    # Compute short code
-    res_code = ""
-    m = re.match(r'^(.*?)\s*(\d+)$', s_upper)
-    if m:
-        base_name = m.group(1).strip()
-        num = m.group(2).strip()
-        base_code = SHORT_OVERRIDES.get(base_name, base_name[:4])
-        res_code = f"{base_code} {num}"
-    elif s_upper in SHORT_OVERRIDES:
-        res_code = SHORT_OVERRIDES[s_upper]
-    else:
-        for k, v in SHORT_OVERRIDES.items():
-            if s_upper.startswith(k):
-                rest = s_upper[len(k):].strip()
-                res_code = f"{v} {rest}".strip()
-                break
-        if not res_code:
-            res_code = s_upper[:4]
-            
-    res_code = re.sub(r'([A-ZÇĞİÖŞÜa-zçğıöşü])(\d+)', r'\1 \2', res_code).strip()
+    import re
+    # Extract trailing number if exists (e.g. "Matematik 1" -> "MAT 1")
+    m = re.match(r'^(.*?)\s*(\d+)$', s_clean)
+    base_name = m.group(1).strip() if m else s_clean
+    num_str = f" {m.group(2)}" if m else ""
     
-    # Auto-save computed short code to data_store if missing
-    if data_store and "dersler" in data_store:
-        for d in data_store["dersler"]:
-            if d.get("ad", "").strip().lower() == s_clean.lower():
-                if not d.get("kisa") or d.get("kisa", "").strip().lower() == d.get("ad", "").strip().lower():
-                    d["kisa"] = res_code
-                    
-    return res_code
+    tr_map = str.maketrans({'i': 'İ', 'ı': 'I', 'ç': 'Ç', 'ğ': 'Ğ', 'ö': 'Ö', 'ş': 'Ş', 'ü': 'Ü'})
+    base_up = base_name.translate(tr_map).upper()
+    
+    STANDARDS = [
+        ("MATEMATİK", "MAT"), ("MATEMATIK", "MAT"), ("MAT", "MAT"),
+        ("FİZİK", "FİZ"), ("FIZIK", "FİZ"), ("FİZ", "FİZ"), ("FIZ", "FİZ"),
+        ("KİMYA", "KİM"), ("KIMYA", "KİM"), ("KİM", "KİM"), ("KIM", "KİM"),
+        ("BİYOLOJİ", "BİY"), ("BIYOLOJI", "BİY"), ("BİYO", "BİY"), ("BIYO", "BİY"), ("BİY", "BİY"), ("BIY", "BİY"),
+        ("TÜRK DİLİ VE EDEBİYATI", "TDE"), ("EDEBİYAT", "TDE"), ("EDBIYAT", "TDE"), ("TÜRKÇE", "TRK"), ("TURKCE", "TRK"), ("TRK", "TRK"),
+        ("TARİH", "TAR"), ("TARIH", "TAR"), ("TAR", "TAR"),
+        ("COĞRAFYA", "COĞ"), ("COGRAFYA", "COĞ"), ("COĞ", "COĞ"), ("COG", "COĞ"),
+        ("DİN KÜLTÜRÜ VE AHLAK BİLGİSİ", "DİN"), ("DİN KÜLTÜRÜ", "DİN"), ("DİN", "DİN"), ("DIN", "DİN"),
+        ("FELSEFE", "FEL"), ("FEL", "FEL"),
+        ("İNGİLİZCE", "İNG"), ("INGILIZCE", "İNG"), ("İNG", "İNG"), ("ING", "İNG"),
+        ("ALMANCA", "ALM"), ("ALM", "ALM"),
+        ("BEDEN EĞİTİMİ", "BED"), ("BEDEN", "BED"), ("BED", "BED"),
+        ("GÖRSEL SANATLAR", "GÖR"), ("GÖRSEL", "GÖR"), ("RESİM", "GÖR"), ("GÖR", "GÖR"), ("GOR", "GÖR"),
+        ("MÜZİK", "MÜZ"), ("MUZIK", "MÜZ"), ("MÜZ", "MÜZ"), ("MUZ", "MÜZ"),
+        ("REHBERLİK", "REH"), ("REHBERLIK", "REH"), ("REH", "REH"),
+        ("GEOMETRİ", "GEO"), ("GEOMETRI", "GEO"), ("GEO", "GEO"),
+        ("PARAGRAF", "PRG"), ("PRG", "PRG")
+    ]
+    
+    for k, v in STANDARDS:
+        if base_up == k or base_up.startswith(k):
+            return f"{v}{num_str}".strip()
+            
+    # Fallback to alphanumeric prefix
+    clean_alpha = "".join(c for c in base_up if c.isalnum())
+    return f"{clean_alpha[:4]}{num_str}".strip()
 
 def format_teacher_display_name(t_name, data_store=None):
     if not t_name or t_name in ["—", "Atanmadı", "❌ Atama Yok"]:
@@ -963,54 +946,54 @@ class TimetablePrintPreview(QDialog):
             
         title = "Toplu Çarşaf Liste : Öğretmenler" if is_teacher else "Toplu Çarşaf Liste : Sınıflar"
         
-        margin_x, margin_y = 30, 40
+        margin_x, margin_y = 25, 35
         w = VW - (2 * margin_x)
         h = VH - (2 * margin_y)
         
         days = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"]
         periods = 8
         
-        # Dimensions
-        name_col_w = max(110, w * 0.12)
+        # Dimensions: Narrow compact name column (55px) to give maximum space to timetable grid
+        name_col_w = max(48, min(65, int(w * 0.052)))
         grid_w = w - name_col_w
         day_w = grid_w / len(days)
         period_w = day_w / periods
         
-        header_h = 44
-        row_h = max(36, min(48, int((h - 90) // min(len(items), 12))))
+        header_h = 42
+        row_h = max(34, min(46, int((h - 80) // min(len(items), 12))))
         
         # Draw Title
-        painter.setFont(make_font(20, True))
+        painter.setFont(make_font(18, True))
         painter.setPen(QPen(QColor("#0F172A"), 1))
-        painter.drawText(QRectF(margin_x, margin_y, w, 36), Qt.AlignCenter, title)
+        painter.drawText(QRectF(margin_x, margin_y, w, 30), Qt.AlignCenter, title)
         
         # Draw School Name
-        painter.setFont(make_font(11, True))
-        painter.setPen(QPen(QColor("#334155"), 1))
-        painter.drawText(QRectF(margin_x, margin_y + 26, w, 20), Qt.AlignLeft | Qt.AlignBottom, school_name)
+        painter.setFont(make_font(10, True))
+        painter.setPen(QPen(QColor("#475569"), 1))
+        painter.drawText(QRectF(margin_x, margin_y + 22, w, 18), Qt.AlignLeft | Qt.AlignBottom, school_name)
         
-        table_y = margin_y + 50
+        table_y = margin_y + 44
         
         # Pagination
-        rows_per_page = max(1, int((h - 70) // row_h))
+        rows_per_page = max(1, int((h - 60) // row_h))
         total_pages = (len(items) + rows_per_page - 1) // rows_per_page
         
         for p_idx in range(total_pages):
             if p_idx > 0:
                 printer.newPage()
                 painter.fillRect(0, 0, VW, VH, Qt.white)
-                painter.setFont(make_font(20, True))
+                painter.setFont(make_font(18, True))
                 painter.setPen(QPen(QColor("#0F172A"), 1))
-                painter.drawText(QRectF(margin_x, margin_y, w, 36), Qt.AlignCenter, title)
-                painter.setFont(make_font(11, True))
-                painter.setPen(QPen(QColor("#334155"), 1))
-                painter.drawText(QRectF(margin_x, margin_y + 26, w, 20), Qt.AlignLeft | Qt.AlignBottom, school_name)
+                painter.drawText(QRectF(margin_x, margin_y, w, 30), Qt.AlignCenter, title)
+                painter.setFont(make_font(10, True))
+                painter.setPen(QPen(QColor("#475569"), 1))
+                painter.drawText(QRectF(margin_x, margin_y + 22, w, 18), Qt.AlignLeft | Qt.AlignBottom, school_name)
             
             cur_y = table_y
             
             # --- Table Header ---
-            painter.setPen(QPen(QColor("#000000"), 1.5))
-            painter.setBrush(Qt.NoBrush)
+            painter.setPen(QPen(QColor("#0F172A"), 1.5))
+            painter.setBrush(QBrush(QColor("#F1F5F9")))
             
             # Empty top-left cell
             painter.drawRect(QRectF(margin_x, cur_y, name_col_w, header_h))
@@ -1018,19 +1001,22 @@ class TimetablePrintPreview(QDialog):
             # Days and Periods
             for d_idx, day_name in enumerate(days):
                 dx = margin_x + name_col_w + d_idx * day_w
-                # Day cell
-                painter.setPen(QPen(QColor("#000000"), 1.5))
+                # Day cell header
+                painter.setPen(QPen(QColor("#0F172A"), 1.5))
+                painter.setBrush(QBrush(QColor("#E2E8F0")))
                 painter.drawRect(QRectF(dx, cur_y, day_w, header_h / 2))
-                painter.setFont(make_font(12, True))
+                painter.setFont(make_font(11, True))
                 painter.setPen(QPen(QColor("#0F172A"), 1))
                 painter.drawText(QRectF(dx, cur_y, day_w, header_h / 2), Qt.AlignCenter, day_name)
                 
-                # Period cells
+                # Period cells (1..8)
                 for p in range(periods):
                     px = dx + p * period_w
-                    painter.setPen(QPen(QColor("#000000"), 1.5 if (p == periods - 1) else 0.8))
+                    is_last_p = (p == periods - 1)
+                    painter.setPen(QPen(QColor("#0F172A"), 2.0 if is_last_p else 0.8))
+                    painter.setBrush(QBrush(QColor("#F8FAFC")))
                     painter.drawRect(QRectF(px, cur_y + header_h / 2, period_w, header_h / 2))
-                    painter.setFont(make_font(10, True))
+                    painter.setFont(make_font(9.5, True))
                     painter.setPen(QPen(QColor("#334155"), 1))
                     painter.drawText(QRectF(px, cur_y + header_h / 2, period_w, header_h / 2), Qt.AlignCenter, str(p + 1))
             
@@ -1042,21 +1028,20 @@ class TimetablePrintPreview(QDialog):
             for item in page_items:
                 target_name = item.get("ad", "")
                 
-                # Draw Name Cell
-                painter.setPen(QPen(QColor("#000000"), 1.5))
+                # Draw Compact Name Cell (9A, 10B, etc.)
+                painter.setPen(QPen(QColor("#0F172A"), 1.5))
+                painter.setBrush(QBrush(QColor("#F8FAFC")))
                 painter.drawRect(QRectF(margin_x, cur_y, name_col_w, row_h))
-                painter.setFont(make_font(13, True))
+                painter.setFont(make_font(12, True))
                 painter.setPen(QPen(QColor("#0F172A"), 1))
                 
-                # If teacher, use short code if available
                 display_name = target_name
                 if is_teacher and item.get("kisa"):
                     display_name = item.get("kisa")
                 elif not is_teacher:
-                    # Remove trailing (ea) etc for classes
-                    display_name = target_name.split("(")[0].strip()
+                    display_name = target_name.split("(")[0].strip().upper()
                     
-                painter.drawText(QRectF(margin_x + 6, cur_y, name_col_w - 12, row_h), Qt.AlignCenter, display_name)
+                painter.drawText(QRectF(margin_x + 2, cur_y, name_col_w - 4, row_h), Qt.AlignCenter, display_name)
                 
                 # Fetch Placements
                 placements = self._get_pseudo_placements(target_name, is_teacher)
@@ -1066,36 +1051,39 @@ class TimetablePrintPreview(QDialog):
                     dx = margin_x + name_col_w + d_idx * day_w
                     for p in range(periods):
                         px = dx + p * period_w
-                        # Day edge is thicker for instant visual distinction
-                        painter.setPen(QPen(QColor("#000000"), 1.5 if (p == periods - 1) else 0.8))
-                        painter.drawRect(QRectF(px, cur_y, period_w, row_h))
+                        is_day_end = (p == periods - 1)
                         
                         lesson = placements.get((d_idx, p))
                         if lesson:
                             sname = lesson.get("subject_name", "")
-                            
-                            # Fotoğrafta çarşaf listede ders kısa kodu yazıyor: F, MAT vs. Öğretmen formatında sınıf kodu yazıyor.
                             if is_teacher:
-                                cell_text = lesson.get("teacher_name", "").split("(")[0].strip() # Sınıf adı
+                                cell_text = lesson.get("teacher_name", "").split("(")[0].strip().upper()
                             else:
                                 cell_text = get_subject_badge(sname, self.data_store)
                                 
-                            # Fit bold legible text
-                            font_size = 11
-                            if len(cell_text) > 4: font_size = 9
-                            if len(cell_text) > 6: font_size = 8
+                            painter.setBrush(QBrush(QColor("#FFFFFF")))
+                            painter.setPen(QPen(QColor("#0F172A"), 2.0 if is_day_end else 0.8))
+                            painter.drawRect(QRectF(px, cur_y, period_w, row_h))
                             
-                            painter.setFont(make_font(font_size, True))
+                            font_sz = 10
+                            if len(cell_text) > 4: font_sz = 8.5
+                            if len(cell_text) > 6: font_sz = 7.5
+                            
+                            painter.setFont(make_font(font_sz, True))
                             painter.setPen(QPen(QColor("#0F172A"), 1))
                             painter.drawText(QRectF(px + 1, cur_y + 1, period_w - 2, row_h - 2), Qt.AlignCenter, cell_text)
+                        else:
+                            painter.setBrush(QBrush(QColor("#FFFFFF")))
+                            painter.setPen(QPen(QColor("#0F172A"), 2.0 if is_day_end else 0.6))
+                            painter.drawRect(QRectF(px, cur_y, period_w, row_h))
                 
                 cur_y += row_h
                 
             # Footer
-            painter.setFont(make_font(9, False))
+            painter.setFont(make_font(8.5, False))
             painter.setPen(QPen(QColor("#64748B"), 1))
-            painter.drawText(QRectF(margin_x, VH - margin_y + 10, w / 2, 20), Qt.AlignLeft, f"Ders Planı Oluşturuldu: {date_str}")
-            painter.drawText(QRectF(margin_x + w / 2, VH - margin_y + 10, w / 2, 20), Qt.AlignRight, "BGZ Ders Planlama")
+            painter.drawText(QRectF(margin_x, VH - margin_y + 10, w / 2, 18), Qt.AlignLeft, f"Ders Planı Oluşturuldu: {date_str}")
+            painter.drawText(QRectF(margin_x + w / 2, VH - margin_y + 10, w / 2, 18), Qt.AlignRight, "BGZ Ders Planlama")
 
 
     def _render_tablo_dersler(self, painter, printer, VW, VH):
