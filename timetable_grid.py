@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QWidget, QTableWidget, QTableWidgetItem, QHeaderView,
     QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton,
     QAbstractItemView, QFrame, QScrollArea, QMenu, QInputDialog,
-    QMessageBox
+    QMessageBox, QStyledItemDelegate, QStyle
 )
 from PySide6.QtCore import Qt, QMimeData, Signal, QByteArray
 from PySide6.QtGui import QFont, QColor, QBrush, QDrag, QPainter, QPixmap, QAction, QPen, QLinearGradient, QIcon
@@ -463,6 +463,78 @@ class UnplacedLessonsDock(QFrame):
         self.load_unplaced(unplaced_cards, has_assignments=bool(atamalar))
 
 
+class TimetableCellDelegate(QStyledItemDelegate):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def paint(self, painter, option, index):
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, False)
+        
+        rect = option.rect
+        table = self.parent()
+        grid = table.parent() if table else None
+        
+        row = index.row()
+        col = index.column()
+        
+        # Check placed lesson info
+        info = None
+        if grid and hasattr(grid, "_placed_lessons"):
+            info = grid._placed_lessons.get((row, col))
+            
+        bg_brush = index.data(Qt.BackgroundRole)
+        text = index.data(Qt.DisplayRole)
+        
+        # 1. Determine cell background color
+        cell_color = None
+        if info and info.get("color"):
+            c = QColor(info["color"])
+            if c.isValid():
+                cell_color = c
+        elif bg_brush and isinstance(bg_brush, (QBrush, QColor)):
+            c = bg_brush.color() if isinstance(bg_brush, QBrush) else bg_brush
+            if c.isValid() and c.alpha() > 0 and c.name().upper() not in ("#C0C0C0", "#B4B4B8", "#D0D0D0", "#D8D8D8", "#FFFFFF"):
+                cell_color = c
+                
+        if not cell_color or not cell_color.isValid():
+            if text and str(text).strip():
+                clean_t = str(text).strip().replace("🔒", "")
+                hash_val = sum(ord(ch) * (i + 1) for i, ch in enumerate(clean_t))
+                pastel_palette = [
+                    "#3B82F6", "#EF4444", "#10B981", "#F59E0B", "#8B5CF6",
+                    "#EC4899", "#06B6D4", "#6366F1", "#14B8A6", "#F97316",
+                    "#84CC16", "#0EA5E9", "#A855F7", "#F43F5E", "#22C55E",
+                    "#EAB308", "#64748B", "#2563EB", "#D97706", "#7C3AED"
+                ]
+                cell_color = QColor(pastel_palette[hash_val % len(pastel_palette)])
+            else:
+                cell_color = QColor("#D1D5DB") # Neutral empty slot
+                
+        # 2. Fill background
+        painter.fillRect(rect, cell_color)
+        
+        # 3. Draw clean 1px border
+        painter.setPen(QColor("#9CA3AF"))
+        painter.drawRect(rect.adjusted(0, 0, -1, -1))
+        
+        # 4. Selection border
+        if option.state & QStyle.State_Selected:
+            painter.setPen(QPen(QColor("#1D4ED8"), 2))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(rect.adjusted(1, 1, -2, -2))
+            
+        # 5. Draw text
+        if text and str(text).strip():
+            lum = (0.299 * cell_color.red() + 0.587 * cell_color.green() + 0.114 * cell_color.blue())
+            text_color = QColor("#FFFFFF") if lum < 155 else QColor("#111827")
+            painter.setPen(text_color)
+            painter.setFont(QFont("Segoe UI", 8, QFont.Bold))
+            painter.drawText(rect, Qt.AlignCenter, str(text))
+            
+        painter.restore()
+
+
 class DropTableWidget(QTableWidget):
     lesson_dropped = Signal(int, int, dict) # row, col, lesson_info
     cell_right_clicked = Signal(int, int)  # row, col for context menu
@@ -474,6 +546,7 @@ class DropTableWidget(QTableWidget):
         self.customContextMenuRequested.connect(self._show_context_menu)
         self.asc_header = AsCTimetableHeader(8, DAYS[:5], self)
         self.setHorizontalHeader(self.asc_header)
+        self.setItemDelegate(TimetableCellDelegate(self))
         
     def dragEnterEvent(self, event):
         if event.mimeData().hasFormat("application/x-lesson"):

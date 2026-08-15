@@ -39,10 +39,31 @@ class AutoScheduleDialog(QDialog):
         grp_param = QGroupBox("Oluşturma Parametreleri")
         form_param = QFormLayout(grp_param)
 
-        target_text = f"🎯 {self.target_class}" if self.target_class else "🌐 Tüm Sınıflar"
-        lbl_target = QLabel(f"<b>{target_text}</b>")
-        lbl_target.setStyleSheet("color: #0284C7; font-size: 13px;")
-        form_param.addRow("Planlanacak Sınıf:", lbl_target)
+        self.cb_target_class = QComboBox()
+        self.cb_target_class.addItem("🌐 Tüm Okul (Tüm Sınıflar & Öğretmenler - Tavsiye Edilen)", None)
+        
+        all_cls = []
+        for c in (self.data_store.get("siniflar", []) if self.data_store else []):
+            cad = c.get("ad", "").strip()
+            if cad and cad not in all_cls:
+                all_cls.append(cad)
+        for a in (self.data_store.get("atamalar", []) if self.data_store else []):
+            cad = (a.get("class") or a.get("sinif") or a.get("class_name") or "").strip()
+            if cad and cad not in all_cls:
+                all_cls.append(cad)
+                
+        for cn in sorted(all_cls):
+            self.cb_target_class.addItem(f"🎯 Sadece {cn}", cn)
+            
+        if self.target_class:
+            idx = self.cb_target_class.findData(self.target_class)
+            if idx >= 0:
+                self.cb_target_class.setCurrentIndex(idx)
+        else:
+            self.cb_target_class.setCurrentIndex(0)
+            
+        self.cb_target_class.setStyleSheet("font-weight: bold; color: #0284C7; min-height: 26px;")
+        form_param.addRow("Planlanacak Kapsam:", self.cb_target_class)
         
         self.cb_complexity = QComboBox()
         self.cb_complexity.addItems([
@@ -67,7 +88,7 @@ class AutoScheduleDialog(QDialog):
         grp_prog = QGroupBox("İlerleme")
         prog_layout = QVBoxLayout(grp_prog)
         
-        self.lbl_info = QLabel("Program oluşturmaya hazır. Mevcut manuel yerleşimler korunacaktır.")
+        self.lbl_info = QLabel("Program oluşturmaya hazır. Kısıtlamalar ve mevcut kilitli dersler korunacaktır.")
         prog_layout.addWidget(self.lbl_info)
         
         self.progress = QProgressBar()
@@ -86,6 +107,7 @@ class AutoScheduleDialog(QDialog):
         btn_layout = QHBoxLayout()
         self.btn_start = QPushButton("Planlamayı Başlat")
         self.btn_start.setObjectName("btn_start")
+        self.btn_start.setStyleSheet("background-color: #2563EB; color: white; border: none; padding: 8px 18px; border-radius: 4px; font-weight: bold;")
         self.btn_start.clicked.connect(self._start_generation)
         
         self.btn_cancel = QPushButton("İptal")
@@ -105,7 +127,8 @@ class AutoScheduleDialog(QDialog):
         
         from auto_scheduler import AutoSchedulerWorker
         fill_empty = self.chk_fill_empty.isChecked()
-        self.worker = AutoSchedulerWorker(self.data_store, target_class=self.target_class, parent=self, fill_empty=fill_empty)
+        chosen_target = self.cb_target_class.currentData()
+        self.worker = AutoSchedulerWorker(self.data_store, target_class=chosen_target, parent=self, fill_empty=fill_empty)
         self.worker.progress_updated.connect(self._on_progress)
         self.worker.finished_successfully.connect(self._on_finished)
         self.worker.failed.connect(self._on_failed)
@@ -121,7 +144,7 @@ class AutoScheduleDialog(QDialog):
         schedule = result.get("schedule", [])
         total_hrs = result.get("placed_hours") or sum(item.get("duration", 1) for item in schedule)
         target_hrs = result.get("total_hours", total_hrs)
-        self.lbl_info.setText("Program başarıyla oluşturuldu! (Çakışmalar çözüldü, tüm slotlar dolduruldu)")
+        self.lbl_info.setText("Program başarıyla oluşturuldu! (Çakışmalar çözüldü, tüm sınıflar dolduruldu)")
         self.lbl_info.setStyleSheet("color: green; font-weight: bold;")
         self.lbl_stats.setText(f"Yerleştirilen: {total_hrs} / {target_hrs} Ders Saati (Haftalık Program %100 Eksiksiz Dolduruldu)")
         self.data_store["auto_schedule_results"] = schedule
@@ -142,13 +165,15 @@ class AutoScheduleDialog(QDialog):
                 cl = item.get("class_name") or item.get("class") or ""
                 dur = int(item.get("duration", 1))
                 color = get_subject_color(s)
+                is_locked = bool(item.get("locked", False))
                 new_placements.append({
                     "row": r, "col": c, "period": r, "day": c,
                     "teacher_name": t, "teacher": t,
                     "subject_name": s, "subject": s,
                     "class_name": cl, "class": cl,
                     "color": color,
-                    "duration": dur
+                    "duration": dur,
+                    "locked": is_locked
                 })
                 
         self.data_store["grid_placements"] = new_placements
@@ -157,8 +182,8 @@ class AutoScheduleDialog(QDialog):
         if p:
             if hasattr(p, "save_db"):
                 p.save_db(sync_from_grid=False)
-            if hasattr(p, "_restore_grid_placements"):
-                p._restore_grid_placements()
+            if hasattr(p, "_refresh_grid"):
+                p._refresh_grid()
             if hasattr(p, "_refresh_tree"):
                 p._refresh_tree()
                 

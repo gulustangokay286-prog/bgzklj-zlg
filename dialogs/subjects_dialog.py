@@ -57,12 +57,22 @@ class SubjectsDialog(BaseDialog):
                 self._refresh()
 
     def _refresh(self):
+        from dialogs.edit_forms import get_subject_color
         self.table.setRowCount(len(self._subjects))
         for i, s in enumerate(self._subjects):
+            s_name = s.get("ad", "")
+            s_color = s.get("renk") or s.get("color") or get_subject_color(s_name)
             for j, key in enumerate(["ad", "kisaltma", "renk", "saat", "not"]):
-                item = QTableWidgetItem(str(s.get(key, "")))
+                val = str(s.get(key, ""))
                 if key == "renk":
-                    item.setBackground(QColor(s.get("renk", "#FFFFFF")))
+                    val = s_color
+                item = QTableWidgetItem(val)
+                if key == "renk":
+                    col = QColor(s_color)
+                    item.setBackground(col)
+                    lum = (0.299 * col.red() + 0.587 * col.green() + 0.114 * col.blue())
+                    item.setForeground(QColor("#FFFFFF" if lum < 155 else "#111827"))
+                    item.setTextAlignment(Qt.AlignCenter)
                 self.table.setItem(i, j, item)
 
 

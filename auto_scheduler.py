@@ -9,6 +9,23 @@ def normalize_class_name(cls_name: str) -> str:
     s = s.replace("-", "/").replace("\\", "/")
     return s
 
+def matches_class(asgn_class_str: str, target_cn: str) -> bool:
+    if not asgn_class_str or not target_cn:
+        return False
+    norm_target = normalize_class_name(target_cn)
+    norm_asgn = normalize_class_name(asgn_class_str)
+    if norm_asgn == norm_target:
+        return True
+    clean_target = norm_target.split("(")[0].strip()
+    clean_asgn = norm_asgn.split("(")[0].strip()
+    if clean_target and clean_asgn and clean_target == clean_asgn:
+        return True
+    for part in str(asgn_class_str).replace("&", ",").replace("+", ",").split(","):
+        p_norm = normalize_class_name(part)
+        if p_norm == norm_target or (clean_target and p_norm.split("(")[0].strip() == clean_target):
+            return True
+    return False
+
 def format_tr_name(name_str: str) -> str:
     if not name_str: return ""
     return " ".join(w.capitalize() for w in str(name_str).strip().split())
@@ -21,7 +38,7 @@ class AutoSchedulerWorker(QThread):
     def __init__(self, data_store, target_class=None, parent=None, fill_empty=False):
         super().__init__(parent)
         self.data_store = data_store
-        self.target_class = normalize_class_name(target_class) if target_class else None
+        self.target_class = target_class if target_class and str(target_class).strip() and "Tüm" not in str(target_class) else None
         self.fill_empty = fill_empty
         self._is_running = True
 
@@ -38,22 +55,23 @@ class AutoSchedulerWorker(QThread):
 
         grid_placements = self.data_store.get("grid_placements", [])
 
-        # Sınıfları listele
+        # Sınıfları listele (Tüm sınıflar)
         all_class_names = []
         for c in self.data_store.get("siniflar", []):
-            cn = normalize_class_name(c.get("ad", ""))
+            cn = c.get("ad", "").strip()
             if cn and cn not in all_class_names:
                 all_class_names.append(cn)
         for asgn in assignments:
-            cn = normalize_class_name(asgn.get("class") or asgn.get("sinif") or asgn.get("class_name") or "")
+            cn = (asgn.get("class") or asgn.get("sinif") or asgn.get("class_name") or "").strip()
             if cn and cn not in all_class_names:
                 all_class_names.append(cn)
         if not all_class_names:
             all_class_names = ["12/A"]
 
         # Hangi sınıflar planlanacak?
-        if self.target_class and self.target_class in all_class_names:
-            classes_to_schedule = [self.target_class]
+        if self.target_class:
+            matched_targets = [c for c in all_class_names if matches_class(c, self.target_class)]
+            classes_to_schedule = matched_targets if matched_targets else [self.target_class]
         else:
             classes_to_schedule = all_class_names
 
@@ -65,7 +83,7 @@ class AutoSchedulerWorker(QThread):
         global_teacher_occupied = set() # (teacher_name, day, period)
 
         for p in grid_placements:
-            c_name = normalize_class_name(p.get("class_name") or p.get("class") or p.get("sinif") or "")
+            c_name = (p.get("class_name") or p.get("class") or p.get("sinif") or "").strip()
             t_name = format_tr_name(p.get("teacher_name") or p.get("teacher") or p.get("ogretmen") or "")
             subj = p.get("subject_name") or p.get("subject") or p.get("ders") or ""
             dur = int(p.get("duration", 1))
@@ -77,10 +95,10 @@ class AutoSchedulerWorker(QThread):
                     a_t_name = format_tr_name(asgn.get("teacher") or asgn.get("ogretmen") or asgn.get("teacher_name") or "")
                     a_subj = asgn.get("subject") or asgn.get("ders") or asgn.get("subject_name") or ""
                     if a_t_name == t_name and a_subj == subj:
-                        c_name = normalize_class_name(asgn.get("class") or asgn.get("sinif") or asgn.get("class_name") or "")
+                        c_name = (asgn.get("class") or asgn.get("sinif") or asgn.get("class_name") or "").strip()
                         if c_name: break
 
-            if c_name in classes_to_schedule:
+            if any(matches_class(c_name, tgt) for tgt in classes_to_schedule):
                 target_class_manual.append({
                     "class_name": c_name, "teacher_name": t_name,
                     "subject_name": subj, "day_idx": day, "period": period,
@@ -94,7 +112,6 @@ class AutoSchedulerWorker(QThread):
                     if t_name: global_teacher_occupied.add((t_name, day, period + off))
 
         t_objs = {format_tr_name(t["ad"]): t for t in self.data_store.get("ogretmenler", []) if t.get("ad")}
-        c_objs = {normalize_class_name(c["ad"]): c for c in self.data_store.get("siniflar", []) if c.get("ad")}
         constraints = self.data_store.get("constraints", {})
 
         # Tamamen kısıtlı öğretmenleri tespit et (tüm slotları 0 olan)
@@ -123,7 +140,7 @@ class AutoSchedulerWorker(QThread):
             if not self._is_running:
                 return
 
-            existing_for_class = [m for m in target_class_manual if m["class_name"] == cn]
+            existing_for_class = [m for m in target_class_manual if matches_class(m["class_name"], cn)]
             occupied_slots = set()
             manual_subj_map = {}
             manual_day_subj_hours = {}
@@ -164,7 +181,7 @@ class AutoSchedulerWorker(QThread):
                 continue
 
             # Aday dersleri hazırla (SADECE bu sınıfa atanmış gerçek dersler!)
-            asgns = [a for a in assignments if normalize_class_name(a.get("class") or a.get("sinif") or a.get("class_name") or "") == cn]
+            asgns = [a for a in assignments if matches_class(a.get("class") or a.get("sinif") or a.get("class_name") or "", cn)]
             if not asgns:
                 # Bu sınıfa ders/öğretmen atanmamışsa kesinlikle doldurma, boş bırak!
                 continue
@@ -221,7 +238,7 @@ class AutoSchedulerWorker(QThread):
                         candidate_blocks.append({"subject": "Boş", "teacher": "Atanmadı", "duration": b_dur})
                         diff -= b_dur
 
-            c_timeoff = c_objs.get(cn, {}).get("timeoff", [])
+            c_timeoff = next((c.get("timeoff", []) for c in self.data_store.get("siniflar", []) if matches_class(c.get("ad", ""), cn)), [])
 
             # A* Search ile Boşluksuz Çöz
             solution = self._astar_solve(

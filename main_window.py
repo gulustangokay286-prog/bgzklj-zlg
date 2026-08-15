@@ -1709,31 +1709,17 @@ class MainWindow(QMainWindow):
         from dialogs.auto_schedule_dialog import AutoScheduleDialog
         from PySide6.QtWidgets import QDialog
         
-        target_class = getattr(self, "_active_entity_name", None) if getattr(self, "_active_view_type", "") == "class" else None
-        # Atama kontrolü: hedef sınıfa ders atanmamışsa uyarı ver
         atamalar = self.data_store.get("atamalar", [])
-        if target_class:
-            from auto_scheduler import normalize_class_name
-            tc_norm = normalize_class_name(target_class)
-            class_atamalar = [a for a in atamalar if normalize_class_name(a.get("class") or a.get("sinif") or a.get("class_name") or "") == tc_norm]
-            if not class_atamalar:
-                QMessageBox.warning(
-                    self, "Ders Ataması Bulunamadı",
-                    f"⚠️ {target_class} sınıfına henüz ders ataması yapılmamış!\n\n"
-                    f"Otomatik planlama başlatılabilmesi için önce bu sınıfa ders ve öğretmen atamalısınız.\n\n"
-                    f"Sınıflar → {target_class} → Ders & Öğretmen Ata yolunu izleyebilirsiniz."
-                )
-                return
-        elif not atamalar:
+        if not atamalar:
             QMessageBox.warning(
                 self, "Ders Ataması Bulunamadı",
-                "⚠️ Hiçbir sınıfa ders ataması yapılmamış!\n\n"
+                "⚠️ Henüz hiçbir sınıfa ders/öğretmen ataması yapılmamış!\n\n"
                 "Otomatik planlama başlatılabilmesi için önce sınıflara ders ve öğretmen atamalısınız.\n\n"
                 "Sınıflar → [Sınıf Seç] → Ders & Öğretmen Ata yolunu izleyebilirsiniz."
             )
             return
 
-        d = AutoScheduleDialog(self.data_store, self, target_class=target_class)
+        d = AutoScheduleDialog(self.data_store, self, target_class=None)
         if d.exec() == QDialog.Accepted:
             # AI produced a schedule
             results = self.data_store.get("auto_schedule_results", [])
