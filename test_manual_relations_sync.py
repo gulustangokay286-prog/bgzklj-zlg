@@ -65,8 +65,10 @@ def test_manual_relations_sync():
         day=1, period=0, duration=2
     )
     assert ok == True, f"Expected OK on day 1, got {msg}"
-    print("✅ Different day placement allowed!")
-    
+    if hasattr(win, "cloud_worker") and win.cloud_worker:
+        win.cloud_worker.stop()
+        win.cloud_worker.wait(1000)
+
     print("\n🎉 ALL REAL-TIME PLANNING RELATIONS TESTS PASSED!")
 
 if __name__ == "__main__":

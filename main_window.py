@@ -1134,52 +1134,59 @@ class MainWindow(QMainWindow):
             if c == day:
                 current_day_lessons.append((r, data))
                 
-        subj_daily_hours = duration
+        # Existing hours of THIS specific subject on this day
+        existing_subj_daily_hours = 0
         for r, data in current_day_lessons:
             d_subj = data.get("subject_name", data.get("subject", ""))
             d_cls = data.get("class_name", data.get("class", ""))
-            if d_subj == subject and (not class_name or d_cls == class_name):
-                subj_daily_hours += data.get("duration", 1)
+            if d_subj.strip().upper() == subject.strip().upper() and (not class_name or d_cls == class_name):
+                existing_subj_daily_hours += data.get("duration", 1)
+
+        new_total_daily_hours = existing_subj_daily_hours + duration
 
         for rel in relations:
             r_type = rel.get("kural", "")
-            val = rel.get("deger", 1)
+            val = rel.get("deger", 2)
             f_subjs = [s.strip().upper() for s in rel.get("dersler", []) if s.strip()]
             f_teach = [t.strip().upper() for t in rel.get("ogretmenler", []) if t.strip()]
             f_classes = [c.strip().upper() for c in rel.get("siniflar", []) if c.strip()]
             
-            match_subj = (not f_subjs) or (subject.upper() in f_subjs)
-            match_teach = (not f_teach) or (teacher.upper() in f_teach)
-            match_class = (not f_classes) or (class_name.upper() in f_classes)
-            
-            if not (match_subj and match_teach and match_class):
+            # Sınıf veya öğretmen filtresi varsa tam eşleşmeli
+            if f_classes and class_name and (class_name.strip().upper() not in f_classes):
+                continue
+            if f_teach and teacher and (teacher.strip().upper() not in f_teach):
+                continue
+            if f_subjs and (subject.strip().upper() not in f_subjs):
                 continue
                 
             # Rule 1: Günde maksimum ders sayısı
             if "Günde maksimum ders sayısı" in r_type or "Günlük maksimum" in r_type:
                 max_h = int(val) if str(val).isdigit() else 2
-                if subj_daily_hours > max_h:
-                    return False, f"⚠️ <b>'Günde maksimum ders sayısı'</b> kuralına göre <b>{subject}</b> dersi günde en fazla <b>{max_h} saat</b> olabilir. (Bu yerleşimle {subj_daily_hours} saat oluyor!)"
+                if not f_subjs:
+                    if existing_subj_daily_hours > 0 and new_total_daily_hours > max_h:
+                        return False, f"⚠️ <b>'Günde maksimum ders sayısı'</b> kuralına göre <b>{subject}</b> dersi günde en fazla <b>{max_h} saat</b> olabilir. (Bu günde zaten {existing_subj_daily_hours} saat var, bu yerleşimle {new_total_daily_hours} saat oluyor!)"
+                else:
+                    if existing_subj_daily_hours > 0 and new_total_daily_hours > max_h:
+                        return False, f"⚠️ <b>'Günde maksimum ders sayısı'</b> kuralına göre <b>{subject}</b> dersi günde en fazla <b>{max_h} saat</b> olabilir. (Bu günde zaten {existing_subj_daily_hours} saat var, bu yerleşimle {new_total_daily_hours} saat oluyor!)"
 
             # Rule 2: Beden Eğitimi / Uygulamalı dersler günde en fazla 2 saat olsun
             elif "Uygulamalı dersler" in r_type or "Beden Eğitimi" in r_type:
-                if subj_daily_hours > 2:
+                if existing_subj_daily_hours > 0 and new_total_daily_hours > 2:
                     return False, f"⚠️ <b>'Uygulamalı dersler günde en fazla 2 saat'</b> kuralına göre <b>{subject}</b> dersi bu gün 2 saati aşıyor!"
 
             # Rule 3: Aynı ders aynı gün tekrar etmesin (Tek blok kuralı)
             elif "tekrar etmesin" in r_type:
-                for r, data in current_day_lessons:
-                    d_subj = data.get("subject_name", data.get("subject", ""))
-                    if d_subj.upper() == subject.upper():
-                        return False, f"⚠️ <b>'Aynı ders aynı gün tekrar etmesin'</b> kuralına göre <b>{subject}</b> dersi {day_name} gününde zaten mevcuttur ({r+1}. saat)!"
+                if existing_subj_daily_hours > 0:
+                    return False, f"⚠️ <b>'Aynı ders aynı gün tekrar etmesin'</b> kuralına göre <b>{subject}</b> dersi {day_name} gününde zaten mevcuttur!"
 
             # Rule 4: İki ders aynı güne gelmesin
             elif "aynı güne gelmesin" in r_type or "İki ders aynı güne" in r_type:
-                other_subjs = [s for s in f_subjs if s != subject.upper()]
-                for r, data in current_day_lessons:
-                    d_subj = data.get("subject_name", data.get("subject", "")).upper()
-                    if d_subj in other_subjs:
-                        return False, f"⚠️ <b>'İki ders aynı güne gelmesin'</b> kuralına göre <b>{subject}</b> ve <b>{d_subj}</b> dersleri {day_name} gününde birlikte bulunamaz!"
+                if len(f_subjs) >= 2 and subject.strip().upper() in f_subjs:
+                    other_subjs = [s for s in f_subjs if s != subject.strip().upper()]
+                    for r, data in current_day_lessons:
+                        d_subj = data.get("subject_name", data.get("subject", "")).strip().upper()
+                        if d_subj in other_subjs:
+                            return False, f"⚠️ <b>'İki ders aynı güne gelmesin'</b> kuralına göre <b>{subject}</b> ve <b>{d_subj}</b> dersleri {day_name} gününde birlikte bulunamaz!"
 
             # Rule 5: Öğretmenin dersleri öğleden önce toplansın (Period < 4)
             elif "öğleden önce toplansın" in r_type or "Sabah" in r_type:

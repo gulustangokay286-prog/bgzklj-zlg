@@ -338,15 +338,7 @@ class AutoSchedulerWorker(QThread):
             else:
                 return max(2, (w_total + 4) // 5)
 
-        units = []
-        for b in candidate_blocks:
-            dur = b["duration"]
-            while dur >= 2:
-                units.append({"subject": b["subject"], "teacher": b["teacher"], "duration": 2})
-                dur -= 2
-            while dur > 0:
-                units.append({"subject": b["subject"], "teacher": b["teacher"], "duration": 1})
-                dur -= 1
+        units = list(candidate_blocks)
 
         # Dersleri haftanın günlerine dengeli dağıtmak için (Sabah blokları 5 güne, sonra öğle blokları 5 güne)
         empty_slots = sorted(empty_slots, key=lambda x: (x[1] // 2, x[0], x[1]))
@@ -368,8 +360,6 @@ class AutoSchedulerWorker(QThread):
             if (d, p) in current_teacher_occ.get("__class_filled__", set()):
                 return solve_slot(slot_idx + 1, current_placed, rem_units, current_teacher_occ, day_subj_hours, placed_cell_map)
 
-            can_2h = (d, p + 1) in occupied_set and (d, p + 1) not in current_teacher_occ.get("__class_filled__", set()) and p + 1 < periods_count
-
             candidates = []
             seen_types = set()
 
@@ -382,7 +372,14 @@ class AutoSchedulerWorker(QThread):
                 if type_key in seen_types:
                     continue
 
-                if dur == 2 and not can_2h:
+                # Slot kapasitesi kontrolü (dur saatlik bloğun tamamı sığıyor mu?)
+                can_fit = all(
+                    (d, p + off) in occupied_set and 
+                    (d, p + off) not in current_teacher_occ.get("__class_filled__", set()) and 
+                    (p + off) < periods_count 
+                    for off in range(dur)
+                )
+                if not can_fit:
                     continue
 
                 # Çakışma kontrolü
@@ -403,41 +400,31 @@ class AutoSchedulerWorker(QThread):
                 if conflict:
                     continue
 
-                seen_types.add(type_key)
-
-                # Heuristic Cost (A* skoru)
-                cost = 0
                 current_day_h = day_subj_hours.get((d, s), 0)
                 new_day_h = current_day_h + dur
                 max_allowed = get_max_daily_hours(s)
 
-                # 1. GÜNLÜK MAKSİMUM DERS SAATİ SINIRI (Beden ve tüm dersler için geçerli)
+                # 1. KESİN GÜNLÜK MAKSİMUM SINIRI (Hard Constraint)
                 if new_day_h > max_allowed:
-                    cost += 900
+                    continue
 
-                # 2. HAFTALIK GÜNLERE DAĞILIM VE BLOK BÜTÜNLÜĞÜ ("Beden Matematik Beden" engelleme)
-                if current_day_h > 0:
-                    # Aynı gün bu dersten zaten varsa, sadece bitişik (alt alta) ise kabul edilebilir, araya başka ders girdiyse ağır ceza!
-                    is_adjacent = False
-                    if placed_cell_map.get((d, p - 1)) == s or placed_cell_map.get((d, p + dur)) == s:
-                        is_adjacent = True
-                    if manual_subj_map.get((d, p - 1)) == s or manual_subj_map.get((d, p + dur)) == s:
-                        is_adjacent = True
+                # 2. HAFTALIK GÜNLERE EŞİT DAĞITIM (Aynı güne gereksiz 2. blok konulamaz)
+                w_total = subj_weekly_hours.get(s, 0)
+                if current_day_h > 0 and w_total <= (days_count * 2):
+                    # Haftalık saati 10 veya daha az olan dersler haftanın farklı günlerine gitmeli!
+                    continue
 
-                    if not is_adjacent:
-                        cost += 750  # Bölünmüş ders (örn: 1. saat Beden, 2. saat Matematik, 3. saat Beden) kesinlikle engellenir!
-                    else:
-                        cost += 200  # Bitişik olsa bile farklı günlere dağıtımı teşvik et
+                seen_types.add(type_key)
 
-                    if relation_no_repeat_same_day or (s in relation_spread_days) or ("" in relation_spread_days):
-                        cost += 500
+                # Heuristic Cost (A* skoru)
+                cost = 0
 
                 if t and t in t_objs:
                     toff = t_objs[t].get("timeoff", [])
                     for off in range(dur):
                         if toff and d < len(toff) and (p + off) < len(toff[d]) and toff[d][p + off] == 0:
                             cost += 250
-                if dur == 2: cost -= 30  # Blok bütünlüğünü ödüllendir
+                if dur >= 2: cost -= 30  # Blok bütünlüğünü ödüllendir
 
                 # Pedagojik Kural 1: İki zor ders peş peşe gelmesin
                 is_hard = s.upper().strip() in HARD_SUBJECTS
