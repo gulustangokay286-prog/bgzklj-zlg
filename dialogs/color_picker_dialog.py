@@ -245,8 +245,8 @@ class ModernColorPickerDialog(QDialog):
         btn_cancel.clicked.connect(self.reject)
         bot_lay.addWidget(btn_cancel)
         
-        btn_apply = QPushButton("💾 Seçilen Rengi Uygula")
-        btn_apply.setStyleSheet("background: #2563EB; color: #FFFFFF; border: none; padding: 6px 20px;")
+        btn_apply = QPushButton("Seçilen Rengi Uygula")
+        btn_apply.setStyleSheet("background: #2563EB; color: #FFFFFF; border: none; padding: 6px 20px; font-weight: bold; border-radius: 6px;")
         btn_apply.clicked.connect(self.accept)
         bot_lay.addWidget(btn_apply)
         

@@ -194,15 +194,15 @@ class TimetablePrintPreview(QDialog):
         top_bar.setSpacing(12)
         
         self.ALL_REPORT_MODES = [
-            "[BİREBİR] Tüm Sınıflar (Yatay Sayfada 6'lı Çizelge)",
-            "[BİREBİR] Tüm Öğretmenler (Yatay Sayfada 6'lı Çizelge)",
-            "Öğretmen Haftalık Ders Programı (Tekil Çizelge - Tek Sayfa)",
-            "Sınıf Haftalık Ders Programı (Tekil Çizelge - Tek Sayfa)",
-            "Sınıf Dersleri & Atama Listesi (Liste Formatı)",
-            "Tüm Öğretmenlerin Ders Yükü Listesi",
             "Toplu Çarşaf Liste : Sınıflar",
             "Toplu Çarşaf Liste : Öğretmenler",
-            "Tablo Olarak : Dersler"
+            "Tablo Olarak : Dersler",
+            "[BİREBİR] Tüm Sınıflar (Yatay Sayfada 6'lı Çizelge)",
+            "[BİREBİR] Tüm Öğretmenler (Yatay Sayfada 6'lı Çizelge)",
+            "Sınıf Haftalık Ders Programı (Tekil Çizelge - Tek Sayfa)",
+            "Öğretmen Haftalık Ders Programı (Tekil Çizelge - Tek Sayfa)",
+            "Sınıf Dersleri & Atama Listesi (Liste Formatı)",
+            "Tüm Öğretmenlerin Ders Yükü Listesi"
         ]
         
         top_bar.addWidget(QLabel("Rapor Türü:", self))
@@ -963,7 +963,7 @@ class TimetablePrintPreview(QDialog):
             
         title = "Toplu Çarşaf Liste : Öğretmenler" if is_teacher else "Toplu Çarşaf Liste : Sınıflar"
         
-        margin_x, margin_y = 40, 50
+        margin_x, margin_y = 30, 40
         w = VW - (2 * margin_x)
         h = VH - (2 * margin_y)
         
@@ -971,42 +971,45 @@ class TimetablePrintPreview(QDialog):
         periods = 8
         
         # Dimensions
-        name_col_w = max(100, w * 0.12)
+        name_col_w = max(110, w * 0.12)
         grid_w = w - name_col_w
         day_w = grid_w / len(days)
         period_w = day_w / periods
         
-        header_h = 40
-        row_h = 35
+        header_h = 44
+        row_h = max(36, min(48, int((h - 90) // min(len(items), 12))))
         
         # Draw Title
-        painter.setFont(make_font(18, True))
-        painter.setPen(QPen(QColor("#000000"), 1))
-        painter.drawText(QRectF(margin_x, margin_y, w, 40), Qt.AlignCenter, title)
+        painter.setFont(make_font(20, True))
+        painter.setPen(QPen(QColor("#0F172A"), 1))
+        painter.drawText(QRectF(margin_x, margin_y, w, 36), Qt.AlignCenter, title)
         
         # Draw School Name
-        painter.setFont(make_font(10, False))
-        painter.drawText(QRectF(margin_x, margin_y + 30, w, 20), Qt.AlignLeft | Qt.AlignBottom, school_name)
+        painter.setFont(make_font(11, True))
+        painter.setPen(QPen(QColor("#334155"), 1))
+        painter.drawText(QRectF(margin_x, margin_y + 26, w, 20), Qt.AlignLeft | Qt.AlignBottom, school_name)
         
-        table_y = margin_y + 55
+        table_y = margin_y + 50
         
         # Pagination
-        rows_per_page = int((h - 80) // row_h)
+        rows_per_page = max(1, int((h - 70) // row_h))
         total_pages = (len(items) + rows_per_page - 1) // rows_per_page
         
         for p_idx in range(total_pages):
             if p_idx > 0:
                 printer.newPage()
                 painter.fillRect(0, 0, VW, VH, Qt.white)
-                painter.setFont(make_font(18, True))
-                painter.drawText(QRectF(margin_x, margin_y, w, 40), Qt.AlignCenter, title)
-                painter.setFont(make_font(10, False))
-                painter.drawText(QRectF(margin_x, margin_y + 30, w, 20), Qt.AlignLeft | Qt.AlignBottom, school_name)
+                painter.setFont(make_font(20, True))
+                painter.setPen(QPen(QColor("#0F172A"), 1))
+                painter.drawText(QRectF(margin_x, margin_y, w, 36), Qt.AlignCenter, title)
+                painter.setFont(make_font(11, True))
+                painter.setPen(QPen(QColor("#334155"), 1))
+                painter.drawText(QRectF(margin_x, margin_y + 26, w, 20), Qt.AlignLeft | Qt.AlignBottom, school_name)
             
             cur_y = table_y
             
             # --- Table Header ---
-            painter.setPen(QPen(QColor("#000000"), 1.2))
+            painter.setPen(QPen(QColor("#000000"), 1.5))
             painter.setBrush(Qt.NoBrush)
             
             # Empty top-left cell
@@ -1016,15 +1019,19 @@ class TimetablePrintPreview(QDialog):
             for d_idx, day_name in enumerate(days):
                 dx = margin_x + name_col_w + d_idx * day_w
                 # Day cell
+                painter.setPen(QPen(QColor("#000000"), 1.5))
                 painter.drawRect(QRectF(dx, cur_y, day_w, header_h / 2))
-                painter.setFont(make_font(11, False))
+                painter.setFont(make_font(12, True))
+                painter.setPen(QPen(QColor("#0F172A"), 1))
                 painter.drawText(QRectF(dx, cur_y, day_w, header_h / 2), Qt.AlignCenter, day_name)
                 
                 # Period cells
                 for p in range(periods):
                     px = dx + p * period_w
+                    painter.setPen(QPen(QColor("#000000"), 1.5 if (p == periods - 1) else 0.8))
                     painter.drawRect(QRectF(px, cur_y + header_h / 2, period_w, header_h / 2))
-                    painter.setFont(make_font(11, False))
+                    painter.setFont(make_font(10, True))
+                    painter.setPen(QPen(QColor("#334155"), 1))
                     painter.drawText(QRectF(px, cur_y + header_h / 2, period_w, header_h / 2), Qt.AlignCenter, str(p + 1))
             
             cur_y += header_h
@@ -1036,8 +1043,11 @@ class TimetablePrintPreview(QDialog):
                 target_name = item.get("ad", "")
                 
                 # Draw Name Cell
+                painter.setPen(QPen(QColor("#000000"), 1.5))
                 painter.drawRect(QRectF(margin_x, cur_y, name_col_w, row_h))
-                painter.setFont(make_font(12, False))
+                painter.setFont(make_font(13, True))
+                painter.setPen(QPen(QColor("#0F172A"), 1))
+                
                 # If teacher, use short code if available
                 display_name = target_name
                 if is_teacher and item.get("kisa"):
@@ -1046,7 +1056,7 @@ class TimetablePrintPreview(QDialog):
                     # Remove trailing (ea) etc for classes
                     display_name = target_name.split("(")[0].strip()
                     
-                painter.drawText(QRectF(margin_x + 5, cur_y, name_col_w - 10, row_h), Qt.AlignCenter, display_name)
+                painter.drawText(QRectF(margin_x + 6, cur_y, name_col_w - 12, row_h), Qt.AlignCenter, display_name)
                 
                 # Fetch Placements
                 placements = self._get_pseudo_placements(target_name, is_teacher)
@@ -1056,7 +1066,8 @@ class TimetablePrintPreview(QDialog):
                     dx = margin_x + name_col_w + d_idx * day_w
                     for p in range(periods):
                         px = dx + p * period_w
-                        painter.setPen(QPen(QColor("#000000"), 1.2 if (p == 0 or p == periods - 1) else 0.5)) # thicker edges for days
+                        # Day edge is thicker for instant visual distinction
+                        painter.setPen(QPen(QColor("#000000"), 1.5 if (p == periods - 1) else 0.8))
                         painter.drawRect(QRectF(px, cur_y, period_w, row_h))
                         
                         lesson = placements.get((d_idx, p))
@@ -1069,20 +1080,21 @@ class TimetablePrintPreview(QDialog):
                             else:
                                 cell_text = get_subject_badge(sname, self.data_store)
                                 
-                            # Fit text
-                            font_size = 9
-                            if len(cell_text) > 4: font_size = 7
-                            if len(cell_text) > 6: font_size = 6
+                            # Fit bold legible text
+                            font_size = 11
+                            if len(cell_text) > 4: font_size = 9
+                            if len(cell_text) > 6: font_size = 8
                             
-                            painter.setFont(make_font(font_size, False))
-                            painter.setPen(QPen(QColor("#000000"), 1))
+                            painter.setFont(make_font(font_size, True))
+                            painter.setPen(QPen(QColor("#0F172A"), 1))
                             painter.drawText(QRectF(px + 1, cur_y + 1, period_w - 2, row_h - 2), Qt.AlignCenter, cell_text)
                 
                 cur_y += row_h
                 
             # Footer
-            painter.setFont(make_font(8, False))
-            painter.drawText(QRectF(margin_x, VH - margin_y + 10, w / 2, 20), Qt.AlignLeft, f"Ders Planı Oluşturuldu:{date_str}")
+            painter.setFont(make_font(9, False))
+            painter.setPen(QPen(QColor("#64748B"), 1))
+            painter.drawText(QRectF(margin_x, VH - margin_y + 10, w / 2, 20), Qt.AlignLeft, f"Ders Planı Oluşturuldu: {date_str}")
             painter.drawText(QRectF(margin_x + w / 2, VH - margin_y + 10, w / 2, 20), Qt.AlignRight, "BGZ Ders Planlama")
 
 

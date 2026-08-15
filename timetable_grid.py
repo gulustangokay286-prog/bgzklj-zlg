@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QStyledItemDelegate, QStyle
 )
 from PySide6.QtCore import Qt, QMimeData, Signal, QByteArray
-from PySide6.QtGui import QFont, QColor, QBrush, QDrag, QPainter, QPixmap, QAction, QPen, QLinearGradient, QIcon
+from PySide6.QtGui import QFont, QColor, QBrush, QDrag, QPainter, QPixmap, QAction, QPen, QLinearGradient, QIcon, QPainterPath
 
 def make_context_icon(symbol: str, color1: str, color2: str) -> QIcon:
     pix = QPixmap(24, 24)
@@ -30,6 +30,150 @@ def make_context_icon(symbol: str, color1: str, color2: str) -> QIcon:
 
 
 DAYS = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
+
+def make_grid_action_icon(name: str, size: int = 24) -> QIcon:
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    
+    if name == 'siniflar':
+        # Modern 3D School / Classroom building
+        grad = QLinearGradient(0, 0, 0, size)
+        grad.setColorAt(0, QColor('#3B82F6'))
+        grad.setColorAt(1, QColor('#1D4ED8'))
+        p.setBrush(QBrush(grad))
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(3, 8, size - 6, size - 11, 3, 3)
+        path = QPainterPath()
+        path.moveTo(size/2, 2)
+        path.lineTo(size - 2, 8)
+        path.lineTo(2, 8)
+        path.closeSubpath()
+        grad_roof = QLinearGradient(0, 0, 0, 8)
+        grad_roof.setColorAt(0, QColor('#60A5FA'))
+        grad_roof.setColorAt(1, QColor('#2563EB'))
+        p.setBrush(QBrush(grad_roof))
+        p.drawPath(path)
+        p.setBrush(QBrush(QColor('#FFFFFF')))
+        p.drawRoundedRect(size/2 - 2.5, size - 9, 5, 6, 1.5, 1.5)
+    elif name == 'ogretmenler':
+        # Modern Teacher / User icon
+        grad_head = QLinearGradient(0, 2, 0, 12)
+        grad_head.setColorAt(0, QColor('#F59E0B'))
+        grad_head.setColorAt(1, QColor('#D97706'))
+        p.setBrush(QBrush(grad_head))
+        p.setPen(Qt.NoPen)
+        p.drawEllipse(size/2 - 4.5, 2, 9, 9)
+        path = QPainterPath()
+        path.moveTo(size/2 - 7, size - 3)
+        path.quadTo(size/2 - 7, 13, size/2, 13)
+        path.quadTo(size/2 + 7, 13, size/2 + 7, size - 3)
+        path.closeSubpath()
+        grad_body = QLinearGradient(0, 13, 0, size)
+        grad_body.setColorAt(0, QColor('#10B981'))
+        grad_body.setColorAt(1, QColor('#059669'))
+        p.setBrush(QBrush(grad_body))
+        p.drawPath(path)
+    elif name == 'lock_open':
+        p.setPen(QPen(QColor('#DC2626'), 2))
+        p.setBrush(Qt.NoBrush)
+        p.drawArc(size/2 - 4, 3, 8, 8, 0, 180 * 16)
+        grad = QLinearGradient(0, 9, 0, size - 3)
+        grad.setColorAt(0, QColor('#F87171'))
+        grad.setColorAt(1, QColor('#DC2626'))
+        p.setBrush(QBrush(grad))
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(4, 9, size - 8, size - 12, 3, 3)
+        p.setBrush(QBrush(QColor('#FFFFFF')))
+        p.drawEllipse(size/2 - 1.5, 12, 3, 3)
+        p.drawRect(size/2 - 1, 14, 2, 3)
+    elif name == 'lock_closed':
+        p.setPen(QPen(QColor('#7C3AED'), 2))
+        p.setBrush(Qt.NoBrush)
+        p.drawArc(size/2 - 4, 3, 8, 8, 0, 180 * 16)
+        p.drawLine(size/2 - 4, 7, size/2 - 4, 10)
+        p.drawLine(size/2 + 4, 7, size/2 + 4, 10)
+        grad = QLinearGradient(0, 9, 0, size - 3)
+        grad.setColorAt(0, QColor('#A78BFA'))
+        grad.setColorAt(1, QColor('#7C3AED'))
+        p.setBrush(QBrush(grad))
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(4, 9, size - 8, size - 12, 3, 3)
+        p.setBrush(QBrush(QColor('#FFFFFF')))
+        p.drawEllipse(size/2 - 1.5, 12, 3, 3)
+        p.drawRect(size/2 - 1, 14, 2, 3)
+    elif name == 'check_circle':
+        grad = QLinearGradient(0, 0, 0, size)
+        grad.setColorAt(0, QColor('#22C55E'))
+        grad.setColorAt(1, QColor('#16A34A'))
+        p.setBrush(QBrush(grad))
+        p.setPen(Qt.NoPen)
+        p.drawEllipse(2, 2, size - 4, size - 4)
+        p.setPen(QPen(QColor('#FFFFFF'), 2.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.drawLine(6, size/2 + 1, size/2 - 1, size - 7)
+        p.drawLine(size/2 - 1, size - 7, size - 6, 7)
+    elif name == 'alert_triangle':
+        path = QPainterPath()
+        path.moveTo(size/2, 2)
+        path.lineTo(size - 2, size - 3)
+        path.lineTo(2, size - 3)
+        path.closeSubpath()
+        grad = QLinearGradient(0, 2, 0, size)
+        grad.setColorAt(0, QColor('#FBBF24'))
+        grad.setColorAt(1, QColor('#D97706'))
+        p.setBrush(QBrush(grad))
+        p.setPen(Qt.NoPen)
+        p.drawPath(path)
+        p.setPen(QPen(QColor('#FFFFFF'), 2, Qt.SolidLine, Qt.RoundCap))
+        p.drawLine(size/2, 7, size/2, size - 9)
+        p.drawPoint(size/2, size - 6)
+    elif name == 'download':
+        grad = QLinearGradient(0, 0, 0, size)
+        grad.setColorAt(0, QColor('#38BDF8'))
+        grad.setColorAt(1, QColor('#0284C7'))
+        p.setBrush(QBrush(grad))
+        p.setPen(Qt.NoPen)
+        p.drawEllipse(4, 8, 8, 8)
+        p.drawEllipse(10, 4, 10, 10)
+        p.drawEllipse(size - 12, 8, 8, 8)
+        p.drawRect(8, 10, size - 16, 6)
+        p.setPen(QPen(QColor('#FFFFFF'), 2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.drawLine(size/2, 10, size/2, size - 4)
+        p.drawLine(size/2 - 3, size - 7, size/2, size - 4)
+        p.drawLine(size/2 + 3, size - 7, size/2, size - 4)
+    elif name == 'toggle_panel':
+        p.setPen(QPen(QColor('#64748B'), 1.5))
+        p.setBrush(QBrush(QColor('#F1F5F9')))
+        p.drawRoundedRect(3, 3, size - 6, size - 6, 3, 3)
+        p.setBrush(QBrush(QColor('#3B82F6')))
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(3, 3, 6, size - 6, 2, 2)
+    elif name == 'edit':
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(QColor('#10B981')))
+        path = QPainterPath()
+        path.moveTo(size - 4, 4)
+        path.lineTo(size - 7, 1)
+        path.lineTo(4, size - 10)
+        path.lineTo(1, size - 1)
+        path.lineTo(10, size - 4)
+        path.closeSubpath()
+        p.drawPath(path)
+    elif name == 'palette':
+        p.setPen(Qt.NoPen)
+        grad = QLinearGradient(0, 0, size, size)
+        grad.setColorAt(0, QColor('#EC4899'))
+        grad.setColorAt(0.5, QColor('#8B5CF6'))
+        grad.setColorAt(1, QColor('#3B82F6'))
+        p.setBrush(QBrush(grad))
+        p.drawEllipse(2, 2, size - 4, size - 4)
+        p.setBrush(QBrush(QColor('#FFFFFF')))
+        p.drawEllipse(6, 6, 3, 3)
+        p.drawEllipse(12, 5, 3, 3)
+        p.drawEllipse(16, 9, 3, 3)
+    p.end()
+    return QIcon(pix)
 
 def get_subject_abbr(subject_name: str) -> str:
     if not subject_name: return ""
@@ -474,15 +618,37 @@ class UnplacedLessonsDock(QFrame):
                 item.widget().deleteLater()
                 
         if not lessons_data:
+            self.container_layout.setAlignment(Qt.AlignCenter)
+            msg_widget = QWidget()
+            msg_widget.setStyleSheet("background: transparent;")
+            msg_layout = QHBoxLayout(msg_widget)
+            msg_layout.setContentsMargins(0, 0, 0, 0)
+            msg_layout.setSpacing(8)
+            msg_layout.setAlignment(Qt.AlignCenter)
+            
+            icon_lbl = QLabel()
+            icon_lbl.setStyleSheet("background: transparent; border: none;")
+            text_lbl = QLabel()
+            text_lbl.setStyleSheet("background: transparent; border: none;")
+            
             if not has_assignments:
-                hint = QLabel("⚠️ Bu sınıfa / öğretmene henüz hiç ders atanmadı! Lütfen 'Ders Atama' bölümünden ders ve öğretmen tanımlayın.")
-                hint.setStyleSheet("color: #D32F2F; font-weight: bold; font-size: 12px; padding: 10px; background: #FFEBEE; border: 1px solid #FFCDD2; border-radius: 6px;")
+                icon_lbl.setPixmap(make_grid_action_icon("alert_triangle", 20).pixmap(20, 20))
+                text_lbl.setText("Bu sınıfa / öğretmene henüz hiç ders atanmadı. Lütfen 'Ders Atama' bölümünden tanımlayın.")
+                text_lbl.setFont(QFont("Segoe UI", 9, QFont.Bold))
+                text_lbl.setStyleSheet("color: #B45309; background: transparent; border: none;")
             else:
-                hint = QLabel("✅ Bu sınıfın / öğretmenin tüm dersleri başarıyla programa yerleştirildi.")
-                hint.setStyleSheet("color: #2E7D32; font-weight: bold; font-size: 12px; padding: 10px; background: #E8F5E9; border: 1px solid #C8E6C9; border-radius: 6px;")
-            self.container_layout.addWidget(hint)
+                icon_lbl.setPixmap(make_grid_action_icon("check_circle", 20).pixmap(20, 20))
+                text_lbl.setText("Bu sınıfın / öğretmenin tüm dersleri başarıyla programa yerleştirildi.")
+                text_lbl.setFont(QFont("Segoe UI", 9, QFont.Bold))
+                text_lbl.setStyleSheet("color: #15803D; background: transparent; border: none;")
+                
+            msg_layout.addWidget(icon_lbl)
+            msg_layout.addWidget(text_lbl)
+            
+            self.container_layout.addWidget(msg_widget)
             return
 
+        self.container_layout.setAlignment(Qt.AlignLeft)
         for l in lessons_data:
             dur = l.get("duration", 1)
             teacher = l.get("teacher", "")
@@ -505,14 +671,16 @@ class UnplacedLessonsDock(QFrame):
             
             placed_count = 0
             for p in grid_placements:
-                if (p.get("subject_name") == s_name or p.get("subject") == s_name) and \
-                   (p.get("class_name") == c_name or p.get("class") == c_name):
+                p_s = p.get("subject_name") or p.get("subject", "")
+                p_c = p.get("class_name") or p.get("class", "")
+                p_t = p.get("teacher_name") or p.get("teacher", "")
+                if p_s == s_name and (not c_name or p_c == c_name) and (not t_name or p_t == t_name):
                     placed_count += int(p.get("duration", 1))
                     
             remaining = dur - placed_count
             if remaining > 0:
                 unplaced_cards.append({
-                    "id": idx,
+                    "id": idx + 1,
                     "subject_name": s_name,
                     "color": color,
                     "duration": remaining,
@@ -528,7 +696,7 @@ class TimetableCellDelegate(QStyledItemDelegate):
 
     def paint(self, painter, option, index):
         painter.save()
-        painter.setRenderHint(QPainter.Antialiasing, False)
+        painter.setRenderHint(QPainter.Antialiasing, True)
         
         rect = option.rect
         table = self.parent()
@@ -545,6 +713,12 @@ class TimetableCellDelegate(QStyledItemDelegate):
         bg_brush = index.data(Qt.BackgroundRole)
         text = index.data(Qt.DisplayRole)
         
+        is_locked = False
+        if info and info.get("locked"):
+            is_locked = True
+        elif text and str(text).startswith("🔒"):
+            is_locked = True
+            
         # 1. Determine cell background color
         cell_color = None
         if info and info.get("color"):
@@ -574,7 +748,7 @@ class TimetableCellDelegate(QStyledItemDelegate):
         painter.fillRect(rect, cell_color)
         
         # 3. Draw clean 1px border
-        painter.setPen(QColor("#9CA3AF"))
+        painter.setPen(QPen(QColor("#9CA3AF"), 1))
         painter.drawRect(rect.adjusted(0, 0, -1, -1))
         
         # 4. Selection border
@@ -585,11 +759,17 @@ class TimetableCellDelegate(QStyledItemDelegate):
             
         # 5. Draw text
         if text and str(text).strip():
+            clean_str = str(text).replace("🔒", "").strip()
             lum = (0.299 * cell_color.red() + 0.587 * cell_color.green() + 0.114 * cell_color.blue())
             text_color = QColor("#FFFFFF") if lum < 155 else QColor("#111827")
             painter.setPen(text_color)
             painter.setFont(QFont("Segoe UI", 8, QFont.Bold))
-            painter.drawText(rect, Qt.AlignCenter, str(text))
+            painter.drawText(rect, Qt.AlignCenter, clean_str)
+            
+        # 6. Draw clean vector padlock badge if locked
+        if is_locked:
+            lock_pix = make_grid_action_icon("lock_closed", 12).pixmap(12, 12)
+            painter.drawPixmap(rect.right() - 13, rect.top() + 2, lock_pix)
             
         painter.restore()
 
@@ -624,39 +804,26 @@ class DropTableWidget(QTableWidget):
 
     def dragLeaveEvent(self, event):
         self._clear_highlight()
-        super().dragLeaveEvent(event)
-            
+        event.accept()
+        
     def dragMoveEvent(self, event):
         if event.mimeData().hasFormat("application/x-lesson"):
-            row = self.rowAt(event.pos().y())
-            col = self.columnAt(event.pos().x())
+            item = self.itemAt(event.pos())
+            r = self.row(item) if item else self.rowAt(event.pos().y())
+            c = self.column(item) if item else self.columnAt(event.pos().x())
             
-            if row >= 0 and col >= 0:
-                if getattr(self, '_drag_hl_cell', None) != (row, col):
-                    self._clear_highlight()
-                    self._drag_hl_cell = (row, col)
-                    
-                    item = self.item(row, col)
-                    if not item: # Sadece boş hücreleri boya
-                        data = json.loads(event.mimeData().data("application/x-lesson").data().decode())
-                        teacher = data.get("teacher", "")
-                        
-                        # Basit çakışma kontrolü (İleride GlobalState'den kontrol edilecek)
-                        # Şimdilik öğretmenin o saatte dersi var mı simulasyonu:
-                        # Eğer teacher doluysa ve rastgele bir conflict mantığı (Gerçek veritabanına bağlanacak)
-                        grid = self.parent()
-                        is_conflict = False
-                        if hasattr(grid, "_placed_lessons"):
-                            for (r, c_idx), info in grid._placed_lessons.items():
-                                if c_idx == col and r == row and info.get("teacher_name") == teacher:
-                                    is_conflict = True
-                                    break
-                                    
-                        hl_item = QTableWidgetItem("")
-                        hl_item._is_temp_highlight = True
-                        color = QColor(255, 0, 0, 80) if is_conflict else QColor(76, 175, 80, 80) # Kırmızı veya Yeşil
-                        hl_item.setBackground(QBrush(color))
-                        self.setItem(row, col, hl_item)
+            if (r, c) != getattr(self, '_drag_hl_cell', None):
+                self._clear_highlight()
+                if r >= 0 and c >= 0:
+                    current = self.item(r, c)
+                    if not current:
+                        temp = QTableWidgetItem("✚ Bırak")
+                        temp._is_temp_highlight = True
+                        temp.setBackground(QColor("#DCFCE7")) # Subtle light green
+                        temp.setForeground(QColor("#16A34A"))
+                        temp.setTextAlignment(Qt.AlignCenter)
+                        self.setItem(r, c, temp)
+                        self._drag_hl_cell = (r, c)
             event.accept()
         else:
             event.ignore()
@@ -680,6 +847,17 @@ class DropTableWidget(QTableWidget):
             col = self.columnAt(self.drag_start_pos.x())
             orig_r, orig_c, orig_dur, info = self._get_lesson_origin(row, col)
             if info:
+                # Kilitli ders taşıma uyarısı
+                if info.get("locked"):
+                    ret = QMessageBox.warning(
+                        self, "Kilitli Ders Uyarısı",
+                        f"🔒 '{info.get('subject_name')}' dersi kilitlenmiştir.\n\n"
+                        "Kilitli bir dersi taşımak istiyor musunuz?",
+                        QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+                    )
+                    if ret != QMessageBox.Yes:
+                        return
+                        
                 from PySide6.QtGui import QDrag
                 drag = QDrag(self)
                 mime = QMimeData()
@@ -689,6 +867,7 @@ class DropTableWidget(QTableWidget):
                 data["origin_row"] = orig_r
                 data["origin_col"] = orig_c
                 data["teacher"] = info.get("teacher_name", "")
+                data["locked"] = info.get("locked", False)
                 
                 mime.setData("application/x-lesson", QByteArray(json.dumps(data).encode()))
                 drag.setMimeData(mime)
@@ -715,6 +894,20 @@ class DropTableWidget(QTableWidget):
             col = self.column(item) if item else self.columnAt(event.pos().x())
             
             if row >= 0 and col >= 0:
+                # Hedef slot kilitli ders kontrolü
+                target_r, target_c, target_dur, target_info = self._get_lesson_origin(row, col)
+                if target_info and target_info.get("locked"):
+                    if not (lesson_info.get("is_move") and lesson_info.get("origin_row") == target_r and lesson_info.get("origin_col") == target_c):
+                        ret = QMessageBox.warning(
+                            self, "Kilitli Slot Uyarısı",
+                            f"⛔ Bırakmak istediğiniz zaman diliminde kilitli bir ders ({target_info.get('subject_name')}) bulunmaktadır!\n\n"
+                            "Bu slota yeni ders yerleştirmek kilit kuralını geçersiz kılabilir. Devam etmek istiyor musunuz?",
+                            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+                        )
+                        if ret != QMessageBox.Yes:
+                            event.ignore()
+                            return
+                            
                 # Öğretmen timeoff kontrolü
                 teacher = lesson_info.get("teacher", "")
                 dur = int(lesson_info.get("duration", 1))
@@ -813,18 +1006,18 @@ class DropTableWidget(QTableWidget):
             info = grid._placed_lessons.get((orig_r, orig_c), {}) if hasattr(grid, "_placed_lessons") else {}
             is_currently_locked = info.get("locked", False)
             
-            act_edit = menu.addAction(make_context_icon("E", "#4CAF50", "#2E7D32"), "Düzenle")
+            act_edit = menu.addAction(make_grid_action_icon("edit", 16), "Düzenle (Ders & Öğretmen Paneli)")
             act_move = menu.addAction(make_context_icon("M", "#FFCA28", "#FF8F00"), "Taşı")
             if not is_currently_locked:
-                act_lock = menu.addAction(make_context_icon("🔒", "#9C27B0", "#6A1B9A"), "🔒 Dersi Kilitle (Sabitle)")
+                act_lock = menu.addAction(make_grid_action_icon("lock_closed", 16), "Dersi Kilitle (Sabitle)")
                 act_unlock = None
             else:
                 act_lock = None
-                act_unlock = menu.addAction(make_context_icon("🔓", "#00BCD4", "#00838F"), "🔓 Bu Dersin Kilidini Aç")
+                act_unlock = menu.addAction(make_grid_action_icon("lock_open", 16), "Bu Dersin Kilidini Aç")
                 
-            act_unlock_all = menu.addAction(make_context_icon("🔓", "#EF5350", "#C62828"), "🔓 Tüm Kilitleri Kaldır")
-            act_change_teacher = menu.addAction(make_context_icon("Ö", "#00BCD4", "#00838F"), "Öğretmeni Değiştir")
-            act_color = menu.addAction(make_context_icon("🎨", "#EC407A", "#C2185B"), "🎨 Renk Paleti Ayarla...")
+            act_unlock_all = menu.addAction(make_grid_action_icon("lock_open", 16), "Tüm Kilitleri Kaldır")
+            act_change_teacher = menu.addAction(make_grid_action_icon("ogretmenler", 16), "Öğretmeni Değiştir")
+            act_color = menu.addAction(make_grid_action_icon("palette", 16), "Renk Paleti Ayarla...")
             menu.addSeparator()
             act_del = menu.addAction(make_context_icon("X", "#EF5350", "#C62828"), "Sil (Kaldır)")
             
@@ -838,33 +1031,28 @@ class DropTableWidget(QTableWidget):
                 if hasattr(grid, "_placed_lessons") and (orig_r, orig_c) in grid._placed_lessons:
                     info = grid._placed_lessons[(orig_r, orig_c)]
                     info["locked"] = True
-                    cur_text = orig_item.text()
-                    if not cur_text.startswith("🔒"):
-                        orig_item.setText(f"🔒{cur_text}")
                     win = self.window()
                     if hasattr(win, "save_db"): win.save_db()
-                    if hasattr(win, "statusBar"): win.statusBar().showMessage("🔒 Ders kilitlendi (Otomatik oluşturma bu dersi taşımayacak).")
+                    if hasattr(win, "statusBar"): win.statusBar().showMessage("Ders kilitlendi (Otomatik oluşturma bu dersi taşımayacak).")
+                    self.viewport().update()
             elif action == act_unlock:
                 if hasattr(grid, "_placed_lessons") and (orig_r, orig_c) in grid._placed_lessons:
                     info = grid._placed_lessons[(orig_r, orig_c)]
                     info["locked"] = False
-                    cur_text = orig_item.text().replace("🔒", "")
-                    orig_item.setText(cur_text)
                     win = self.window()
                     if hasattr(win, "save_db"): win.save_db()
-                    if hasattr(win, "statusBar"): win.statusBar().showMessage("🔓 Dersin kilidi açıldı.")
+                    if hasattr(win, "statusBar"): win.statusBar().showMessage("Dersin kilidi açıldı.")
+                    self.viewport().update()
             elif action == act_unlock_all:
                 if hasattr(grid, "_placed_lessons"):
                     for (r, c), p_info in grid._placed_lessons.items():
                         p_info["locked"] = False
-                        c_item = self.item(r, c)
-                        if c_item:
-                            c_item.setText(c_item.text().replace("🔒", ""))
                     win = self.window()
                     if hasattr(win, "save_db"): win.save_db()
-                    if hasattr(win, "statusBar"): win.statusBar().showMessage("🔓 Tüm derslerin kilitleri açıldı.")
+                    if hasattr(win, "statusBar"): win.statusBar().showMessage("Tüm derslerin kilitleri açıldı.")
+                    self.viewport().update()
             elif action == act_color:
-                from dialogs.color_picker_dialog import ModernColorPickerDialog
+                from dialogs.color_picker_dialog import ModernColorPickerDialog, update_subject_color_globally
                 grid = self.parent()
                 win = self.window()
                 data_store = getattr(win, "data_store", None)
@@ -874,50 +1062,12 @@ class DropTableWidget(QTableWidget):
                     new_color = ModernColorPickerDialog.pick_color(
                         initial_color=info.get("color", "#1E88E5"),
                         parent=self,
-                        title=f"🎨 {s_name} — Renk Seçimi",
+                        title=f"{s_name} — Renk Seçimi",
                         data_store=data_store,
                         subject_name=s_name
                     )
                     if new_color and new_color.isValid():
-                        hex_color = new_color.name()
-                        info["color"] = hex_color
-                        orig_item.setBackground(QBrush(new_color))
-                        lum = (0.299 * new_color.red() + 0.587 * new_color.green() + 0.114 * new_color.blue())
-                        orig_item.setForeground(QBrush(Qt.white if lum < 160 else Qt.black))
-                        
-                        # Update subject globally in data_store
-                        if data_store:
-                            if "dersler" in data_store:
-                                for d in data_store["dersler"]:
-                                    if d.get("ad", "").strip().upper() == s_name.strip().upper():
-                                        d["color"] = hex_color
-                                        d["renk"] = hex_color
-                            if "atamalar" in data_store:
-                                for a in data_store["atamalar"]:
-                                    if a.get("subject", "").strip().upper() == s_name.strip().upper():
-                                        a["color"] = hex_color
-                            if "grid_placements" in data_store:
-                                for p in data_store["grid_placements"]:
-                                    if (p.get("subject_name") or p.get("subject") or "").strip().upper() == s_name.strip().upper():
-                                        p["color"] = hex_color
-                                        
-                        # Update all placements of this subject on current grid
-                        if hasattr(grid, "_placed_lessons"):
-                            for (r, c), p_info in grid._placed_lessons.items():
-                                if p_info.get("subject_name", "").strip().upper() == s_name.strip().upper():
-                                    p_info["color"] = hex_color
-                                    cell_item = self.item(r, c)
-                                    if cell_item:
-                                        cell_item.setData(Qt.BackgroundRole, QBrush(new_color))
-                                        cell_item.setForeground(QBrush(Qt.white if lum < 160 else Qt.black))
-                                        
-                        self.viewport().update()
-                        if win:
-                            if hasattr(win, "save_db"): win.save_db(sync_from_grid=False)
-                            if hasattr(win, "_refresh_tree"): win._refresh_tree()
-                            if hasattr(win, "_refresh_grid"): win._refresh_grid()
-                            if hasattr(grid, "unplaced_dock") and grid.unplaced_dock:
-                                grid.unplaced_dock.update_list(data_store)
+                        update_subject_color_globally(self, data_store, s_name, new_color.name())
             elif action == act_change_teacher:
                 from PySide6.QtWidgets import QInputDialog
                 win = self.window()
@@ -1078,27 +1228,38 @@ class TimetableGrid(QWidget):
         top.setContentsMargins(8, 4, 8, 4)
         top.setSpacing(8)
 
-        self.toggle_panel_btn = QPushButton("Sol Paneli Aç/Kapat", self)
+        self.toggle_panel_btn = QPushButton(" Sol Panel", self)
+        self.toggle_panel_btn.setIcon(make_grid_action_icon("toggle_panel", 16))
         self.toggle_panel_btn.setFont(QFont("Segoe UI", 9, QFont.Bold))
         self.toggle_panel_btn.setStyleSheet("""
             QPushButton {
-                background-color: #3B82F6; color: white; border-radius: 4px; padding: 4px 12px;
+                background-color: #FFFFFF; color: #334155; border: 1px solid #CBD5E1;
+                border-radius: 6px; padding: 4px 12px;
             }
-            QPushButton:hover { background-color: #2563EB; }
+            QPushButton:hover { background-color: #F1F5F9; border-color: #94A3B8; }
         """)
         top.addWidget(self.toggle_panel_btn)
         
         top.addSpacing(10)
         
         # Segmented view switchers (Sınıflar Çarşafı / Öğretmenler Çarşafı)
-        self.btn_view_classes = QPushButton("🏫 Sınıflar Çarşafı", self)
-        self.btn_view_teachers = QPushButton("👨‍🏫 Öğretmenler Çarşafı", self)
+        switcher_frame = QFrame(self)
+        switcher_frame.setStyleSheet("QFrame { background: #E2E8F0; border-radius: 6px; }")
+        switcher_layout = QHBoxLayout(switcher_frame)
+        switcher_layout.setContentsMargins(2, 2, 2, 2)
+        switcher_layout.setSpacing(2)
+        
+        self.btn_view_classes = QPushButton(" Sınıflar Çarşafı", switcher_frame)
+        self.btn_view_classes.setIcon(make_grid_action_icon("siniflar", 18))
+        self.btn_view_teachers = QPushButton(" Öğretmenler Çarşafı", switcher_frame)
+        self.btn_view_teachers.setIcon(make_grid_action_icon("ogretmenler", 18))
         
         for btn in (self.btn_view_classes, self.btn_view_teachers):
             btn.setCheckable(True)
             btn.setFont(QFont("Segoe UI", 9, QFont.Bold))
             btn.setFixedHeight(28)
             btn.setCursor(Qt.PointingHandCursor)
+            switcher_layout.addWidget(btn)
             
         self.btn_view_classes.setChecked(True)
         self._update_view_btn_styles()
@@ -1106,15 +1267,21 @@ class TimetableGrid(QWidget):
         self.btn_view_classes.clicked.connect(lambda: self._set_view_mode("classes"))
         self.btn_view_teachers.clicked.connect(lambda: self._set_view_mode("teachers"))
         
-        top.addWidget(self.btn_view_classes)
-        top.addWidget(self.btn_view_teachers)
+        top.addWidget(switcher_frame)
         
         top.addStretch(1)
         
         # Unlock All Button
-        btn_unlock_all = QPushButton("🔓 Tüm Kilitleri Aç", self)
-        btn_unlock_all.setFont(QFont("Segoe UI", 9))
-        btn_unlock_all.setStyleSheet("background: #FFFFFF; color: #DC2626; border: 1px solid #FECACA; border-radius: 4px; padding: 4px 10px;")
+        btn_unlock_all = QPushButton(" Tüm Kilitleri Aç", self)
+        btn_unlock_all.setIcon(make_grid_action_icon("lock_open", 16))
+        btn_unlock_all.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        btn_unlock_all.setStyleSheet("""
+            QPushButton {
+                background: #FEF2F2; color: #DC2626; border: 1px solid #FECACA;
+                border-radius: 6px; padding: 4px 12px;
+            }
+            QPushButton:hover { background: #FEE2E2; }
+        """)
         btn_unlock_all.setCursor(Qt.PointingHandCursor)
         btn_unlock_all.clicked.connect(self._unlock_all_lessons)
         top.addWidget(btn_unlock_all)
@@ -1183,7 +1350,10 @@ class TimetableGrid(QWidget):
         info_top.setSpacing(6)
         self.info_color_box = QLabel()
         self.info_color_box.setFixedSize(22, 22)
-        self.info_color_box.setStyleSheet("background: transparent; border: 1px solid #666;")
+        self.info_color_box.setCursor(Qt.PointingHandCursor)
+        self.info_color_box.setToolTip("Rengi Değiştirmek İçin Tıklayın")
+        self.info_color_box.setStyleSheet("background: transparent; border: 1px solid #666; border-radius: 3px;")
+        self.info_color_box.mousePressEvent = self._on_color_box_clicked
         info_top.addWidget(self.info_color_box)
         
         self.info_subject_lbl = QLabel("")
@@ -1211,9 +1381,32 @@ class TimetableGrid(QWidget):
         
         layout.addWidget(bottom_frame)
 
+    def _on_color_box_clicked(self, event):
+        info = getattr(self, "_current_selected_lesson_info", None)
+        if not info:
+            r = self.table.currentRow()
+            c = self.table.currentColumn()
+            if r >= 0 and c >= 0:
+                _, _, _, info = self.table._get_lesson_origin(r, c)
+        if info:
+            s_name = info.get("subject_name", "")
+            if s_name:
+                from dialogs.color_picker_dialog import ModernColorPickerDialog, update_subject_color_globally
+                win = self.window()
+                data_store = getattr(win, "data_store", None)
+                new_color = ModernColorPickerDialog.pick_color(
+                    initial_color=info.get("color", "#1E88E5"),
+                    parent=self,
+                    title=f"{s_name} — Renk Seçimi",
+                    data_store=data_store,
+                    subject_name=s_name
+                )
+                if new_color and new_color.isValid():
+                    update_subject_color_globally(self, data_store, s_name, new_color.name())
+
     def _update_view_btn_styles(self):
-        active_style = "background-color: #2563EB; color: white; border: none; border-radius: 4px; padding: 4px 12px;"
-        inactive_style = "background-color: #E2E8F0; color: #334155; border: 1px solid #CBD5E1; border-radius: 4px; padding: 4px 12px;"
+        active_style = "QPushButton { background-color: #2563EB; color: #FFFFFF; border: none; border-radius: 4px; padding: 4px 14px; font-weight: bold; } QPushButton:hover { background-color: #1D4ED8; }"
+        inactive_style = "QPushButton { background-color: transparent; color: #475569; border: none; border-radius: 4px; padding: 4px 14px; font-weight: bold; } QPushButton:hover { background-color: #CBD5E1; color: #0F172A; }"
         self.btn_view_classes.setStyleSheet(active_style if self.current_view_mode == "classes" else inactive_style)
         self.btn_view_teachers.setStyleSheet(active_style if self.current_view_mode == "teachers" else inactive_style)
 

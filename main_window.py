@@ -243,15 +243,30 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Hazır")
         
         # Cloud Sync Status Label
-        self.cloud_status_lbl = QLabel("Bulut: Bağlı (Güvenli)")
-        self.cloud_status_lbl.setStyleSheet("color: #1E88E5; font-weight: bold; margin-right: 10px;")
+        self.cloud_status_lbl = QLabel("Bulut: Bağlı")
+        self.cloud_status_lbl.setStyleSheet("color: #0284C7; font-weight: bold; margin-right: 10px;")
         self.statusBar().addPermanentWidget(self.cloud_status_lbl)
         
         from PySide6.QtWidgets import QPushButton
-        btn_chk = QPushButton("🔄 Evden Güncelleme Çek")
-        btn_chk.setStyleSheet("padding: 3px 10px; font-weight: bold; background: #2563EB; color: white; border-radius: 4px; border: none;")
-        btn_chk.clicked.connect(self._act_check_updates)
-        self.statusBar().addPermanentWidget(btn_chk)
+        btn_download = QPushButton(" Güncel Versiyonu İndir")
+        from timetable_grid import make_grid_action_icon
+        btn_download.setIcon(make_grid_action_icon("download", 16))
+        btn_download.setCursor(Qt.PointingHandCursor)
+        btn_download.setStyleSheet("""
+            QPushButton {
+                padding: 3px 12px; font-weight: bold; background: #0284C7; color: white;
+                border-radius: 4px; border: none; font-size: 11px;
+            }
+            QPushButton:hover { background: #0369A1; }
+        """)
+        def open_download_page():
+            import webbrowser
+            download_url = self.data_store.get("settings", {}).get("download_url", "https://chenki.net/indir")
+            webbrowser.open(download_url)
+            self.statusBar().showMessage(f"İndirme sayfası açılıyor: {download_url}")
+            
+        btn_download.clicked.connect(open_download_page)
+        self.statusBar().addPermanentWidget(btn_download)
 
         ver_lbl = QLabel(f"Chenki Akademi 2026 - 2027 Pro")
         ver_lbl.setStyleSheet("color: #64748B; font-weight: bold; margin-left: 10px; margin-right: 10px;")
@@ -1820,3 +1835,75 @@ class MainWindow(QMainWindow):
         msg.setWindowTitle("Bulut Tabanlı Planlama")
         msg.setIcon(QMessageBox.Information)
         msg.exec()
+
+    def _on_cell_edit(self, row, col):
+        if not hasattr(self, "_grid"):
+            return
+        grid = self._grid
+        orig_r, orig_c, orig_dur, info = grid.table._get_lesson_origin(row, col)
+        if not info:
+            info = grid._placed_lessons.get((row, col), {})
+            
+        subject_name = info.get("subject_name") or info.get("subject") or ""
+        teacher_name = info.get("teacher_name") or info.get("teacher") or ""
+        class_name = info.get("class_name") or info.get("class") or ""
+        
+        if not subject_name and not teacher_name and not class_name:
+            item = grid.table.item(row, col)
+            if item and item.text().strip():
+                subject_name = item.text().strip().replace("🔒", "")
+                
+        if not subject_name:
+            return
+            
+        from dialogs.edit_forms import SubjectTeacherAssignmentDialog
+        d = SubjectTeacherAssignmentDialog(
+            subject_name=subject_name,
+            data_store=self.data_store,
+            parent=self,
+            preselect_class=class_name
+        )
+        if d.exec():
+            self.save_db()
+            self._refresh_tree()
+            self._refresh_grid()
+
+    def _on_lesson_dropped(self, row, col, lesson_info):
+        if not hasattr(self, "_grid"):
+            return
+        grid = self._grid
+        dur = int(lesson_info.get("duration", 1))
+        s_name = lesson_info.get("subject_name") or lesson_info.get("subject", "")
+        t_name = lesson_info.get("teacher") or lesson_info.get("teacher_name", "")
+        c_name = lesson_info.get("class_name") or lesson_info.get("class", "")
+        color = lesson_info.get("color") or get_subject_color(s_name)
+        is_locked = bool(lesson_info.get("locked") or lesson_info.get("is_locked"))
+        
+        if lesson_info.get("is_move"):
+            orig_r = lesson_info.get("origin_row", -1)
+            orig_c = lesson_info.get("origin_col", -1)
+            if orig_r >= 0 and orig_c >= 0:
+                grid.table._delete_lesson_at(orig_r, orig_c)
+                
+        # Register placement
+        grid._placed_lessons[(row, col)] = {
+            "subject_name": s_name,
+            "teacher_name": t_name,
+            "class_name": c_name,
+            "duration": dur,
+            "color": color,
+            "locked": is_locked
+        }
+        
+        # Draw cells
+        for r_off in range(dur):
+            tr = row + r_off
+            if tr < grid.table.rowCount():
+                item = QTableWidgetItem(s_name)
+                item.setBackground(QBrush(QColor(color)))
+                item.setTextAlignment(Qt.AlignCenter)
+                grid.table.setItem(tr, col, item)
+                
+        self.save_db(sync_from_grid=True)
+        self._refresh_grid()
+        self._refresh_tree()
