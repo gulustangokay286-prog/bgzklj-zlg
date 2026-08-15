@@ -76,8 +76,8 @@ class AsCTimetableHeader(QHeaderView):
         self.days_list = days_list or DAYS[:5]
         self.setFixedHeight(34)
         self.setSectionResizeMode(QHeaderView.Fixed)
-        self.setDefaultSectionSize(32)
-        self.setMinimumSectionSize(18)
+        self.setDefaultSectionSize(44)
+        self.setMinimumSectionSize(20)
 
     def set_config(self, periods: int, days_list: list):
         self.periods = periods
@@ -676,9 +676,20 @@ class DropTableWidget(QTableWidget):
         """)
         
         if orig_item and orig_item.text().strip():
+            grid = self.parent()
+            info = grid._placed_lessons.get((orig_r, orig_c), {}) if hasattr(grid, "_placed_lessons") else {}
+            is_currently_locked = info.get("locked", False)
+            
             act_edit = menu.addAction(make_context_icon("E", "#4CAF50", "#2E7D32"), "Düzenle")
             act_move = menu.addAction(make_context_icon("M", "#FFCA28", "#FF8F00"), "Taşı")
-            act_lock = menu.addAction(make_context_icon("K", "#9C27B0", "#6A1B9A"), "Kilitle (Sabitle)")
+            if not is_currently_locked:
+                act_lock = menu.addAction(make_context_icon("🔒", "#9C27B0", "#6A1B9A"), "🔒 Dersi Kilitle (Sabitle)")
+                act_unlock = None
+            else:
+                act_lock = None
+                act_unlock = menu.addAction(make_context_icon("🔓", "#00BCD4", "#00838F"), "🔓 Bu Dersin Kilidini Aç")
+                
+            act_unlock_all = menu.addAction(make_context_icon("🔓", "#EF5350", "#C62828"), "🔓 Tüm Kilitleri Kaldır")
             act_change_teacher = menu.addAction(make_context_icon("Ö", "#00BCD4", "#00838F"), "Öğretmeni Değiştir")
             act_color = menu.addAction(make_context_icon("🎨", "#EC407A", "#C2185B"), "🎨 Renk Paleti Ayarla...")
             menu.addSeparator()
@@ -691,16 +702,34 @@ class DropTableWidget(QTableWidget):
             elif action == act_edit:
                 self.cell_right_clicked.emit(orig_r, orig_c)
             elif action == act_lock:
-                grid = self.parent()
                 if hasattr(grid, "_placed_lessons") and (orig_r, orig_c) in grid._placed_lessons:
                     info = grid._placed_lessons[(orig_r, orig_c)]
-                    info["locked"] = not info.get("locked", False)
-                    if info["locked"]:
-                        orig_item.setBackground(QBrush(QColor("#E0E0E0"))) # Grayed out / locked
-                    else:
-                        orig_item.setBackground(QBrush(QColor("#E8F4F8")))
+                    info["locked"] = True
+                    cur_text = orig_item.text()
+                    if not cur_text.startswith("🔒"):
+                        orig_item.setText(f"🔒{cur_text}")
                     win = self.window()
                     if hasattr(win, "save_db"): win.save_db()
+                    if hasattr(win, "statusBar"): win.statusBar().showMessage("🔒 Ders kilitlendi (Otomatik oluşturma bu dersi taşımayacak).")
+            elif action == act_unlock:
+                if hasattr(grid, "_placed_lessons") and (orig_r, orig_c) in grid._placed_lessons:
+                    info = grid._placed_lessons[(orig_r, orig_c)]
+                    info["locked"] = False
+                    cur_text = orig_item.text().replace("🔒", "")
+                    orig_item.setText(cur_text)
+                    win = self.window()
+                    if hasattr(win, "save_db"): win.save_db()
+                    if hasattr(win, "statusBar"): win.statusBar().showMessage("🔓 Dersin kilidi açıldı.")
+            elif action == act_unlock_all:
+                if hasattr(grid, "_placed_lessons"):
+                    for (r, c), p_info in grid._placed_lessons.items():
+                        p_info["locked"] = False
+                        c_item = self.item(r, c)
+                        if c_item:
+                            c_item.setText(c_item.text().replace("🔒", ""))
+                    win = self.window()
+                    if hasattr(win, "save_db"): win.save_db()
+                    if hasattr(win, "statusBar"): win.statusBar().showMessage("🔓 Tüm derslerin kilitleri açıldı.")
             elif action == act_color:
                 from dialogs.color_picker_dialog import ModernColorPickerDialog
                 grid = self.parent()
@@ -883,11 +912,13 @@ class DropTableWidget(QTableWidget):
 
 class TimetableGrid(QWidget):
     cell_right_clicked = Signal(int, int)
+    view_mode_changed = Signal(str)
 
     def __init__(self, periods: int = 8, parent=None):
         super().__init__(parent)
         self._periods = periods
         self._placed_lessons = {}
+        self.current_view_mode = "classes"
         self._build_ui()
 
     def _build_ui(self):
@@ -910,7 +941,37 @@ class TimetableGrid(QWidget):
         """)
         top.addWidget(self.toggle_panel_btn)
         
+        top.addSpacing(10)
+        
+        # Segmented view switchers (Sınıflar Çarşafı / Öğretmenler Çarşafı)
+        self.btn_view_classes = QPushButton("🏫 Sınıflar Çarşafı", self)
+        self.btn_view_teachers = QPushButton("👨‍🏫 Öğretmenler Çarşafı", self)
+        
+        for btn in (self.btn_view_classes, self.btn_view_teachers):
+            btn.setCheckable(True)
+            btn.setFont(QFont("Segoe UI", 9, QFont.Bold))
+            btn.setFixedHeight(28)
+            btn.setCursor(Qt.PointingHandCursor)
+            
+        self.btn_view_classes.setChecked(True)
+        self._update_view_btn_styles()
+        
+        self.btn_view_classes.clicked.connect(lambda: self._set_view_mode("classes"))
+        self.btn_view_teachers.clicked.connect(lambda: self._set_view_mode("teachers"))
+        
+        top.addWidget(self.btn_view_classes)
+        top.addWidget(self.btn_view_teachers)
+        
         top.addStretch(1)
+        
+        # Unlock All Button
+        btn_unlock_all = QPushButton("🔓 Tüm Kilitleri Aç", self)
+        btn_unlock_all.setFont(QFont("Segoe UI", 9))
+        btn_unlock_all.setStyleSheet("background: #FFFFFF; color: #DC2626; border: 1px solid #FECACA; border-radius: 4px; padding: 4px 10px;")
+        btn_unlock_all.setCursor(Qt.PointingHandCursor)
+        btn_unlock_all.clicked.connect(self._unlock_all_lessons)
+        top.addWidget(btn_unlock_all)
+        
         layout.addLayout(top)
 
         # ── Table (aSc-style gray compact grid)
@@ -924,38 +985,28 @@ class TimetableGrid(QWidget):
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
 
-        hh = self.table.horizontalHeader()
-        hh.setSectionResizeMode(QHeaderView.Stretch)
-        hh.setDefaultAlignment(Qt.AlignCenter)
-        hh.setMinimumSectionSize(22)
-        hh.setStyleSheet("""
-            QHeaderView::section {
-                background: #D0D0D0; font-weight: bold; padding: 2px;
-                border: 1px solid #999; font-size: 10px; color: #111;
-            }
-        """)
-
         vh = self.table.verticalHeader()
-        vh.setSectionResizeMode(QHeaderView.Stretch)
-        vh.setMinimumSectionSize(22)
+        vh.setSectionResizeMode(QHeaderView.Fixed)
+        vh.setDefaultSectionSize(26)
+        vh.setDefaultAlignment(Qt.AlignCenter)
         vh.setStyleSheet("""
             QHeaderView::section {
-                background: #D8D8D8; font-weight: bold; border: 1px solid #999;
-                padding: 2px; font-size: 10px; color: #111;
+                background: #D4D4D4; font-weight: bold; border: 1px solid #888888;
+                padding: 2px 6px; font-size: 10px; color: #111111;
             }
         """)
 
         self.table.setStyleSheet("""
             QTableWidget {
-                background: #C0C0C0;
-                gridline-color: #999999;
+                background: #B4B4B8;
+                gridline-color: #7E7E84;
                 font-size: 10px;
                 selection-background-color: #FFFF00;
                 selection-color: #000;
             }
             QTableWidget::item {
-                padding: 1px;
-                background: #C0C0C0;
+                padding: 0px;
+                border: none;
             }
         """)
 
@@ -1014,6 +1065,39 @@ class TimetableGrid(QWidget):
         
         layout.addWidget(bottom_frame)
 
+    def _update_view_btn_styles(self):
+        active_style = "background-color: #2563EB; color: white; border: none; border-radius: 4px; padding: 4px 12px;"
+        inactive_style = "background-color: #E2E8F0; color: #334155; border: 1px solid #CBD5E1; border-radius: 4px; padding: 4px 12px;"
+        self.btn_view_classes.setStyleSheet(active_style if self.current_view_mode == "classes" else inactive_style)
+        self.btn_view_teachers.setStyleSheet(active_style if self.current_view_mode == "teachers" else inactive_style)
+
+    def _set_view_mode(self, mode: str):
+        self.current_view_mode = mode
+        self.btn_view_classes.setChecked(mode == "classes")
+        self.btn_view_teachers.setChecked(mode == "teachers")
+        self._update_view_btn_styles()
+        self.view_mode_changed.emit(mode)
+        win = self.window()
+        if hasattr(win, "_refresh_grid"):
+            win._refresh_grid()
+
+    def _unlock_all_lessons(self):
+        for (r, c), p_info in self._placed_lessons.items():
+            p_info["locked"] = False
+            c_item = self.table.item(r, c)
+            if c_item:
+                c_item.setText(c_item.text().replace("🔒", ""))
+        win = self.window()
+        if hasattr(win, "data_store"):
+            for p in win.data_store.get("grid_placements", []):
+                p["locked"] = False
+            if hasattr(win, "save_db"):
+                win.save_db(sync_from_grid=False)
+            if hasattr(win, "_refresh_grid"):
+                win._refresh_grid()
+        if hasattr(win, "statusBar"):
+            win.statusBar().showMessage("🔓 Tüm derslerin kilitleri açıldı.")
+
     def _on_cell_clicked(self, row, col):
         """Show lesson info in the bottom-left panel when a cell is clicked (aSc-style)."""
         info = self._placed_lessons.get((row, col))
@@ -1029,10 +1113,12 @@ class TimetableGrid(QWidget):
             teacher = info.get("teacher_name", "")
             cls = info.get("class_name", "")
             color = info.get("color", "#C0C0C0")
+            is_locked = info.get("locked", False)
             
             abbr = get_subject_abbr(subj)
             self.info_color_box.setStyleSheet(f"background: {color}; border: 1px solid #666;")
-            self.info_subject_lbl.setText(f"{abbr} - {subj.upper()}")
+            lock_prefix = "🔒 " if is_locked else ""
+            self.info_subject_lbl.setText(f"{lock_prefix}{abbr} - {subj.upper()}")
             self.info_class_lbl.setText(cls.upper() if cls else "")
             
             t_display = ""
@@ -1056,9 +1142,14 @@ class TimetableGrid(QWidget):
             self.table.setRowCount(self._periods)
             self.table.setVerticalHeaderLabels([f"{i+1}" for i in range(self._periods)])
 
-    def set_cell(self, row, col, subject_name, color, teacher_name="", duration=1, class_name=""):
-        abbr = get_subject_abbr(subject_name)
-        display_text = abbr
+    def set_cell(self, row, col, subject_name, color, teacher_name="", duration=1, class_name="", display_mode="classes", locked=False):
+        if display_mode == "teachers":
+            display_text = class_name.strip()
+        else:
+            display_text = get_subject_abbr(subject_name)
+            
+        if locked:
+            display_text = f"🔒{display_text}"
             
         item = QTableWidgetItem(display_text)
         item.setTextAlignment(Qt.AlignCenter)
@@ -1077,7 +1168,8 @@ class TimetableGrid(QWidget):
         # Track placed lesson
         self._placed_lessons[(row, col)] = {
             "subject_name": subject_name, "color": color,
-            "teacher_name": teacher_name, "class_name": class_name, "duration": 1
+            "teacher_name": teacher_name, "class_name": class_name, "duration": 1,
+            "locked": bool(locked)
         }
         
     def get_placed_lessons(self):
@@ -1099,9 +1191,10 @@ class TimetableGrid(QWidget):
         self.clear_grid()
         
     def set_mode_all_classes(self, class_list: list, periods: int, days_list: list):
-        """Whole School View (aSc Çarşaf): Rows=Classes, Cols=Days*Periods"""
+        """Whole School View (aSc Çarşaf - Sınıflar): Rows=Classes, Cols=Days*Periods"""
         self._periods = periods
         self.class_list = class_list
+        self.current_view_mode = "classes"
         self.table.setRowCount(len(class_list))
         self.table.setVerticalHeaderLabels(class_list)
         total_cols = len(days_list) * periods
@@ -1113,8 +1206,30 @@ class TimetableGrid(QWidget):
         
         # Set compact column widths and row heights
         for i in range(total_cols):
-            self.table.setColumnWidth(i, 32)
+            self.table.setColumnWidth(i, 44)
         for r in range(len(class_list)):
+            self.table.setRowHeight(r, 26)
+            
+        self.clear_grid()
+
+    def set_mode_all_teachers(self, teacher_list: list, periods: int, days_list: list):
+        """Whole School View (aSc Çarşaf - Öğretmenler): Rows=Teachers, Cols=Days*Periods"""
+        self._periods = periods
+        self.teacher_list = teacher_list
+        self.current_view_mode = "teachers"
+        self.table.setRowCount(len(teacher_list))
+        self.table.setVerticalHeaderLabels(teacher_list)
+        total_cols = len(days_list) * periods
+        self.table.setColumnCount(total_cols)
+        
+        # Configure AsCTimetableHeader
+        if hasattr(self.table, "asc_header"):
+            self.table.asc_header.set_config(periods, days_list)
+        
+        # Set compact column widths and row heights
+        for i in range(total_cols):
+            self.table.setColumnWidth(i, 44)
+        for r in range(len(teacher_list)):
             self.table.setRowHeight(r, 26)
             
         self.clear_grid()

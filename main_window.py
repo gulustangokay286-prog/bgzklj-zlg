@@ -435,44 +435,25 @@ class MainWindow(QMainWindow):
         entity_name = item.data(0, Qt.UserRole)
         
         if "Öğretmenler" in parent_text:
-            self._grid.view_combo.setCurrentText("Öğretmen Görünümü")
-            # Filter entity_combo
-            idx = self._grid.entity_combo.findText(entity_name)
-            if idx >= 0: self._grid.entity_combo.setCurrentIndex(idx)
-            self._filter_grid("teacher", entity_name)
+            if hasattr(self, "_grid"):
+                self._grid._set_view_mode("teachers")
+                # Scroll to teacher row if found
+                for r in range(self._grid.table.rowCount()):
+                    item_lbl = self._grid.table.verticalHeaderItem(r)
+                    if item_lbl and item_lbl.text() == entity_name:
+                        self._grid.table.selectRow(r)
+                        self._grid.table.scrollToItem(self._grid.table.item(r, 0) or item_lbl)
+                        break
         elif "Sınıflar" in parent_text:
-            self._grid.view_combo.setCurrentText("Sınıf Görünümü")
-            idx = self._grid.entity_combo.findText(entity_name)
-            if idx >= 0: self._grid.entity_combo.setCurrentIndex(idx)
-            self._filter_grid("class", entity_name)
-        elif "Derslikler" in parent_text:
-            self._grid.view_combo.setCurrentText("Derslik Görünümü")
-            idx = self._grid.entity_combo.findText(entity_name)
-            if idx >= 0: self._grid.entity_combo.setCurrentIndex(idx)
-            self._filter_grid("room", entity_name)
-            
-    def _filter_grid(self, view_type, entity_name):
-        if not getattr(self, "_is_loading", False):
-            prev_view = getattr(self, "_active_view_type", None)
-            prev_entity = getattr(self, "_active_entity_name", None)
-            if prev_view and prev_entity and (prev_view != view_type or prev_entity != entity_name):
-                self._sync_grid_to_store(prev_view, prev_entity)
-                self.save_db(sync_from_grid=False)
-        
-        if hasattr(self, "_grid") and hasattr(self._grid, "entity_combo"):
-            self._grid.entity_combo.blockSignals(True)
-            if self._grid.entity_combo.count() == 0:
-                self._on_view_combo_changed(self._grid.view_combo.currentText(), initial_load=True)
-            idx = self._grid.entity_combo.findText(entity_name)
-            if idx >= 0:
-                self._grid.entity_combo.setCurrentIndex(idx)
-            else:
-                self._grid.entity_combo.addItem(entity_name)
-                self._grid.entity_combo.setCurrentText(entity_name)
-            self._grid.entity_combo.blockSignals(False)
-            
-        self._active_view_type = view_type
-        self._active_entity_name = entity_name
+            if hasattr(self, "_grid"):
+                self._grid._set_view_mode("classes")
+                # Scroll to class row if found
+                for r in range(self._grid.table.rowCount()):
+                    item_lbl = self._grid.table.verticalHeaderItem(r)
+                    if item_lbl and item_lbl.text() == entity_name:
+                        self._grid.table.selectRow(r)
+                        self._grid.table.scrollToItem(self._grid.table.item(r, 0) or item_lbl)
+                        break
         self.statusBar().showMessage(f"Görünüm güncellendi: {entity_name}")
         self._restore_grid_placements(view_type, entity_name)
         self._refresh_tree(view_type=view_type, target_entity=entity_name)
@@ -729,6 +710,8 @@ class MainWindow(QMainWindow):
         splitter.addWidget(right)
         splitter.setSizes([220, 1060])
 
+        self._grid.view_mode_changed.connect(lambda mode: self._refresh_grid())
+
         # Wire up grid toggle button
         def toggle_sidebar():
             is_vis = left.isVisible()
@@ -741,36 +724,6 @@ class MainWindow(QMainWindow):
         splitter.setSizes([0, 1060])
         
         return splitter
-        
-    def _on_view_combo_changed(self, text, initial_load=False):
-        self._grid.entity_combo.blockSignals(True)
-        self._grid.entity_combo.clear()
-        
-        if text == "Sınıf Görünümü":
-            items = [c.get("ad", "") for c in self.data_store.get("siniflar", [])]
-            self._grid.entity_combo.addItems(items)
-        elif text == "Öğretmen Görünümü":
-            items = [t.get("ad", "") for t in self.data_store.get("ogretmenler", [])]
-            self._grid.entity_combo.addItems(items)
-        elif text == "Derslik Görünümü":
-            items = [r.get("ad", "") for r in self.data_store.get("derslikler", [])]
-            self._grid.entity_combo.addItems(items)
-            
-        self._grid.entity_combo.blockSignals(False)
-        if self._grid.entity_combo.count() > 0:
-            if not initial_load and not getattr(self, "_is_loading", False):
-                self._on_entity_combo_changed(self._grid.entity_combo.currentText())
-            
-    def _on_entity_combo_changed(self, entity_name):
-        if getattr(self, "_is_loading", False):
-            return
-        view = self._grid.view_combo.currentText()
-        if view == "Sınıf Görünümü":
-            self._filter_grid("class", entity_name)
-        elif view == "Öğretmen Görünümü":
-            self._filter_grid("teacher", entity_name)
-        elif view == "Derslik Görünümü":
-            self._filter_grid("room", entity_name)
 
     def closeEvent(self, event):
         # Auto-save changes seamlessly
@@ -889,45 +842,82 @@ class MainWindow(QMainWindow):
         from timetable_grid import DAYS
         days_list = DAYS[:days_count]
         
-        classes = self.data_store.get("siniflar", [])
-        class_names = [c.get("ad", "").strip() for c in classes if c.get("ad")]
-        
-        # If no classes in data store yet, provide default demo classes
-        if not class_names:
-            class_names = ["9A", "9B", "10A", "10B", "11A", "11B", "11C", "12A", "12B"]
-            
-        self._grid.set_mode_all_classes(class_names, periods, days_list)
-        
-        # Draw placed lessons
+        mode = getattr(self._grid, "current_view_mode", "classes")
         grid_data = self.data_store.get("grid_placements", [])
         if not grid_data and self.data_store.get("auto_schedule_results"):
             grid_data = self.data_store.get("auto_schedule_results")
             
-        for item in grid_data:
-            s_name = item.get("subject_name") or item.get("subject") or ""
-            c_name = (item.get("class_name") or item.get("class") or "").strip()
-            t_name = item.get("teacher_name") or item.get("teacher") or ""
-            dur = int(item.get("duration", 1))
-            col = int(item.get("day", item.get("col", 0)))
-            period = int(item.get("period", item.get("row", 0)))
+        from dialogs.edit_forms import format_tr_name
+        
+        if mode == "teachers":
+            teachers = self.data_store.get("ogretmenler", [])
+            teacher_names = [t.get("ad", "").strip() for t in teachers if t.get("ad")]
+            if not teacher_names:
+                teacher_names = ["Öğretmen 1"]
+            self._grid.set_mode_all_teachers(teacher_names, periods, days_list)
             
-            # Find matching class row (with tolerance)
-            matching_row = -1
-            if c_name in class_names:
-                matching_row = class_names.index(c_name)
-            else:
-                for idx, cn in enumerate(class_names):
-                    if cn.upper() == c_name.upper():
-                        matching_row = idx
-                        break
-                        
-            if matching_row >= 0:
-                actual_col = col * periods + period
-                color = item.get("color") or get_subject_color(s_name)
-                for ext in range(dur):
-                    target_c = actual_col + ext
-                    if target_c < len(days_list) * periods:
-                        self._grid.set_cell(matching_row, target_c, s_name, color, t_name, 1, c_name)
+            for item in grid_data:
+                s_name = item.get("subject_name") or item.get("subject") or ""
+                c_name = (item.get("class_name") or item.get("class") or "").strip()
+                t_name = (item.get("teacher_name") or item.get("teacher") or "").strip()
+                dur = int(item.get("duration", 1))
+                col = int(item.get("day", item.get("col", 0)))
+                period = int(item.get("period", item.get("row", 0)))
+                is_locked = bool(item.get("locked", False))
+                
+                # Find matching teacher row
+                matching_row = -1
+                if t_name in teacher_names:
+                    matching_row = teacher_names.index(t_name)
+                else:
+                    for idx, tn in enumerate(teacher_names):
+                        if format_tr_name(tn) == format_tr_name(t_name):
+                            matching_row = idx
+                            break
+                            
+                if matching_row >= 0:
+                    actual_col = col * periods + period
+                    color = item.get("color") or get_subject_color(s_name)
+                    for ext in range(dur):
+                        target_c = actual_col + ext
+                        if target_c < len(days_list) * periods:
+                            self._grid.set_cell(matching_row, target_c, s_name, color, t_name, 1, c_name, display_mode="teachers", locked=is_locked)
+        else:
+            classes = self.data_store.get("siniflar", [])
+            class_names = [c.get("ad", "").strip() for c in classes if c.get("ad")]
+            if not class_names:
+                class_names = ["9A", "9B", "10A", "10B", "11A", "11B", "11C", "12A", "12B"]
+                
+            self._grid.set_mode_all_classes(class_names, periods, days_list)
+            
+            for item in grid_data:
+                s_name = item.get("subject_name") or item.get("subject") or ""
+                c_name = (item.get("class_name") or item.get("class") or "").strip()
+                t_name = (item.get("teacher_name") or item.get("teacher") or "").strip()
+                dur = int(item.get("duration", 1))
+                col = int(item.get("day", item.get("col", 0)))
+                period = int(item.get("period", item.get("row", 0)))
+                is_locked = bool(item.get("locked", False))
+                
+                # Support combined classes if comma separated or listed
+                target_classes = [c.strip() for c in c_name.split(",") if c.strip()] if "," in c_name else [c_name]
+                for tc in target_classes:
+                    matching_row = -1
+                    if tc in class_names:
+                        matching_row = class_names.index(tc)
+                    else:
+                        for idx, cn in enumerate(class_names):
+                            if cn.upper() == tc.upper():
+                                matching_row = idx
+                                break
+                                
+                    if matching_row >= 0:
+                        actual_col = col * periods + period
+                        color = item.get("color") or get_subject_color(s_name)
+                        for ext in range(dur):
+                            target_c = actual_col + ext
+                            if target_c < len(days_list) * periods:
+                                self._grid.set_cell(matching_row, target_c, s_name, color, t_name, 1, tc, display_mode="classes", locked=is_locked)
         
         # Update unplaced dock
         if hasattr(self._grid, "unplaced_dock"):
@@ -1144,21 +1134,7 @@ class MainWindow(QMainWindow):
                     "duration": block_dur
                 })
             
-        # 2. Filter unplaced cards by currently selected class / teacher view if active
-        has_assignments = True
-        if hasattr(self, "_grid") and hasattr(self._grid, "view_combo") and hasattr(self._grid, "entity_combo"):
-            v_type = view_type or self._grid.view_combo.currentText()
-            e_name = target_entity or self._grid.entity_combo.currentText()
-            if v_type in ("class", "Sınıf Görünümü") and e_name:
-                total_for_entity = [a for a in atamalar if a.get("class") and a.get("class").strip().upper() == e_name.strip().upper()]
-                has_assignments = len(total_for_entity) > 0
-                unplaced = [u for u in unplaced if u.get("class_name") and u.get("class_name").strip().upper() == e_name.strip().upper()]
-            elif v_type in ("teacher", "Öğretmen Görünümü") and e_name:
-                total_for_entity = [a for a in atamalar if a.get("teacher") and format_tr_name(a.get("teacher")) == format_tr_name(e_name)]
-                has_assignments = len(total_for_entity) > 0
-                unplaced = [u for u in unplaced if u.get("teacher") and format_tr_name(u.get("teacher")) == format_tr_name(e_name)]
-
-        self._grid.unplaced_dock.load_unplaced(unplaced, has_assignments=has_assignments)
+        self._grid.unplaced_dock.load_unplaced(unplaced, has_assignments=bool(atamalar))
 
     def _check_planning_relations(self, subject, teacher, class_name, day, period, duration, is_move=False, orig_r=-1, orig_c=-1):
         """
@@ -1532,8 +1508,8 @@ class MainWindow(QMainWindow):
             self.save_db(sync_from_grid=True)
         from PySide6.QtWidgets import QDialog
         from dialogs.print_wizard import PrintWizardDialog
-        curr_view = self._grid.view_combo.currentText() if hasattr(self, "_grid") else ""
-        curr_entity = self._grid.entity_combo.currentText() if hasattr(self, "_grid") else ""
+        curr_view = "Sınıf Görünümü"
+        curr_entity = ""
         wiz = PrintWizardDialog(self.data_store, default_entity=curr_entity, default_view=curr_view, parent=self)
         if wiz.exec() == QDialog.Accepted:
             filters = wiz.get_selected_filters()
@@ -1733,12 +1709,7 @@ class MainWindow(QMainWindow):
         from dialogs.auto_schedule_dialog import AutoScheduleDialog
         from PySide6.QtWidgets import QDialog
         
-        target_class = None
-        if hasattr(self, "_grid") and hasattr(self._grid, "view_combo") and hasattr(self._grid, "entity_combo"):
-            if self._grid.view_combo.currentText() == "Sınıf Görünümü":
-                target_class = self._grid.entity_combo.currentText()
-        if not target_class and hasattr(self, "_active_entity_name") and getattr(self, "_active_view_type", "") == "class":
-            target_class = self._active_entity_name
+        target_class = getattr(self, "_active_entity_name", None) if getattr(self, "_active_view_type", "") == "class" else None
         # Atama kontrolü: hedef sınıfa ders atanmamışsa uyarı ver
         atamalar = self.data_store.get("atamalar", [])
         if target_class:
@@ -1833,52 +1804,22 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Bulut Tabanlı Planlama", "Bulut tabanlı planlama modülünü kullanabilmek için aktif bir Dijisa hesabı gereklidir.")
 
     def _act_clear_schedule(self):
-        view = self._grid.view_combo.currentText()
-        entity = self._grid.entity_combo.currentText()
-        
-        if view == "Genel Görünüm" or not entity:
-            msg = "Tüm sınıflar ve öğretmenler için yerleştirilmiş derslerin TAMAMI çizelgeden kaldırılacak.\nEmin misiniz?"
-            target_entity = None
-            target_type = None
-        else:
-            msg = f"Sadece '{entity}' için yerleştirilmiş dersler çizelgeden kaldırılacak.\nEmin misiniz?\n\n(Tüm okulu sıfırlamak için Genel Görünüm'e geçebilirsiniz)"
-            target_entity = entity
-            if view == "Sınıf Görünümü": target_type = "class_name"
-            elif view == "Öğretmen Görünümü": target_type = "teacher_name"
-            else: target_type = "room_name"
-
-        r = QMessageBox.question(self, "Çizelgeyi Sıfırla / Temizle", msg, QMessageBox.Yes | QMessageBox.No)
-        
+        r = QMessageBox.question(
+            self, "Çizelgeyi Sıfırla / Temizle",
+            "Tüm sınıflar ve öğretmenler için yerleştirilmiş derslerin TAMAMI çizelgeden kaldırılacak.\nEmin misiniz?",
+            QMessageBox.Yes | QMessageBox.No
+        )
         if r == QMessageBox.Yes:
-            if target_entity is None:
-                self.data_store["grid_placements"] = []
-                self.data_store["auto_schedule_results"] = []
-                self.data_store["yerlesim"] = {}
-                msg_toast = "🧹 Tüm çizelge dersleri başarıyla sıfırlandı."
-            else:
-                from auto_scheduler import normalize_class_name
-                new_placements = []
-                for p in self.data_store.get("grid_placements", []):
-                    # Check if this placement belongs to the target entity
-                    p_val = p.get(target_type, "")
-                    if target_type == "class_name":
-                        if normalize_class_name(p_val) == normalize_class_name(target_entity):
-                            continue # Skip this one (remove it)
-                    else:
-                        if p_val == target_entity:
-                            continue # Skip this one (remove it)
-                    new_placements.append(p)
-                
-                self.data_store["grid_placements"] = new_placements
-                msg_toast = f"🧹 {entity} çizelgesi başarıyla sıfırlandı."
-
+            self._push_undo_state()
+            self.data_store["grid_placements"] = []
+            self.data_store["auto_schedule_results"] = []
+            self.data_store["yerlesim"] = {}
             if hasattr(self, "_grid"):
                 self._grid.clear_grid()
-                self._grid._placed_lessons = {}
             self.save_db(sync_from_grid=False)
-            self._restore_grid_placements()
+            self._refresh_grid()
             self._refresh_tree()
-            self.statusBar().showMessage(msg_toast)
+            self.statusBar().showMessage("🧹 Tüm çizelge dersleri başarıyla sıfırlandı.")
 
     def _open_extracted(self, dialog_id):
         from dialogs.extracted_dialog import open_extracted_dialog

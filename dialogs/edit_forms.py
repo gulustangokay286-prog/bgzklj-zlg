@@ -1402,19 +1402,21 @@ class DersEditDialog(QDialog):
 
 
 class MultiClassAssignDialog(QDialog):
-    """Belirli bir öğretmen ve ders için çoklu sınıf atama penceresi"""
-    def __init__(self, teacher_name, subject_name, all_classes, selected_classes, parent=None):
+    """Modern Checkbox ile Çoklu Sınıf Seçim Penceresi & Birleşik Sınıf Desteği"""
+    def __init__(self, teacher_name="", subject_name="", all_classes=None, selected_classes=None, is_combined=False, parent=None):
         super().__init__(parent)
         self.setWindowTitle(f"Sınıf Seçimi — {teacher_name}")
-        self.resize(380, 440)
+        self.resize(360, 480)
+        all_classes = all_classes or []
+        selected_classes = selected_classes or []
+        
         self.setStyleSheet("""
-            QDialog { background-color: #F8FAFC; font-family: system-ui, -apple-system, sans-serif; }
-            QLabel { color: #1E293B; font-weight: bold; font-size: 13px; }
-            QListWidget { background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 6px; font-size: 13px; padding: 4px; }
-            QListWidget::item { padding: 8px; border-bottom: 1px solid #F1F5F9; }
+            QDialog { background: #FFFFFF; }
+            QListWidget { border: 1px solid #CBD5E1; border-radius: 6px; font-size: 13px; }
+            QListWidget::item { padding: 8px 12px; }
             QListWidget::indicator {
-                width: 17px;
-                height: 17px;
+                width: 18px;
+                height: 18px;
                 border: 2px solid #64748B;
                 border-radius: 4px;
                 background-color: #FFFFFF;
@@ -1455,6 +1457,12 @@ class MultiClassAssignDialog(QDialog):
         btn_all.clicked.connect(toggle_all)
         lay.addWidget(btn_all)
         
+        # 🔗 Birleşik Sınıf Seçeneği (Ortak Ders)
+        self.chk_combine = QCheckBox("🔗 Seçili Sınıfları Birleştir (Ortak/Birleşik Ders Yap)")
+        self.chk_combine.setChecked(is_combined)
+        self.chk_combine.setStyleSheet("QCheckBox { font-weight: bold; color: #1E40AF; font-size: 12px; margin-top: 4px; }")
+        lay.addWidget(self.chk_combine)
+        
         btns = QHBoxLayout()
         btn_cancel = QPushButton("İptal")
         btn_cancel.setStyleSheet("background: #FFFFFF; border: 1px solid #CBD5E1; color: #475569;")
@@ -1468,6 +1476,9 @@ class MultiClassAssignDialog(QDialog):
         
     def get_selected_classes(self):
         return [self.list_widget.item(i).text() for i in range(self.list_widget.count()) if self.list_widget.item(i).checkState() == Qt.Checked]
+
+    def get_is_combined(self):
+        return self.chk_combine.isChecked()
 
 
 class SubjectTeacherAssignmentDialog(QDialog):
@@ -1666,14 +1677,20 @@ class SubjectTeacherAssignmentDialog(QDialog):
                 self.table.setItem(row, 1, it1)
             
             # 2. Classes Label / Badges
-            cls_str = ", ".join(cfg["classes"]) if (cfg["checked"] and cfg["classes"]) else "—"
+            if cfg.get("is_combined") and len(cfg.get("classes", [])) > 1:
+                cls_str = f"( {' & '.join(cfg['classes'])} sınıfı birleşiktir )"
+            else:
+                cls_str = ", ".join(cfg["classes"]) if (cfg["checked"] and cfg["classes"]) else "—"
             item_cls = QTableWidgetItem(cls_str)
             item_cls.setTextAlignment(Qt.AlignCenter)
             item_cls.setFlags(item_cls.flags() ^ Qt.ItemIsEditable)
             if not cfg["checked"]:
                 item_cls.setForeground(QBrush(QColor("#CBD5E1")))
             else:
-                item_cls.setForeground(QBrush(QColor("#0284C7")))
+                if cfg.get("is_combined") and len(cfg.get("classes", [])) > 1:
+                    item_cls.setForeground(QBrush(QColor("#16A34A"))) # Green for combined
+                else:
+                    item_cls.setForeground(QBrush(QColor("#0284C7")))
                 item_cls.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
             self.table.setItem(row, 2, item_cls)
             
@@ -1788,14 +1805,22 @@ class SubjectTeacherAssignmentDialog(QDialog):
             subject_name=self.subject_name,
             all_classes=self.all_classes,
             selected_classes=cfg["classes"],
+            is_combined=cfg.get("is_combined", False),
             parent=self
         )
         if d.exec():
             new_classes = d.get_selected_classes()
+            is_comb = d.get_is_combined()
             cfg["classes"] = new_classes
+            cfg["is_combined"] = is_comb
             item_cls = self.table.item(row_idx, 2)
             if item_cls:
-                cls_str = ", ".join(new_classes) if new_classes else "—"
+                if is_comb and len(new_classes) > 1:
+                    cls_str = f"( {' & '.join(new_classes)} sınıfı birleşiktir )"
+                    item_cls.setForeground(QBrush(QColor("#16A34A")))
+                else:
+                    cls_str = ", ".join(new_classes) if new_classes else "—"
+                    item_cls.setForeground(QBrush(QColor("#0284C7")))
                 item_cls.setText(cls_str)
 
     def _filter_table(self, text):
@@ -1894,6 +1919,8 @@ class SubjectTeacherAssignmentDialog(QDialog):
                 total_dur = sum(parts) if parts else (int(type_str) if type_str.isdigit() else 2)
                 
                 target_classes = cfg["classes"]
+                is_combined = bool(cfg.get("is_combined", False)) and len(target_classes) > 1
+                
                 for c_name in target_classes:
                     if c_name:
                         if not any(
@@ -1908,7 +1935,9 @@ class SubjectTeacherAssignmentDialog(QDialog):
                                 "class": c_name.strip(),
                                 "duration": total_dur,
                                 "type": type_str,
-                                "color": get_subject_color(self.subject_name)
+                                "color": get_subject_color(self.subject_name),
+                                "is_combined": is_combined,
+                                "combined_classes": target_classes if is_combined else []
                             })
                         
         self.data_store["atamalar"] = clean_atamalar
