@@ -97,9 +97,12 @@ def test_auto_short_code_updates():
     print("Testing auto shortcode updates...")
     from dialogs.edit_forms import _auto_short_code, OgretmenEditDialog, SinifEditDialog, DersEditDialog
     
-    assert _auto_short_code("Biyoloji") == "BİYO"
+    assert _auto_short_code("Biyoloji") == "BİYOLOJİ"
     assert _auto_short_code("Rehberlik") == "REHBERLİK"
-    assert _auto_short_code("Matematik 10") == "MAT 10"
+    assert _auto_short_code("Matematik 10") == "MATEMATİK 10"
+    assert _auto_short_code("Beden") == "BEDEN"
+    assert _auto_short_code("Tarih") == "TARİH"
+    assert _auto_short_code("Türkçe") == "TÜRKÇE"
     
     # Test edit dialogs updating shortcodes even with existing data
     ds = {"siniflar": [{"ad": "9A"}], "ogretmenler": [{"ad": "Ahmet Yılmaz", "kisa": "A. YILMAZ"}]}
@@ -112,9 +115,9 @@ def test_auto_short_code_updates():
     c_dlg.w_ad.setText("11 B")
     assert c_dlg.w_kisa.text() == "11B", f"Expected 11B, got {c_dlg.w_kisa.text()}"
     
-    d_dlg = DersEditDialog(existing_data={"ad": "Fizik", "kisa": "FİZ"})
+    d_dlg = DersEditDialog(existing_data={"ad": "Fizik", "kisa": "FİZİK"})
     d_dlg.txt_ad.setText("Biyoloji")
-    assert d_dlg.txt_kisa.text() == "BİYO", f"Expected BİYO, got {d_dlg.txt_kisa.text()}"
+    assert d_dlg.txt_kisa.text() == "BİYOLOJİ", f"Expected BİYOLOJİ, got {d_dlg.txt_kisa.text()}"
     
     print("✅ Auto shortcode updates on GÜNCELLE verified!")
 

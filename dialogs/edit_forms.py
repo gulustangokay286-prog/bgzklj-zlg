@@ -1089,47 +1089,78 @@ def _auto_short_code(text: str) -> str:
         
     upper_letters = tr_upper(letters_str)
     
-    # Special Overrides
+    # Special Overrides with Full Turkish Subject Names
     overrides = {
-        "BİYOLOJİ": "BİYO",
-        "BİYO": "BİYO",
+        "BEDEN": "BEDEN",
+        "BEDEN EĞİTİMİ": "BEDEN EĞİTİMİ",
+        "BEDEN EĞİTİMİ VE SPOR": "BEDEN EĞİTİMİ",
+        "BED": "BEDEN",
+        "TARİH": "TARİH",
+        "TAR": "TARİH",
+        "İNKILAP": "İNKILAP TARİHİ",
+        "İNKILAP TARİHİ": "İNKILAP TARİHİ",
+        "T.C. İNKILAP TARİHİ": "İNKILAP TARİHİ",
         "REHBERLİK": "REHBERLİK",
+        "REHBERLİK VE YÖNLENDİRME": "REHBERLİK",
         "REH": "REHBERLİK",
-        "MATEMATİK": "MAT",
-        "GEOMETRİ": "GEO",
-        "EDEBİYAT": "EDB",
-        "TÜRKÇE": "TÜRK",
-        "TÜRK DİLİ VE EDEBİYATI": "TDE",
-        "FİZİK": "FİZ",
-        "KİMYA": "KİM",
-        "COĞRAFYA": "COĞ",
-        "TARİH": "TAR",
-        "İNGİLİZCE": "İNG",
-        "ALMANCA": "ALM",
-        "FRANSIZCA": "FRA",
-        "FELSEFE": "FEL",
-        "DİN": "DİN",
-        "DİN KÜLTÜRÜ": "DİN",
-        "MÜZİK": "MÜZ",
-        "BEDEN": "BED",
-        "BEDEN EĞİTİMİ": "BED",
-        "GÖRSEL SANATLAR": "GÖRS",
-        "PARAGRAF": "PAR",
-        "PROBLEM": "PROB"
+        "TÜRKÇE": "TÜRKÇE",
+        "TÜRK": "TÜRKÇE",
+        "MÜZİK": "MÜZİK",
+        "MÜZ": "MÜZİK",
+        "FELSEFE": "FELSEFE",
+        "FEL": "FELSEFE",
+        "DİN": "DİN KÜLTÜRÜ",
+        "DİN KÜLTÜRÜ": "DİN KÜLTÜRÜ",
+        "DİN KÜLTÜRÜ VE AHLAK BİLGİSİ": "DİN KÜLTÜRÜ",
+        "GÖRSEL SANATLAR": "GÖRSEL SANATLAR",
+        "GÖRSEL": "GÖRSEL SANATLAR",
+        "GÖRS": "GÖRSEL SANATLAR",
+        "RESİM": "GÖRSEL SANATLAR",
+        "BİYOLOJİ": "BİYOLOJİ",
+        "BİYO": "BİYOLOJİ",
+        "FİZİK": "FİZİK",
+        "FİZ": "FİZİK",
+        "KİMYA": "KİMYA",
+        "KİM": "KİMYA",
+        "COĞRAFYA": "COĞRAFYA",
+        "COĞ": "COĞRAFYA",
+        "GEOMETRİ": "GEOMETRİ",
+        "GEO": "GEOMETRİ",
+        "EDEBİYAT": "EDEBİYAT",
+        "EDB": "EDEBİYAT",
+        "TÜRK DİLİ VE EDEBİYATI": "TÜRK DİLİ VE EDEBİYATI",
+        "TDE": "TÜRK DİLİ VE EDEBİYATI",
+        "MATEMATİK": "MATEMATİK",
+        "MAT": "MATEMATİK",
+        "İNGİLİZCE": "İNGİLİZCE",
+        "İNG": "İNGİLİZCE",
+        "ALMANCA": "ALMANCA",
+        "ALM": "ALMANCA",
+        "FRANSIZCA": "FRANSIZCA",
+        "FRA": "FRANSIZCA",
+        "PARAGRAF": "PARAGRAF",
+        "PAR": "PARAGRAF",
+        "PROBLEM": "PROBLEM",
+        "PROB": "PROBLEM",
+        "BİLİŞİM": "BİLİŞİM",
+        "KODLAMA": "KODLAMA",
+        "YAZILIM": "YAZILIM",
+        "ROBOTİK": "ROBOTİK",
+        "SAĞLIK": "SAĞLIK BİLGİSİ",
+        "SAĞLIK BİLGİSİ": "SAĞLIK BİLGİSİ",
+        "TRAFİK": "TRAFİK",
+        "ASTRONOMİ": "ASTRONOMİ",
+        "MANTIK": "MANTIK",
+        "SOSYOLOJİ": "SOSYOLOJİ",
+        "PSİKOLOJİ": "PSİKOLOJİ",
     }
     
-    # Word-based logic if no override
-    base = ""
     if upper_letters in overrides:
         base = overrides[upper_letters]
+    elif len(upper_letters) <= 20:
+        base = upper_letters
     else:
-        words = upper_letters.split()
-        if not words:
-            base = clean[:3].upper()
-        elif len(words) >= 2:
-            base = words[0][:3] + words[1][:1]
-        else:
-            base = words[0][:4] if len(words[0]) >= 4 else words[0]
+        base = upper_letters
     
     # Numbers must ALWAYS stand separate by a space
     sc = f"{base} {nums}" if nums else base

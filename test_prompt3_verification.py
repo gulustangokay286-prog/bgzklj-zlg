@@ -14,13 +14,16 @@ def run_tests():
     if not app:
         app = QApplication(sys.argv)
         
-    print("=== TEST 1: Short code generation (BİYO, REHBERLİK, Space before numbers) ===")
+    print("=== TEST 1: Short code generation (Beden, Tarih, Rehberlik, Türkçe, Biyoloji) ===")
     from dialogs.edit_forms import _auto_short_code
-    assert _auto_short_code("Biyoloji") == "BİYO", f"Expected BİYO got {_auto_short_code('Biyoloji')}"
+    assert _auto_short_code("Biyoloji") == "BİYOLOJİ", f"Expected BİYOLOJİ got {_auto_short_code('Biyoloji')}"
     assert _auto_short_code("Rehberlik") == "REHBERLİK", f"Expected REHBERLİK got {_auto_short_code('Rehberlik')}"
-    assert _auto_short_code("Matematik 1") == "MAT 1", f"Expected MAT 1 got {_auto_short_code('Matematik 1')}"
-    assert _auto_short_code("Fizik2") == "FİZ 2", f"Expected FİZ 2 got {_auto_short_code('Fizik2')}"
-    assert _auto_short_code("Kimya") == "KİM", f"Expected KİM got {_auto_short_code('Kimya')}"
+    assert _auto_short_code("Matematik 1") == "MATEMATİK 1", f"Expected MATEMATİK 1 got {_auto_short_code('Matematik 1')}"
+    assert _auto_short_code("Fizik2") == "FİZİK 2", f"Expected FİZİK 2 got {_auto_short_code('Fizik2')}"
+    assert _auto_short_code("Kimya") == "KİMYA", f"Expected KİMYA got {_auto_short_code('Kimya')}"
+    assert _auto_short_code("Beden") == "BEDEN", f"Expected BEDEN got {_auto_short_code('Beden')}"
+    assert _auto_short_code("Tarih") == "TARİH", f"Expected TARİH got {_auto_short_code('Tarih')}"
+    assert _auto_short_code("Türkçe") == "TÜRKÇE", f"Expected TÜRKÇE got {_auto_short_code('Türkçe')}"
     print("✅ TEST 1 PASSED!")
 
     print("=== TEST 2: SchoolInfoDialog and settings persistence ===")
