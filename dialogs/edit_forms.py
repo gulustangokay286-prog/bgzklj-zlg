@@ -1366,7 +1366,7 @@ class DersEditDialog(QDialog):
         QMessageBox.information(self, "Derslik Ayarı", "Derslik seçimleri bu dersin tüm tanımlı kartlarına uygulandı.")
 
     def _auto_short_code(self, text):
-        if not self.existing_data.get("kisa") and text:
+        if text:
             self.txt_kisa.setText(_auto_short_code(text))
 
     def _open_custom_fields(self):
@@ -2296,7 +2296,7 @@ class SinifEditDialog(BaseEditForm):
             self.color_box.setStyleSheet(f"background: {self._color}; border: 1px solid #CCC; border-radius: 4px;")
             
     def _auto_short_code_class(self, text):
-        if not self.existing_data.get("kisa") and text:
+        if text:
             self.w_kisa.setText(text.strip().replace(" ", "").upper())
 
     def _open_custom_fields(self):
@@ -2564,7 +2564,7 @@ class OgretmenEditDialog(BaseEditForm):
         dlg.exec()
 
     def _auto_short_code_teacher(self, text):
-        if not self.existing_data.get("kisa") and text:
+        if text:
             clean = text.strip()
             parts = clean.split()
             if len(parts) >= 2:

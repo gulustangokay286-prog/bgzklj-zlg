@@ -1,5 +1,12 @@
 import sys
 import os
+
+if sys.stdout.encoding != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 import unittest
 from PySide6.QtWidgets import QApplication
 

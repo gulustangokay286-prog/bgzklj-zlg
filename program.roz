@@ -1,44 +1,55 @@
 {
-    "ogretmenler": [
-        {
-            "ad": "Sultan Yılmaz"
-        }
-    ],
     "siniflar": [
         {
-            "ad": "9A"
+            "ad": "9/A",
+            "kisa": "9A"
         },
         {
-            "ad": "10A"
-        },
-        {
-            "ad": "11A"
+            "ad": "12/A",
+            "kisa": "12A"
         }
     ],
     "dersler": [
         {
-            "ad": "Matematik 9"
+            "ad": "Beden",
+            "kisa": "BED"
+        }
+    ],
+    "ogretmenler": [
+        {
+            "ad": "Ceylan",
+            "kisa": "C."
         },
         {
-            "ad": "Matematik 10"
+            "ad": "Erman Gürbüz",
+            "kisa": "E."
         }
     ],
     "atamalar": [
         {
-            "teacher": "Sultan Yılmaz",
-            "subject": "Matematik 9",
-            "class": "9A",
-            "duration": 4,
-            "type": "2+2",
-            "color": "#F4511E"
-        },
-        {
-            "teacher": "Sultan Yılmaz",
-            "subject": "Matematik 9",
-            "class": "11A",
-            "duration": 3,
-            "type": "2+1",
-            "color": "#F4511E"
+            "teacher": "Erman Gürbüz",
+            "subject": "Beden",
+            "class": "12/A",
+            "duration": 2,
+            "type": "2"
         }
-    ]
+    ],
+    "grid_placements": [
+        {
+            "teacher_name": "Erman Gürbüz",
+            "subject_name": "Beden",
+            "class_name": "12/A",
+            "day": 1,
+            "period": 0,
+            "duration": 2
+        }
+    ],
+    "yerlesim": {
+        "1,0": {
+            "teacher_name": "Erman Gürbüz",
+            "subject_name": "Beden",
+            "class_name": "12/A",
+            "duration": 2
+        }
+    }
 }
