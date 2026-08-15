@@ -711,8 +711,7 @@ class LessonAssignmentDialog(QDialog):
         main_layout.addLayout(bot_lay)
 
     def _get_all_subjects(self):
-        subjs = sorted(list({d.get("ad", "").strip() for d in self.data_store.get("dersler", []) if d.get("ad", "").strip()}))
-        return ["Lütfen Ders Seçiniz"] + subjs
+        return sorted(list({d.get("ad", "").strip() for d in self.data_store.get("dersler", []) if d.get("ad", "").strip()}))
 
     def _get_all_classes(self):
         if self.data_store:
@@ -750,7 +749,10 @@ class LessonAssignmentDialog(QDialog):
             if idx >= 0: cb_subject.setCurrentIndex(idx)
             else: cb_subject.setCurrentText(subject_name)
         else:
-            cb_subject.setCurrentIndex(0) # "Lütfen Ders Seçiniz"
+            cb_subject.setCurrentIndex(-1)
+            if cb_subject.lineEdit():
+                cb_subject.lineEdit().clear()
+                cb_subject.lineEdit().setPlaceholderText("🔍 Ders Ara veya Seç...")
             
         top_h.addWidget(cb_subject, 2)
         
@@ -798,34 +800,34 @@ class LessonAssignmentDialog(QDialog):
         btn_classes.clicked.connect(lambda: self._edit_classes_for_row(row_data))
         btn_del.clicked.connect(lambda: self._remove_subject_row(row_data))
         
-        cb_subject.currentTextChanged.connect(lambda text: self._on_subject_changed(row_data, text))
-        cb_tip.currentTextChanged.connect(lambda _: self._on_tip_changed(row_data))
+        cb_subject.editTextChanged.connect(lambda t: self._on_subject_changed(row_data, t))
+        cb_tip.currentTextChanged.connect(lambda t: self._on_tip_changed(row_data))
         
         self._update_row_badge(row_data)
-        self._update_classes_summary()
         self._update_ozet()
 
     def _update_row_badge(self, row_data):
-        classes = row_data.get("classes", [])
-        if not classes:
+        assigned_classes = row_data["classes"]
+        configs = row_data.get("class_configs", {})
+        default_dist = row_data["cb_tip"].currentText().strip() or "2"
+        
+        if not assigned_classes:
             row_data["lbl_badge"].setText("🎓 Atanan Sınıflar: Tüm Sınıflar / Belirtilmedi")
             return
             
-        parts = []
-        default_typ = row_data["cb_tip"].currentText().strip() or "2"
-        for c in classes:
-            cfg = row_data.get("class_configs", {}).get(c, {})
-            t_str = cfg.get("type", default_typ)
-            dur = cfg.get("duration")
-            if dur is None:
-                if "+" in t_str:
-                    dur_parts = [int(p.strip()) for p in t_str.split("+") if p.strip().isdigit()]
-                    dur = sum(dur_parts) if dur_parts else 1
-                else:
-                    dur = int(t_str) if t_str.isdigit() else 1
-            parts.append(f"{c} ({dur}s: {t_str})")
+        badge_parts = []
+        for c in assigned_classes:
+            cfg = configs.get(c, {})
+            c_type = cfg.get("type", default_dist)
+            if "+" in c_type:
+                dur = sum(int(x) for x in c_type.split("+") if x.strip().isdigit())
+            elif c_type.isdigit():
+                dur = int(c_type)
+            else:
+                dur = cfg.get("duration", 2)
+            badge_parts.append(f"{c} ({dur}s: {c_type})")
             
-        row_data["lbl_badge"].setText("🎓 Atanan Sınıflar: " + ", ".join(parts))
+        row_data["lbl_badge"].setText("🎓 Atanan Sınıflar: " + ", ".join(badge_parts))
 
     def _on_tip_changed(self, row_data):
         self._update_row_badge(row_data)
@@ -833,7 +835,7 @@ class LessonAssignmentDialog(QDialog):
 
     def _on_subject_changed(self, row_data, text):
         clean = text.strip()
-        if clean and clean != "Lütfen Ders Seçiniz":
+        if clean:
             # If this is the last row, automatically append a new empty row below it!
             if self.subject_rows and self.subject_rows[-1] == row_data:
                 self._add_subject_row("", "2", "2", [], {})
@@ -861,8 +863,10 @@ class LessonAssignmentDialog(QDialog):
 
     def _remove_subject_row(self, row_data):
         if len(self.subject_rows) <= 1:
-            # Don't delete last empty row, just clear it
-            row_data["cb_subject"].setCurrentIndex(0)
+            row_data["cb_subject"].setCurrentIndex(-1)
+            if row_data["cb_subject"].lineEdit():
+                row_data["cb_subject"].lineEdit().clear()
+                row_data["cb_subject"].lineEdit().setPlaceholderText("🔍 Ders Ara veya Seç...")
             row_data["classes"] = []
             row_data["class_configs"] = {}
             self._update_row_badge(row_data)
@@ -903,34 +907,36 @@ class LessonAssignmentDialog(QDialog):
     def _update_ozet(self, *_):
         t = self.cb_ogretmen.currentText() or "-"
         
-        valid_rows = [r for r in self.subject_rows if r["cb_subject"].currentText().strip() and r["cb_subject"].currentText().strip() != "Lütfen Ders Seçiniz"]
+        valid_rows = [r for r in self.subject_rows if r["cb_subject"].currentText().strip()]
         ders_count = len(valid_rows)
         
         all_cls = set()
         total_hours = 0
         for r in valid_rows:
-            assigned_classes = r["classes"] or []
-            if not assigned_classes:
-                type_val = r["cb_tip"].currentText().strip()
-                if "+" in type_val:
-                    parts = [int(p.strip()) for p in type_val.split("+") if p.strip().isdigit()]
-                    dur = sum(parts) if parts else 1
+            cfg_map = r.get("class_configs", {})
+            assigned_c = r["classes"] or (self.combined_classes if self.combined_classes else ["9A"])
+            def_dist = r["cb_tip"].currentText().strip() or "2"
+            
+            for c in assigned_c:
+                all_cls.add(c)
+                cfg = cfg_map.get(c, {})
+                c_type = cfg.get("type", def_dist)
+                if "+" in c_type:
+                    parts = [int(p.strip()) for p in c_type.split("+") if p.strip().isdigit()]
+                    total_hours += sum(parts) if parts else 2
+                elif c_type.isdigit():
+                    total_hours += int(c_type)
                 else:
-                    dur = int(type_val) if type_val.isdigit() else 1
-                total_hours += dur
-            else:
-                for c in assigned_classes:
-                    all_cls.add(c)
-                    cfg = r.get("class_configs", {}).get(c, {})
-                    type_val = cfg.get("type", r["cb_tip"].currentText().strip())
-                    if "+" in type_val:
-                        parts = [int(p.strip()) for p in type_val.split("+") if p.strip().isdigit()]
-                        dur = sum(parts) if parts else 1
-                    else:
-                        dur = int(type_val) if type_val.isdigit() else 1
-                    total_hours += dur
-                
-        self.lbl_ozet.setText(f"🎯 Otomatik Eşleşme: {t} ➔ {ders_count} Farklı Ders, {len(all_cls)} Sınıf, Toplam {total_hours} Saat/Hafta")
+                    total_hours += int(cfg.get("duration", 2))
+                    
+        cls_count = len(all_cls)
+        
+        self.lbl_ozet.setText(
+            f"<b>Öğretmen:</b> {t} | "
+            f"<b>Toplam Ders Sayısı:</b> {ders_count} | "
+            f"<b>Atanan Sınıf Sayısı:</b> {cls_count} | "
+            f"<b>Toplam Haftalık Saat:</b> {total_hours} Saat"
+        )
 
     def _load_teacher_initial_data(self):
         if not self.data_store:
@@ -950,33 +956,40 @@ class LessonAssignmentDialog(QDialog):
             self.cb_ogretmen.setCurrentIndex(0)
         self.cb_ogretmen.blockSignals(False)
         
-        self._populate_teacher_assignments(self.cb_ogretmen.currentText())
+        self._populate_from_teacher()
 
     def _on_teacher_changed(self, teacher_name):
-        self._populate_teacher_assignments(teacher_name)
+        self._populate_from_teacher()
 
-    def _populate_teacher_assignments(self, teacher_name):
-        # Clear existing subject rows
-        for r in list(self.subject_rows):
-            self.subjects_container.removeWidget(r["widget"])
-            r["widget"].deleteLater()
-        self.subject_rows = []
-        self.combined_classes = []
-        
+    def _populate_from_teacher(self):
+        teacher_name = self.cb_ogretmen.currentText().strip()
+        if not teacher_name or not self.data_store:
+            return
+            
         atamalar = self.data_store.get("atamalar", [])
         my_atamalar = [a for a in atamalar if format_tr_name(a.get("teacher", "")) == format_tr_name(teacher_name)]
         
-        # Group assignments by subject and type
+        # Clear existing dynamic rows
+        for r in list(self.subject_rows):
+            self.subjects_container.removeWidget(r["widget"])
+            r["widget"].deleteLater()
+        self.subject_rows.clear()
+        
+        # Group by subject
         subj_map = {}
         for a in my_atamalar:
-            s_name = a.get("subject", "")
+            s_name = a.get("subject", "").strip()
             if not s_name: continue
-            typ = a.get("type", str(a.get("duration", 2)))
+            cls_name = a.get("class", "").strip()
             dur = a.get("duration", 2)
-            cls_name = a.get("class", "")
-            
+            typ = a.get("type", str(dur))
             if s_name not in subj_map:
-                subj_map[s_name] = {"type": typ, "classes": [], "class_configs": {}}
+                subj_map[s_name] = {
+                    "classes": [],
+                    "duration": dur,
+                    "type": typ,
+                    "class_configs": {}
+                }
             if cls_name:
                 if cls_name not in subj_map[s_name]["classes"]:
                     subj_map[s_name]["classes"].append(cls_name)
@@ -989,7 +1002,7 @@ class LessonAssignmentDialog(QDialog):
             self._add_subject_row("", "2", "2", [], {})
             
         # Add trailing empty row for frictionless addition
-        if self.subject_rows and self.subject_rows[-1]["cb_subject"].currentText().strip() not in ["", "Lütfen Ders Seçiniz"]:
+        if self.subject_rows and self.subject_rows[-1]["cb_subject"].currentText().strip():
             self._add_subject_row("", "2", "2", [], {})
             
         self._update_classes_summary()
@@ -1041,7 +1054,7 @@ class LessonAssignmentDialog(QDialog):
         assignments = []
         for r in self.subject_rows:
             subj = r["cb_subject"].currentText().strip()
-            if not subj or subj == "Lütfen Ders Seçiniz":
+            if not subj:
                 continue
                 
             default_type_val = r["cb_tip"].currentText().strip()
