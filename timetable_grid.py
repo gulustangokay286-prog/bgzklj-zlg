@@ -794,19 +794,16 @@ class TimetableGrid(QWidget):
         top.setContentsMargins(8, 4, 8, 4)
         top.setSpacing(8)
 
-        view_lbl = QLabel("Görünüm:", self)
-        view_lbl.setFont(QFont("Segoe UI", 9))
-        top.addWidget(view_lbl)
-
-        self.view_combo = QComboBox(self)
-        self.view_combo.addItems(["Sınıf Görünümü", "Öğretmen Görünümü", "Derslik Görünümü", "Öğrenci Görünümü"])
-        self.view_combo.setFixedWidth(180)
-        top.addWidget(self.view_combo)
-
-        self.entity_combo = QComboBox(self)
-        self.entity_combo.setFixedWidth(160)
-        top.addWidget(self.entity_combo)
-
+        self.toggle_panel_btn = QPushButton("Sol Paneli Aç/Kapat", self)
+        self.toggle_panel_btn.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        self.toggle_panel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3B82F6; color: white; border-radius: 4px; padding: 4px 12px;
+            }
+            QPushButton:hover { background-color: #2563EB; }
+        """)
+        top.addWidget(self.toggle_panel_btn)
+        
         top.addStretch(1)
         layout.addLayout(top)
 

@@ -729,9 +729,11 @@ class MainWindow(QMainWindow):
         splitter.addWidget(right)
         splitter.setSizes([220, 1060])
 
-        # Wire up grid combos to refresh the view
-        self._grid.view_combo.currentTextChanged.connect(self._on_view_combo_changed)
-        self._grid.entity_combo.currentTextChanged.connect(self._on_entity_combo_changed)
+        # Wire up grid toggle button
+        self._grid.toggle_panel_btn.clicked.connect(lambda: left.setVisible(not left.isVisible()))
+        # Set initial left panel hidden (kapalı başlasın)
+        left.setVisible(False)
+        splitter.setSizes([0, 1060])
         
         return splitter
         
@@ -855,96 +857,38 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "_grid") or not hasattr(self._grid, "get_placed_lessons"):
             return
             
-        view_type = view_type or getattr(self, "_active_view_type", None)
-        entity_name = entity_name or getattr(self, "_active_entity_name", None)
-        
-        if not view_type or not entity_name:
-            if hasattr(self._grid, "view_combo") and hasattr(self._grid, "entity_combo"):
-                entity_name = self._grid.entity_combo.currentText()
-                v_text = self._grid.view_combo.currentText()
-                if "Sınıf" in v_text: view_type = "class"
-                elif "Öğretmen" in v_text: view_type = "teacher"
-                elif "Derslik" in v_text: view_type = "room"
-                
-        if not view_type or not entity_name:
-            return
+        settings = self.data_store.get("settings", {})
+        periods = int(settings.get("periods", 8))
+        classes = self.data_store.get("siniflar", [])
+        class_names = [c.get("ad", "") for c in classes if c.get("ad")]
+        if not class_names:
+            class_names = ["Sınıf 1"]
             
-        from auto_scheduler import normalize_class_name
-        from dialogs.edit_forms import format_tr_name
-        
-        global_placements = self.data_store.setdefault("grid_placements", [])
-        new_global = []
-        
-        # 1. Retain everything except the current entity's lessons
-        for p in global_placements:
-            if view_type == "class" and normalize_class_name(p.get("class_name", "")) == normalize_class_name(entity_name):
-                continue
-            if view_type == "teacher" and format_tr_name(p.get("teacher_name", "")) == format_tr_name(entity_name):
-                continue
-            new_global.append(p)
-            
-        # 2. Add back the current entity's lessons from the active grid
         placed = self._grid.get_placed_lessons()
+        new_global = []
         for (r, c), info in placed.items():
             p = dict(info)
-            p["period"] = r
-            p["day"] = c
-            p["row"] = r
-            p["col"] = c
-            if view_type == "class":
-                p["class_name"] = entity_name
-                p["class"] = entity_name
-            elif view_type == "teacher":
-                p["teacher_name"] = entity_name
-                p["teacher"] = entity_name
-            new_global.append(p)
-            
+            # aSc multi-sheet görünümünde row = Sınıf indexi, c = Gün * period + saat
+            if r < len(class_names):
+                cls_name = class_names[r]
+                day = c // periods
+                period = c % periods
+                
+                p["class_name"] = cls_name
+                p["class"] = cls_name
+                p["day"] = day
+                p["col"] = day
+                p["period"] = period
+                p["row"] = period
+                new_global.append(p)
+                
         self.data_store["grid_placements"] = new_global
 
     def _restore_grid_placements(self, view_type=None, entity_name=None):
-        if hasattr(self, "_grid"):
-            if not view_type and hasattr(self._grid, "view_combo"):
-                v_text = self._grid.view_combo.currentText()
-                if "Sınıf" in v_text: view_type = "class"
-                elif "Öğretmen" in v_text: view_type = "teacher"
-                elif "Derslik" in v_text: view_type = "room"
-            if not entity_name and hasattr(self._grid, "entity_combo"):
-                entity_name = self._grid.entity_combo.currentText()
-                
-            settings = self.data_store.get("settings", {})
-            periods = int(settings.get("periods", 8))
-            days_count = int(settings.get("days_count", 5))
-            from timetable_grid import DAYS
-            current_days = DAYS[:days_count]
-            self._grid.set_mode_single_entity(periods, current_days)
+        # We handle restoring inside _refresh_grid directly now
+        pass
 
-            grid_data = self.data_store.get("grid_placements", [])
-            self._grid.clear_grid()
-            from auto_scheduler import normalize_class_name
-            from dialogs.edit_forms import format_tr_name
-            for info in grid_data:
-                t_info = info.get("teacher_name", "").strip()
-                c_info = info.get("class_name", "").strip()
-                
-                # Filter logic with case/turkish character and whitespace tolerance
-                if view_type == "teacher" and entity_name:
-                    if format_tr_name(t_info) != format_tr_name(entity_name):
-                        continue
-                if view_type == "class" and entity_name:
-                    if normalize_class_name(c_info) != normalize_class_name(entity_name):
-                        continue
-                if view_type == "room" and entity_name:
-                    continue
-                    
-                self._grid.set_cell(
-                    info.get("period", 0), 
-                    info.get("day", 0),
-                    info.get("subject_name", "Ders"),
-                    info.get("color", "#1E88E5"),
-                    info.get("teacher_name", ""),
-                    info.get("duration", 1),
-                    class_name=info.get("class_name", "")
-                )
+
 
     def save_db(self, path=None, sync_from_grid=True):
         if getattr(self, "_is_loading", False):

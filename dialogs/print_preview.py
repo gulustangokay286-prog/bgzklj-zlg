@@ -1016,6 +1016,10 @@ class TimetablePrintPreview(QDialog):
                 display_name = target_name
                 if is_teacher and item.get("kisa"):
                     display_name = item.get("kisa")
+                elif not is_teacher:
+                    # Remove trailing (ea) etc for classes
+                    display_name = target_name.split("(")[0].strip()
+                    
                 painter.drawText(QRectF(margin_x + 5, cur_y, name_col_w - 10, row_h), Qt.AlignCenter, display_name)
                 
                 # Fetch Placements
@@ -1035,7 +1039,7 @@ class TimetablePrintPreview(QDialog):
                             
                             # Fotoğrafta çarşaf listede ders kısa kodu yazıyor: F, MAT vs. Öğretmen formatında sınıf kodu yazıyor.
                             if is_teacher:
-                                cell_text = lesson.get("teacher_name", "") # Sınıf adı "teacher_name" argümanından geliyor (is_teacher olunca swap ediliyor)
+                                cell_text = lesson.get("teacher_name", "").split("(")[0].strip() # Sınıf adı
                             else:
                                 cell_text = get_subject_badge(sname, self.data_store)
                                 
