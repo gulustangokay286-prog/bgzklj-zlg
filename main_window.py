@@ -224,8 +224,10 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
                 
+        self._is_loading = True
         self._active_view_type = "class"
         self._active_entity_name = ""
+        self.current_roz_path = self.db_path
         self.data_store = {"dersler": [], "siniflar": [], "derslikler": [], "ogretmenler": [], "atamalar": [], "settings": {}}
         
         # Eğer giriş yapılmışsa, buluttan o kuruma (uid) ait veriyi çek
@@ -235,8 +237,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self.load_db()
         self._refresh_tree()
-        if hasattr(self, "_grid") and hasattr(self._grid, "view_combo"):
-            self._on_view_combo_changed(self._grid.view_combo.currentText())
+        self._is_loading = False
         
         # Setup StatusBar and Cloud Worker
         self.statusBar().showMessage("Hazır")
@@ -451,12 +452,17 @@ class MainWindow(QMainWindow):
             self._filter_grid("room", entity_name)
             
     def _filter_grid(self, view_type, entity_name):
-        self.save_db()
+        if not getattr(self, "_is_loading", False):
+            prev_view = getattr(self, "_active_view_type", None)
+            prev_entity = getattr(self, "_active_entity_name", None)
+            if prev_view and prev_entity and (prev_view != view_type or prev_entity != entity_name):
+                self._sync_grid_to_store(prev_view, prev_entity)
+                self.save_db(sync_from_grid=False)
         
         if hasattr(self, "_grid") and hasattr(self._grid, "entity_combo"):
             self._grid.entity_combo.blockSignals(True)
             if self._grid.entity_combo.count() == 0:
-                self._on_view_combo_changed(self._grid.view_combo.currentText())
+                self._on_view_combo_changed(self._grid.view_combo.currentText(), initial_load=True)
             idx = self._grid.entity_combo.findText(entity_name)
             if idx >= 0:
                 self._grid.entity_combo.setCurrentIndex(idx)
@@ -465,10 +471,10 @@ class MainWindow(QMainWindow):
                 self._grid.entity_combo.setCurrentText(entity_name)
             self._grid.entity_combo.blockSignals(False)
             
-        self.statusBar().showMessage(f"Görünüm güncellendi: {entity_name}")
-        self._restore_grid_placements(view_type, entity_name)
         self._active_view_type = view_type
         self._active_entity_name = entity_name
+        self.statusBar().showMessage(f"Görünüm güncellendi: {entity_name}")
+        self._restore_grid_placements(view_type, entity_name)
         self._refresh_tree(view_type=view_type, target_entity=entity_name)
 
     # ── Ribbon ────────────────────────────────────────────────────────────────
@@ -729,7 +735,7 @@ class MainWindow(QMainWindow):
         
         return splitter
         
-    def _on_view_combo_changed(self, text):
+    def _on_view_combo_changed(self, text, initial_load=False):
         self._grid.entity_combo.blockSignals(True)
         self._grid.entity_combo.clear()
         
@@ -745,9 +751,12 @@ class MainWindow(QMainWindow):
             
         self._grid.entity_combo.blockSignals(False)
         if self._grid.entity_combo.count() > 0:
-            self._on_entity_combo_changed(self._grid.entity_combo.currentText())
+            if not initial_load and not getattr(self, "_is_loading", False):
+                self._on_entity_combo_changed(self._grid.entity_combo.currentText())
             
     def _on_entity_combo_changed(self, entity_name):
+        if getattr(self, "_is_loading", False):
+            return
         view = self._grid.view_combo.currentText()
         if view == "Sınıf Görünümü":
             self._filter_grid("class", entity_name)
@@ -757,19 +766,13 @@ class MainWindow(QMainWindow):
             self._filter_grid("room", entity_name)
 
     def closeEvent(self, event):
-        reply = QMessageBox.question(
-            self, "Kaydet",
-            "Çıkmadan önce değişiklikleri kaydetmek ister misiniz?",
-            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
-            QMessageBox.Yes
-        )
-        if reply == QMessageBox.Yes:
-            self._act_save()
-            event.accept()
-        elif reply == QMessageBox.No:
-            event.accept()
-        else:
-            event.ignore()
+        # Auto-save changes seamlessly
+        try:
+            self.save_db(sync_from_grid=True)
+        except Exception as e:
+            print("Auto-save on exit error:", e)
+        event.accept()
+
     def _get_last_db_path(self):
         import json
         default_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "program.roz")
@@ -792,12 +795,21 @@ class MainWindow(QMainWindow):
             pass
 
     def load_db(self, path=None):
+        self._is_loading = True
         import json
-        load_path = path or self.db_path
+        load_path = path or getattr(self, "current_roz_path", None) or self.db_path
+        if not load_path or not os.path.exists(load_path):
+            user_dir = os.path.join(os.path.expanduser("~"), ".chenki_akademi")
+            load_path = os.path.join(user_dir, "bgz_database.json")
+            
         if os.path.exists(load_path):
             try:
+                self.current_roz_path = os.path.abspath(load_path)
+                self.db_path = self.current_roz_path
+                self._set_last_db_path(self.current_roz_path)
                 with open(load_path, "r", encoding="utf-8") as f:
                     loaded = json.load(f)
+                    self.data_store.clear()
                     self.data_store.update(loaded)
                     
                 # Migrate old dict placements to list
@@ -816,15 +828,79 @@ class MainWindow(QMainWindow):
                     if t.get("ad"): t["ad"] = format_tr_name(t["ad"])
 
                 self.statusBar().showMessage(f"Veriler yüklendi: {load_path}")
-                
-                if hasattr(self, "_grid") and hasattr(self._grid, "view_combo"):
-                    self._on_view_combo_changed(self._grid.view_combo.currentText())
-                    
-                # Restore grid placements
-                self._restore_grid_placements()
             except Exception as e:
                 print("DB Load Error:", e)
-    
+
+        # Update entity combo without triggering premature saves
+        if hasattr(self, "_grid") and hasattr(self._grid, "view_combo"):
+            self._grid.entity_combo.blockSignals(True)
+            self._grid.view_combo.blockSignals(True)
+            self._on_view_combo_changed(self._grid.view_combo.currentText(), initial_load=True)
+            if self._grid.entity_combo.count() > 0:
+                self._active_entity_name = self._grid.entity_combo.currentText()
+                v_text = self._grid.view_combo.currentText()
+                if "Sınıf" in v_text: self._active_view_type = "class"
+                elif "Öğretmen" in v_text: self._active_view_type = "teacher"
+                elif "Derslik" in v_text: self._active_view_type = "room"
+            self._grid.view_combo.blockSignals(False)
+            self._grid.entity_combo.blockSignals(False)
+            
+        self._restore_grid_placements()
+        self._refresh_tree()
+        self._is_loading = False
+
+    def _sync_grid_to_store(self, view_type=None, entity_name=None):
+        if getattr(self, "_is_loading", False):
+            return
+        if not hasattr(self, "_grid") or not hasattr(self._grid, "get_placed_lessons"):
+            return
+            
+        view_type = view_type or getattr(self, "_active_view_type", None)
+        entity_name = entity_name or getattr(self, "_active_entity_name", None)
+        
+        if not view_type or not entity_name:
+            if hasattr(self._grid, "view_combo") and hasattr(self._grid, "entity_combo"):
+                entity_name = self._grid.entity_combo.currentText()
+                v_text = self._grid.view_combo.currentText()
+                if "Sınıf" in v_text: view_type = "class"
+                elif "Öğretmen" in v_text: view_type = "teacher"
+                elif "Derslik" in v_text: view_type = "room"
+                
+        if not view_type or not entity_name:
+            return
+            
+        from auto_scheduler import normalize_class_name
+        from dialogs.edit_forms import format_tr_name
+        
+        global_placements = self.data_store.setdefault("grid_placements", [])
+        new_global = []
+        
+        # 1. Retain everything except the current entity's lessons
+        for p in global_placements:
+            if view_type == "class" and normalize_class_name(p.get("class_name", "")) == normalize_class_name(entity_name):
+                continue
+            if view_type == "teacher" and format_tr_name(p.get("teacher_name", "")) == format_tr_name(entity_name):
+                continue
+            new_global.append(p)
+            
+        # 2. Add back the current entity's lessons from the active grid
+        placed = self._grid.get_placed_lessons()
+        for (r, c), info in placed.items():
+            p = dict(info)
+            p["period"] = r
+            p["day"] = c
+            p["row"] = r
+            p["col"] = c
+            if view_type == "class":
+                p["class_name"] = entity_name
+                p["class"] = entity_name
+            elif view_type == "teacher":
+                p["teacher_name"] = entity_name
+                p["teacher"] = entity_name
+            new_global.append(p)
+            
+        self.data_store["grid_placements"] = new_global
+
     def _restore_grid_placements(self, view_type=None, entity_name=None):
         if hasattr(self, "_grid"):
             if not view_type and hasattr(self._grid, "view_combo"):
@@ -842,89 +918,66 @@ class MainWindow(QMainWindow):
             current_days = DAYS[:days_count]
             self._grid.set_mode_single_entity(periods, current_days)
 
-        grid_data = self.data_store.get("grid_placements", [])
-        self._grid.clear_grid()
-        for info in grid_data:
-            t_info = info.get("teacher_name", "").strip()
-            c_info = info.get("class_name", "").strip()
-            
-            # Filter logic with case/turkish character and whitespace tolerance
-            if view_type == "teacher" and entity_name:
-                if format_tr_name(t_info) != format_tr_name(entity_name):
-                    continue
-            if view_type == "class" and entity_name:
-                if normalize_class_name(c_info) != normalize_class_name(entity_name):
-                    continue
-            if view_type == "room" and entity_name: # Room support later
-                continue
+            grid_data = self.data_store.get("grid_placements", [])
+            self._grid.clear_grid()
+            from auto_scheduler import normalize_class_name
+            from dialogs.edit_forms import format_tr_name
+            for info in grid_data:
+                t_info = info.get("teacher_name", "").strip()
+                c_info = info.get("class_name", "").strip()
                 
-            self._grid.set_cell(
-                info.get("period", 0), 
-                info.get("day", 0),
-                info.get("subject_name", "Ders"),
-                info.get("color", "#1E88E5"),
-                info.get("teacher_name", ""),
-                info.get("duration", 1),
-                class_name=info.get("class_name", "")
-            )
+                # Filter logic with case/turkish character and whitespace tolerance
+                if view_type == "teacher" and entity_name:
+                    if format_tr_name(t_info) != format_tr_name(entity_name):
+                        continue
+                if view_type == "class" and entity_name:
+                    if normalize_class_name(c_info) != normalize_class_name(entity_name):
+                        continue
+                if view_type == "room" and entity_name:
+                    continue
+                    
+                self._grid.set_cell(
+                    info.get("period", 0), 
+                    info.get("day", 0),
+                    info.get("subject_name", "Ders"),
+                    info.get("color", "#1E88E5"),
+                    info.get("teacher_name", ""),
+                    info.get("duration", 1),
+                    class_name=info.get("class_name", "")
+                )
 
     def save_db(self, path=None, sync_from_grid=True):
+        if getattr(self, "_is_loading", False):
+            return
+            
         import json
         if hasattr(self, "_push_undo_state"):
             self._push_undo_state()
-        save_path = path or getattr(self, "current_roz_path", None) or self.db_path
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        self._set_last_db_path(save_path)
-        
-        # Sync current grid view to global list ONLY when sync_from_grid is True
-        if sync_from_grid and hasattr(self, "_grid") and hasattr(self._grid, "view_combo") and hasattr(self._grid, "entity_combo"):
-            view_type = getattr(self, "_active_view_type", None)
-            entity_name = getattr(self, "_active_entity_name", None)
             
-            if not view_type or not entity_name:
-                entity_name = self._grid.entity_combo.currentText()
-                if hasattr(self._grid.view_combo, "currentText"):
-                    if self._grid.view_combo.currentText() == "Sınıf Görünümü":
-                        view_type = "class"
-                    elif self._grid.view_combo.currentText() == "Öğretmen Görünümü":
-                        view_type = "teacher"
-                
-            if view_type and entity_name:
-                global_placements = self.data_store.setdefault("grid_placements", [])
-                new_global = []
-                # 1. Retain everything except the current entity's lessons
-                for p in global_placements:
-                    if view_type == "class" and normalize_class_name(p.get("class_name", "")) == normalize_class_name(entity_name):
-                        continue
-                    if view_type == "teacher" and format_tr_name(p.get("teacher_name", "")) == format_tr_name(entity_name):
-                        continue
-                    new_global.append(p)
-                    
-                # 2. Add back the current entity's lessons from the grid
-                for (r, c), info in self._grid.get_placed_lessons().items():
-                    p = dict(info)
-                    p["period"] = r
-                    p["day"] = c
-                    if view_type == "class":
-                        p["class_name"] = entity_name
-                    elif view_type == "teacher":
-                        p["teacher_name"] = entity_name
-                    new_global.append(p)
-                    
-                self.data_store["grid_placements"] = new_global
+        if sync_from_grid:
+            self._sync_grid_to_store()
+            
+        save_path = path or getattr(self, "current_roz_path", None) or self.db_path
+        if not save_path:
+            save_path = os.path.join(os.path.expanduser("~"), ".chenki_akademi", "bgz_database.json")
+            
+        os.makedirs(os.path.dirname(os.path.abspath(save_path)), exist_ok=True)
+        self.current_roz_path = os.path.abspath(save_path)
+        self.db_path = self.current_roz_path
+        self._set_last_db_path(self.current_roz_path)
+        
         try:
-            with open(save_path, "w", encoding="utf-8") as f:
+            with open(self.current_roz_path, "w", encoding="utf-8") as f:
                 json.dump(self.data_store, f, ensure_ascii=False, indent=4)
                 
-            fname = os.path.basename(save_path)
-            self.statusBar().showMessage(f"💾 Tüm değişiklikler '{fname}' dosyasına kaydedildi.")
+            fname = os.path.basename(self.current_roz_path)
+            self.statusBar().showMessage(f"💾 Tüm değişiklikler '{fname}' dosyasına anlık kaydedildi.")
             
-            # Bulut senkronizasyonu (Çoklu kurum desteği ile UID altına)
+            # Bulut senkronizasyonu
             if hasattr(self, "cloud_worker") and self.cloud_worker and hasattr(self, "auth_data") and self.auth_data:
                 uid = self.auth_data.get("uid")
                 if uid:
                     self.cloud_worker.add_to_queue("institutions", uid, self.data_store)
-                
         except Exception as e:
             self.statusBar().showMessage(f"Kaydetme hatası: {e}")
 
@@ -1473,28 +1526,13 @@ class MainWindow(QMainWindow):
     def _act_open(self):
         path, _ = QFileDialog.getOpenFileName(self, "Dosya Aç / Kurum Değiştir", "", "BGZ Planlama Dosyaları (*.roz);;Tüm Dosyalar (*)")
         if path:
-            self.data_store = {
-                "dersler": [], "siniflar": [], "derslikler": [], 
-                "ogretmenler": [], "atamalar": [], "settings": {}
-            }
             self.load_db(path)
-            self.current_roz_path = path
-            self._set_last_db_path(path)
-            self._grid.clear_grid()
-            self._refresh_tree()
             self.statusBar().showMessage(f"Açıldı: {path}")
 
     def _act_save(self):
-        path = getattr(self, "current_roz_path", None)
-        if not path:
-            path, _ = QFileDialog.getSaveFileName(self, "Farklı Kaydet", "program.roz", "BGZ Planlama Dosyaları (*.roz)")
-        
-        if path:
-            self.current_roz_path = path
-            placed = self._grid.get_placed_lessons()
-            self.data_store["yerlesim"] = {f"{r},{c}": data for (r, c), data in placed.items()}
-            self.save_db(path)
-            self.save_db() # Also save to internal bgz_database.json for cloud sync
+        self.save_db(sync_from_grid=True)
+        fname = os.path.basename(self.current_roz_path or self.db_path or "program.roz")
+        self.statusBar().showMessage(f"💾 '{fname}' başarıyla kaydedildi.")
 
     def _act_print(self):
         if hasattr(self, "save_db"):
