@@ -1,16 +1,55 @@
 {
-    "ogretmenler": [
-        {
-            "ad": "Hüseyin Arman"
-        }
-    ],
     "siniflar": [
         {
-            "ad": "9A"
+            "ad": "9/A",
+            "kisa": "9A"
         },
         {
-            "ad": "10B"
+            "ad": "12/A",
+            "kisa": "12A"
         }
     ],
-    "atamalar": []
+    "dersler": [
+        {
+            "ad": "Beden",
+            "kisa": "BED"
+        }
+    ],
+    "ogretmenler": [
+        {
+            "ad": "Ceylan",
+            "kisa": "C."
+        },
+        {
+            "ad": "Erman Gürbüz",
+            "kisa": "E."
+        }
+    ],
+    "atamalar": [
+        {
+            "teacher": "Erman Gürbüz",
+            "subject": "Beden",
+            "class": "12/A",
+            "duration": 2,
+            "type": "2"
+        }
+    ],
+    "grid_placements": [
+        {
+            "teacher_name": "Erman Gürbüz",
+            "subject_name": "Beden",
+            "class_name": "12/A",
+            "day": 1,
+            "period": 0,
+            "duration": 2
+        }
+    ],
+    "yerlesim": {
+        "1,0": {
+            "teacher_name": "Erman Gürbüz",
+            "subject_name": "Beden",
+            "class_name": "12/A",
+            "duration": 2
+        }
+    }
 }

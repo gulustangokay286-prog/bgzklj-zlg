@@ -148,10 +148,7 @@ class DraggableLessonCard(QLabel):
             QMenu::separator { height: 1px; background: #DDD; margin: 3px 10px; }
         """)
         
-        act_1 = menu.addAction(make_context_icon("1", "#29B6F6", "#0277BD"), "1 Saat (Tekli)")
-        act_2 = menu.addAction(make_context_icon("2", "#29B6F6", "#0277BD"), "2 Saat (İkili Blok)")
-        act_3 = menu.addAction(make_context_icon("3", "#29B6F6", "#0277BD"), "3 Saat (Üçlü Blok)")
-        act_4 = menu.addAction(make_context_icon("4", "#29B6F6", "#0277BD"), "4 Saat (Dörtlü Blok)")
+        act_palette = menu.addAction(make_context_icon("🎨", "#E91E63", "#C2185B"), f"🎨 {self.subject_name} Rengini Ayarla (Renk Paleti)...")
         menu.addSeparator()
         act_2_2 = menu.addAction(make_context_icon("2+2", "#AB47BC", "#7B1FA2"), "2+2 Saat (2 İkili Blok)")
         act_2_1 = menu.addAction(make_context_icon("2+1", "#AB47BC", "#7B1FA2"), "2+1 Saat (1 İkili + 1 Tekli)")
@@ -170,12 +167,43 @@ class DraggableLessonCard(QLabel):
         win = self.window()
         data_store = getattr(win, "data_store", None)
         
+        if action == act_palette:
+            from dialogs.color_picker_dialog import ModernColorPickerDialog
+            new_color = ModernColorPickerDialog.pick_color(
+                initial_color=self.color,
+                parent=win or self,
+                title=f"🎨 {self.subject_name} — Renk Seçimi",
+                data_store=data_store,
+                subject_name=self.subject_name
+            )
+            if new_color and new_color.isValid():
+                new_hex = new_color.name()
+                self.color = new_hex
+                lum = (0.299 * new_color.red() + 0.587 * new_color.green() + 0.114 * new_color.blue())
+                text_color = "#FFFFFF" if lum < 160 else "#111111"
+                self.setStyleSheet(f"""
+                    QLabel {{
+                        background-color: {new_hex};
+                        color: {text_color};
+                        font-family: system-ui, -apple-system, sans-serif;
+                        font-size: 11px;
+                        border: 1px solid rgba(0, 0, 0, 0.18);
+                        border-radius: 8px;
+                        padding: 4px;
+                    }}
+                    QLabel:hover {{
+                        border: 2px solid #0078D7;
+                    }}
+                """)
+                if win:
+                    if hasattr(win, "save_db"): win.save_db(sync_from_grid=False)
+                    if hasattr(win, "_refresh_tree"): win._refresh_tree()
+                    if hasattr(win, "_on_tree_selection_changed"): win._on_tree_selection_changed()
+                    elif hasattr(win, "_load_unplaced_lessons"): win._load_unplaced_lessons()
+            return
+
         selected_type = None
-        if action == act_1: selected_type = "1"
-        elif action == act_2: selected_type = "2"
-        elif action == act_3: selected_type = "3"
-        elif action == act_4: selected_type = "4"
-        elif action == act_2_2: selected_type = "2+2"
+        if action == act_2_2: selected_type = "2+2"
         elif action == act_2_1: selected_type = "2+1"
         elif action == act_2_2_1: selected_type = "2+2+1"
         elif action == act_3_2: selected_type = "3+2"
@@ -223,7 +251,8 @@ class DraggableLessonCard(QLabel):
                     "subject": self.subject_name,
                     "class": self.class_name,
                     "duration": tot_dur,
-                    "type": selected_type
+                    "type": selected_type,
+                    "color": self.color
                 })
                 
             if hasattr(win, "save_db"): win.save_db()
@@ -481,8 +510,16 @@ class DropTableWidget(QTableWidget):
         self.update()
         
         win = self.window()
+        if hasattr(win, "data_store"):
+            yerlesim = win.data_store.get("yerlesim", {})
+            if isinstance(yerlesim, dict):
+                yerlesim.pop(f"{orig_r},{orig_c}", None)
+                yerlesim.pop(f"{orig_c},{orig_r}", None)
+                
         if hasattr(win, "save_db"):
-            win.save_db()
+            win.save_db(sync_from_grid=True)
+        if hasattr(grid, "unplaced_dock") and hasattr(grid.unplaced_dock, "_rebuild_cards"):
+            grid.unplaced_dock._rebuild_cards()
         if hasattr(win, "_refresh_tree"):
             win._refresh_tree()
 
@@ -518,13 +555,7 @@ class DropTableWidget(QTableWidget):
             act_move = menu.addAction(make_context_icon("M", "#FFCA28", "#FF8F00"), "Taşı")
             act_lock = menu.addAction(make_context_icon("K", "#9C27B0", "#6A1B9A"), "Kilitle (Sabitle)")
             act_change_teacher = menu.addAction(make_context_icon("Ö", "#00BCD4", "#00838F"), "Öğretmeni Değiştir")
-            act_color = menu.addAction(make_context_icon("R", "#EC407A", "#C2185B"), "Renk Paleti Ayarla")
-            menu.addSeparator()
-            act_single = menu.addAction(make_context_icon("1", "#29B6F6", "#0277BD"), "Tekli Yap (1 Saat)")
-            act_double = menu.addAction(make_context_icon("2", "#29B6F6", "#0277BD"), "İkili Blok Yap (2 Saat)")
-            act_triple = menu.addAction(make_context_icon("3", "#29B6F6", "#0277BD"), "Üçlü Blok Yap (3 Saat)")
-            act_quad   = menu.addAction(make_context_icon("4", "#29B6F6", "#0277BD"), "Dörtlü Blok Yap (4 Saat)")
-            act_quint  = menu.addAction(make_context_icon("5", "#29B6F6", "#0277BD"), "Beşli Blok Yap (5 Saat)")
+            act_color = menu.addAction(make_context_icon("🎨", "#EC407A", "#C2185B"), "🎨 Renk Paleti Ayarla...")
             menu.addSeparator()
             act_del = menu.addAction(make_context_icon("X", "#EF5350", "#C62828"), "Sil (Kaldır)")
             
@@ -532,16 +563,6 @@ class DropTableWidget(QTableWidget):
             
             if action == act_del:
                 self._delete_lesson_at(orig_r, orig_c)
-            elif action == act_single:
-                self._set_span(row, col, 1)
-            elif action == act_double:
-                self._set_span(row, col, 2)
-            elif action == act_triple:
-                self._set_span(row, col, 3)
-            elif action == act_quad:
-                self._set_span(row, col, 4)
-            elif action == act_quint:
-                self._set_span(row, col, 5)
             elif action == act_edit:
                 self.cell_right_clicked.emit(orig_r, orig_c)
             elif action == act_lock:
@@ -557,28 +578,26 @@ class DropTableWidget(QTableWidget):
                     win = self.window()
                     if hasattr(win, "save_db"): win.save_db()
             elif action == act_color:
-                from PySide6.QtWidgets import QColorDialog
+                from dialogs.color_picker_dialog import ModernColorPickerDialog
                 grid = self.parent()
+                win = self.window()
+                data_store = getattr(win, "data_store", None)
                 if hasattr(grid, "_placed_lessons") and (orig_r, orig_c) in grid._placed_lessons:
                     info = grid._placed_lessons[(orig_r, orig_c)]
-                    current_color = QColor(info.get("color", "#1E88E5"))
-                    new_color = QColorDialog.getColor(current_color, self, "Ders Rengini Seçin")
-                    if new_color.isValid():
+                    s_name = info.get("subject_name", "")
+                    new_color = ModernColorPickerDialog.pick_color(
+                        initial_color=info.get("color", "#1E88E5"),
+                        parent=self,
+                        title=f"🎨 {s_name} — Renk Seçimi",
+                        data_store=data_store,
+                        subject_name=s_name
+                    )
+                    if new_color and new_color.isValid():
                         hex_color = new_color.name()
                         info["color"] = hex_color
-                        # update visual instantly
                         orig_item.setBackground(QBrush(new_color))
                         lum = (0.299 * new_color.red() + 0.587 * new_color.green() + 0.114 * new_color.blue())
                         orig_item.setForeground(QBrush(Qt.white if lum < 160 else Qt.black))
-                        # also update the subject color globally for consistency if needed
-                        win = self.window()
-                        if hasattr(win, "data_store"):
-                            for d in win.data_store.get("dersler", []):
-                                if d.get("ad") == info.get("subject_name"):
-                                    d["renk"] = hex_color
-                                    break
-                            win.save_db()
-                            if hasattr(win, "_refresh_tree"): win._refresh_tree()
             elif action == act_change_teacher:
                 from PySide6.QtWidgets import QInputDialog
                 win = self.window()
@@ -781,6 +800,13 @@ class TimetableGrid(QWidget):
         # Bottom Dock for unplaced lessons
         self.unplaced_dock = UnplacedLessonsDock(self)
         layout.addWidget(self.unplaced_dock)
+
+    def set_periods(self, periods: int):
+        new_periods = max(1, min(16, int(periods)))
+        if self._periods != new_periods:
+            self._periods = new_periods
+            self.table.setRowCount(self._periods)
+            self.table.setVerticalHeaderLabels([f"{i+1}" for i in range(self._periods)])
 
     def set_cell(self, row, col, subject_name, color, teacher_name="", duration=1, class_name=""):
         display_text = f"{subject_name}"

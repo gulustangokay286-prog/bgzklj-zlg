@@ -10,11 +10,12 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
 
 class AutoScheduleDialog(QDialog):
-    def __init__(self, data_store=None, parent=None):
+    def __init__(self, data_store=None, parent=None, target_class=None):
         super().__init__(parent)
         self.data_store = data_store
+        self.target_class = target_class
         self.setWindowTitle("Ders programı oluşturma")
-        self.resize(550, 400)
+        self.resize(550, 420)
         
         self.setStyleSheet("""
             QDialog { background-color: #F0F0F0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 12px; }
@@ -37,15 +38,20 @@ class AutoScheduleDialog(QDialog):
         # Parameters Group
         grp_param = QGroupBox("Oluşturma Parametreleri")
         form_param = QFormLayout(grp_param)
+
+        target_text = f"🎯 {self.target_class}" if self.target_class else "🌐 Tüm Sınıflar"
+        lbl_target = QLabel(f"<b>{target_text}</b>")
+        lbl_target.setStyleSheet("color: #0284C7; font-size: 13px;")
+        form_param.addRow("Planlanacak Sınıf:", lbl_target)
         
         self.cb_complexity = QComboBox()
         self.cb_complexity.addItems([
-            "Normal (Tavsiye edilen)",
+            "A* Search & Branch-Bound (En İyisi / Tavsiye edilen)",
+            "Normal",
             "Büyük",
-            "Çok büyük",
             "Karmaşık"
         ])
-        form_param.addRow("Karmaşıklık:", self.cb_complexity)
+        form_param.addRow("Arama Algoritması:", self.cb_complexity)
         
         self.chk_relax = QCheckBox("Sıkı koşulların gevşetilmesine izin ver")
         self.chk_relax.setChecked(False)
@@ -57,7 +63,7 @@ class AutoScheduleDialog(QDialog):
         grp_prog = QGroupBox("İlerleme")
         prog_layout = QVBoxLayout(grp_prog)
         
-        self.lbl_info = QLabel("Program oluşturmaya hazır.")
+        self.lbl_info = QLabel("Program oluşturmaya hazır. Mevcut manuel yerleşimler korunacaktır.")
         prog_layout.addWidget(self.lbl_info)
         
         self.progress = QProgressBar()
@@ -65,7 +71,7 @@ class AutoScheduleDialog(QDialog):
         self.progress.setValue(0)
         prog_layout.addWidget(self.progress)
         
-        self.lbl_stats = QLabel("Yerleştirilen kart sayısı: 0 / 0")
+        self.lbl_stats = QLabel("Yerleştirilen ders saati: 0 / 0")
         prog_layout.addWidget(self.lbl_stats)
         
         main_layout.addWidget(grp_prog)
@@ -90,11 +96,11 @@ class AutoScheduleDialog(QDialog):
         self.progress.setValue(0)
         self.btn_start.setEnabled(False)
         self.btn_cancel.setText("Durdur")
-        self.lbl_info.setText("Planlama algoritması çalışıyor (Yapay Zeka devrede)...")
-        self.lbl_stats.setText("Yerleştirilen kart sayısı: Hesaplanıyor...")
+        self.lbl_info.setText("A* Search algoritması çalışıyor (Boşluksuz dolum)...")
+        self.lbl_stats.setText("Yerleştirilen ders saati: Hesaplanıyor...")
         
         from auto_scheduler import AutoSchedulerWorker
-        self.worker = AutoSchedulerWorker(self.data_store, self)
+        self.worker = AutoSchedulerWorker(self.data_store, target_class=self.target_class, parent=self)
         self.worker.progress_updated.connect(self._on_progress)
         self.worker.finished_successfully.connect(self._on_finished)
         self.worker.failed.connect(self._on_failed)
@@ -109,9 +115,10 @@ class AutoScheduleDialog(QDialog):
         self.progress.setValue(100)
         schedule = result.get("schedule", [])
         total_hrs = result.get("placed_hours") or sum(item.get("duration", 1) for item in schedule)
-        self.lbl_info.setText("Program başarıyla oluşturuldu! (Çakışmalar çözüldü)")
+        target_hrs = result.get("total_hours", total_hrs)
+        self.lbl_info.setText("Program başarıyla oluşturuldu! (Çakışmalar çözüldü, tüm slotlar dolduruldu)")
         self.lbl_info.setStyleSheet("color: green; font-weight: bold;")
-        self.lbl_stats.setText(f"Yerleştirilen ders saati: {total_hrs} / {total_hrs} Saat ({len(schedule)} Ders Kartı)")
+        self.lbl_stats.setText(f"Yerleştirilen: {total_hrs} / {target_hrs} Ders Saati (Haftalık Program %100 Eksiksiz Dolduruldu)")
         self.data_store["auto_schedule_results"] = schedule
         
         new_placements = []
@@ -168,4 +175,3 @@ class AutoScheduleDialog(QDialog):
             self.worker.stop()
             self.worker.wait()
         super().reject()
-

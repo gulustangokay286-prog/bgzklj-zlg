@@ -2,7 +2,7 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QLabel,
     QStackedWidget, QTableWidget, QTableWidgetItem, QHeaderView,
-    QFrame, QSizePolicy, QSpacerItem
+    QFrame, QSizePolicy, QSpacerItem, QMessageBox
 )
 from PySide6.QtCore import Qt, QSize, QPoint
 from PySide6.QtGui import QFont, QPixmap, QPainter, QColor, QPen, QBrush, QPolygon, QIcon
@@ -197,23 +197,24 @@ class ActionButton(QPushButton):
 
 
 class MasterDataDialog(QDialog):
-    def __init__(self, start_idx=0, parent=None):
+    def __init__(self, start_idx=0, parent=None, data_store=None):
         super().__init__(parent)
         self.setWindowTitle("Sınıflar") # Will be updated in select_tab
         self.resize(900, 650)
         self.setFont(QFont("Segoe UI", 9))
         
         self.main_window = parent
-        if hasattr(self.main_window, "data_store"):
+        if data_store is not None:
+            self.data_store = data_store
+        elif hasattr(self.main_window, "data_store"):
             self.data_store = self.main_window.data_store
-            # Ensure keys exist
-            for k in ["siniflar", "ogretmenler", "derslikler", "dersler"]:
-                if k not in self.data_store:
-                    self.data_store[k] = []
         else:
             self.data_store = {
                 "siniflar": [], "ogretmenler": [], "derslikler": [], "dersler": []
             }
+        for k in ["siniflar", "ogretmenler", "derslikler", "dersler", "atamalar", "grid_placements"]:
+            if k not in self.data_store:
+                self.data_store[k] = []
         
         self._build_ui()
         self._load_existing_data()
@@ -432,6 +433,11 @@ class MasterDataDialog(QDialog):
         btn_save.setStyleSheet("background: #0078D7; color: white; font-weight: bold; border-radius: 4px; font-size: 13px;")
         btn_save.clicked.connect(self.accept)
         
+        btn_reset_classes = QPushButton("🧹 Tüm Sınıf Atamalarını Sıfırla")
+        btn_reset_classes.setFixedSize(200, 32)
+        btn_reset_classes.setStyleSheet("background: #FEF2F2; color: #DC2626; border: 1px solid #FECACA; font-weight: bold; border-radius: 4px; font-size: 12px;")
+        btn_reset_classes.clicked.connect(self._reset_all_class_assignments)
+        
         btn_info = QPushButton("Bilgi Al")
         btn_info.setFixedSize(90, 30)
         btn_info.setStyleSheet("background: #F0F0F0; border: 1px solid #CCC; border-radius: 4px;")
@@ -443,11 +449,49 @@ class MasterDataDialog(QDialog):
         
         bottom_layout.addWidget(btn_help)
         bottom_layout.addWidget(btn_save)
+        bottom_layout.addWidget(btn_reset_classes)
         bottom_layout.addWidget(btn_info)
         bottom_layout.addStretch(1)
         bottom_layout.addWidget(btn_close)
         
         main_layout.addLayout(bottom_layout)
+
+    def _reset_all_class_assignments(self):
+        r = QMessageBox.question(
+            self,
+            "Tüm Sınıf Atamalarını Sıfırla",
+            "TÜM sınıflara ait ders ve öğretmen görevlendirmeleri tamamen silinecektir.\n\nEmin misiniz?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if r == QMessageBox.Yes:
+            self.data_store["atamalar"] = []
+            self.data_store["grid_placements"] = []
+            self.data_store["yerlesim"] = {}
+            trigger_save_db(self, self.data_store)
+            
+            # Find main window to refresh grid and tree
+            win = self.window()
+            if not win or not hasattr(win, "_grid"):
+                p = self.parent()
+                while p:
+                    if hasattr(p, "_grid"):
+                        win = p
+                        break
+                    p = p.parent()
+            if win:
+                if hasattr(win, "save_db"):
+                    win.save_db(sync_from_grid=False)
+                if hasattr(win, "_refresh_tree"):
+                    win._refresh_tree()
+                if hasattr(win, "_load_unplaced_lessons"):
+                    win._load_unplaced_lessons()
+                if hasattr(win, "_grid") and hasattr(win._grid, "load_lessons"):
+                    win._grid.load_lessons({})
+                    
+            if hasattr(self, "_load_data"):
+                self._load_data()
+            QMessageBox.information(self, "Başarılı", "Tüm sınıf atamaları başarıyla sıfırlandı.")
 
     def _create_table(self, headers):
         t = DragDropTableWidget(0, len(headers))
@@ -484,6 +528,7 @@ class MasterDataDialog(QDialog):
             }
         """)
         t.cellDoubleClicked.connect(self._on_table_double_clicked)
+        t.cellClicked.connect(self._on_table_clicked)
         t.row_dropped.connect(self._on_row_dropped)
         return t
 
@@ -508,6 +553,15 @@ class MasterDataDialog(QDialog):
             
             p = self.parent() or getattr(self, "main_window", None)
             if p and hasattr(p, "save_db"): p.save_db()
+
+    def _on_table_clicked(self, row, col):
+        idx = self.stack.currentIndex()
+        if idx == 3 and col == 3: # Zaman Tablosu & Çizelge column
+            item = self.table_ogretmen.item(row, 0)
+            if item:
+                t_name = item.text().strip()
+                d = TeacherIndividualTimetableDialog(t_name, self.data_store, self)
+                d.exec()
 
     def _on_table_double_clicked(self, row, col):
         idx = self.stack.currentIndex()
@@ -875,7 +929,12 @@ class MasterDataDialog(QDialog):
     def _act_auto_schedule(self):
         from dialogs.auto_schedule_dialog import AutoScheduleDialog
         dlg = AutoScheduleDialog(self.data_store, self)
-        dlg.exec()
+        if dlg.exec():
+            self._load_existing_data()
+            p = self.parent() or getattr(self, "main_window", None)
+            if p and hasattr(p, "save_db"): p.save_db()
+            if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
+            if p and hasattr(p, "_restore_grid_placements"): p._restore_grid_placements()
 
     def _open_2025_dialog(self, dlg_id):
         from dialogs.extracted_dialog import open_extracted_dialog
@@ -920,22 +979,52 @@ class MasterDataDialog(QDialog):
             table.setItem(r, c, item)
 
 
+def normalize_tr_str(s: str) -> str:
+    if not s:
+        return ""
+    tr_map = str.maketrans({
+        'İ': 'i', 'I': 'ı', 'ı': 'i', 'Ş': 's', 'ş': 's',
+        'Ğ': 'g', 'ğ': 'g', 'Ü': 'u', 'ü': 'u', 'Ö': 'o', 'ö': 'o',
+        'Ç': 'c', 'ç': 'c'
+    })
+    cleaned = str(s).translate(tr_map).lower().strip()
+    return "".join(c for c in cleaned if c.isalnum())
+
+def is_teacher_match(t1: str, t2: str, teacher_objs=None) -> bool:
+    if not t1 or not t2:
+        return False
+    n1 = normalize_tr_str(t1)
+    n2 = normalize_tr_str(t2)
+    if n1 == n2:
+        return True
+    if len(n1) >= 4 and len(n2) >= 4 and (n1 in n2 or n2 in n1):
+        return True
+    if teacher_objs:
+        for t in teacher_objs:
+            ad_norm = normalize_tr_str(t.get("ad", ""))
+            kisa_norm = normalize_tr_str(t.get("kisa", ""))
+            if (n1 == ad_norm or n1 == kisa_norm or (len(n1) >= 3 and n1 in ad_norm)) and \
+               (n2 == ad_norm or n2 == kisa_norm or (len(n2) >= 3 and n2 in ad_norm)):
+                return True
+    return False
+
+
 class TeacherIndividualTimetableDialog(QDialog):
     """Öğretmenin Özel Zaman Çizelgesi ve Önizleme/Yazdırma Ekranı"""
     def __init__(self, teacher_name, data_store=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle(f"Öğretmen Çizelgesi - {teacher_name}")
-        self.setMinimumSize(850, 600)
-        self.resize(850, 600)
+        self.setMinimumSize(880, 620)
+        self.resize(880, 620)
         self.teacher_name = teacher_name
-        self.data_store = data_store or {}
+        self.data_store = data_store if data_store is not None else {}
         self.setStyleSheet("""
             QDialog { background-color: #F8FAFC; font-family: system-ui, -apple-system, sans-serif; font-size: 13px; }
             QLabel { color: #334155; font-size: 13px; font-weight: bold; }
             QPushButton { min-height: 32px; padding: 6px 14px; border: 1px solid #CBD5E1; border-radius: 6px; background: #FFFFFF; font-size: 13px; font-weight: bold; color: #475569; }
             QPushButton:hover { background: #F1F5F9; }
-            QTableWidget { border: 1px solid #E2E8F0; background: #FFFFFF; gridline-color: #E2E8F0; font-size: 12px; border-radius: 8px; }
-            QHeaderView::section { background-color: #F1F5F9; border: none; border-bottom: 2px solid #E2E8F0; padding: 8px; font-weight: bold; font-size: 13px; color: #475569; }
+            QTableWidget { border: 1px solid #CBD5E1; background: #FFFFFF; gridline-color: #E2E8F0; font-size: 12px; border-radius: 8px; }
+            QHeaderView::section { background-color: #F1F5F9; border: none; border-bottom: 2px solid #CBD5E1; padding: 8px; font-weight: bold; font-size: 13px; color: #334155; }
         """)
         self._build_ui()
 
@@ -945,7 +1034,7 @@ class TeacherIndividualTimetableDialog(QDialog):
         lay.setSpacing(12)
         
         top_bar = QHBoxLayout()
-        lbl = QLabel(f"👨‍🏫 {self.teacher_name} - Haftalık Ders Çizelgesi")
+        lbl = QLabel(f"👨‍🏫 {self.teacher_name} — Haftalık Ders Çizelgesi")
         lbl.setStyleSheet("font-size: 16px; color: #2563EB; font-weight: bold;")
         top_bar.addWidget(lbl)
         top_bar.addStretch(1)
@@ -967,6 +1056,7 @@ class TeacherIndividualTimetableDialog(QDialog):
         table.setHorizontalHeaderLabels(days)
         table.setVerticalHeaderLabels([f"{p+1}. Ders" for p in range(periods)])
         table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        table.verticalHeader().setSectionResizeMode(QHeaderView.Stretch)
         table.setEditTriggers(QTableWidget.NoEditTriggers)
         table.setAlternatingRowColors(True)
         table.verticalHeader().setDefaultSectionSize(48)
@@ -974,58 +1064,98 @@ class TeacherIndividualTimetableDialog(QDialog):
         from dialogs.edit_forms import format_tr_name, get_subject_color
         from PySide6.QtGui import QBrush, QColor
         
-        target_norm = format_tr_name(self.teacher_name)
+        teacher_objs = self.data_store.get("ogretmenler", [])
+        placed_cells = {}
+        placed_hours = 0
 
-        # 1. Gather placements from parent main window if grid has placed items
+        # Helper to set cell item
+        def fill_cell(r, c, subj, cls, col_hex):
+            nonlocal placed_hours
+            if 0 <= r < periods and 0 <= c < len(days):
+                if (r, c) not in placed_cells:
+                    placed_hours += 1
+                placed_cells[(r, c)] = True
+                
+                item = QTableWidgetItem(f"{subj}\n({cls})" if cls else f"{subj}")
+                item.setTextAlignment(Qt.AlignCenter)
+                item.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+                
+                bg_color = QColor(col_hex or get_subject_color(subj))
+                item.setBackground(QBrush(bg_color))
+                lum = (0.299 * bg_color.red() + 0.587 * bg_color.green() + 0.114 * bg_color.blue())
+                item.setForeground(QBrush(Qt.white if lum < 160 else Qt.black))
+                table.setItem(r, c, item)
+
+        # 1. Scan data_store["grid_placements"] (Global list for all classes)
+        placements_list = self.data_store.get("grid_placements", [])
+        for p in placements_list:
+            if not isinstance(p, dict):
+                continue
+            t_name = p.get("teacher_name") or p.get("teacher") or p.get("ogretmen") or ""
+            if is_teacher_match(t_name, self.teacher_name, teacher_objs):
+                s_name = p.get("subject_name") or p.get("subject") or p.get("ders") or ""
+                c_name = p.get("class_name") or p.get("class") or p.get("sinif") or ""
+                dur = int(p.get("duration") or 1)
+                col_hex = p.get("color") or get_subject_color(s_name)
+                
+                day_val = p.get("day") if "day" in p else (p.get("day_idx") if "day_idx" in p else p.get("col", 0))
+                period_val = p.get("period") if "period" in p else p.get("row", 0)
+                try:
+                    d = int(day_val)
+                    r = int(period_val)
+                except (ValueError, TypeError):
+                    continue
+                    
+                for off in range(dur):
+                    fill_cell(r + off, d, s_name, c_name, col_hex)
+
+        # 2. Scan data_store["yerlesim"] (Dict mapping)
+        raw_yerlesim = self.data_store.get("yerlesim", {})
+        if isinstance(raw_yerlesim, dict):
+            for key_str, p in raw_yerlesim.items():
+                if not isinstance(p, dict):
+                    continue
+                t_name = p.get("teacher_name") or p.get("teacher") or p.get("ogretmen") or ""
+                if is_teacher_match(t_name, self.teacher_name, teacher_objs):
+                    s_name = p.get("subject_name") or p.get("subject") or p.get("ders") or ""
+                    c_name = p.get("class_name") or p.get("class") or p.get("sinif") or ""
+                    dur = int(p.get("duration") or 1)
+                    col_hex = p.get("color") or get_subject_color(s_name)
+                    
+                    if "," in str(key_str):
+                        try:
+                            parts = str(key_str).split(",")
+                            r, d = int(parts[0]), int(parts[1])
+                            for off in range(dur):
+                                fill_cell(r + off, d, s_name, c_name, col_hex)
+                        except Exception:
+                            pass
+
+        # 3. Scan active grid if parent main window is present
         parent_mw = self.parent()
         while parent_mw and not hasattr(parent_mw, "_grid"):
             parent_mw = parent_mw.parent()
             
         if parent_mw and hasattr(parent_mw, "_grid") and hasattr(parent_mw._grid, "get_placed_lessons"):
             grid_placed = parent_mw._grid.get_placed_lessons()
-            for (r, c), info in grid_placed.items():
+            for (r, d), info in grid_placed.items():
                 if isinstance(info, dict):
-                    t_name = info.get("teacher_name") or info.get("teacher", "")
-                    if format_tr_name(t_name) == target_norm:
-                        s_name = info.get("subject_name") or info.get("subject", "")
-                        c_name = info.get("class_name") or info.get("class", "")
-                        color = info.get("color") or get_subject_color(s_name)
-                        if 0 <= r < periods and 0 <= c < len(days):
-                            item = QTableWidgetItem(f"{s_name}\n({c_name})")
-                            item.setTextAlignment(Qt.AlignCenter)
-                            item.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-                            item.setBackground(QBrush(QColor(color)))
-                            table.setItem(r, c, item)
+                    t_name = info.get("teacher_name") or info.get("teacher") or info.get("ogretmen") or ""
+                    if is_teacher_match(t_name, self.teacher_name, teacher_objs):
+                        s_name = info.get("subject_name") or info.get("subject") or info.get("ders") or ""
+                        c_name = info.get("class_name") or info.get("class") or info.get("sinif") or ""
+                        dur = int(info.get("duration") or 1)
+                        col_hex = info.get("color") or get_subject_color(s_name)
+                        for off in range(dur):
+                            fill_cell(r + off, d, s_name, c_name, col_hex)
 
-        # 2. Gather placements from data_store["grid_placements"]
-        placements_list = self.data_store.get("grid_placements", [])
-        for p in placements_list:
-            if not isinstance(p, dict):
-                continue
-            t_name = p.get("teacher_name") or p.get("teacher", "")
-            if format_tr_name(t_name) == target_norm:
-                r_val = p.get("period") if "period" in p else p.get("row")
-                c_val = p.get("day") if "day" in p else p.get("col")
-                if r_val is not None and c_val is not None:
-                    try:
-                        r = int(r_val)
-                        c = int(c_val)
-                    except (ValueError, TypeError):
-                        continue
-                    if 0 <= r < periods and 0 <= c < len(days):
-                        s_name = p.get("subject_name") or p.get("subject", "")
-                        c_name = p.get("class_name") or p.get("class", "")
-                        dur = int(p.get("duration") or 1)
-                        color = p.get("color") or get_subject_color(s_name)
-                        for d_off in range(dur):
-                            p_curr = r + d_off
-                            if p_curr < periods:
-                                item = QTableWidgetItem(f"{s_name}\n({c_name})")
-                                item.setTextAlignment(Qt.AlignCenter)
-                                item.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-                                item.setBackground(QBrush(QColor(color)))
-                                table.setItem(p_curr, c, item)
-                                
+        teacher_atamalar = [a for a in self.data_store.get("atamalar", []) if is_teacher_match(a.get("teacher", ""), self.teacher_name, teacher_objs)]
+        total_assigned_hours = sum(int(a.get("duration", 1)) for a in teacher_atamalar)
+
+        # Summary footer bar
+        info_banner = QLabel(f"ℹ️ Toplam Tanımlı Ders: {total_assigned_hours} Saat  |  Haftalık Çizelgede Yerleşen: {placed_hours} Saat")
+        info_banner.setStyleSheet("color: #1E293B; background: #E2E8F0; padding: 6px 12px; border-radius: 6px; font-weight: 600;")
+        lay.addWidget(info_banner)
         lay.addWidget(table, 1)
         
         bot = QHBoxLayout()

@@ -108,8 +108,15 @@ class _SubjectEditDialog(QDialog):
         layout.addLayout(btns)
 
     def _pick(self):
-        c = QColorDialog.getColor(QColor(self._color), self)
-        if c.isValid():
+        from dialogs.color_picker_dialog import ModernColorPickerDialog
+        s_name = self._w.get("ad", None)
+        title_str = f"🎨 {s_name.text().strip()} — Renk Seçimi" if s_name else "🎨 Renk Seçimi"
+        c = ModernColorPickerDialog.pick_color(
+            initial_color=self._color,
+            parent=self,
+            title=title_str
+        )
+        if c and c.isValid():
             self._color = c.name()
             self._color_btn.setStyleSheet(f"background:{self._color};border:1px solid #CCC;border-radius:3px;")
 

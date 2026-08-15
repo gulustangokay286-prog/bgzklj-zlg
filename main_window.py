@@ -155,22 +155,21 @@ class TitleBar(QWidget):
     """Working file menu button + Title bar"""
     def __init__(self, logo_path, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(36)
+        self.setFixedHeight(44)
         self.setStyleSheet("background: #F0F0F0; border-bottom: 1px solid #D0D0D0;")
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 0, 8, 0)
+        layout.setContentsMargins(6, 8, 8, 0) # 8px down
 
         # File menu button (top-left circle)
         self.file_btn = QToolButton(self)
-        # Use a nice 3D icon instead of text
         self.file_btn.setIcon(make_menu_icon("M", "#0078D7", "#005A9E"))
         self.file_btn.setIconSize(QSize(28, 28))
-        self.file_btn.setFixedSize(32, 40)
+        self.file_btn.setFixedSize(34, 34)
         self.file_btn.setStyleSheet("""
             QToolButton {
                 border: none;
                 border-radius: 4px;
-                margin-top: 8px;
+                background: transparent;
             }
             QToolButton:hover { background: #E5F1FB; }
             QToolButton::menu-indicator { image: none; }
@@ -233,13 +232,9 @@ class MainWindow(QMainWindow):
         if self.auth_data and self.auth_data.get("uid"):
             self._download_cloud_data()
             
-        self.load_db()
-
         self._build_ui()
-        self._restore_grid_placements()
+        self.load_db()
         self._refresh_tree()
-        if hasattr(self, "_grid") and hasattr(self._grid, "view_combo"):
-            self._on_view_combo_changed(self._grid.view_combo.currentText())
         if hasattr(self, "_grid") and hasattr(self._grid, "view_combo"):
             self._on_view_combo_changed(self._grid.view_combo.currentText())
         
@@ -257,7 +252,7 @@ class MainWindow(QMainWindow):
         btn_chk.clicked.connect(self._act_check_updates)
         self.statusBar().addPermanentWidget(btn_chk)
 
-        ver_lbl = QLabel(f"Chenki Akademi v2.5 Pro")
+        ver_lbl = QLabel(f"Chenki Akademi 2026 - 2027 Pro")
         ver_lbl.setStyleSheet("color: #64748B; font-weight: bold; margin-left: 10px; margin-right: 10px;")
         self.statusBar().addPermanentWidget(ver_lbl)
         
@@ -605,9 +600,8 @@ class MainWindow(QMainWindow):
         p7.add_button("Teknik\nDestek","yardim",self._act_nyi)
         p7.add_button("Yeni Versiyon\nKontrolü","internet",self._act_nyi)
         p7.add_button("Hizmet Yenilemek\nİçin Tıklayınız","internet",self._act_nyi)
-        p7.add_divider()
-        p7.add_button("Online\nYardım","yardim",self._act_nyi)
-        p7.add_button("Sorular?\nYorumlar?","yardim",self._act_nyi)
+        p7.add_button("Online\nYardım","yardim",lambda: __import__('webbrowser').open("https://chenki.net/"))
+        p7.add_button("Sorular?\nYorumlar?","yardim",lambda: __import__('dialogs.faq_dialog', fromlist=['FAQDialog']).FAQDialog(self).exec())
         p7.add_stretch()
 
     # ── Workspace ─────────────────────────────────────────────────────────────
@@ -1139,30 +1133,72 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage(f"Kısıtlama engeli: {teacher} - {day_name} {row+1}. saat kapalı!")
                 return
                 
-        # 2. Check Teacher Conflict (Is teacher already placed elsewhere at this slot?)
+        # 2. Check Teacher Conflict (Is teacher already placed elsewhere at this slot across ANY class?)
         teacher_info = next((t for t in self.data_store.get("ogretmenler", []) if t.get("ad") == teacher), {})
         allows_parallel = teacher_info.get("es_zamanli", False)
         
-        if not allows_parallel:
+        if teacher and not allows_parallel:
+            conflict_found = False
+            conflict_class = ""
+            conflict_subj = ""
+            conflict_period = row
+            
+            # Check 1: In active grid view
             placed = self._grid.get_placed_lessons()
             for (r, c), data in placed.items():
-                # If we are moving, don't conflict with our own old position if they somehow overlap
                 if is_move and r == orig_r and c == orig_c:
                     continue
-                    
-                # Conflict logic
-                # A placed lesson spans from r to r + data["duration"]
                 placed_dur = data.get("duration", 1)
-                
-                # Check overlap in columns and rows
                 if c == col:
                     overlap = (row < r + placed_dur) and (r < row + duration)
                     if overlap and data.get("teacher") == teacher and teacher != "":
-                        QMessageBox.warning(
-                            self, "Çakışma Engeli",
-                            f"⚠️ '{teacher}' öğretmeni {day_name} günü {row+1}. ders saatinde zaten başka bir derste görevlidir!\n(Farklı bir sınıfta eş zamanlı ders vermek için öğretmen düzenleme ekranından 'Çoklu Ders İzni' seçeneğini açabilirsiniz)."
-                        )
-                        return
+                        conflict_found = True
+                        conflict_class = data.get("class", data.get("class_name", "Mevcut Sınıf"))
+                        conflict_subj = data.get("subject", data.get("subject_name", "Ders"))
+                        conflict_period = r
+                        break
+                        
+            # Check 2: Globally in data_store grid_placements
+            if not conflict_found:
+                for p_item in self.data_store.get("grid_placements", []):
+                    p_t = format_tr_name(p_item.get("teacher_name") or p_item.get("teacher") or "")
+                    if p_t == teacher:
+                        p_day = int(p_item.get("day") if "day" in p_item else p_item.get("col", 0))
+                        p_period = int(p_item.get("period") if "period" in p_item else p_item.get("row", 0))
+                        p_dur = int(p_item.get("duration", 1))
+                        p_cls = p_item.get("class_name") or p_item.get("class") or ""
+                        p_sub = p_item.get("subject_name") or p_item.get("subject") or "Ders"
+                        
+                        if is_move and p_cls == cls_name and p_day == orig_c and p_period == orig_r:
+                            continue
+                            
+                        if p_day == col:
+                            if (row < p_period + p_dur) and (p_period < row + duration):
+                                conflict_found = True
+                                conflict_class = p_cls or "Başka Bir Sınıf"
+                                conflict_subj = p_sub
+                                conflict_period = p_period
+                                break
+                                
+            if conflict_found:
+                msg_text = (
+                    f"⚠️ <b>Öğretmen Çakışması Algılandı!</b><br><br>"
+                    f"<b>{teacher}</b> isimli öğretmenin <b>{day_name}</b> günü <b>{conflict_period+1}. ders saatinde</b> "
+                    f"<b>{conflict_class}</b> sınıfında <b>{conflict_subj}</b> dersi bulunmaktadır.<br><br>"
+                    f"Normalde sistem çakışmaları engeller. Ne yapmak istersiniz?"
+                )
+                msg_box = QMessageBox(self)
+                msg_box.setWindowTitle("Ders Çakışması Uyarısı")
+                msg_box.setText(msg_text)
+                msg_box.setIcon(QMessageBox.Warning)
+                btn_ignore = msg_box.addButton("⚠️ Yoksay ve Devam Et", QMessageBox.AcceptRole)
+                btn_cancel = msg_box.addButton("❌ İptal Et / Engelle", QMessageBox.RejectRole)
+                msg_box.setDefaultButton(btn_cancel)
+                msg_box.exec()
+                
+                if msg_box.clickedButton() != btn_ignore:
+                    self.statusBar().showMessage(f"Çakışma engellendi: {teacher} - {conflict_class} ile çakışıyor.")
+                    return
 
         # Check if Target is Occupied
         target_info = None
@@ -1357,23 +1393,32 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Yinelenecek başka işlem yok.")
 
     def _open_subjects(self):
+        self.save_db(sync_from_grid=True)
         d = MasterDataDialog(0, self)
         d.exec()
         self.save_db()
         self._refresh_tree()
+        self._restore_grid_placements()
 
     def _open_school_info(self):
         from dialogs.school_info import SchoolInfoDialog
         d = SchoolInfoDialog(parent=self, data_store=self.data_store)
         if d.exec() == QDialog.Accepted:
+            settings = self.data_store.get("settings", {})
+            periods = int(settings.get("periods", 8))
+            if hasattr(self, "_grid"):
+                self._grid.set_periods(periods)
             self.save_db()
             self._refresh_tree()
+            self._restore_grid_placements()
 
     def _open_classes(self):
+        self.save_db(sync_from_grid=True)
         d = MasterDataDialog(1, self)
         d.exec()
         self.save_db()
         self._refresh_tree()
+        self._restore_grid_placements()
 
     def _open_class_assignments(self, target_class=None):
         from dialogs.edit_forms import ClassComprehensiveAssignmentDialog
@@ -1402,6 +1447,7 @@ class MainWindow(QMainWindow):
         if d.exec():
             self.save_db()
             self._refresh_tree()
+            self._restore_grid_placements()
 
     def _show_tree_context_menu(self, pos):
         from PySide6.QtWidgets import QMenu
@@ -1428,18 +1474,23 @@ class MainWindow(QMainWindow):
                 if d.exec():
                     self.save_db()
                     self._refresh_tree()
+                    self._restore_grid_placements()
 
     def _open_rooms(self):
+        self.save_db(sync_from_grid=True)
         d = MasterDataDialog(2, self)
         d.exec()
         self.save_db()
         self._refresh_tree()
+        self._restore_grid_placements()
 
     def _open_teachers(self):
+        self.save_db(sync_from_grid=True)
         d = MasterDataDialog(3, self)
         d.exec()
         self.save_db()
         self._refresh_tree()
+        self._restore_grid_placements()
 
     def _open_electives(self):
         from dialogs.electives_dialog import ElectivesDialog
@@ -1462,7 +1513,37 @@ class MainWindow(QMainWindow):
     def _act_auto_schedule(self):
         from dialogs.auto_schedule_dialog import AutoScheduleDialog
         from PySide6.QtWidgets import QDialog
-        d = AutoScheduleDialog(self.data_store, self)
+        
+        target_class = None
+        if hasattr(self, "_grid") and hasattr(self._grid, "view_combo") and hasattr(self._grid, "entity_combo"):
+            if self._grid.view_combo.currentText() == "Sınıf Görünümü":
+                target_class = self._grid.entity_combo.currentText()
+        if not target_class and hasattr(self, "_active_entity_name") and getattr(self, "_active_view_type", "") == "class":
+            target_class = self._active_entity_name
+        # Atama kontrolü: hedef sınıfa ders atanmamışsa uyarı ver
+        atamalar = self.data_store.get("atamalar", [])
+        if target_class:
+            from auto_scheduler import normalize_class_name
+            tc_norm = normalize_class_name(target_class)
+            class_atamalar = [a for a in atamalar if normalize_class_name(a.get("class") or a.get("sinif") or a.get("class_name") or "") == tc_norm]
+            if not class_atamalar:
+                QMessageBox.warning(
+                    self, "Ders Ataması Bulunamadı",
+                    f"⚠️ {target_class} sınıfına henüz ders ataması yapılmamış!\n\n"
+                    f"Otomatik planlama başlatılabilmesi için önce bu sınıfa ders ve öğretmen atamalısınız.\n\n"
+                    f"Sınıflar → {target_class} → Ders & Öğretmen Ata yolunu izleyebilirsiniz."
+                )
+                return
+        elif not atamalar:
+            QMessageBox.warning(
+                self, "Ders Ataması Bulunamadı",
+                "⚠️ Hiçbir sınıfa ders ataması yapılmamış!\n\n"
+                "Otomatik planlama başlatılabilmesi için önce sınıflara ders ve öğretmen atamalısınız.\n\n"
+                "Sınıflar → [Sınıf Seç] → Ders & Öğretmen Ata yolunu izleyebilirsiniz."
+            )
+            return
+
+        d = AutoScheduleDialog(self.data_store, self, target_class=target_class)
         if d.exec() == QDialog.Accepted:
             # AI produced a schedule
             results = self.data_store.get("auto_schedule_results", [])
@@ -1501,7 +1582,7 @@ class MainWindow(QMainWindow):
                 total_hours = sum(p.get("duration", 1) for p in grid_placements)
                 QMessageBox.information(
                     self, "Otomatik Planlama Tamamlandı",
-                    f"🎉 Otomatik planlama başarıyla oluşturuldu!\n\nToplam {total_hours} ders saati ({len(grid_placements)} ders kartı) çakışmasız olarak çizelgeye yerleştirildi."
+                    f"🎉 Otomatik planlama başarıyla oluşturuldu!\n\nToplam {total_hours} ders saatinin tamamı haftalık çizelgeye eksiksiz (%100 Dolu) olarak yerleştirildi."
                 )
                 self.statusBar().showMessage(f"Otomatik planlama başarıyla oluşturuldu ({total_hours} ders saati yerleştirildi).")
             else:
@@ -1543,8 +1624,6 @@ class MainWindow(QMainWindow):
             if hasattr(self, "_grid"):
                 self._grid.clear_grid()
                 self._grid._placed_lessons = {}
-            self._active_view_type = "class"
-            self._active_entity_name = ""
             self.save_db(sync_from_grid=False)
             self._restore_grid_placements()
             self._refresh_tree()

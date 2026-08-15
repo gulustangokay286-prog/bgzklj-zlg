@@ -177,29 +177,31 @@ class SchoolInfoDialog(QDialog):
         grid2 = QGridLayout()
         grid2.setSpacing(10)
         
-        grid2.addWidget(QLabel("Günlük Ders Saati:"), 0, 0)
+        grid2.addWidget(QLabel("Çizelge Zamanı / Günlük Ders Saati:"), 0, 0)
         self.cb_ders_saati = QComboBox()
-        self.cb_ders_saati.addItems([str(i) for i in range(1, 21)])
-        self.cb_ders_saati.setCurrentText("7")
-        self.cb_ders_saati.setFixedWidth(60)
+        self.cb_ders_saati.addItems([str(i) for i in range(1, 17)])
+        self.cb_ders_saati.setCurrentText("8")
+        self.cb_ders_saati.setFixedWidth(70)
         grid2.addWidget(self.cb_ders_saati, 0, 1)
         
-        btn_zil = QPushButton("Zil / Zamanları Yeniden Adlandır")
+        btn_zil = QPushButton("🔔 Zil / Teneffüs Saatlerini Ayarla")
+        btn_zil.clicked.connect(self._open_zil_dialog)
         grid2.addWidget(btn_zil, 0, 2)
         
-        grid2.addWidget(QLabel("Gün Sayısı:"), 1, 0)
+        grid2.addWidget(QLabel("Haftalık Çalışma Gün Sayısı:"), 1, 0)
         self.cb_gun_sayisi = QComboBox()
-        self.cb_gun_sayisi.addItems([str(i) for i in range(1, 15)])
+        self.cb_gun_sayisi.addItems([str(i) for i in range(1, 8)])
         self.cb_gun_sayisi.setCurrentText("5")
-        self.cb_gun_sayisi.setFixedWidth(60)
+        self.cb_gun_sayisi.setFixedWidth(70)
         grid2.addWidget(self.cb_gun_sayisi, 1, 1)
         
-        btn_gunler = QPushButton("Haftanın Günlerini Güncelle")
+        btn_gunler = QPushButton("📅 Günler ve Tatil Günlerini Seç")
+        btn_gunler.clicked.connect(self._open_gunler_dialog)
         grid2.addWidget(btn_gunler, 1, 2)
         
         grid2.addWidget(QLabel("Hafta Sonu:"), 2, 0, 1, 2, Qt.AlignRight)
         self.cb_hafta_sonu = QComboBox()
-        self.cb_hafta_sonu.addItems(["Cumartesi - Pazar", "Pazar - Pazartesi", "Cuma - Cumartesi"])
+        self.cb_hafta_sonu.addItems(["Cumartesi - Pazar", "Pazar - Pazartesi", "Cuma - Cumartesi", "Yalnız Pazar", "Hafta Sonu Tatili Yok"])
         grid2.addWidget(self.cb_hafta_sonu, 2, 2)
         
         sec2.addLayout(grid2)
@@ -211,12 +213,12 @@ class SchoolInfoDialog(QDialog):
         # Section 3: Multi-week
         sec3 = QHBoxLayout()
         icon3 = QLabel()
-        icon3.setPixmap(draw_placeholder_icon("calendar"))
+        icon3.setPixmap(draw_placeholder_icon("list"))
         icon3.setFixedSize(70, 70)
         sec3.addWidget(icon3)
         
         vbox3 = QVBoxLayout()
-        self.chk_cok_donem = QCheckBox("Çok Dönemli veya Çok Haftalı Program")
+        self.chk_cok_donem = QCheckBox("Çok Dönemli veya Çok Haftalı Program (Güz / Bahar)")
         font_bold = QFont()
         font_bold.setBold(True)
         self.chk_cok_donem.setFont(font_bold)
@@ -230,8 +232,8 @@ class SchoolInfoDialog(QDialog):
         
         # Section 4: School Type
         sec4 = QVBoxLayout()
-        self.radio_okul = QRadioButton("Okul / Kolej / Diğer")
-        self.radio_fakulte = QRadioButton("Fakülte / Yüksek Okul")
+        self.radio_okul = QRadioButton("Okul / Kolej / Kurs / Özel Öğretim")
+        self.radio_fakulte = QRadioButton("Fakülte / Yüksek Okul / Üniversite")
         self.radio_okul.setChecked(True)
         
         btn_grp = QButtonGroup(self)
@@ -245,28 +247,98 @@ class SchoolInfoDialog(QDialog):
         
         layout.addStretch()
 
+    def _open_zil_dialog(self):
+        from PySide6.QtWidgets import QInputDialog
+        cur_periods = int(self.cb_ders_saati.currentText())
+        settings = self.data_store.setdefault("settings", {})
+        default_bell = settings.get("bell_schedule", "08:30-09:10, 09:20-10:00, 10:10-10:50, 11:00-11:40, 11:50-12:30, 13:30-14:10, 14:20-15:00, 15:10-15:50")
+        text, ok = QInputDialog.getMultiLineText(
+            self, "Zil / Teneffüs Saatleri Ayarı",
+            f"Günlük {cur_periods} saatlik dersler için zil ve teneffüs saatlerini virgülle ayırarak giriniz:",
+            default_bell
+        )
+        if ok and text.strip():
+            settings["bell_schedule"] = text.strip()
+
+    def _open_gunler_dialog(self):
+        from PySide6.QtWidgets import QMessageBox
+        cnt = self.cb_gun_sayisi.currentText()
+        ws = self.cb_hafta_sonu.currentText()
+        QMessageBox.information(
+            self, "Çalışma Günleri",
+            f"Haftalık Çalışma Gün Sayısı: {cnt} Gün\nHafta Sonu Tatili: {ws}\n\nProgram çizelgesi bu gün ayarlarına göre otomatik güncellenecektir."
+        )
+
     def _load_data(self):
         if not self.data_store: return
+        settings = self.data_store.get("settings", {})
         kurum = self.data_store.get("kurum", {})
-        if kurum.get("isim"):
-            self.txt_kurum_adi.setText(kurum.get("isim"))
-        if kurum.get("yetkili"):
-            self.txt_yetkili_ad.setText(kurum.get("yetkili"))
+        
+        school_name = settings.get("school_name") or kurum.get("isim") or self.data_store.get("okul_adi", "")
+        if school_name:
+            self.txt_kurum_adi.setText(school_name)
+            
+        principal = settings.get("principal") or kurum.get("yetkili", "")
+        if principal:
+            self.txt_yetkili_ad.setText(principal)
+            
+        principal_title = settings.get("principal_title", "Okul Müdürü")
+        self.txt_yetkili_unvan.setText(principal_title)
+        
+        acad_year = settings.get("academic_year", "2026 - 2027")
+        self.txt_yil.setText(acad_year)
+        
+        periods = str(settings.get("periods") or self.data_store.get("ders_saati", 8))
+        idx_p = self.cb_ders_saati.findText(periods)
+        if idx_p >= 0:
+            self.cb_ders_saati.setCurrentIndex(idx_p)
+            
+        day_count = str(settings.get("day_count") or self.data_store.get("gun_sayisi", 5))
+        idx_d = self.cb_gun_sayisi.findText(day_count)
+        if idx_d >= 0:
+            self.cb_gun_sayisi.setCurrentIndex(idx_d)
+            
+        weekend = settings.get("weekend", "Cumartesi - Pazar")
+        idx_w = self.cb_hafta_sonu.findText(weekend)
+        if idx_w >= 0:
+            self.cb_hafta_sonu.setCurrentIndex(idx_w)
             
     def _save_and_accept(self):
         if self.data_store is not None:
-            if "kurum" not in self.data_store:
-                self.data_store["kurum"] = {}
-            self.data_store["kurum"]["isim"] = self.txt_kurum_adi.text().strip()
-            self.data_store["kurum"]["yetkili"] = self.txt_yetkili_ad.text().strip()
-            self.data_store["ders_saati"] = int(self.cb_ders_saati.currentText())
-            self.data_store["gun_sayisi"] = int(self.cb_gun_sayisi.currentText())
+            settings = self.data_store.setdefault("settings", {})
+            kurum = self.data_store.setdefault("kurum", {})
+            
+            sch_name = self.txt_kurum_adi.text().strip()
+            princ = self.txt_yetkili_ad.text().strip()
+            princ_title = self.txt_yetkili_unvan.text().strip()
+            acad_year = self.txt_yil.text().strip() or "2026 - 2027"
+            periods = int(self.cb_ders_saati.currentText())
+            day_cnt = int(self.cb_gun_sayisi.currentText())
+            weekend = self.cb_hafta_sonu.currentText()
+            
+            kurum["isim"] = sch_name
+            kurum["yetkili"] = princ
+            self.data_store["okul_adi"] = sch_name
+            self.data_store["ders_saati"] = periods
+            self.data_store["gun_sayisi"] = day_cnt
+            
+            settings["school_name"] = sch_name
+            settings["principal"] = princ
+            settings["principal_title"] = princ_title
+            settings["academic_year"] = acad_year
+            settings["periods"] = periods
+            settings["day_count"] = day_cnt
+            settings["weekend"] = weekend
+            
+            all_days = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
+            settings["days"] = all_days[:day_cnt]
+            
         self.accept()
 
     def get_data(self):
         return {
-            "okul_adi": self.txt_kurum_adi.text(),
-            "yil": 2026,
+            "okul_adi": self.txt_kurum_adi.text().strip(),
+            "yil": "2026 - 2027",
             "gun_sayisi": int(self.cb_gun_sayisi.currentText()),
             "ders_saati": int(self.cb_ders_saati.currentText()),
         }
