@@ -1146,7 +1146,7 @@ class MainWindow(QMainWindow):
 
         for rel in relations:
             r_type = rel.get("kural", "")
-            val = rel.get("deger", 2)
+            val = rel.get("parametre", 2)
             f_subjs = [s.strip().upper() for s in rel.get("dersler", []) if s.strip()]
             f_teach = [t.strip().upper() for t in rel.get("ogretmenler", []) if t.strip()]
             f_classes = [c.strip().upper() for c in rel.get("siniflar", []) if c.strip()]

@@ -611,7 +611,7 @@ class TimetablePrintPreview(QDialog):
             
             p_idx = 0
             while p_idx < periods:
-                lesson = placements.get((d_idx, p_idx)) or placements.get((p_idx, d_idx))
+                lesson = placements.get((d_idx, p_idx))
                 
                 cx = grid_x + hour_col_w + p_idx * col_w
                 
