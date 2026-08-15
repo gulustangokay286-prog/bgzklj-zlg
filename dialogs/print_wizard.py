@@ -6,9 +6,11 @@ from PySide6.QtCore import Qt
 import database
 
 class PrintWizardDialog(QDialog):
-    def __init__(self, data_store=None, parent=None):
+    def __init__(self, data_store=None, default_entity=None, default_view=None, parent=None):
         super().__init__(parent)
         self.data_store = data_store or {}
+        self.default_entity = default_entity
+        self.default_view = default_view or ""
         self.setWindowTitle("Gelişmiş Yazdırma Sihirbazı")
         self.resize(500, 500)
         self.setStyleSheet("""
@@ -42,7 +44,7 @@ class PrintWizardDialog(QDialog):
         self.tabs.addTab(self.tab_classes, "Sınıflar (Öğrenci Görünümü)")
         self.tabs.addTab(self.tab_teachers, "Öğretmenler")
         
-        # Load from SQLite
+        # Load data
         self._load_data()
         
         # Buttons
@@ -65,18 +67,35 @@ class PrintWizardDialog(QDialog):
         
     def _load_data(self):
         classes = self.data_store.get("siniflar", [])
+        is_class_view = "Sınıf" in self.default_view or (self.default_entity and any(c.get("ad") == self.default_entity for c in classes))
+        
         for c in classes:
-            item = QListWidgetItem(c.get("ad", ""))
+            c_name = c.get("ad", "")
+            item = QListWidgetItem(c_name)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(Qt.Checked)
+            if self.default_entity:
+                item.setCheckState(Qt.Checked if c_name == self.default_entity else Qt.Unchecked)
+            else:
+                item.setCheckState(Qt.Checked)
             self.list_classes.addItem(item)
             
         teachers = self.data_store.get("ogretmenler", [])
+        is_teacher_view = "Öğretmen" in self.default_view or (self.default_entity and any(t.get("ad") == self.default_entity for t in teachers))
+        
         for t in teachers:
-            item = QListWidgetItem(t.get("ad", ""))
+            t_name = t.get("ad", "")
+            item = QListWidgetItem(t_name)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(Qt.Unchecked) # Varsayılan olarak sınıf yazdırıldığı için öğretmenleri kapalı tut
+            if self.default_entity and is_teacher_view:
+                item.setCheckState(Qt.Checked if t_name == self.default_entity else Qt.Unchecked)
+            else:
+                item.setCheckState(Qt.Unchecked)
             self.list_teachers.addItem(item)
+            
+        if is_teacher_view:
+            self.tabs.setCurrentIndex(1)
+        else:
+            self.tabs.setCurrentIndex(0)
             
     def _select_all(self):
         current_list = self.list_classes if self.tabs.currentIndex() == 0 else self.list_teachers

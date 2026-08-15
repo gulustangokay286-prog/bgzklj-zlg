@@ -570,7 +570,6 @@ class DropTableWidget(QTableWidget):
                 if hasattr(grid, "_placed_lessons") and (orig_r, orig_c) in grid._placed_lessons:
                     info = grid._placed_lessons[(orig_r, orig_c)]
                     info["locked"] = not info.get("locked", False)
-                    from PySide6.QtGui import QBrush, QColor
                     if info["locked"]:
                         orig_item.setBackground(QBrush(QColor("#E0E0E0"))) # Grayed out / locked
                     else:
@@ -598,6 +597,26 @@ class DropTableWidget(QTableWidget):
                         orig_item.setBackground(QBrush(new_color))
                         lum = (0.299 * new_color.red() + 0.587 * new_color.green() + 0.114 * new_color.blue())
                         orig_item.setForeground(QBrush(Qt.white if lum < 160 else Qt.black))
+                        
+                        # Update subject globally in data_store
+                        if data_store and "dersler" in data_store:
+                            for d in data_store["dersler"]:
+                                if d.get("ad", "").strip().upper() == s_name.strip().upper():
+                                    d["color"] = hex_color
+                                    d["renk"] = hex_color
+                                    
+                        # Update all placements of this subject on current grid
+                        if hasattr(grid, "_placed_lessons"):
+                            for (r, c), p_info in grid._placed_lessons.items():
+                                if p_info.get("subject_name", "").strip().upper() == s_name.strip().upper():
+                                    p_info["color"] = hex_color
+                                    cell_item = self.item(r, c)
+                                    if cell_item:
+                                        cell_item.setBackground(QBrush(new_color))
+                                        cell_item.setForeground(QBrush(Qt.white if lum < 160 else Qt.black))
+                                        
+                        if hasattr(win, "save_db"): win.save_db()
+                        if hasattr(win, "_refresh_tree"): win._refresh_tree()
             elif action == act_change_teacher:
                 from PySide6.QtWidgets import QInputDialog
                 win = self.window()

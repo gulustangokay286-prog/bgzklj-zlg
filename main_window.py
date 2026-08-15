@@ -946,13 +946,25 @@ class MainWindow(QMainWindow):
             if t: workloads[t] = workloads.get(t, 0) + dur
             
         # 0. Sanitize & Capitalize
+        from dialogs.edit_forms import _auto_short_code
         for t in self.data_store.get("ogretmenler", []):
             if t.get("ad"):
                 t["ad"] = format_tr_name(t["ad"])
-                if not t.get("kisa"): t["kisa"] = t["ad"][:4].upper()
+                clean = t["ad"].strip()
+                parts = clean.split()
+                if len(parts) >= 2:
+                    t["kisa"] = f"{parts[0][0].upper()}. {' '.join(parts[1:]).upper()}"
+                elif len(parts) == 1 and len(parts[0]) > 0:
+                    t["kisa"] = f"{parts[0][0].upper()}. {parts[0].upper()}"
 
         for d in self.data_store.get("dersler", []):
-            if d.get("ad"): d["color"] = get_subject_color(d["ad"])
+            if d.get("ad"):
+                d["color"] = get_subject_color(d["ad"])
+                d["kisa"] = _auto_short_code(d["ad"])
+
+        for c in self.data_store.get("siniflar", []):
+            if c.get("ad"):
+                c["kisa"] = c["ad"].strip().replace(" ", "").upper()
 
         s_list = self.data_store.get("siniflar", [])
         t_list = self.data_store.get("ogretmenler", [])
@@ -1323,9 +1335,12 @@ class MainWindow(QMainWindow):
     def _act_print(self):
         from PySide6.QtWidgets import QDialog
         from dialogs.print_wizard import PrintWizardDialog
-        wiz = PrintWizardDialog(self.data_store, self)
+        curr_view = self._grid.view_combo.currentText() if hasattr(self, "_grid") else ""
+        curr_entity = self._grid.entity_combo.currentText() if hasattr(self, "_grid") else ""
+        wiz = PrintWizardDialog(self.data_store, default_entity=curr_entity, default_view=curr_view, parent=self)
         if wiz.exec() == QDialog.Accepted:
             filters = wiz.get_selected_filters()
+            filters["default_selection"] = curr_entity
             from dialogs.print_preview import TimetablePrintPreview
             dlg = TimetablePrintPreview(self.data_store, self._grid.get_placed_lessons(), filters, self)
             dlg.direct_print()
@@ -1333,9 +1348,12 @@ class MainWindow(QMainWindow):
     def _act_preview(self):
         from PySide6.QtWidgets import QDialog
         from dialogs.print_wizard import PrintWizardDialog
-        wiz = PrintWizardDialog(self.data_store, self)
+        curr_view = self._grid.view_combo.currentText() if hasattr(self, "_grid") else ""
+        curr_entity = self._grid.entity_combo.currentText() if hasattr(self, "_grid") else ""
+        wiz = PrintWizardDialog(self.data_store, default_entity=curr_entity, default_view=curr_view, parent=self)
         if wiz.exec() == QDialog.Accepted:
             filters = wiz.get_selected_filters()
+            filters["default_selection"] = curr_entity
             dlg = TimetablePrintPreview(self.data_store, self._grid.get_placed_lessons(), filters, self)
             dlg.exec()
 

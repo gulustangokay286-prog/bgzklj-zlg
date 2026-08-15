@@ -180,6 +180,11 @@ class TimetablePrintPreview(QDialog):
         self.filtered_classes = self.data_store.get("siniflar", [])
         self.filtered_teachers = self.data_store.get("ogretmenler", [])
         
+        if self.filters.get("classes"):
+            self.filtered_classes = [c for c in self.filtered_classes if c.get("ad") in self.filters.get("classes")]
+        if self.filters.get("teachers"):
+            self.filtered_teachers = [t for t in self.filtered_teachers if t.get("ad") in self.filters.get("teachers")]
+        
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(12, 12, 12, 12)
         main_layout.setSpacing(10)
@@ -450,9 +455,9 @@ class TimetablePrintPreview(QDialog):
 
     def _render_asc_multi_grid(self, painter, printer, VW, VH, is_teacher=False):
         if is_teacher:
-            items = [t.get("ad", "Öğretmen") for t in self.data_store.get("ogretmenler", [])]
+            items = [t.get("ad", "Öğretmen") for t in (self.filtered_teachers if self.filtered_teachers else self.data_store.get("ogretmenler", []))]
         else:
-            items = [c.get("ad", "Sınıf") for c in self.data_store.get("siniflar", [])]
+            items = [c.get("ad", "Sınıf") for c in (self.filtered_classes if self.filtered_classes else self.data_store.get("siniflar", []))]
             
         if not items:
             items = ["Örnek 1", "Örnek 2"]
