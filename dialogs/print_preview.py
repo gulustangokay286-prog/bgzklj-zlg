@@ -372,10 +372,8 @@ class TimetablePrintPreview(QDialog):
         painter.end()
 
     def _get_pseudo_placements(self, target_name, is_teacher=False):
-        """Fetch placements for a class or teacher, auto-populating from atamalar if not yet placed."""
+        """Fetch placements for a class or teacher, prioritizing live placed_lessons and preventing duplicate slot merges."""
         res = {}
-        periods = int(self.data_store.get("settings", {}).get("periods", 8))
-        days_count = int(self.data_store.get("settings", {}).get("days_count", 5))
         
         def normalize_clean(s):
             if not s: return ""
@@ -384,12 +382,42 @@ class TimetablePrintPreview(QDialog):
             
         target_norm = normalize_clean(target_name)
         
-        # 1. From grid_placements (list)
+        # 1. First priority: Live placed_lessons from TimetableGrid
+        if self.placed_lessons and isinstance(self.placed_lessons, dict):
+            for (r, c), item in self.placed_lessons.items():
+                if not isinstance(item, dict): continue
+                t_name = item.get("teacher_name") or item.get("teacher") or ""
+                c_name = item.get("class_name") or item.get("class") or ""
+                s_name = item.get("subject_name") or item.get("subject") or ""
+                scolor = item.get("color") or get_subject_color(s_name)
+                dur = int(item.get("duration", 1))
+                
+                match = False
+                if is_teacher:
+                    if normalize_clean(t_name) == target_norm or (len(target_norm) >= 4 and target_norm in normalize_clean(t_name)):
+                        match = True
+                        other_name = c_name
+                else:
+                    if normalize_clean(c_name) == target_norm or (len(target_norm) >= 2 and target_norm in normalize_clean(c_name)):
+                        match = True
+                        other_name = t_name
+                        
+                if match:
+                    for off in range(dur):
+                        res[(c, r + off)] = {
+                            "subject_name": s_name,
+                            "teacher_name": other_name,
+                            "color": scolor
+                        }
+                        
+            if res:
+                return res
+
+        # 2. Second priority: data_store["grid_placements"] (list)
         grid_data = self.data_store.get("grid_placements", [])
         if isinstance(grid_data, list) and grid_data:
             for item in grid_data:
-                if not isinstance(item, dict):
-                    continue
+                if not isinstance(item, dict): continue
                 r = int(item.get("period", item.get("row", 0)))
                 c = int(item.get("day", item.get("col", 0)))
                 dur = int(item.get("duration", 1))
@@ -415,13 +443,14 @@ class TimetablePrintPreview(QDialog):
                             "teacher_name": other_name,
                             "color": scolor
                         }
-                        
-        # 2. From yerlesim (dict)
+            if res:
+                return res
+
+        # 3. Third priority: data_store["yerlesim"] (dict)
         yerlesim_data = self.data_store.get("yerlesim", {})
-        if isinstance(yerlesim_data, dict):
+        if isinstance(yerlesim_data, dict) and yerlesim_data:
             for key_str, item in yerlesim_data.items():
-                if not isinstance(item, dict):
-                    continue
+                if not isinstance(item, dict): continue
                 t_name = item.get("teacher_name") or item.get("teacher") or ""
                 c_name = item.get("class_name") or item.get("class") or ""
                 s_name = item.get("subject_name") or item.get("subject") or ""
@@ -450,7 +479,7 @@ class TimetablePrintPreview(QDialog):
                             }
                     except Exception:
                         pass
-                        
+
         return res
 
     def _render_asc_multi_grid(self, painter, printer, VW, VH, is_teacher=False):

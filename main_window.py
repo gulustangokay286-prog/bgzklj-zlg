@@ -1497,6 +1497,8 @@ class MainWindow(QMainWindow):
             self.save_db() # Also save to internal bgz_database.json for cloud sync
 
     def _act_print(self):
+        if hasattr(self, "save_db"):
+            self.save_db(sync_from_grid=True)
         from PySide6.QtWidgets import QDialog
         from dialogs.print_wizard import PrintWizardDialog
         curr_view = self._grid.view_combo.currentText() if hasattr(self, "_grid") else ""
@@ -1510,6 +1512,8 @@ class MainWindow(QMainWindow):
             dlg.direct_print()
 
     def _act_preview(self):
+        if hasattr(self, "save_db"):
+            self.save_db(sync_from_grid=True)
         from PySide6.QtWidgets import QDialog
         from dialogs.print_wizard import PrintWizardDialog
         curr_view = self._grid.view_combo.currentText() if hasattr(self, "_grid") else ""
