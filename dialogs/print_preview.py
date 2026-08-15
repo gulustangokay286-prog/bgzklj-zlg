@@ -199,7 +199,10 @@ class TimetablePrintPreview(QDialog):
             "Öğretmen Haftalık Ders Programı (Tekil Çizelge - Tek Sayfa)",
             "Sınıf Haftalık Ders Programı (Tekil Çizelge - Tek Sayfa)",
             "Sınıf Dersleri & Atama Listesi (Liste Formatı)",
-            "Tüm Öğretmenlerin Ders Yükü Listesi"
+            "Tüm Öğretmenlerin Ders Yükü Listesi",
+            "Toplu Çarşaf Liste : Sınıflar",
+            "Toplu Çarşaf Liste : Öğretmenler",
+            "Tablo Olarak : Dersler"
         ]
         
         top_bar.addWidget(QLabel("Rapor Türü:", self))
@@ -276,7 +279,7 @@ class TimetablePrintPreview(QDialog):
         self.target_combo.blockSignals(True)
         self.target_combo.clear()
         
-        if "Tüm Sınıflar" in mode or "Tüm Öğretmenler" in mode or "Ders Yükü" in mode:
+        if "Tüm Sınıflar" in mode or "Tüm Öğretmenler" in mode or "Ders Yükü" in mode or "Çarşaf Liste" in mode or "Tablo Olarak" in mode:
             self.target_combo.addItem("Tümü (Çoklu Sayfa)")
             self.target_combo.setEnabled(False)
         elif "Öğretmen" in mode:
@@ -354,7 +357,13 @@ class TimetablePrintPreview(QDialog):
         painter.setViewport(0, 0, printer.width(), printer.height())
         painter.setWindow(0, 0, VW, VH)
         
-        if "Tüm Sınıflar" in mode:
+        if "Çarşaf Liste : Sınıflar" in mode:
+            self._render_carsaf_liste(painter, printer, VW, VH, is_teacher=False)
+        elif "Çarşaf Liste : Öğretmenler" in mode:
+            self._render_carsaf_liste(painter, printer, VW, VH, is_teacher=True)
+        elif "Tablo Olarak : Dersler" in mode:
+            self._render_tablo_dersler(painter, printer, VW, VH)
+        elif "Tüm Sınıflar" in mode:
             self._render_asc_multi_grid(painter, printer, VW, VH, is_teacher=False)
         elif "Tüm Öğretmenler" in mode:
             self._render_asc_multi_grid(painter, printer, VW, VH, is_teacher=True)
@@ -915,3 +924,253 @@ class TimetablePrintPreview(QDialog):
             
             painter.drawText(QRectF(cur_x, cur_y, cols[3][1], row_h), Qt.AlignCenter, f"{tot_hours} Saat")
             cur_y += row_h
+
+    def _render_carsaf_liste(self, painter, printer, VW, VH, is_teacher=False):
+        """Toplu Çarşaf Liste: Sınıflar/Öğretmenler. 8 saatlik birebir aSc formatı."""
+        import datetime
+        date_str = datetime.datetime.now().strftime("%d.%m.%Y")
+        school_name = self.data_store.get("okul_adi") or self.data_store.get("settings", {}).get("school_name", "Okul Adı")
+        
+        items = self.filtered_teachers if is_teacher else self.filtered_classes
+        if not items:
+            items = [{"ad": "Örnek 1"}]
+            
+        title = "Toplu Çarşaf Liste : Öğretmenler" if is_teacher else "Toplu Çarşaf Liste : Sınıflar"
+        
+        margin_x, margin_y = 40, 50
+        w = VW - (2 * margin_x)
+        h = VH - (2 * margin_y)
+        
+        days = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"]
+        periods = 8
+        
+        # Dimensions
+        name_col_w = max(100, w * 0.12)
+        grid_w = w - name_col_w
+        day_w = grid_w / len(days)
+        period_w = day_w / periods
+        
+        header_h = 40
+        row_h = 35
+        
+        # Draw Title
+        painter.setFont(make_font(18, True))
+        painter.setPen(QPen(QColor("#000000"), 1))
+        painter.drawText(QRectF(margin_x, margin_y, w, 40), Qt.AlignCenter, title)
+        
+        # Draw School Name
+        painter.setFont(make_font(10, False))
+        painter.drawText(QRectF(margin_x, margin_y + 30, w, 20), Qt.AlignLeft | Qt.AlignBottom, school_name)
+        
+        table_y = margin_y + 55
+        
+        # Pagination
+        rows_per_page = int((h - 80) // row_h)
+        total_pages = (len(items) + rows_per_page - 1) // rows_per_page
+        
+        for p_idx in range(total_pages):
+            if p_idx > 0:
+                printer.newPage()
+                painter.fillRect(0, 0, VW, VH, Qt.white)
+                painter.setFont(make_font(18, True))
+                painter.drawText(QRectF(margin_x, margin_y, w, 40), Qt.AlignCenter, title)
+                painter.setFont(make_font(10, False))
+                painter.drawText(QRectF(margin_x, margin_y + 30, w, 20), Qt.AlignLeft | Qt.AlignBottom, school_name)
+            
+            cur_y = table_y
+            
+            # --- Table Header ---
+            painter.setPen(QPen(QColor("#000000"), 1.2))
+            painter.setBrush(Qt.NoBrush)
+            
+            # Empty top-left cell
+            painter.drawRect(QRectF(margin_x, cur_y, name_col_w, header_h))
+            
+            # Days and Periods
+            for d_idx, day_name in enumerate(days):
+                dx = margin_x + name_col_w + d_idx * day_w
+                # Day cell
+                painter.drawRect(QRectF(dx, cur_y, day_w, header_h / 2))
+                painter.setFont(make_font(11, False))
+                painter.drawText(QRectF(dx, cur_y, day_w, header_h / 2), Qt.AlignCenter, day_name)
+                
+                # Period cells
+                for p in range(periods):
+                    px = dx + p * period_w
+                    painter.drawRect(QRectF(px, cur_y + header_h / 2, period_w, header_h / 2))
+                    painter.setFont(make_font(11, False))
+                    painter.drawText(QRectF(px, cur_y + header_h / 2, period_w, header_h / 2), Qt.AlignCenter, str(p + 1))
+            
+            cur_y += header_h
+            
+            # --- Rows ---
+            page_items = items[p_idx * rows_per_page : (p_idx + 1) * rows_per_page]
+            
+            for item in page_items:
+                target_name = item.get("ad", "")
+                
+                # Draw Name Cell
+                painter.drawRect(QRectF(margin_x, cur_y, name_col_w, row_h))
+                painter.setFont(make_font(12, False))
+                # If teacher, use short code if available
+                display_name = target_name
+                if is_teacher and item.get("kisa"):
+                    display_name = item.get("kisa")
+                painter.drawText(QRectF(margin_x + 5, cur_y, name_col_w - 10, row_h), Qt.AlignCenter, display_name)
+                
+                # Fetch Placements
+                placements = self._get_pseudo_placements(target_name, is_teacher)
+                
+                # Draw Grid Cells
+                for d_idx in range(len(days)):
+                    dx = margin_x + name_col_w + d_idx * day_w
+                    for p in range(periods):
+                        px = dx + p * period_w
+                        painter.setPen(QPen(QColor("#000000"), 1.2 if (p == 0 or p == periods - 1) else 0.5)) # thicker edges for days
+                        painter.drawRect(QRectF(px, cur_y, period_w, row_h))
+                        
+                        lesson = placements.get((d_idx, p))
+                        if lesson:
+                            sname = lesson.get("subject_name", "")
+                            
+                            # Fotoğrafta çarşaf listede ders kısa kodu yazıyor: F, MAT vs. Öğretmen formatında sınıf kodu yazıyor.
+                            if is_teacher:
+                                cell_text = lesson.get("teacher_name", "") # Sınıf adı "teacher_name" argümanından geliyor (is_teacher olunca swap ediliyor)
+                            else:
+                                cell_text = get_subject_badge(sname, self.data_store)
+                                
+                            # Fit text
+                            font_size = 9
+                            if len(cell_text) > 4: font_size = 7
+                            if len(cell_text) > 6: font_size = 6
+                            
+                            painter.setFont(make_font(font_size, False))
+                            painter.setPen(QPen(QColor("#000000"), 1))
+                            painter.drawText(QRectF(px + 1, cur_y + 1, period_w - 2, row_h - 2), Qt.AlignCenter, cell_text)
+                
+                cur_y += row_h
+                
+            # Footer
+            painter.setFont(make_font(8, False))
+            painter.drawText(QRectF(margin_x, VH - margin_y + 10, w / 2, 20), Qt.AlignLeft, f"Ders Planı Oluşturuldu:{date_str}")
+            painter.drawText(QRectF(margin_x + w / 2, VH - margin_y + 10, w / 2, 20), Qt.AlignRight, "BGZ Ders Planlama")
+
+
+    def _render_tablo_dersler(self, painter, printer, VW, VH):
+        """Tablo Olarak: Dersler. Her ders ayrı bir sayfada."""
+        import datetime
+        date_str = datetime.datetime.now().strftime("%d.%m.%Y")
+        school_name = self.data_store.get("okul_adi") or self.data_store.get("settings", {}).get("school_name", "Okul Adı")
+        
+        dersler = self.data_store.get("dersler", [])
+        if not dersler:
+            dersler = [{"ad": "MATEMATİK", "kisa": "MAT"}]
+            
+        margin_x, margin_y = 60, 60
+        w = VW - (2 * margin_x)
+        h = VH - (2 * margin_y)
+        
+        days = ["Pa", "Sa", "Ça", "Pe", "Cu"]
+        periods = 8
+        times = [
+            "8:00 - 8:45", "9:00 - 9:45", "10:00 - 10:45", "11:00 - 11:45",
+            "12:00 - 12:45", "13:00 - 13:45", "14:00 - 14:45", "15:00 - 15:45"
+        ]
+        
+        day_col_w = 80
+        grid_w = w - day_col_w
+        period_w = grid_w / periods
+        
+        header_h = 60
+        row_h = (h - header_h - 80) / len(days) # 80 is for title space
+        
+        for i, ders in enumerate(dersler):
+            if i > 0:
+                printer.newPage()
+                painter.fillRect(0, 0, VW, VH, Qt.white)
+                
+            sname = ders.get("ad", "")
+            short_name = ders.get("kisa") or get_subject_badge(sname, self.data_store)
+            
+            # Title
+            painter.setFont(make_font(36, False))
+            painter.setPen(QPen(QColor("#000000"), 1))
+            painter.drawText(QRectF(margin_x, margin_y, w, 50), Qt.AlignCenter, short_name)
+            
+            # School Name
+            painter.setFont(make_font(10, False))
+            painter.drawText(QRectF(margin_x, margin_y + 45, w, 20), Qt.AlignLeft | Qt.AlignBottom, school_name)
+            
+            table_y = margin_y + 70
+            
+            # Grid
+            painter.setPen(QPen(QColor("#000000"), 1.5))
+            painter.setBrush(Qt.NoBrush)
+            
+            # Empty top-left
+            painter.drawRect(QRectF(margin_x, table_y, day_col_w, header_h))
+            
+            # Column headers (Periods & Times)
+            for p in range(periods):
+                px = margin_x + day_col_w + p * period_w
+                painter.drawRect(QRectF(px, table_y, period_w, header_h))
+                
+                painter.setFont(make_font(16, False))
+                painter.drawText(QRectF(px, table_y + 5, period_w, header_h / 2), Qt.AlignCenter | Qt.AlignBottom, str(p + 1))
+                
+                painter.setFont(make_font(8, False))
+                t_str = times[p] if p < len(times) else f"{8+p}:00 - {8+p}:45"
+                painter.drawText(QRectF(px, table_y + header_h / 2, period_w, header_h / 2), Qt.AlignCenter | Qt.AlignTop, t_str)
+                
+            cur_y = table_y + header_h
+            
+            # Gather all placements for this subject across all classes
+            subj_placements = {} # (day, period) -> list of (class, teacher)
+            
+            # Ensure we are reading live grid data or saved grid_placements
+            grid_data = self.data_store.get("grid_placements", [])
+            for item in grid_data:
+                if item.get("subject_name") == sname or item.get("subject") == sname:
+                    r = int(item.get("period", item.get("row", 0)))
+                    c = int(item.get("day", item.get("col", 0)))
+                    dur = int(item.get("duration", 1))
+                    cls = item.get("class_name") or item.get("class") or ""
+                    tchr = item.get("teacher_name") or item.get("teacher") or ""
+                    
+                    for off in range(dur):
+                        if (c, r + off) not in subj_placements:
+                            subj_placements[(c, r + off)] = []
+                        subj_placements[(c, r + off)].append((cls, tchr))
+            
+            # Rows (Days)
+            for d_idx, day_name in enumerate(days):
+                ry = cur_y + d_idx * row_h
+                painter.drawRect(QRectF(margin_x, ry, day_col_w, row_h))
+                painter.setFont(make_font(24, False))
+                painter.drawText(QRectF(margin_x, ry, day_col_w, row_h), Qt.AlignCenter, day_name)
+                
+                for p in range(periods):
+                    px = margin_x + day_col_w + p * period_w
+                    painter.drawRect(QRectF(px, ry, period_w, row_h))
+                    
+                    placements = subj_placements.get((d_idx, p), [])
+                    if placements:
+                        # Draw first placement (typically there's only 1 or 2 classes doing this subject at this time)
+                        cls, tchr = placements[0]
+                        painter.setFont(make_font(12, True))
+                        painter.drawText(QRectF(px, ry, period_w, row_h / 2), Qt.AlignCenter | Qt.AlignBottom, cls)
+                        
+                        painter.setFont(make_font(10, False))
+                        if tchr:
+                            # Short teacher name (e.g. H. ARMAN)
+                            parts = tchr.split()
+                            if len(parts) >= 2:
+                                t_str = f"{parts[0][0].upper()}. {parts[1].upper()}"
+                            else:
+                                t_str = tchr.upper()
+                            painter.drawText(QRectF(px, ry + row_h / 2, period_w, row_h / 2), Qt.AlignCenter | Qt.AlignTop, t_str)
+            
+            # Footer
+            painter.setFont(make_font(8, False))
+            painter.drawText(QRectF(margin_x, cur_y + len(days) * row_h + 10, w / 2, 20), Qt.AlignLeft, f"Ders Planı Oluşturuldu:{date_str}")
+            painter.drawText(QRectF(margin_x + w / 2, cur_y + len(days) * row_h + 10, w / 2, 20), Qt.AlignRight, "BGZ Ders Planlama")

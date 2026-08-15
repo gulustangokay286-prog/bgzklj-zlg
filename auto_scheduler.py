@@ -97,6 +97,20 @@ class AutoSchedulerWorker(QThread):
         c_objs = {normalize_class_name(c["ad"]): c for c in self.data_store.get("siniflar", []) if c.get("ad")}
         constraints = self.data_store.get("constraints", {})
 
+        # Tamamen kısıtlı öğretmenleri tespit et (tüm slotları 0 olan)
+        fully_blocked_teachers = set()
+        for t_name, t_obj in t_objs.items():
+            toff = t_obj.get("timeoff", [])
+            if toff:
+                all_blocked = all(
+                    (d_idx < len(toff) and p_idx < len(toff[d_idx]) and toff[d_idx][p_idx] == 0)
+                    for d_idx in range(len(days))
+                    for p_idx in range(periods)
+                )
+                if all_blocked:
+                    fully_blocked_teachers.add(t_name)
+                    print(f"[SCHEDULER] ⛔ {t_name} tamamen kısıtlıdır, hiçbir ders ataması yapılmayacak.")
+
         # Planlama İlişkileri kurallarını oku (aktif olanlar)
         relations = [r for r in self.data_store.get("planlama_iliskileri", []) if r.get("aktif", True)]
 
@@ -160,6 +174,11 @@ class AutoSchedulerWorker(QThread):
                 raw_type = str(asgn.get("type", "")).strip()
                 t_name = format_tr_name(asgn.get("teacher") or asgn.get("ogretmen") or asgn.get("teacher_name") or "")
                 s_name = asgn.get("subject") or asgn.get("ders") or asgn.get("subject_name") or ""
+                
+                # Tamamen kısıtlı öğretmenlerin derslerini atla
+                if t_name in fully_blocked_teachers:
+                    print(f"[SCHEDULER] ⏭️ {t_name} kısıtlı, {s_name} dersi {cn} sınıfı için atlanıyor.")
+                    continue
                 
                 if raw_type and "+" in raw_type:
                     for p in raw_type.split("+"):
@@ -431,9 +450,14 @@ class AutoSchedulerWorker(QThread):
 
                 if t and t in t_objs:
                     toff = t_objs[t].get("timeoff", [])
-                    for off in range(dur):
-                        if toff and d < len(toff) and (p + off) < len(toff[d]) and toff[d][p + off] == 0:
-                            cost += 250
+                    if toff:
+                        timeoff_blocked = False
+                        for off in range(dur):
+                            if d < len(toff) and (p + off) < len(toff[d]) and toff[d][p + off] == 0:
+                                timeoff_blocked = True
+                                break
+                        if timeoff_blocked:
+                            continue  # Hard constraint: kesinlikle yerleştirme
                 if dur >= 2: cost -= 30  # Blok bütünlüğünü ödüllendir
 
                 # Pedagojik Kural 1: İki zor ders peş peşe gelmesin

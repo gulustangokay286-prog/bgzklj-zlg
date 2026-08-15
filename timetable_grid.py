@@ -476,6 +476,25 @@ class DropTableWidget(QTableWidget):
             col = self.column(item) if item else self.columnAt(event.pos().x())
             
             if row >= 0 and col >= 0:
+                # Öğretmen timeoff kontrolü
+                teacher = lesson_info.get("teacher", "")
+                dur = int(lesson_info.get("duration", 1))
+                win = self.window()
+                if teacher and hasattr(win, "data_store"):
+                    for t in win.data_store.get("ogretmenler", []):
+                        t_ad = t.get("ad", "")
+                        if t_ad and (t_ad == teacher or t_ad.upper() == teacher.upper()):
+                            toff = t.get("timeoff", [])
+                            if toff:
+                                for off in range(dur):
+                                    if col < len(toff) and (row + off) < len(toff[col]) and toff[col][row + off] == 0:
+                                        QMessageBox.warning(self, "Kısıtlama Engeli",
+                                            f"⛔ {t_ad} öğretmeni bu zaman diliminde kısıtlıdır.\n"
+                                            f"Önce öğretmenin kısıtlama ayarlarını değiştirin.")
+                                        event.ignore()
+                                        return
+                            break
+                
                 self.lesson_dropped.emit(row, col, lesson_info)
                 event.accept()
             else:
@@ -767,11 +786,12 @@ class TimetableGrid(QWidget):
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 4)
-        layout.setSpacing(6)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
         # ── Toolbar row
         top = QHBoxLayout()
+        top.setContentsMargins(8, 4, 8, 4)
         top.setSpacing(8)
 
         view_lbl = QLabel("Görünüm:", self)
@@ -790,7 +810,7 @@ class TimetableGrid(QWidget):
         top.addStretch(1)
         layout.addLayout(top)
 
-        # ── Table
+        # ── Table (aSc-style gray compact grid)
         self.table = DropTableWidget(self._periods, len(DAYS), self)
         self.table.cell_right_clicked.connect(self.cell_right_clicked)
         self.table.setHorizontalHeaderLabels(DAYS)
@@ -804,21 +824,127 @@ class TimetableGrid(QWidget):
         hh = self.table.horizontalHeader()
         hh.setSectionResizeMode(QHeaderView.Stretch)
         hh.setDefaultAlignment(Qt.AlignCenter)
-        hh.setMinimumSectionSize(100)
-        hh.setStyleSheet("QHeaderView::section { background: #F1F5F9; font-weight: bold; padding: 6px; border: 1px solid #E2E8F0; font-size: 12px; color: #334155; }")
+        hh.setMinimumSectionSize(22)
+        hh.setStyleSheet("""
+            QHeaderView::section {
+                background: #D0D0D0; font-weight: bold; padding: 2px;
+                border: 1px solid #999; font-size: 10px; color: #111;
+            }
+        """)
 
         vh = self.table.verticalHeader()
         vh.setSectionResizeMode(QHeaderView.Stretch)
-        vh.setMinimumSectionSize(55)
-        vh.setStyleSheet("QHeaderView::section { background: #F8FAFC; font-weight: bold; border: 1px solid #E2E8F0; padding: 6px; font-size: 12px; color: #334155; }")
+        vh.setMinimumSectionSize(22)
+        vh.setStyleSheet("""
+            QHeaderView::section {
+                background: #D8D8D8; font-weight: bold; border: 1px solid #999;
+                padding: 2px; font-size: 10px; color: #111;
+            }
+        """)
 
-        self.table.setStyleSheet("QTableWidget { background: #FFFFFF; gridline-color: #E2E8F0; font-size: 12px; } QTableWidget::item { padding: 4px; }")
+        self.table.setStyleSheet("""
+            QTableWidget {
+                background: #C0C0C0;
+                gridline-color: #999999;
+                font-size: 10px;
+                selection-background-color: #FFFF00;
+                selection-color: #000;
+            }
+            QTableWidget::item {
+                padding: 1px;
+                background: #C0C0C0;
+            }
+        """)
+
+        # Connect click for info panel
+        self.table.cellClicked.connect(self._on_cell_clicked)
         
         layout.addWidget(self.table, stretch=1)
         
-        # Bottom Dock for unplaced lessons
+        # ── Bottom area: info panel + unplaced dock
+        bottom_frame = QFrame(self)
+        bottom_frame.setStyleSheet("QFrame { background: #B0B0B8; border-top: 1px solid #888; }")
+        bottom_layout = QHBoxLayout(bottom_frame)
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_layout.setSpacing(0)
+        
+        # Left: Lesson Info Panel (aSc-style)
+        self.info_panel = QFrame(self)
+        self.info_panel.setFixedHeight(75)
+        self.info_panel.setMinimumWidth(280)
+        self.info_panel.setMaximumWidth(400)
+        self.info_panel.setStyleSheet("QFrame { background: #B8B8C0; border: 1px solid #888; }")
+        info_inner = QVBoxLayout(self.info_panel)
+        info_inner.setContentsMargins(8, 4, 8, 4)
+        info_inner.setSpacing(2)
+        
+        # Color swatch + subject name
+        info_top = QHBoxLayout()
+        info_top.setSpacing(6)
+        self.info_color_box = QLabel()
+        self.info_color_box.setFixedSize(22, 22)
+        self.info_color_box.setStyleSheet("background: transparent; border: 1px solid #666;")
+        info_top.addWidget(self.info_color_box)
+        
+        self.info_subject_lbl = QLabel("")
+        self.info_subject_lbl.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        self.info_subject_lbl.setStyleSheet("color: #111; background: transparent; border: none;")
+        info_top.addWidget(self.info_subject_lbl)
+        info_top.addStretch(1)
+        info_inner.addLayout(info_top)
+        
+        self.info_class_lbl = QLabel("")
+        self.info_class_lbl.setFont(QFont("Segoe UI", 10))
+        self.info_class_lbl.setStyleSheet("color: #D32F2F; background: transparent; border: none; font-weight: bold;")
+        info_inner.addWidget(self.info_class_lbl)
+        
+        self.info_teacher_lbl = QLabel("")
+        self.info_teacher_lbl.setFont(QFont("Segoe UI", 10))
+        self.info_teacher_lbl.setStyleSheet("color: #333; background: transparent; border: none;")
+        info_inner.addWidget(self.info_teacher_lbl)
+        
+        bottom_layout.addWidget(self.info_panel)
+        
+        # Right: Unplaced lessons dock
         self.unplaced_dock = UnplacedLessonsDock(self)
-        layout.addWidget(self.unplaced_dock)
+        bottom_layout.addWidget(self.unplaced_dock, stretch=1)
+        
+        layout.addWidget(bottom_frame)
+
+    def _on_cell_clicked(self, row, col):
+        """Show lesson info in the bottom-left panel when a cell is clicked (aSc-style)."""
+        info = self._placed_lessons.get((row, col))
+        if not info:
+            for (r, c), lesson_info in self._placed_lessons.items():
+                dur = lesson_info.get("duration", 1)
+                if c == col and r <= row < r + dur:
+                    info = lesson_info
+                    break
+        
+        if info:
+            subj = info.get("subject_name", "")
+            teacher = info.get("teacher_name", "")
+            cls = info.get("class_name", "")
+            color = info.get("color", "#C0C0C0")
+            
+            abbr = get_subject_abbr(subj)
+            self.info_color_box.setStyleSheet(f"background: {color}; border: 1px solid #666;")
+            self.info_subject_lbl.setText(f"{abbr} - {subj.upper()}")
+            self.info_class_lbl.setText(cls.upper() if cls else "")
+            
+            t_display = ""
+            if teacher:
+                parts = teacher.strip().split()
+                if len(parts) >= 2:
+                    t_display = f"{parts[0][0].upper()} – {teacher}"
+                else:
+                    t_display = teacher
+            self.info_teacher_lbl.setText(t_display)
+        else:
+            self.info_color_box.setStyleSheet("background: transparent; border: 1px solid #666;")
+            self.info_subject_lbl.setText("")
+            self.info_class_lbl.setText("")
+            self.info_teacher_lbl.setText("")
 
     def set_periods(self, periods: int):
         new_periods = max(1, min(16, int(periods)))
@@ -828,9 +954,8 @@ class TimetableGrid(QWidget):
             self.table.setVerticalHeaderLabels([f"{i+1}" for i in range(self._periods)])
 
     def set_cell(self, row, col, subject_name, color, teacher_name="", duration=1, class_name=""):
-        display_text = f"{subject_name}"
-        if teacher_name and teacher_name != "Öğretmen":
-            display_text += f"\n{teacher_name}"
+        abbr = get_subject_abbr(subject_name)
+        display_text = abbr
             
         item = QTableWidgetItem(display_text)
         item.setTextAlignment(Qt.AlignCenter)
@@ -876,7 +1001,7 @@ class TimetableGrid(QWidget):
         self.clear_grid()
         
     def set_mode_all_classes(self, class_list: list, periods: int, days_list: list):
-        """Whole School View: Rows=Classes, Cols=Days*Periods"""
+        """Whole School View (aSc Çarşaf): Rows=Classes, Cols=Days*Periods"""
         self._periods = periods
         self.table.setRowCount(len(class_list))
         total_cols = len(days_list) * periods
@@ -888,6 +1013,14 @@ class TimetableGrid(QWidget):
         col_headers = []
         for d in days_list:
             for p in range(periods):
-                col_headers.append(f"{d[:3]} {p+1}")
+                col_headers.append(str(p + 1))
         self.table.setHorizontalHeaderLabels(col_headers)
+        
+        # Set compact column widths
+        hh = self.table.horizontalHeader()
+        hh.setMinimumSectionSize(18)
+        for i in range(total_cols):
+            self.table.setColumnWidth(i, 24)
+            
         self.clear_grid()
+
