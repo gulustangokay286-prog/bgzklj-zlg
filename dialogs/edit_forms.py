@@ -1129,32 +1129,36 @@ def _auto_short_code(text: str) -> str:
         "GÖRSEL": "GÖRSEL SANATLAR",
         "GÖRS": "GÖRSEL SANATLAR",
         "RESİM": "GÖRSEL SANATLAR",
-        "BİYOLOJİ": "BİYOLOJİ",
-        "BİYO": "BİYOLOJİ",
-        "FİZİK": "FİZİK",
-        "FİZ": "FİZİK",
-        "KİMYA": "KİMYA",
-        "KİM": "KİMYA",
-        "COĞRAFYA": "COĞRAFYA",
-        "COĞ": "COĞRAFYA",
-        "GEOMETRİ": "GEOMETRİ",
-        "GEO": "GEOMETRİ",
-        "EDEBİYAT": "EDEBİYAT",
-        "EDB": "EDEBİYAT",
-        "TÜRK DİLİ VE EDEBİYATI": "TÜRK DİLİ VE EDEBİYATI",
-        "TDE": "TÜRK DİLİ VE EDEBİYATI",
-        "MATEMATİK": "MATEMATİK",
-        "MAT": "MATEMATİK",
-        "İNGİLİZCE": "İNGİLİZCE",
-        "İNG": "İNGİLİZCE",
-        "ALMANCA": "ALMANCA",
-        "ALM": "ALMANCA",
-        "FRANSIZCA": "FRANSIZCA",
-        "FRA": "FRANSIZCA",
-        "PARAGRAF": "PARAGRAF",
-        "PAR": "PARAGRAF",
-        "PROBLEM": "PROBLEM",
-        "PROB": "PROBLEM",
+        
+        # Diğer dersler kısa koda dönüştürülmeli
+        "BİYOLOJİ": "BİYO",
+        "BİYO": "BİYO",
+        "FİZİK": "FİZ",
+        "FİZ": "FİZ",
+        "KİMYA": "KİM",
+        "KİM": "KİM",
+        "COĞRAFYA": "COĞ",
+        "COĞ": "COĞ",
+        "GEOMETRİ": "GEO",
+        "GEO": "GEO",
+        "EDEBİYAT": "EDB",
+        "EDB": "EDB",
+        "TÜRK DİLİ VE EDEBİYATI": "TDE",
+        "TDE": "TDE",
+        "MATEMATİK": "MAT",
+        "MAT": "MAT",
+        "İNGİLİZCE": "İNG",
+        "İNG": "İNG",
+        "ALMANCA": "ALM",
+        "ALM": "ALM",
+        "FRANSIZCA": "FRA",
+        "FRA": "FRA",
+        "PARAGRAF": "PAR",
+        "PAR": "PAR",
+        "PROBLEM": "PROB",
+        "PROB": "PROB",
+        
+        # Kısa kodu olmayan diğer dersler
         "BİLİŞİM": "BİLİŞİM",
         "KODLAMA": "KODLAMA",
         "YAZILIM": "YAZILIM",
@@ -1171,9 +1175,9 @@ def _auto_short_code(text: str) -> str:
     if upper_letters in overrides:
         base = overrides[upper_letters]
     elif len(upper_letters) <= 20:
-        base = upper_letters
+        base = upper_letters[:4] if len(upper_letters) > 4 else upper_letters
     else:
-        base = upper_letters
+        base = upper_letters[:4]
     
     # Numbers must ALWAYS stand separate by a space
     sc = f"{base} {nums}" if nums else base
