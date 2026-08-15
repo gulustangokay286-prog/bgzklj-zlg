@@ -1132,6 +1132,41 @@ class MainWindow(QMainWindow):
         if is_move and orig_r == row and orig_c == col:
             return
             
+        # Check boundary
+        if row + duration > self._grid.table.rowCount():
+            QMessageBox.warning(self, "Geçersiz Konum", f"⚠️ Ders {duration} saatlik olduğu için {row+1}. saate sığmıyor (günlük sınır: {self._grid.table.rowCount()} saat)!")
+            return
+            
+        placed = self._grid.get_placed_lessons()
+        
+        # Check if cell is occupied when adding from card dock (not a move)
+        if not is_move:
+            occupied_conflict = None
+            for (r, c), data in placed.items():
+                if c == col:
+                    placed_dur = data.get("duration", 1)
+                    if (row < r + placed_dur) and (r < row + duration):
+                        occupied_conflict = data
+                        break
+            if occupied_conflict:
+                occ_subj = occupied_conflict.get("subject_name", occupied_conflict.get("subject", "Ders"))
+                occ_t = occupied_conflict.get("teacher_name", occupied_conflict.get("teacher", ""))
+                msg = QMessageBox(self)
+                msg.setWindowTitle("Ders Çakışması / Üzerine Yazma")
+                msg.setIcon(QMessageBox.Warning)
+                msg.setText(
+                    f"⚠️ <b>Bu Saatte Zaten Ders Var!</b><br><br>"
+                    f"<b>{day_name}</b> günü <b>{row+1}. ders saatinde</b> bu sınıfta zaten <b>{occ_subj}</b> ({occ_t}) dersi bulunmaktadır.<br><br>"
+                    f"Mevcut dersin üzerine yazmak istiyor musunuz?"
+                )
+                btn_yes = msg.addButton("⚠️ Evet, Üzerine Yaz", QMessageBox.AcceptRole)
+                btn_no = msg.addButton("❌ İptal Et / Engelle", QMessageBox.RejectRole)
+                msg.setDefaultButton(btn_no)
+                msg.exec()
+                if msg.clickedButton() != btn_yes:
+                    self.statusBar().showMessage("İşlem iptal edildi (Mevcut ders korundu).")
+                    return
+            
         # 1. Check Teacher Constraints (Time-off / Kapalı gün/saat)
         kisitlamalar = self.data_store.get("kisitlamalar", {})
         if teacher and teacher in kisitlamalar:

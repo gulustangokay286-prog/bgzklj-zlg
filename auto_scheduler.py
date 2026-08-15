@@ -173,6 +173,25 @@ class AutoSchedulerWorker(QThread):
                         candidate_blocks.append({"subject": s_name, "teacher": t_name, "duration": b_dur})
                         h -= b_dur
 
+            # Manuel olarak önceden yerleştirilmiş ders saatlerini aday bloklardan düş (mükerrerliği önle)
+            for m in existing_for_class:
+                m_subj = m.get("subject_name", "")
+                m_t = m.get("teacher_name", "")
+                m_dur = int(m.get("duration", 1))
+                
+                found_idx = -1
+                for idx, cb in enumerate(candidate_blocks):
+                    if cb.get("subject") == m_subj and cb.get("teacher") == m_t and cb.get("duration") == m_dur:
+                        found_idx = idx
+                        break
+                if found_idx == -1:
+                    for idx, cb in enumerate(candidate_blocks):
+                        if cb.get("subject") == m_subj and cb.get("teacher") == m_t:
+                            found_idx = idx
+                            break
+                if found_idx != -1:
+                    candidate_blocks.pop(found_idx)
+
             c_timeoff = c_objs.get(cn, {}).get("timeoff", [])
 
             # A* Search ile Boşluksuz Çöz
