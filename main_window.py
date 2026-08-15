@@ -899,15 +899,16 @@ class MainWindow(QMainWindow):
                 period = int(item.get("period", item.get("row", 0)))
                 is_locked = bool(item.get("locked", False))
                 
-                # Support combined classes if comma separated or listed
-                target_classes = [c.strip() for c in c_name.split(",") if c.strip()] if "," in c_name else [c_name]
+                # Support combined classes if comma or ampersand separated
+                from auto_scheduler import matches_class
+                target_classes = [c.strip() for c in c_name.replace("&", ",").split(",") if c.strip()] if ("," in c_name or "&" in c_name) else [c_name]
                 for tc in target_classes:
                     matching_row = -1
                     if tc in class_names:
                         matching_row = class_names.index(tc)
                     else:
                         for idx, cn in enumerate(class_names):
-                            if cn.upper() == tc.upper():
+                            if matches_class(cn, tc) or matches_class(tc, cn):
                                 matching_row = idx
                                 break
                                 

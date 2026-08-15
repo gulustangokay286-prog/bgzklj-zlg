@@ -9,6 +9,11 @@ def normalize_class_name(cls_name: str) -> str:
     s = s.replace("-", "/").replace("\\", "/")
     return s
 
+def normalize_clean(s: str) -> str:
+    if not s: return ""
+    tr_map = str.maketrans({'İ': 'i', 'I': 'ı', 'ı': 'i', 'Ş': 's', 'ş': 's', 'Ğ': 'g', 'ğ': 'g', 'Ü': 'u', 'ü': 'u', 'Ö': 'o', 'ö': 'o', 'Ç': 'c', 'ç': 'c'})
+    return "".join(c for c in str(s).translate(tr_map).lower() if c.isalnum())
+
 def matches_class(asgn_class_str: str, target_cn: str) -> bool:
     if not asgn_class_str or not target_cn:
         return False
@@ -112,6 +117,15 @@ class AutoSchedulerWorker(QThread):
                     if t_name: global_teacher_occupied.add((t_name, day, period + off))
 
         t_objs = {format_tr_name(t["ad"]): t for t in self.data_store.get("ogretmenler", []) if t.get("ad")}
+        t_toff_dict = {}
+        for t in self.data_store.get("ogretmenler", []):
+            t_ad = t.get("ad", "")
+            toff = t.get("timeoff", [])
+            if t_ad and toff:
+                t_toff_dict[normalize_clean(t_ad)] = toff
+                t_toff_dict[format_tr_name(t_ad)] = toff
+                t_toff_dict[t_ad] = toff
+                
         constraints = self.data_store.get("constraints", {})
 
         # Tamamen kısıtlı öğretmenleri tespit et (tüm slotları 0 olan)
@@ -253,12 +267,14 @@ class AutoSchedulerWorker(QThread):
                 manual_day_subj_hours=manual_day_subj_hours,
                 constraints=constraints,
                 relations=relations,
-                class_name=cn
+                class_name=cn,
+                t_toff_dict=t_toff_dict
             )
 
             for sol_item in solution:
                 dur = sol_item["duration"]
                 t_name = sol_item["teacher"]
+                s_name = sol_item["subject"]
                 d = sol_item["day"]
                 p = sol_item["period"]
                 total_placed_hours += dur
@@ -266,14 +282,38 @@ class AutoSchedulerWorker(QThread):
                 for off in range(dur):
                     if t_name: global_teacher_occupied.add((t_name, d, p + off))
 
-                total_scheduled_placements.append({
-                    "period": p, "day": d,
-                    "row": p, "col": d,
-                    "subject_name": sol_item["subject"], "subject": sol_item["subject"],
-                    "teacher_name": t_name, "teacher": t_name,
-                    "class_name": cn, "class": cn,
-                    "duration": dur
-                })
+                # Birleşik ders kontrolü (Örn: 10A ve 10B aynı anda bahçeye / derse çıksın)
+                combined_targets = [cn]
+                for a in assignments:
+                    a_subj = a.get("subject") or a.get("ders") or ""
+                    a_t = format_tr_name(a.get("teacher") or "")
+                    if a_subj == s_name and (not a_t or a_t == t_name):
+                        cls_str = a.get("class") or ""
+                        if "," in cls_str or "&" in cls_str:
+                            parts = [c.strip() for c in cls_str.replace("&", ",").split(",") if c.strip()]
+                            if any(matches_class(p_c, cn) for p_c in parts):
+                                combined_targets = parts
+                                break
+
+                for target_cn in combined_targets:
+                    if target_cn != cn:
+                        target_class_manual.append({
+                            "class_name": target_cn,
+                            "teacher_name": t_name,
+                            "subject_name": s_name,
+                            "day_idx": d,
+                            "period": p,
+                            "duration": dur,
+                            "is_manual": True
+                        })
+                    total_scheduled_placements.append({
+                        "period": p, "day": d,
+                        "row": p, "col": d,
+                        "subject_name": s_name, "subject": s_name,
+                        "teacher_name": t_name, "teacher": t_name,
+                        "class_name": target_cn, "class": target_cn,
+                        "duration": dur
+                    })
 
             self.progress_updated.emit(total_placed_hours, total_target_hours)
 
@@ -284,13 +324,14 @@ class AutoSchedulerWorker(QThread):
             "total_hours": total_target_hours
         })
 
-    def _astar_solve(self, empty_slots, candidate_blocks, global_teacher_occupied, t_objs, c_timeoff=None, days_count=5, periods_count=8, manual_subj_map=None, manual_day_subj_hours=None, constraints=None, relations=None, class_name=None):
+    def _astar_solve(self, empty_slots, candidate_blocks, global_teacher_occupied, t_objs, c_timeoff=None, days_count=5, periods_count=8, manual_subj_map=None, manual_day_subj_hours=None, constraints=None, relations=None, class_name=None, t_toff_dict=None):
         """A* Search & Branch-and-Bound solver that fills 100% of empty slots without gaps or conflicts, enforcing strict daily hours limits and pedagogical rules."""
         HARD_SUBJECTS = {"MATEMATİK", "FİZİK", "KİMYA", "BİYOLOJİ", "GEOMETRİ", "MAT", "FİZ", "KİM", "BİYO", "GEO"}
         manual_subj_map = manual_subj_map or {}
         manual_day_subj_hours = manual_day_subj_hours or {}
         constraints = constraints or {}
         relations = relations or []
+        t_toff_dict = t_toff_dict or {}
         subject_windows = constraints.get("subject_windows", {})
 
         # Calculate total weekly hours for each subject
@@ -446,6 +487,16 @@ class AutoSchedulerWorker(QThread):
                 if conflict:
                     continue
 
+                # Öğretmen timeoff (Kısıtlama) kontrolü
+                if t:
+                    t_toff = t_toff_dict.get(normalize_clean(t))
+                    if t_toff:
+                        for off in range(dur):
+                            if d < len(t_toff) and (p + off) < len(t_toff[d]) and t_toff[d][p + off] == 0:
+                                conflict = True; break
+                if conflict:
+                    continue
+
                 current_day_h = day_subj_hours.get((d, s), 0)
                 new_day_h = current_day_h + dur
                 max_allowed = get_max_daily_hours(s)
@@ -464,17 +515,6 @@ class AutoSchedulerWorker(QThread):
 
                 # Heuristic Cost (A* skoru)
                 cost = 0
-
-                if t and t in t_objs:
-                    toff = t_objs[t].get("timeoff", [])
-                    if toff:
-                        timeoff_blocked = False
-                        for off in range(dur):
-                            if d < len(toff) and (p + off) < len(toff[d]) and toff[d][p + off] == 0:
-                                timeoff_blocked = True
-                                break
-                        if timeoff_blocked:
-                            continue  # Hard constraint: kesinlikle yerleştirme
                 if dur >= 2: cost -= 30  # Blok bütünlüğünü ödüllendir
 
                 # Pedagojik Kural 1: İki zor ders peş peşe gelmesin

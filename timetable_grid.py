@@ -105,8 +105,8 @@ class AsCTimetableHeader(QHeaderView):
             if start_col >= total_sections:
                 break
             actual_end_col = min(end_col, total_sections - 1)
-            x_start = self.sectionPosition(start_col)
-            x_end = self.sectionPosition(actual_end_col) + self.sectionSize(actual_end_col)
+            x_start = self.sectionViewportPosition(start_col)
+            x_end = self.sectionViewportPosition(actual_end_col) + self.sectionSize(actual_end_col)
             day_w = x_end - x_start
             
             day_rect = QRect(x_start, 0, day_w, 17)
@@ -117,11 +117,17 @@ class AsCTimetableHeader(QHeaderView):
             painter.setPen(QPen(QColor("#111111")))
             font_day = QFont("Segoe UI", 8, QFont.Bold)
             painter.setFont(font_day)
-            painter.drawText(day_rect, Qt.AlignCenter, day_name)
+            
+            # Keep day label centered in the visible portion of the section while scrolling
+            vis_rect = day_rect.intersected(self.rect())
+            if not vis_rect.isEmpty() and vis_rect.width() >= 25:
+                painter.drawText(vis_rect, Qt.AlignCenter, day_name)
+            elif not day_rect.isEmpty():
+                painter.drawText(day_rect, Qt.AlignCenter, day_name)
             
         # 2. Period headers (Bottom row: y=17..34)
         for col_idx in range(total_sections):
-            x = self.sectionPosition(col_idx)
+            x = self.sectionViewportPosition(col_idx)
             w = self.sectionSize(col_idx)
             period_num = (col_idx % periods) + 1
             
@@ -159,14 +165,14 @@ class DraggableLessonCard(QLabel):
                 
         display_text = f"<b>{abbr}</b>"
         if t_short:
-            display_text += f"<br><span style='font-weight:normal; font-size:10px; opacity:0.9;'>{t_short}</span>"
+            display_text += f" <span style='font-weight:normal; font-size:8.5px; opacity:0.95;'>{t_short}</span>"
         if duration > 1:
-            display_text += f" <span style='background:rgba(255,255,255,0.35); border-radius:3px; padding:1px 4px; font-size:9px; font-weight:bold;'>{duration}h</span>"
+            display_text += f" <span style='background:rgba(255,255,255,0.35); border-radius:2px; padding:0 3px; font-size:8px; font-weight:bold;'>{duration}h</span>"
             
         self.setText(display_text)
         self.setAlignment(Qt.AlignCenter)
-        card_width = max(85, 75 + (duration - 1)*30)
-        self.setFixedSize(card_width, 54)
+        card_width = max(56, 50 + (duration - 1)*18)
+        self.setFixedSize(card_width, 32)
         
         c = QColor(color)
         luminance = (0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue())
@@ -177,10 +183,10 @@ class DraggableLessonCard(QLabel):
                 background-color: {color};
                 color: {text_color};
                 font-family: system-ui, -apple-system, sans-serif;
-                font-size: 11px;
-                border: 1px solid rgba(0, 0, 0, 0.18);
-                border-radius: 8px;
-                padding: 4px;
+                font-size: 10px;
+                border: 1px solid rgba(0, 0, 0, 0.22);
+                border-radius: 4px;
+                padding: 1px 4px;
             }}
             QLabel:hover {{
                 border: 2px solid #0078D7;
@@ -259,20 +265,36 @@ class DraggableLessonCard(QLabel):
                         background-color: {new_hex};
                         color: {text_color};
                         font-family: system-ui, -apple-system, sans-serif;
-                        font-size: 11px;
-                        border: 1px solid rgba(0, 0, 0, 0.18);
-                        border-radius: 8px;
-                        padding: 4px;
+                        font-size: 10px;
+                        border: 1px solid rgba(0, 0, 0, 0.22);
+                        border-radius: 4px;
+                        padding: 1px 4px;
                     }}
                     QLabel:hover {{
                         border: 2px solid #0078D7;
                     }}
                 """)
+                if data_store:
+                    if "dersler" in data_store:
+                        for d in data_store["dersler"]:
+                            if d.get("ad", "").strip().upper() == self.subject_name.strip().upper():
+                                d["color"] = new_hex
+                                d["renk"] = new_hex
+                    if "atamalar" in data_store:
+                        for a in data_store["atamalar"]:
+                            if a.get("subject", "").strip().upper() == self.subject_name.strip().upper():
+                                a["color"] = new_hex
+                    if "grid_placements" in data_store:
+                        for p in data_store["grid_placements"]:
+                            if (p.get("subject_name") or p.get("subject") or "").strip().upper() == self.subject_name.strip().upper():
+                                p["color"] = new_hex
                 if win:
                     if hasattr(win, "save_db"): win.save_db(sync_from_grid=False)
                     if hasattr(win, "_refresh_tree"): win._refresh_tree()
-                    if hasattr(win, "_on_tree_selection_changed"): win._on_tree_selection_changed()
-                    elif hasattr(win, "_load_unplaced_lessons"): win._load_unplaced_lessons()
+                    if hasattr(win, "_refresh_grid"): win._refresh_grid()
+                    grid = getattr(win, "_grid", None)
+                    if grid and hasattr(grid, "unplaced_dock"):
+                        grid.unplaced_dock.update_list(data_store)
             return
 
         selected_type = None
@@ -335,13 +357,13 @@ class DraggableLessonCard(QLabel):
 class UnplacedLessonsDock(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(85)
+        self.setFixedHeight(46)
         self.setAcceptDrops(True)
-        self.setStyleSheet("QFrame { background: #F8FAFC; border-top: 2px solid #E2E8F0; }")
+        self.setStyleSheet("QFrame { background: #F8FAFC; border-top: 1px solid #CBD5E1; }")
         
         self.layout = QHBoxLayout(self)
-        self.layout.setContentsMargins(12, 6, 12, 6)
-        self.layout.setSpacing(10)
+        self.layout.setContentsMargins(6, 2, 6, 2)
+        self.layout.setSpacing(6)
         
         # Scroll area for unplaced lessons
         scroll = QScrollArea(self)
@@ -826,12 +848,21 @@ class DropTableWidget(QTableWidget):
                         orig_item.setForeground(QBrush(Qt.white if lum < 160 else Qt.black))
                         
                         # Update subject globally in data_store
-                        if data_store and "dersler" in data_store:
-                            for d in data_store["dersler"]:
-                                if d.get("ad", "").strip().upper() == s_name.strip().upper():
-                                    d["color"] = hex_color
-                                    d["renk"] = hex_color
-                                    
+                        if data_store:
+                            if "dersler" in data_store:
+                                for d in data_store["dersler"]:
+                                    if d.get("ad", "").strip().upper() == s_name.strip().upper():
+                                        d["color"] = hex_color
+                                        d["renk"] = hex_color
+                            if "atamalar" in data_store:
+                                for a in data_store["atamalar"]:
+                                    if a.get("subject", "").strip().upper() == s_name.strip().upper():
+                                        a["color"] = hex_color
+                            if "grid_placements" in data_store:
+                                for p in data_store["grid_placements"]:
+                                    if (p.get("subject_name") or p.get("subject") or "").strip().upper() == s_name.strip().upper():
+                                        p["color"] = hex_color
+                                        
                         # Update all placements of this subject on current grid
                         if hasattr(grid, "_placed_lessons"):
                             for (r, c), p_info in grid._placed_lessons.items():
@@ -839,11 +870,16 @@ class DropTableWidget(QTableWidget):
                                     p_info["color"] = hex_color
                                     cell_item = self.item(r, c)
                                     if cell_item:
-                                        cell_item.setBackground(QBrush(new_color))
+                                        cell_item.setData(Qt.BackgroundRole, QBrush(new_color))
                                         cell_item.setForeground(QBrush(Qt.white if lum < 160 else Qt.black))
                                         
-                        if hasattr(win, "save_db"): win.save_db()
-                        if hasattr(win, "_refresh_tree"): win._refresh_tree()
+                        self.viewport().update()
+                        if win:
+                            if hasattr(win, "save_db"): win.save_db(sync_from_grid=False)
+                            if hasattr(win, "_refresh_tree"): win._refresh_tree()
+                            if hasattr(win, "_refresh_grid"): win._refresh_grid()
+                            if hasattr(grid, "unplaced_dock") and grid.unplaced_dock:
+                                grid.unplaced_dock.update_list(data_store)
             elif action == act_change_teacher:
                 from PySide6.QtWidgets import QInputDialog
                 win = self.window()

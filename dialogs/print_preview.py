@@ -381,15 +381,17 @@ class TimetablePrintPreview(QDialog):
         painter.end()
 
     def _get_pseudo_placements(self, target_name, is_teacher=False):
-        """Fetch placements for a class or teacher, prioritizing live placed_lessons and preventing duplicate slot merges."""
+        """Fetch placements for a class or teacher (day, period) mapped directly from grid_placements and live state."""
         res = {}
         
         def normalize_clean(s):
             if not s: return ""
             tr_map = str.maketrans({'İ': 'i', 'I': 'ı', 'ı': 'i', 'Ş': 's', 'ş': 's', 'Ğ': 'g', 'ğ': 'g', 'Ü': 'u', 'ü': 'u', 'Ö': 'o', 'ö': 'o', 'Ç': 'c', 'ç': 'c'})
-            return "".join(c for c in str(s).translate(tr_map).lower() if c.isalnum())
+            clean = "".join(c for c in str(s).translate(tr_map).lower() if c.isalnum())
+            return clean.split("ea")[0].split("say")[0].split("soz")[0].split("dil")[0].strip()
             
         target_norm = normalize_clean(target_name)
+        periods_per_day = int(self.data_store.get("settings", {}).get("periods", 8))
         
         # 1. First priority: Live placed_lessons from TimetableGrid
         if self.placed_lessons and isinstance(self.placed_lessons, dict):
@@ -401,19 +403,25 @@ class TimetablePrintPreview(QDialog):
                 scolor = item.get("color") or get_subject_color(s_name)
                 dur = int(item.get("duration", 1))
                 
+                # Determine actual day (0..4) and period (0..7)
+                d_idx = int(item.get("day", c // periods_per_day))
+                p_idx = int(item.get("period", c % periods_per_day))
+                
                 match = False
                 if is_teacher:
-                    if normalize_clean(t_name) == target_norm or (len(target_norm) >= 4 and target_norm in normalize_clean(t_name)):
+                    tn = normalize_clean(t_name)
+                    if tn == target_norm or (len(target_norm) >= 3 and (target_norm in tn or tn in target_norm)):
                         match = True
                         other_name = c_name
                 else:
-                    if normalize_clean(c_name) == target_norm or (len(target_norm) >= 2 and target_norm in normalize_clean(c_name)):
+                    cn = normalize_clean(c_name)
+                    if cn == target_norm or (len(target_norm) >= 2 and (target_norm in cn or cn in target_norm)):
                         match = True
                         other_name = t_name
                         
                 if match:
                     for off in range(dur):
-                        res[(c, r + off)] = {
+                        res[(d_idx, p_idx + off)] = {
                             "subject_name": s_name,
                             "teacher_name": other_name,
                             "color": scolor,
@@ -429,8 +437,20 @@ class TimetablePrintPreview(QDialog):
         if isinstance(grid_data, list) and grid_data:
             for item in grid_data:
                 if not isinstance(item, dict): continue
-                r = int(item.get("period", item.get("row", 0)))
-                c = int(item.get("day", item.get("col", 0)))
+                raw_col = int(item.get("col", 0))
+                raw_day = item.get("day")
+                raw_period = item.get("period")
+                
+                if raw_day is not None and raw_period is not None:
+                    d_idx = int(raw_day)
+                    p_idx = int(raw_period)
+                elif raw_col >= periods_per_day:
+                    d_idx = raw_col // periods_per_day
+                    p_idx = raw_col % periods_per_day
+                else:
+                    d_idx = int(item.get("day", item.get("col", 0)))
+                    p_idx = int(item.get("period", item.get("row", 0)))
+                    
                 dur = int(item.get("duration", 1))
                 t_name = item.get("teacher_name") or item.get("teacher") or ""
                 c_name = item.get("class_name") or item.get("class") or ""
@@ -439,17 +459,19 @@ class TimetablePrintPreview(QDialog):
                 
                 match = False
                 if is_teacher:
-                    if normalize_clean(t_name) == target_norm or (len(target_norm) >= 4 and target_norm in normalize_clean(t_name)):
+                    tn = normalize_clean(t_name)
+                    if tn == target_norm or (len(target_norm) >= 3 and (target_norm in tn or tn in target_norm)):
                         match = True
                         other_name = c_name
                 else:
-                    if normalize_clean(c_name) == target_norm or (len(target_norm) >= 2 and target_norm in normalize_clean(c_name)):
+                    cn = normalize_clean(c_name)
+                    if cn == target_norm or (len(target_norm) >= 2 and (target_norm in cn or cn in target_norm)):
                         match = True
                         other_name = t_name
                         
                 if match:
                     for off in range(dur):
-                        res[(c, r + off)] = {
+                        res[(d_idx, p_idx + off)] = {
                             "subject_name": s_name,
                             "teacher_name": other_name,
                             "color": scolor,
@@ -472,11 +494,13 @@ class TimetablePrintPreview(QDialog):
                 
                 match = False
                 if is_teacher:
-                    if normalize_clean(t_name) == target_norm or (len(target_norm) >= 4 and target_norm in normalize_clean(t_name)):
+                    tn = normalize_clean(t_name)
+                    if tn == target_norm or (len(target_norm) >= 3 and (target_norm in tn or tn in target_norm)):
                         match = True
                         other_name = c_name
                 else:
-                    if normalize_clean(c_name) == target_norm or (len(target_norm) >= 2 and target_norm in normalize_clean(c_name)):
+                    cn = normalize_clean(c_name)
+                    if cn == target_norm or (len(target_norm) >= 2 and (target_norm in cn or cn in target_norm)):
                         match = True
                         other_name = t_name
                         
@@ -484,8 +508,10 @@ class TimetablePrintPreview(QDialog):
                     try:
                         parts = str(key_str).split(",")
                         r, c = int(parts[0]), int(parts[1])
+                        d_idx = c
+                        p_idx = r
                         for off in range(dur):
-                            res[(c, r + off)] = {
+                            res[(d_idx, p_idx + off)] = {
                                 "subject_name": s_name,
                                 "teacher_name": other_name,
                                 "color": scolor,

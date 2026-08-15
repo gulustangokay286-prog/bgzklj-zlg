@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QLabel,
     QLineEdit, QComboBox, QCheckBox, QColorDialog, QFrame, QFormLayout, QGridLayout,
     QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView, QListWidget, QListWidgetItem,
-    QMessageBox
+    QMessageBox, QGroupBox, QSpinBox
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QColor, QBrush
@@ -1457,6 +1457,26 @@ class MultiClassAssignDialog(QDialog):
         btn_all.clicked.connect(toggle_all)
         lay.addWidget(btn_all)
         
+        # 🔗 Birleşik Dersler Ayarlama Butonu
+        btn_combine_manager = QPushButton("🔗 Birleşik Dersler Ayarla (Sınıf & Ders Birleştirme)...")
+        btn_combine_manager.setStyleSheet("background: #EFF6FF; color: #1D4ED8; font-weight: bold; border: 1px solid #BFDBFE; border-radius: 4px; padding: 6px; margin-top: 2px;")
+        def open_combined():
+            p = self.parent()
+            ds = getattr(p, "data_store", {}) if p else {}
+            dlg = CombinedClassesAssignDialog(
+                data_store=ds,
+                parent=self,
+                default_classes=self.get_selected_classes()
+            )
+            if dlg.exec():
+                if hasattr(dlg, "selected_classes"):
+                    for i in range(self.list_widget.count()):
+                        txt = self.list_widget.item(i).text()
+                        self.list_widget.item(i).setCheckState(Qt.Checked if txt in dlg.selected_classes else Qt.Unchecked)
+                    self.chk_combine.setChecked(True)
+        btn_combine_manager.clicked.connect(open_combined)
+        lay.addWidget(btn_combine_manager)
+        
         # 🔗 Birleşik Sınıf Seçeneği (Ortak Ders)
         self.chk_combine = QCheckBox("🔗 Seçili Sınıfları Birleştir (Ortak/Birleşik Ders Yap)")
         self.chk_combine.setChecked(is_combined)
@@ -1479,6 +1499,152 @@ class MultiClassAssignDialog(QDialog):
 
     def get_is_combined(self):
         return self.chk_combine.isChecked()
+
+
+class CombinedClassesAssignDialog(QDialog):
+    """Birleşik Dersler ve Sınıf Birleştirme Ayarlama Penceresi"""
+    def __init__(self, data_store=None, parent=None, default_subject="", default_teacher="", default_classes=None):
+        super().__init__(parent)
+        self.data_store = data_store or {}
+        self.default_subject = default_subject
+        self.default_teacher = default_teacher
+        self.default_classes = default_classes or []
+        
+        self.setWindowTitle("🔗 Birleşik Dersler Ayarla — Sınıf ve Ders Birleştirme")
+        self.resize(520, 520)
+        self.setStyleSheet("""
+            QDialog { background-color: #F8FAFC; font-family: system-ui, -apple-system, sans-serif; }
+            QLabel { color: #1E293B; font-size: 12px; font-weight: bold; }
+            QGroupBox { font-weight: bold; border: 1px solid #CBD5E1; border-radius: 6px; margin-top: 10px; padding-top: 10px; background: white; }
+            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #1E40AF; }
+            QComboBox, QSpinBox { min-height: 28px; border: 1px solid #CBD5E1; border-radius: 4px; padding: 2px 8px; background: white; }
+            QPushButton { min-height: 32px; border-radius: 5px; font-weight: bold; padding: 6px 16px; }
+        """)
+        
+        lay = QVBoxLayout(self)
+        lay.setSpacing(12)
+        lay.setContentsMargins(16, 16, 16, 16)
+        
+        # Info Box
+        info_lbl = QLabel(
+            "💡 <b>Birleşik Ders Nedir?</b><br>"
+            "Farklı sınıflar (Örn: <b>10A ve 10B</b>) aynı derste (Örn: <b>Beden Eğitimi / Müzik</b>) "
+            "birleştirildiğinde, haftalık çizelgede ve otomatik planlamada <b>aynı gün ve saatte tek bir öğretmen</b> "
+            "ile ortak derse katılırlar."
+        )
+        info_lbl.setStyleSheet("background: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 6px; padding: 10px; color: #1E3A8A; font-size: 11px;")
+        info_lbl.setWordWrap(True)
+        lay.addWidget(info_lbl)
+        
+        # Sınıflar Grubu
+        grp_cls = QGroupBox("1. Birleştirilecek Sınıfları Seçin")
+        lay_cls = QVBoxLayout(grp_cls)
+        self.cls_list = QListWidget()
+        self.cls_list.setStyleSheet("border: 1px solid #E2E8F0; border-radius: 4px;")
+        
+        all_cls = [c.get("ad", "") for c in self.data_store.get("siniflar", []) if c.get("ad")]
+        for c in all_cls:
+            item = QListWidgetItem(c)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked if c in self.default_classes else Qt.Unchecked)
+            self.cls_list.addItem(item)
+        lay_cls.addWidget(self.cls_list)
+        lay.addWidget(grp_cls)
+        
+        # Ders & Öğretmen Grubu
+        grp_subj = QGroupBox("2. Ortak Ders ve Öğretmen Bilgileri")
+        form_subj = QFormLayout(grp_subj)
+        form_subj.setSpacing(8)
+        
+        self.cb_subj = QComboBox()
+        all_subjs = [d.get("ad", "") for d in self.data_store.get("dersler", []) if d.get("ad")]
+        for s in all_subjs:
+            self.cb_subj.addItem(s)
+        if self.default_subject and self.default_subject in all_subjs:
+            self.cb_subj.setCurrentText(self.default_subject)
+        form_subj.addRow("Ortak Ders:", self.cb_subj)
+        
+        self.cb_teacher = QComboBox()
+        all_teachers = [t.get("ad", "") for t in self.data_store.get("ogretmenler", []) if t.get("ad")]
+        for t in all_teachers:
+            self.cb_teacher.addItem(t)
+        if self.default_teacher and self.default_teacher in all_teachers:
+            self.cb_teacher.setCurrentText(self.default_teacher)
+        form_subj.addRow("Ortak Öğretmen:", self.cb_teacher)
+        
+        self.cb_type = QComboBox()
+        self.cb_type.addItems(["2 Saat (2'li Blok)", "2+2 Saat (4 Saat)", "1 Saat (Tekli)", "1+1 Saat (2 Tekli)", "3 Saat", "Özel"])
+        form_subj.addRow("Ders Dağılımı:", self.cb_type)
+        
+        lay.addWidget(grp_subj)
+        
+        # Buttons
+        btns = QHBoxLayout()
+        btn_cancel = QPushButton("İptal")
+        btn_cancel.setStyleSheet("background: white; border: 1px solid #CBD5E1; color: #475569;")
+        btn_cancel.clicked.connect(self.reject)
+        
+        btn_save = QPushButton("✅ Birleşik Dersi Ata ve Kaydet")
+        btn_save.setStyleSheet("background: #2563EB; color: white; border: none;")
+        btn_save.clicked.connect(self._save_combined)
+        
+        btns.addStretch()
+        btns.addWidget(btn_cancel)
+        btns.addWidget(btn_save)
+        lay.addLayout(btns)
+        
+    def _save_combined(self):
+        selected_classes = [self.cls_list.item(i).text() for i in range(self.cls_list.count()) if self.cls_list.item(i).checkState() == Qt.Checked]
+        if len(selected_classes) < 2:
+            QMessageBox.warning(self, "Yetersiz Sınıf Seçimi", "Lütfen birleştirmek için en az 2 sınıf seçiniz (Örn: 10A ve 10B).")
+            return
+            
+        subj = self.cb_subj.currentText()
+        teacher = self.cb_teacher.currentText()
+        type_choice = self.cb_type.currentText()
+        
+        type_str = "2"
+        tot_dur = 2
+        if "2+2" in type_choice:
+            type_str = "2+2"; tot_dur = 4
+        elif "1+1" in type_choice:
+            type_str = "1+1"; tot_dur = 2
+        elif "1 Saat" in type_choice:
+            type_str = "1"; tot_dur = 1
+        elif "3 Saat" in type_choice:
+            type_str = "3"; tot_dur = 3
+            
+        combined_class_name = ", ".join(selected_classes)
+        
+        if "atamalar" not in self.data_store:
+            self.data_store["atamalar"] = []
+            
+        # Check if identical combined assignment exists
+        found = False
+        for a in self.data_store["atamalar"]:
+            if a.get("subject") == subj and (a.get("is_combined") or "," in str(a.get("class", ""))):
+                a["class"] = combined_class_name
+                a["teacher"] = teacher
+                a["duration"] = tot_dur
+                a["type"] = type_str
+                a["is_combined"] = True
+                found = True
+                break
+                
+        if not found:
+            from dialogs.edit_forms import get_subject_color
+            self.data_store["atamalar"].append({
+                "subject": subj,
+                "teacher": teacher,
+                "class": combined_class_name,
+                "duration": tot_dur,
+                "type": type_str,
+                "is_combined": True,
+                "color": get_subject_color(subj)
+            })
+            
+        self.selected_classes = selected_classes
+        self.accept()
 
 
 class SubjectTeacherAssignmentDialog(QDialog):
