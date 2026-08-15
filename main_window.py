@@ -998,26 +998,30 @@ class MainWindow(QMainWindow):
             dur = a.get("duration", 1)
             if t: workloads[t] = workloads.get(t, 0) + dur
             
-        # 0. Sanitize & Capitalize
+        # 0. Sanitize & Capitalize (Preserve manual short codes)
         from dialogs.edit_forms import _auto_short_code
         for t in self.data_store.get("ogretmenler", []):
             if t.get("ad"):
                 t["ad"] = format_tr_name(t["ad"])
-                clean = t["ad"].strip()
-                parts = clean.split()
-                if len(parts) >= 2:
-                    t["kisa"] = f"{parts[0][0].upper()}. {' '.join(parts[1:]).upper()}"
-                elif len(parts) == 1 and len(parts[0]) > 0:
-                    t["kisa"] = f"{parts[0][0].upper()}. {parts[0].upper()}"
+                if not t.get("kisa"):
+                    clean = t["ad"].strip()
+                    parts = clean.split()
+                    if len(parts) >= 2:
+                        t["kisa"] = f"{parts[0][0].upper()}. {' '.join(parts[1:]).upper()}"
+                    elif len(parts) == 1 and len(parts[0]) > 0:
+                        t["kisa"] = f"{parts[0][0].upper()}. {parts[0].upper()}"
 
         for d in self.data_store.get("dersler", []):
             if d.get("ad"):
-                d["color"] = get_subject_color(d["ad"])
-                d["kisa"] = _auto_short_code(d["ad"])
+                if not d.get("color"):
+                    d["color"] = get_subject_color(d["ad"])
+                if not d.get("kisa"):
+                    d["kisa"] = _auto_short_code(d["ad"])
 
         for c in self.data_store.get("siniflar", []):
             if c.get("ad"):
-                c["kisa"] = c["ad"].strip().replace(" ", "").upper()
+                if not c.get("kisa"):
+                    c["kisa"] = c["ad"].strip().replace(" ", "").upper()
 
         s_list = self.data_store.get("siniflar", [])
         t_list = self.data_store.get("ogretmenler", [])

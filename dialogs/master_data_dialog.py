@@ -781,6 +781,19 @@ class MasterDataDialog(QDialog):
                         for a in self.data_store.get("atamalar", []):
                             if a.get(attr) == old_name:
                                 a[attr] = new_name
+                        for p in self.data_store.get("grid_placements", []):
+                            if idx == 0:
+                                if p.get("subject_name") == old_name or p.get("subject") == old_name:
+                                    p["subject_name"] = new_name
+                                    p["subject"] = new_name
+                            elif idx == 1:
+                                if p.get("class_name") == old_name or p.get("class") == old_name:
+                                    p["class_name"] = new_name
+                                    p["class"] = new_name
+                            elif idx == 3:
+                                if p.get("teacher_name") == old_name or p.get("teacher") == old_name:
+                                    p["teacher_name"] = new_name
+                                    p["teacher"] = new_name
 
                 data_list[matched_idx] = new_data
                 
@@ -826,6 +839,7 @@ class MasterDataDialog(QDialog):
                 trigger_save_db(self, self.data_store)
                 p = self.parent()
                 if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
+                if p and hasattr(p, "_restore_grid_placements"): p._restore_grid_placements()
 
     def _act_delete(self):
         from PySide6.QtWidgets import QMessageBox

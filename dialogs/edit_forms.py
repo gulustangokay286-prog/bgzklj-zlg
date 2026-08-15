@@ -1105,8 +1105,8 @@ def _auto_short_code(text: str) -> str:
     # Special Overrides with Full Turkish Subject Names
     overrides = {
         "BEDEN": "BEDEN",
-        "BEDEN EĞİTİMİ": "BEDEN EĞİTİMİ",
-        "BEDEN EĞİTİMİ VE SPOR": "BEDEN EĞİTİMİ",
+        "BEDEN EĞİTİMİ": "BEDEN",
+        "BEDEN EĞİTİMİ VE SPOR": "BEDEN",
         "BED": "BEDEN",
         "TARİH": "TARİH",
         "TAR": "TARİH",
@@ -1122,13 +1122,14 @@ def _auto_short_code(text: str) -> str:
         "MÜZ": "MÜZİK",
         "FELSEFE": "FELSEFE",
         "FEL": "FELSEFE",
-        "DİN": "DİN KÜLTÜRÜ",
-        "DİN KÜLTÜRÜ": "DİN KÜLTÜRÜ",
-        "DİN KÜLTÜRÜ VE AHLAK BİLGİSİ": "DİN KÜLTÜRÜ",
-        "GÖRSEL SANATLAR": "GÖRSEL SANATLAR",
-        "GÖRSEL": "GÖRSEL SANATLAR",
-        "GÖRS": "GÖRSEL SANATLAR",
-        "RESİM": "GÖRSEL SANATLAR",
+        "DİN": "DİN",
+        "DİN KÜLTÜRÜ": "DİN",
+        "DİN KÜLTÜRÜ VE AHLAK BİLGİSİ": "DİN",
+        "EDİN KÜLTÜRÜ": "DİN",
+        "GÖRSEL SANATLAR": "GÖRSEL",
+        "GÖRSEL": "GÖRSEL",
+        "GÖRS": "GÖRSEL",
+        "RESİM": "GÖRSEL",
         
         # Diğer dersler kısa koda dönüştürülmeli
         "BİYOLOJİ": "BİYO",
@@ -1141,10 +1142,10 @@ def _auto_short_code(text: str) -> str:
         "COĞ": "COĞ",
         "GEOMETRİ": "GEO",
         "GEO": "GEO",
-        "EDEBİYAT": "EDB",
-        "EDB": "EDB",
-        "TÜRK DİLİ VE EDEBİYATI": "TDE",
-        "TDE": "TDE",
+        "EDEBİYAT": "EDEBİYAT",
+        "EDB": "EDEBİYAT",
+        "TÜRK DİLİ VE EDEBİYATI": "EDEBİYAT",
+        "TDE": "EDEBİYAT",
         "MATEMATİK": "MAT",
         "MAT": "MAT",
         "İNGİLİZCE": "İNG",
@@ -1154,6 +1155,7 @@ def _auto_short_code(text: str) -> str:
         "FRANSIZCA": "FRA",
         "FRA": "FRA",
         "PARAGRAF": "PARAG",
+        "PARAG": "PARAG",
         "PAR": "PARAG",
         "PROBLEM": "PROB",
         "PROB": "PROB",
@@ -1364,7 +1366,7 @@ class DersEditDialog(QDialog):
         QMessageBox.information(self, "Derslik Ayarı", "Derslik seçimleri bu dersin tüm tanımlı kartlarına uygulandı.")
 
     def _auto_short_code(self, text):
-        if text:
+        if not self.existing_data.get("kisa") and text:
             self.txt_kisa.setText(_auto_short_code(text))
 
     def _open_custom_fields(self):
@@ -2099,7 +2101,7 @@ class SinifEditDialog(BaseEditForm):
             self.color_box.setStyleSheet(f"background: {self._color}; border: 1px solid #CCC; border-radius: 4px;")
             
     def _auto_short_code_class(self, text):
-        if text:
+        if not self.existing_data.get("kisa") and text:
             self.w_kisa.setText(text.strip().replace(" ", "").upper())
 
     def _open_custom_fields(self):
@@ -2367,7 +2369,7 @@ class OgretmenEditDialog(BaseEditForm):
         dlg.exec()
 
     def _auto_short_code_teacher(self, text):
-        if text:
+        if not self.existing_data.get("kisa") and text:
             clean = text.strip()
             parts = clean.split()
             if len(parts) >= 2:
