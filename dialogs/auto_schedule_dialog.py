@@ -78,7 +78,7 @@ class AutoScheduleDialog(QDialog):
         self.chk_relax.setChecked(False)
         form_param.addRow("", self.chk_relax)
         
-        self.chk_fill_empty = QCheckBox("Eksik ders saatlerini 'Boş/Serbest' ile tam 40 saate tamamla")
+        self.chk_fill_empty = QCheckBox("Tüm haftalık çizelgeyi derslerle %100 doldur (Sıfır Boşluk / Eksiksiz Planlama)")
         self.chk_fill_empty.setChecked(True)
         form_param.addRow("", self.chk_fill_empty)
         

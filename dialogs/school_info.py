@@ -105,9 +105,10 @@ class SchoolInfoDialog(QDialog):
         
         main_layout.addWidget(self.tabs)
         
-        self.lbl_status = QLabel("k12kbs.com Üyelik Durumu : Pasif")
+        self.lbl_status = QLabel("🏫 BGZ Eğitim Kurumları : Üyelik Durumu Aktif (Kalan Süre: 365 Gün / 1 Yıl — Lisanslı Kurum)")
         self.lbl_status.setObjectName("status_lbl")
         self.lbl_status.setAlignment(Qt.AlignCenter)
+        self.lbl_status.setStyleSheet("background: #EFF6FF; border: 1px solid #93C5FD; color: #1E40AF; font-weight: bold; padding: 8px; border-radius: 6px; font-size: 12px;")
         main_layout.addWidget(self.lbl_status)
         
         btn_layout = QHBoxLayout()
@@ -142,7 +143,7 @@ class SchoolInfoDialog(QDialog):
         grid1.setSpacing(10)
         
         grid1.addWidget(QLabel("Okul / Kurum Adı:"), 0, 0)
-        self.txt_kurum_adi = QLineEdit("Pivot Akademi")
+        self.txt_kurum_adi = QLineEdit("BGZ Eğitim Kurumları")
         grid1.addWidget(self.txt_kurum_adi, 0, 1, 1, 2)
         
         grid1.addWidget(QLabel("Başlangıç Tarihi:"), 1, 0)
@@ -248,26 +249,24 @@ class SchoolInfoDialog(QDialog):
         layout.addStretch()
 
     def _open_zil_dialog(self):
-        from PySide6.QtWidgets import QInputDialog
+        from dialogs.bell_times_dialog import BellAndBreakTimesDialog
         cur_periods = int(self.cb_ders_saati.currentText())
-        settings = self.data_store.setdefault("settings", {})
-        default_bell = settings.get("bell_schedule", "08:30-09:10, 09:20-10:00, 10:10-10:50, 11:00-11:40, 11:50-12:30, 13:30-14:10, 14:20-15:00, 15:10-15:50")
-        text, ok = QInputDialog.getMultiLineText(
-            self, "Zil / Teneffüs Saatleri Ayarı",
-            f"Günlük {cur_periods} saatlik dersler için zil ve teneffüs saatlerini virgülle ayırarak giriniz:",
-            default_bell
-        )
-        if ok and text.strip():
-            settings["bell_schedule"] = text.strip()
+        dlg = BellAndBreakTimesDialog(self.data_store, periods=cur_periods, parent=self)
+        dlg.exec()
 
     def _open_gunler_dialog(self):
-        from PySide6.QtWidgets import QMessageBox
-        cnt = self.cb_gun_sayisi.currentText()
-        ws = self.cb_hafta_sonu.currentText()
-        QMessageBox.information(
-            self, "Çalışma Günleri",
-            f"Haftalık Çalışma Gün Sayısı: {cnt} Gün\nHafta Sonu Tatili: {ws}\n\nProgram çizelgesi bu gün ayarlarına göre otomatik güncellenecektir."
-        )
+        from dialogs.days_dialog import DaysAndHolidaysDialog
+        dlg = DaysAndHolidaysDialog(self.data_store, parent=self)
+        if dlg.exec():
+            sel_days = dlg.get_selected_days()
+            day_cnt = str(len(sel_days))
+            idx_d = self.cb_gun_sayisi.findText(day_cnt)
+            if idx_d >= 0:
+                self.cb_gun_sayisi.setCurrentIndex(idx_d)
+            weekend = self.data_store.get("settings", {}).get("weekend", "Cumartesi - Pazar")
+            idx_w = self.cb_hafta_sonu.findText(weekend)
+            if idx_w >= 0:
+                self.cb_hafta_sonu.setCurrentIndex(idx_w)
 
     def _load_data(self):
         if not self.data_store: return

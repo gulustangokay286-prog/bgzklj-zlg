@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QFrame, QScrollArea, QMenu, QInputDialog,
     QMessageBox, QStyledItemDelegate, QStyle
 )
-from PySide6.QtCore import Qt, QMimeData, Signal, QByteArray
+from PySide6.QtCore import Qt, QMimeData, Signal, QByteArray, QRect
 from PySide6.QtGui import QFont, QColor, QBrush, QDrag, QPainter, QPixmap, QAction, QPen, QLinearGradient, QIcon, QPainterPath
 
 def make_context_icon(symbol: str, color1: str, color2: str) -> QIcon:
@@ -345,7 +345,14 @@ class DraggableLessonCard(QLabel):
             else:
                 t_short = parts[0]
                 
-        if display_mode == "teachers":
+        is_comb = ("," in class_name or "&" in class_name or "+" in class_name)
+        if is_comb:
+            c_clean = "+".join([c.strip().split("(")[0] for c in class_name.replace("&", ",").replace("+", ",").split(",") if c.strip()])
+            if display_mode == "teachers":
+                display_text = f"<b>🔗 {c_clean}</b>"
+            else:
+                display_text = f"<b>🔗 {abbr}</b> <span style='font-size:8px;'>({c_clean})</span>"
+        elif display_mode == "teachers":
             # For teacher view, highlight class name in bold and subject name as subtitle
             c_clean = class_name.replace(" ", "").upper()
             display_text = f"<b>{c_clean}</b>"
@@ -361,7 +368,7 @@ class DraggableLessonCard(QLabel):
             
         self.setText(display_text)
         self.setAlignment(Qt.AlignCenter)
-        card_width = max(58, 52 + (duration - 1)*18)
+        card_width = max(64, 52 + (duration - 1)*18)
         self.setFixedSize(card_width, 32)
         
         c = QColor(color)
@@ -681,15 +688,23 @@ class TimetableCellDelegate(QStyledItemDelegate):
         clean_str = str(text).replace("🔒", "").strip() if text else ""
         
         is_locked = bool(info and info.get("locked"))
+        
+        # Get subject and teacher from info
+        subject_name = ""
+        teacher_name = ""
+        if info:
+            subject_name = info.get("subject_name") or info.get("subject") or ""
+            teacher_name = info.get("teacher_name") or info.get("teacher") or ""
             
-        # 1. Determine cell background color
+        # 1. Determine cell background color - prefer subject_name from info
         cell_color = None
         win = table.window() if table and hasattr(table, "window") else None
         data_store = getattr(win, "data_store", None)
         
-        if clean_str:
+        color_key = subject_name or clean_str
+        if color_key:
             from dialogs.color_picker_dialog import resolve_subject_color
-            resolved_hex = resolve_subject_color(clean_str, data_store)
+            resolved_hex = resolve_subject_color(color_key, data_store)
             cell_color = QColor(resolved_hex)
         elif info and info.get("color"):
             c = QColor(info["color"])
@@ -716,20 +731,44 @@ class TimetableCellDelegate(QStyledItemDelegate):
             painter.setBrush(Qt.NoBrush)
             painter.drawRect(rect.adjusted(1, 1, -2, -2))
             
-        # 5. Draw text
-        if clean_str:
+        # 5. Draw text - Subject + Teacher (two lines)
+        if clean_str or subject_name:
             lum = (0.299 * cell_color.red() + 0.587 * cell_color.green() + 0.114 * cell_color.blue())
             text_color = QColor("#FFFFFF") if lum < 155 else QColor("#111827")
             painter.setPen(text_color)
-            painter.setFont(QFont("Segoe UI", 8, QFont.Bold))
-            painter.drawText(rect, Qt.AlignCenter, clean_str)
             
-        # 6. Draw clean vector padlock badge if locked
-        if is_locked:
-            lock_pix = make_grid_action_icon("lock_closed", 12).pixmap(12, 12)
-            painter.drawPixmap(rect.right() - 13, rect.top() + 2, lock_pix)
+            lock_prefix = "🔒 " if is_locked else ""
+            display_subj = lock_prefix + clean_str
+            
+            if teacher_name:
+                # Two-line display: Subject (top, bold) + Teacher (bottom, smaller)
+                # Get short teacher name (first name initial + surname)
+                t_parts = teacher_name.strip().split()
+                if len(t_parts) >= 2:
+                    short_teacher = f"{t_parts[0][0]}.{t_parts[-1]}"
+                elif t_parts:
+                    short_teacher = t_parts[0]
+                else:
+                    short_teacher = ""
+                
+                top_rect = QRect(rect.left(), rect.top() + 1, rect.width(), rect.height() // 2)
+                bot_rect = QRect(rect.left(), rect.top() + rect.height() // 2 - 1, rect.width(), rect.height() // 2)
+                
+                painter.setFont(QFont("Segoe UI", 7, QFont.Bold))
+                painter.drawText(top_rect, Qt.AlignCenter | Qt.AlignBottom, display_subj)
+                
+                # Teacher name in slightly transparent color
+                t_color = QColor(text_color)
+                t_color.setAlpha(200)
+                painter.setPen(t_color)
+                painter.setFont(QFont("Segoe UI", 6))
+                painter.drawText(bot_rect, Qt.AlignCenter | Qt.AlignTop, short_teacher)
+            else:
+                painter.setFont(QFont("Segoe UI", 8, QFont.Bold))
+                painter.drawText(rect, Qt.AlignCenter, display_subj)
             
         painter.restore()
+
 
 
 class DropTableWidget(QTableWidget):
@@ -964,17 +1003,16 @@ class DropTableWidget(QTableWidget):
             info = grid._placed_lessons.get((orig_r, orig_c), {}) if hasattr(grid, "_placed_lessons") else {}
             is_currently_locked = info.get("locked", False)
             
-            act_edit = menu.addAction(make_grid_action_icon("edit", 16), "Düzenle (Ders & Öğretmen Paneli)")
-            act_move = menu.addAction(make_context_icon("M", "#FFCA28", "#FF8F00"), "Taşı")
+            act_edit = menu.addAction(make_context_icon("✏️", "#2196F3", "#1976D2"), "Düzenle")
+            act_move = menu.addAction(make_context_icon("✥", "#FFCA28", "#FF8F00"), "Taşı")
             if not is_currently_locked:
-                act_lock = menu.addAction(make_grid_action_icon("lock_closed", 16), "Dersi Kilitle (Sabitle)")
+                act_lock = menu.addAction(make_context_icon("🔒", "#9C27B0", "#7B1FA2"), "Dersi Kilitle (Sabitle)")
                 act_unlock = None
             else:
                 act_lock = None
-                act_unlock = menu.addAction(make_grid_action_icon("lock_open", 16), "Bu Dersin Kilidini Aç")
+                act_unlock = menu.addAction(make_context_icon("🔓", "#E53935", "#C62828"), "Bu Dersin Kilidini Aç")
                 
-            act_unlock_all = menu.addAction(make_grid_action_icon("lock_open", 16), "Tüm Kilitleri Kaldır")
-            act_change_teacher = menu.addAction(make_grid_action_icon("ogretmenler", 16), "Öğretmeni Değiştir")
+            act_unlock_all = menu.addAction(make_context_icon("🔓", "#E53935", "#C62828"), "Tüm Kilitleri Kaldır")
             act_color = menu.addAction(make_grid_action_icon("palette", 16), "Renk Paleti Ayarla...")
             menu.addSeparator()
             act_del = menu.addAction(make_context_icon("X", "#EF5350", "#C62828"), "Sil (Kaldır)")
@@ -1049,20 +1087,6 @@ class DropTableWidget(QTableWidget):
                     )
                     if new_color and new_color.isValid():
                         update_subject_color_globally(self, data_store, s_name, new_color.name())
-            elif action == act_change_teacher:
-                from PySide6.QtWidgets import QInputDialog
-                win = self.window()
-                if hasattr(win, "data_store"):
-                    teachers = [t.get("ad") for t in win.data_store.get("ogretmenler", [])]
-                    t_choice, ok = QInputDialog.getItem(self, "Öğretmen Değiştir", "Yeni Öğretmen Seçin:", teachers, 0, False)
-                    if ok and t_choice:
-                        grid = self.parent()
-                        if hasattr(grid, "_placed_lessons") and (orig_r, orig_c) in grid._placed_lessons:
-                            info = grid._placed_lessons[(orig_r, orig_c)]
-                            info["teacher"] = t_choice
-                            subj = info.get("subject_name", "")
-                            orig_item.setText(f"{subj}\n{t_choice}")
-                            win.save_db()
             elif action == act_move:
                 # Instant move dialog
                 from PySide6.QtWidgets import QInputDialog
@@ -1469,8 +1493,12 @@ class TimetableGrid(QWidget):
             abbr = get_subject_abbr(subj)
             self.info_color_box.setStyleSheet(f"background: {color}; border: 2px solid #334155; border-radius: 4px;")
             lock_prefix = "🔒 " if is_locked else ""
-            self.info_subject_lbl.setText(f"{lock_prefix}{abbr} - {subj.upper()}")
-            self.info_class_lbl.setText(cls.upper() if cls else "")
+            is_comb = bool(info.get("is_combined") or (cls and ("," in cls or "&" in cls or "+" in cls)))
+            if is_comb:
+                clean_cls = cls.replace("&", ", ").replace("+", ", ").strip()
+                self.info_class_lbl.setText(f"🔗 Ortak Ders: {clean_cls.upper()}")
+            else:
+                self.info_class_lbl.setText(cls.upper() if cls else "")
             
             t_display = ""
             if teacher:
@@ -1494,15 +1522,20 @@ class TimetableGrid(QWidget):
             self.table.setVerticalHeaderLabels([f"{i+1}" for i in range(self._periods)])
 
     def set_cell(self, row, col, subject_name, color, teacher_name="", duration=1, class_name="", display_mode="classes", locked=False):
+        class_name = str(class_name).replace("(ea)", "(EA)").replace("(say)", "(SAY)").replace("(soz)", "(SÖZ)").replace("(dil)", "(DİL)")
         if display_mode == "teachers":
-            display_text = class_name.strip()
+            if "," in class_name or "&" in class_name or "+" in class_name:
+                display_text = "+".join([c.strip().split("(")[0].strip() for c in class_name.replace("&", ",").replace("+", ",").split(",") if c.strip()])
+            else:
+                display_text = class_name.strip().split("(")[0].strip()
         else:
             display_text = get_subject_abbr(subject_name)
             
         if locked:
-            display_text = f"🔒{display_text}"
+            display_text = f"🔒 {display_text}"
             
         item = QTableWidgetItem(display_text)
+            
         item.setTextAlignment(Qt.AlignCenter)
         item.setBackground(QBrush(QColor(color)))
         
@@ -1519,7 +1552,7 @@ class TimetableGrid(QWidget):
         # Track placed lesson
         self._placed_lessons[(row, col)] = {
             "subject_name": subject_name, "color": color,
-            "teacher_name": teacher_name, "class_name": class_name, "duration": 1,
+            "teacher_name": teacher_name, "class_name": class_name, "duration": duration,
             "locked": bool(locked)
         }
         

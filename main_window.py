@@ -281,11 +281,13 @@ class MainWindow(QMainWindow):
         self.cloud_worker.sync_status_changed.connect(self.cloud_status_lbl.setText)
         self.cloud_worker.start()
 
-        # Otomatik Bulut Senkronizasyonu Zamanlayıcısı (Her 30 saniyede bir evden/dışarıdan yapılan değişiklikleri çeker)
-        from PySide6.QtCore import QTimer
-        self._auto_sync_timer = QTimer(self)
-        self._auto_sync_timer.timeout.connect(lambda: self._download_cloud_data(show_message=False))
-        self._auto_sync_timer.start(30000) # 30 saniye
+        # Global Rollback / Undo / Redo Shortcuts
+        from PySide6.QtGui import QKeySequence, QShortcut
+        QShortcut(QKeySequence.Undo, self, self._act_undo)
+        QShortcut(QKeySequence("Ctrl+Z"), self, self._act_undo)
+        QShortcut(QKeySequence.Redo, self, self._act_redo)
+        QShortcut(QKeySequence("Ctrl+Y"), self, self._act_redo)
+        QShortcut(QKeySequence("Ctrl+Shift+Z"), self, self._act_redo)
 
     def _download_cloud_data(self, show_message=False):
         if not hasattr(self, "auth_data") or not self.auth_data: return
@@ -368,12 +370,13 @@ class MainWindow(QMainWindow):
         root_layout.setSpacing(0)
         self.setCentralWidget(root)
 
-        # Title bar
-        self._title_bar = TitleBar(self.logo_path, root)
-        root_layout.addWidget(self._title_bar)
-        
-        # Wire the file menu
-        fm = self._title_bar.file_menu
+        # Ribbon
+        self._ribbon = RibbonWidget(root)
+        self._build_ribbon()
+        root_layout.addWidget(self._ribbon)
+
+        # Wire the file menu (Integrated directly on Ribbon Tab Bar)
+        fm = self._ribbon.file_menu
         
         act_new = QAction(make_menu_icon("N", "#4CAF50", "#2E7D32"), "Yeni", self)
         act_new.triggered.connect(self._act_new)
@@ -416,11 +419,6 @@ class MainWindow(QMainWindow):
         act_exit = QAction(make_menu_icon("X", "#EF5350", "#C62828"), "Çıkış", self)
         act_exit.triggered.connect(self.close)
         fm.addAction(act_exit)
-
-        # Ribbon
-        self._ribbon = RibbonWidget(root)
-        self._build_ribbon()
-        root_layout.addWidget(self._ribbon)
 
         # Workspace
         workspace = self._build_workspace(root)
@@ -486,6 +484,8 @@ class MainWindow(QMainWindow):
         p1.add_button("Yeni",           "yeni",     self._act_new)
         p1.add_button("Aç",             "ac",       self._act_open)
         p1.add_button("Kaydet",         "kaydet",   self._act_save)
+        p1.add_button("Geri Al\nCtrl+Z","bilgi",    self._act_undo)
+        p1.add_button("Yinele\nCtrl+Y", "bilgi",    self._act_redo)
         p1.add_button("Yazdır",         "yazdir",   self._act_print)
         p1.add_button("Ön İzleme",      "on_izleme",self._act_preview)
         p1.add_divider()
@@ -859,10 +859,11 @@ class MainWindow(QMainWindow):
             
         settings = self.data_store.get("settings", {})
         periods = int(settings.get("periods", 8))
-        days_count = int(settings.get("days_count", 5))
-        
-        from timetable_grid import DAYS
-        days_list = DAYS[:days_count]
+        days_list = settings.get("days")
+        if not days_list:
+            days_count = int(settings.get("days_count", settings.get("day_count", self.data_store.get("gun_sayisi", 5))))
+            from timetable_grid import DAYS
+            days_list = DAYS[:days_count]
         
         mode = getattr(self._grid, "current_view_mode", "classes")
         grid_data = self.data_store.get("grid_placements", [])
@@ -883,8 +884,12 @@ class MainWindow(QMainWindow):
                     teacher_names = ["Öğretmen 1"]
                 self._grid.set_mode_all_teachers(teacher_names, periods, days_list)
                 
+                teacher_match_cache = {}
+                
                 for item in grid_data:
-                    s_name = item.get("subject_name") or item.get("subject") or ""
+                    s_name = (item.get("subject_name") or item.get("subject") or "").strip()
+                    if s_name.lower() in ["boş", "bos", "atanmadı", ""]:
+                        continue
                     c_name = (item.get("class_name") or item.get("class") or "").strip()
                     t_name = (item.get("teacher_name") or item.get("teacher") or "").strip()
                     dur = int(item.get("duration", 1))
@@ -892,15 +897,19 @@ class MainWindow(QMainWindow):
                     period = int(item.get("period", item.get("row", 0)))
                     is_locked = bool(item.get("locked", False))
                     
-                    # Find matching teacher row
-                    matching_row = -1
-                    if t_name in teacher_names:
-                        matching_row = teacher_names.index(t_name)
+                    # Find matching teacher row with cache
+                    if t_name in teacher_match_cache:
+                        matching_row = teacher_match_cache[t_name]
                     else:
-                        for idx, tn in enumerate(teacher_names):
-                            if format_tr_name(tn) == format_tr_name(t_name):
-                                matching_row = idx
-                                break
+                        matching_row = -1
+                        if t_name in teacher_names:
+                            matching_row = teacher_names.index(t_name)
+                        else:
+                            for idx, tn in enumerate(teacher_names):
+                                if format_tr_name(tn) == format_tr_name(t_name):
+                                    matching_row = idx
+                                    break
+                        teacher_match_cache[t_name] = matching_row
                                 
                     if matching_row >= 0:
                         actual_col = col * periods + period
@@ -918,8 +927,12 @@ class MainWindow(QMainWindow):
                     
                 self._grid.set_mode_all_classes(class_names, periods, days_list)
                 
+                class_match_cache = {}
+                
                 for item in grid_data:
-                    s_name = item.get("subject_name") or item.get("subject") or ""
+                    s_name = (item.get("subject_name") or item.get("subject") or "").strip()
+                    if s_name.lower() in ["boş", "bos", "atanmadı", ""]:
+                        continue
                     c_name = (item.get("class_name") or item.get("class") or "").strip()
                     t_name = (item.get("teacher_name") or item.get("teacher") or "").strip()
                     dur = int(item.get("duration", 1))
@@ -931,15 +944,19 @@ class MainWindow(QMainWindow):
                     from auto_scheduler import matches_class
                     target_classes = [c.strip() for c in c_name.replace("&", ",").split(",") if c.strip()] if ("," in c_name or "&" in c_name) else [c_name]
                     for tc in target_classes:
-                        matching_row = -1
-                        if tc in class_names:
-                            matching_row = class_names.index(tc)
+                        if tc in class_match_cache:
+                            matching_row = class_match_cache[tc]
                         else:
-                            for idx, cn in enumerate(class_names):
-                                if matches_class(cn, tc) or matches_class(tc, cn):
-                                    matching_row = idx
-                                    break
-                                    
+                            matching_row = -1
+                            if tc in class_names:
+                                matching_row = class_names.index(tc)
+                            else:
+                                for idx, cn in enumerate(class_names):
+                                    if matches_class(cn, tc) or matches_class(tc, cn):
+                                        matching_row = idx
+                                        break
+                            class_match_cache[tc] = matching_row
+                                        
                         if matching_row >= 0:
                             actual_col = col * periods + period
                             color = get_subject_color(s_name, self.data_store)
@@ -964,9 +981,6 @@ class MainWindow(QMainWindow):
             return
             
         import json
-        if hasattr(self, "_push_undo_state"):
-            self._push_undo_state()
-            
         if sync_from_grid:
             self._sync_grid_to_store()
             
@@ -1280,9 +1294,23 @@ class MainWindow(QMainWindow):
         subject_name = lesson_info.get("subject_name", "Ders")
         color = get_subject_color(subject_name)
         teacher = format_tr_name(lesson_info.get("teacher", ""))
+        
+        # Öğretmen yoksa otomatik olarak branşından müsait bir hoca bul ve ata
+        if not teacher:
+            s_upper = subject_name.upper().strip()
+            s_words = [w for w in s_upper.split() if len(w) >= 3 and not w.isdigit()]
+            for t in self.data_store.get("ogretmenler", []):
+                t_ad = format_tr_name(t.get("ad", ""))
+                t_brans = (t.get("brans") or t.get("branch") or "").upper().strip()
+                if t_brans and (t_brans in s_upper or any(w in t_brans for w in s_words)):
+                    teacher = t_ad; break
+                elif any(w in t_ad.upper() for w in s_words):
+                    teacher = t_ad; break
+            if not teacher and self.data_store.get("ogretmenler"):
+                teacher = format_tr_name(self.data_store["ogretmenler"][0].get("ad", ""))
+                
         cls_name = lesson_info.get("class_name", "")
         duration = lesson_info.get("duration", 1)
-        
         is_move = lesson_info.get("is_move", False)
         orig_r = lesson_info.get("origin_row", -1)
         orig_c = lesson_info.get("origin_col", -1)
@@ -1342,30 +1370,16 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage(f"Kısıtlama engeli: {teacher} - {day_name} {row+1}. saat kapalı!")
                 return
                 
-        # 2. Check Active Planning Relations in Real Time
+        # 2. Check Active Planning Relations in Real Time (Soft check - log to status bar)
         is_rel_ok, rel_msg = self._check_planning_relations(
             subject=subject_name, teacher=teacher, class_name=cls_name,
             day=col, period=row, duration=duration,
             is_move=is_move, orig_r=orig_r, orig_c=orig_c
         )
-        if not is_rel_ok:
-            msg_box = QMessageBox(self)
-            msg_box.setWindowTitle("Planlama İlişkisi Uyarısı")
-            msg_box.setIcon(QMessageBox.Warning)
-            msg_box.setText(
-                f"{rel_msg}<br><br>"
-                f"Tanımlanmış aktif bir <b>Planlama İlişkisi</b> kuralı ihlal edilmektedir.<br>"
-                f"Ne yapmak istersiniz?"
-            )
-            btn_ignore = msg_box.addButton("⚠️ Kuralı Yoksay ve Yerleştir", QMessageBox.AcceptRole)
-            btn_cancel = msg_box.addButton("❌ İptal Et / Engelle", QMessageBox.RejectRole)
-            msg_box.setDefaultButton(btn_cancel)
-            msg_box.exec()
-            if msg_box.clickedButton() != btn_ignore:
-                self.statusBar().showMessage("Planlama ilişkisi kuralı nedeniyle işlem iptal edildi.")
-                return
+        if not is_rel_ok and rel_msg:
+            self.statusBar().showMessage(f"ℹ️ {rel_msg}")
                 
-        # 2. Check Teacher Conflict (Is teacher already placed elsewhere at this slot across ANY class?)
+        # 3. Check Teacher Conflict (Is teacher already placed elsewhere at this slot across ANY class?)
         teacher_info = next((t for t in self.data_store.get("ogretmenler", []) if t.get("ad") == teacher), {})
         allows_parallel = teacher_info.get("es_zamanli", False)
         
@@ -1384,6 +1398,9 @@ class MainWindow(QMainWindow):
                 if c == col:
                     overlap = (row < r + placed_dur) and (r < row + duration)
                     if overlap and data.get("teacher") == teacher and teacher != "":
+                        # Combined classes sharing the same teacher & subject are ALLOWED concurrently!
+                        if data.get("subject") == subject_name and (data.get("is_combined") or "," in str(data.get("class", "")) or "," in cls_name):
+                            continue
                         conflict_found = True
                         conflict_class = data.get("class", data.get("class_name", "Mevcut Sınıf"))
                         conflict_subj = data.get("subject", data.get("subject_name", "Ders"))
@@ -1406,6 +1423,8 @@ class MainWindow(QMainWindow):
                             
                         if p_day == col:
                             if (row < p_period + p_dur) and (p_period < row + duration):
+                                if p_sub == subject_name and ("," in p_cls or "," in cls_name or p_item.get("is_combined")):
+                                    continue
                                 conflict_found = True
                                 conflict_class = p_cls or "Başka Bir Sınıf"
                                 conflict_subj = p_sub
@@ -1417,13 +1436,13 @@ class MainWindow(QMainWindow):
                     f"⚠️ <b>Öğretmen Çakışması Algılandı!</b><br><br>"
                     f"<b>{teacher}</b> isimli öğretmenin <b>{day_name}</b> günü <b>{conflict_period+1}. ders saatinde</b> "
                     f"<b>{conflict_class}</b> sınıfında <b>{conflict_subj}</b> dersi bulunmaktadır.<br><br>"
-                    f"Normalde sistem çakışmaları engeller. Ne yapmak istersiniz?"
+                    f"Ne yapmak istersiniz?"
                 )
                 msg_box = QMessageBox(self)
                 msg_box.setWindowTitle("Ders Çakışması Uyarısı")
                 msg_box.setText(msg_text)
                 msg_box.setIcon(QMessageBox.Warning)
-                btn_ignore = msg_box.addButton("⚠️ Yoksay ve Devam Et", QMessageBox.AcceptRole)
+                btn_ignore = msg_box.addButton("⚠️ Yoksay ve Yerleştir", QMessageBox.AcceptRole)
                 btn_cancel = msg_box.addButton("❌ İptal Et / Engelle", QMessageBox.RejectRole)
                 msg_box.setDefaultButton(btn_cancel)
                 msg_box.exec()
@@ -1448,6 +1467,7 @@ class MainWindow(QMainWindow):
                     break
 
         # Passed checks! If it's a move, delete original first
+        self._push_undo_state()
         if is_move and orig_r >= 0 and orig_c >= 0:
             self._grid.table.setSpan(orig_r, orig_c, 1, 1)
             for r_off in range(duration):
@@ -1492,16 +1512,91 @@ class MainWindow(QMainWindow):
         self._ribbon._select(0)
 
     def _on_cell_edit(self, row, col):
-        from dialogs.edit_forms import LessonAssignmentDialog
-        dlg = LessonAssignmentDialog(data_store=self.data_store, parent=self)
-        if dlg.exec():
-            data = dlg.get_data()
-            if isinstance(data, list):
-                self.data_store.setdefault("atamalar", []).extend(data)
+        if not hasattr(self, "_grid"):
+            return
+            
+        grid_table = self._grid.table if hasattr(self._grid, "table") else self._grid
+        
+        orig_r, orig_c, orig_dur, info = grid_table._get_lesson_origin(row, col)
+        if not info:
+            if hasattr(self._grid, "_placed_lessons"):
+                info = self._grid._placed_lessons.get((row, col), {})
+            
+        subject_name = info.get("subject_name") or info.get("subject") or ""
+        teacher_name = info.get("teacher_name") or info.get("teacher") or ""
+        class_name = info.get("class_name") or info.get("class") or ""
+        
+        if not subject_name and not teacher_name and not class_name:
+            item = grid_table.item(row, col)
+            if item and item.text().strip():
+                subject_name = item.text().strip().replace("🔒", "")
+                
+        if not subject_name:
+            return
+            
+        self._push_undo_state()
+        from dialogs.edit_forms import SubjectTeacherAssignmentDialog
+        d = SubjectTeacherAssignmentDialog(
+            subject_name=subject_name,
+            data_store=self.data_store,
+            parent=self,
+            preselect_class=class_name,
+            preselect_teacher=teacher_name,
+            is_cell_edit=True,
+            cell_c=orig_c,
+            cell_r=orig_r
+        )
+        if d.exec():
+            if getattr(d, "is_cell_edit", False) and getattr(d, "new_teacher", None) and d.new_teacher != teacher_name:
+                from auto_scheduler import matches_class, normalize_clean, format_tr_name
+                periods_per_day = int(self.data_store.get("settings", {}).get("periods", 8))
+                cell_day = orig_c // periods_per_day
+                
+                # 1. Update in grid_placements & auto_schedule_results
+                for store_key in ["grid_placements", "auto_schedule_results"]:
+                    for p in self.data_store.get(store_key, []):
+                        p_day = int(p.get("day", p.get("col", 0) // periods_per_day if "col" in p else 0))
+                        p_cls = p.get("class_name", p.get("class", ""))
+                        p_sub = p.get("subject_name", p.get("subject", ""))
+                        p_t = p.get("teacher_name", p.get("teacher", ""))
+                        
+                        cls_match = matches_class(p_cls, class_name) or matches_class(class_name, p_cls) or (p_cls == class_name)
+                        sub_match = (normalize_clean(p_sub) == normalize_clean(subject_name)) or (p_sub == subject_name)
+                        t_match = (not teacher_name) or (format_tr_name(p_t) == format_tr_name(teacher_name)) or (normalize_clean(p_t) == normalize_clean(teacher_name))
+                        
+                        if p_day == cell_day and cls_match and sub_match and t_match:
+                            p["teacher_name"] = d.new_teacher
+                            p["teacher"] = d.new_teacher
+                            p["is_manual"] = True
+                
+                # 2. Update live grid cache
+                if hasattr(self._grid, "_placed_lessons"):
+                    for (gr, gc), pinfo in self._grid._placed_lessons.items():
+                        g_day = gc // periods_per_day
+                        p_cls = pinfo.get("class_name", "")
+                        p_sub = pinfo.get("subject_name", "")
+                        p_t = pinfo.get("teacher_name", "")
+                        cls_match = matches_class(p_cls, class_name) or matches_class(class_name, p_cls) or (p_cls == class_name)
+                        sub_match = (normalize_clean(p_sub) == normalize_clean(subject_name)) or (p_sub == subject_name)
+                        t_match = (not teacher_name) or (format_tr_name(p_t) == format_tr_name(teacher_name)) or (normalize_clean(p_t) == normalize_clean(teacher_name))
+                        
+                        if g_day == cell_day and cls_match and sub_match and t_match:
+                            pinfo["teacher_name"] = d.new_teacher
+                            pinfo["teacher"] = d.new_teacher
+                            
+                self.save_db(sync_from_grid=False)
+                self._refresh_tree()
+                self._refresh_grid()
+                
+                # Refresh selected cell info panel immediately
+                if hasattr(self._grid, "_on_cell_clicked"):
+                    self._grid._on_cell_clicked(orig_r, orig_c)
+                    
+                self.statusBar().showMessage(f"Öğretmen Değiştirildi: {teacher_name} -> {d.new_teacher} (Sadece o gün için)")
             else:
-                self.data_store.setdefault("atamalar", []).append(data)
-            self.save_db()
-            self._refresh_tree()
+                self.save_db()
+                self._refresh_tree()
+                self._refresh_grid()
 
     def _act_new(self):
         from dialogs.startup_wizard import StartupWizard
@@ -1594,15 +1689,27 @@ class MainWindow(QMainWindow):
             self._redo_stack.append(copy.deepcopy(self.data_store))
             prev_state = self._history_stack.pop()
             self.data_store = prev_state
+            
+            self._is_loading = True
             save_path = getattr(self, "current_roz_path", None) or self.db_path
-            with open(save_path, "w", encoding="utf-8") as f:
-                import json
-                json.dump(self.data_store, f, ensure_ascii=False, indent=4)
+            if save_path:
+                try:
+                    with open(save_path, "w", encoding="utf-8") as f:
+                        import json
+                        json.dump(self.data_store, f, ensure_ascii=False, indent=4)
+                except Exception as e:
+                    print("Undo Save Error:", e)
+            self._is_loading = False
+            
+            settings = self.data_store.get("settings", {})
+            periods = int(settings.get("periods", self.data_store.get("ders_saati", 8)))
+            if hasattr(self, "_grid"):
+                self._grid.set_periods(periods)
             self._refresh_tree()
-            self._restore_grid_placements()
-            self.statusBar().showMessage("İşlem geri alındı (Rollback). ↩️")
+            self._refresh_grid()
+            self.statusBar().showMessage("↺ İşlem başarıyla geri alındı (Rollback).")
         else:
-            self.statusBar().showMessage("Geri alınacak başka işlem yok.")
+            self.statusBar().showMessage("⚠️ Geri alınacak başka işlem yok.")
 
     def _act_redo(self):
         import copy
@@ -1611,17 +1718,30 @@ class MainWindow(QMainWindow):
             self._history_stack.append(copy.deepcopy(self.data_store))
             next_state = self._redo_stack.pop()
             self.data_store = next_state
+            
+            self._is_loading = True
             save_path = getattr(self, "current_roz_path", None) or self.db_path
-            with open(save_path, "w", encoding="utf-8") as f:
-                import json
-                json.dump(self.data_store, f, ensure_ascii=False, indent=4)
+            if save_path:
+                try:
+                    with open(save_path, "w", encoding="utf-8") as f:
+                        import json
+                        json.dump(self.data_store, f, ensure_ascii=False, indent=4)
+                except Exception as e:
+                    print("Redo Save Error:", e)
+            self._is_loading = False
+            
+            settings = self.data_store.get("settings", {})
+            periods = int(settings.get("periods", self.data_store.get("ders_saati", 8)))
+            if hasattr(self, "_grid"):
+                self._grid.set_periods(periods)
             self._refresh_tree()
-            self._restore_grid_placements()
-            self.statusBar().showMessage("İşlem yinelendi (Redo). ↪️")
+            self._refresh_grid()
+            self.statusBar().showMessage("↻ İşlem başarıyla tekrar uygulandı (Redo).")
         else:
-            self.statusBar().showMessage("Yinelenecek başka işlem yok.")
+            self.statusBar().showMessage("⚠️ Yinelenecek başka işlem yok.")
 
     def _open_subjects(self):
+        self._push_undo_state()
         self.save_db(sync_from_grid=True)
         d = MasterDataDialog(0, self)
         d.exec()
@@ -1630,6 +1750,7 @@ class MainWindow(QMainWindow):
         self._restore_grid_placements()
 
     def _open_school_info(self):
+        self._push_undo_state()
         from dialogs.school_info import SchoolInfoDialog
         d = SchoolInfoDialog(parent=self, data_store=self.data_store)
         if d.exec() == QDialog.Accepted:
@@ -1642,6 +1763,7 @@ class MainWindow(QMainWindow):
             self._restore_grid_placements()
 
     def _open_classes(self):
+        self._push_undo_state()
         self.save_db(sync_from_grid=True)
         d = MasterDataDialog(1, self)
         d.exec()
@@ -1650,6 +1772,7 @@ class MainWindow(QMainWindow):
         self._restore_grid_placements()
 
     def _open_class_assignments(self, target_class=None):
+        self._push_undo_state()
         from dialogs.edit_forms import ClassComprehensiveAssignmentDialog
         from PySide6.QtWidgets import QInputDialog
         
@@ -1698,6 +1821,7 @@ class MainWindow(QMainWindow):
             act = menu.addAction(f"🎓 {entity_name} Öğretmenin Atamaları")
             chosen = menu.exec_(self._tree.mapToGlobal(pos))
             if chosen == act:
+                self._push_undo_state()
                 from dialogs.edit_forms import LessonAssignmentDialog
                 d = LessonAssignmentDialog(data_store=self.data_store, parent=self, selected_teacher=entity_name)
                 if d.exec():
@@ -1706,6 +1830,7 @@ class MainWindow(QMainWindow):
                     self._restore_grid_placements()
 
     def _open_rooms(self):
+        self._push_undo_state()
         self.save_db(sync_from_grid=True)
         d = MasterDataDialog(2, self)
         d.exec()
@@ -1714,6 +1839,7 @@ class MainWindow(QMainWindow):
         self._restore_grid_placements()
 
     def _open_teachers(self):
+        self._push_undo_state()
         self.save_db(sync_from_grid=True)
         d = MasterDataDialog(3, self)
         d.exec()
@@ -1722,24 +1848,28 @@ class MainWindow(QMainWindow):
         self._restore_grid_placements()
 
     def _open_electives(self):
+        self._push_undo_state()
         from dialogs.electives_dialog import ElectivesDialog
         d = ElectivesDialog(data_store=self.data_store, parent=self)
         d.exec()
         self.save_db()
 
     def _open_relations(self):
+        self._push_undo_state()
         from dialogs.relations_dialog import PlanningRelationsDialog
         d = PlanningRelationsDialog(data_store=self.data_store, parent=self)
         d.exec()
         self.save_db()
 
     def _open_wizard(self):
+        self._push_undo_state()
         d = MasterDataDialog(0, self)
         d.exec()
         self.save_db()
         self._refresh_tree()
 
     def _act_auto_schedule(self):
+        self._push_undo_state()
         from dialogs.auto_schedule_dialog import AutoScheduleDialog
         from PySide6.QtWidgets import QDialog
         
@@ -1786,7 +1916,7 @@ class MainWindow(QMainWindow):
                 # Update datastore and save cleanly
                 self.data_store["grid_placements"] = grid_placements
                 self.save_db(sync_from_grid=False)
-                self._restore_grid_placements()
+                self._refresh_grid()
                 self._refresh_tree()
                 
                 total_hours = sum(p.get("duration", 1) for p in grid_placements)
@@ -1797,7 +1927,7 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage(f"Otomatik planlama başarıyla oluşturuldu ({total_hours} ders saati yerleştirildi).")
             else:
                 self.save_db(sync_from_grid=False)
-                self._restore_grid_placements()
+                self._refresh_grid()
                 self._refresh_tree()
 
     def _act_statistics(self):
@@ -1851,74 +1981,3 @@ class MainWindow(QMainWindow):
         msg.setIcon(QMessageBox.Information)
         msg.exec()
 
-    def _on_cell_edit(self, row, col):
-        if not hasattr(self, "_grid"):
-            return
-        grid = self._grid
-        orig_r, orig_c, orig_dur, info = grid.table._get_lesson_origin(row, col)
-        if not info:
-            info = grid._placed_lessons.get((row, col), {})
-            
-        subject_name = info.get("subject_name") or info.get("subject") or ""
-        teacher_name = info.get("teacher_name") or info.get("teacher") or ""
-        class_name = info.get("class_name") or info.get("class") or ""
-        
-        if not subject_name and not teacher_name and not class_name:
-            item = grid.table.item(row, col)
-            if item and item.text().strip():
-                subject_name = item.text().strip().replace("🔒", "")
-                
-        if not subject_name:
-            return
-            
-        from dialogs.edit_forms import SubjectTeacherAssignmentDialog
-        d = SubjectTeacherAssignmentDialog(
-            subject_name=subject_name,
-            data_store=self.data_store,
-            parent=self,
-            preselect_class=class_name
-        )
-        if d.exec():
-            self.save_db()
-            self._refresh_tree()
-            self._refresh_grid()
-
-    def _on_lesson_dropped(self, row, col, lesson_info):
-        if not hasattr(self, "_grid"):
-            return
-        grid = self._grid
-        dur = int(lesson_info.get("duration", 1))
-        s_name = lesson_info.get("subject_name") or lesson_info.get("subject", "")
-        t_name = lesson_info.get("teacher") or lesson_info.get("teacher_name", "")
-        c_name = lesson_info.get("class_name") or lesson_info.get("class", "")
-        color = lesson_info.get("color") or get_subject_color(s_name, self.data_store)
-        is_locked = bool(lesson_info.get("locked") or lesson_info.get("is_locked"))
-        
-        if lesson_info.get("is_move"):
-            orig_r = lesson_info.get("origin_row", -1)
-            orig_c = lesson_info.get("origin_col", -1)
-            if orig_r >= 0 and orig_c >= 0:
-                grid.table._delete_lesson_at(orig_r, orig_c)
-                
-        # Register placement
-        grid._placed_lessons[(row, col)] = {
-            "subject_name": s_name,
-            "teacher_name": t_name,
-            "class_name": c_name,
-            "duration": dur,
-            "color": color,
-            "locked": is_locked
-        }
-        
-        # Draw cells
-        for r_off in range(dur):
-            tr = row + r_off
-            if tr < grid.table.rowCount():
-                item = QTableWidgetItem(s_name)
-                item.setBackground(QBrush(QColor(color)))
-                item.setTextAlignment(Qt.AlignCenter)
-                grid.table.setItem(tr, col, item)
-                
-        self.save_db(sync_from_grid=True)
-        self._refresh_grid()
-        self._refresh_tree()

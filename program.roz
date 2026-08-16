@@ -1,44 +1,40 @@
 {
-    "ogretmenler": [
-        {
-            "ad": "Sultan Yılmaz"
-        }
-    ],
+    "okul_adi": "BGZ Test",
     "siniflar": [
         {
-            "ad": "9A"
-        },
-        {
             "ad": "10A"
-        },
+        }
+    ],
+    "ogretmenler": [
         {
-            "ad": "11A"
+            "ad": "Ali Kaya"
         }
     ],
     "dersler": [
         {
-            "ad": "Matematik 9"
-        },
-        {
-            "ad": "Matematik 10"
+            "ad": "Biyoloji"
         }
     ],
     "atamalar": [
         {
-            "teacher": "Sultan Yılmaz",
-            "subject": "Matematik 9",
-            "class": "9A",
-            "duration": 4,
-            "type": "2+2",
-            "color": "#F4511E"
-        },
-        {
-            "teacher": "Sultan Yılmaz",
-            "subject": "Matematik 9",
-            "class": "11A",
-            "duration": 3,
-            "type": "2+1",
-            "color": "#F4511E"
+            "class": "10A",
+            "subject": "Biyoloji",
+            "teacher": "Ali Kaya",
+            "duration": 2
         }
-    ]
+    ],
+    "grid_placements": [
+        {
+            "day": 0,
+            "period": 0,
+            "duration": 2,
+            "class": "10A",
+            "subject": "Biyoloji",
+            "teacher": "Ali Kaya"
+        }
+    ],
+    "settings": {
+        "periods": 8,
+        "day_count": 5
+    }
 }

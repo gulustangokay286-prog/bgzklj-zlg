@@ -1,4 +1,4 @@
-"""dialogs/edit_forms.py - Sihirbaz içindeki detaylı özel formlar (Ders, Sınıf vb.)"""
+import os, sys
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QLabel,
     QLineEdit, QComboBox, QCheckBox, QColorDialog, QFrame, QFormLayout, QGridLayout,
@@ -8,6 +8,11 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QColor, QBrush
 from database import trigger_save_db
+
+def get_asset_path(rel_path):
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, rel_path).replace("\\", "/")
+    return os.path.abspath(rel_path).replace("\\", "/")
 
 PASTEL_DISTINCT_COLORS = [
     "#1E88E5", "#43A047", "#FB8C00", "#8E24AA", "#E53935",
@@ -825,7 +830,12 @@ class LessonAssignmentDialog(QDialog):
                 dur = int(c_type)
             else:
                 dur = cfg.get("duration", 2)
-            badge_parts.append(f"{c} ({dur}s: {c_type})")
+            
+            clean_c = c.replace(",", "+").replace(" ", "") if ("," in c or "+" in c or "&" in c) else c
+            if "," in c or "+" in c or "&" in c:
+                badge_parts.append(f"🔗 {clean_c} ({dur}s: {c_type})")
+            else:
+                badge_parts.append(f"{clean_c} ({dur}s: {c_type})")
             
         row_data["lbl_badge"].setText("🎓 Atanan Sınıflar: " + ", ".join(badge_parts))
 
@@ -896,11 +906,16 @@ class LessonAssignmentDialog(QDialog):
         all_assigned = []
         for r in self.subject_rows:
             for c in r["classes"]:
-                if c and c not in all_assigned:
-                    all_assigned.append(c)
+                clean_c = c.replace(",", "+").replace(" ", "") if ("," in c or "+" in c or "&" in c) else c
+                if clean_c and clean_c not in all_assigned:
+                    all_assigned.append(clean_c)
                     
         if all_assigned:
-            self.txt_classes_summary.setText(", ".join(all_assigned))
+            summary_str = ", ".join(all_assigned)
+            if "+" in summary_str or "🔗" in summary_str:
+                self.txt_classes_summary.setText(f"🔗 {summary_str}")
+            else:
+                self.txt_classes_summary.setText(summary_str)
         else:
             self.txt_classes_summary.setText("")
 
@@ -1410,26 +1425,24 @@ class MultiClassAssignDialog(QDialog):
         all_classes = all_classes or []
         selected_classes = selected_classes or []
         
-        self.setStyleSheet("""
-            QDialog { background: #FFFFFF; }
-            QListWidget { border: 1px solid #CBD5E1; border-radius: 6px; font-size: 13px; }
-            QListWidget::item { padding: 8px 12px; }
-            QListWidget::indicator {
+        chk_checked = get_asset_path("resources/chk_checked.png")
+        chk_unchk = get_asset_path("resources/chk_unchecked.png")
+        
+        self.setStyleSheet(f"""
+            QDialog {{ background: #FFFFFF; }}
+            QListWidget {{ border: 1px solid #CBD5E1; border-radius: 6px; font-size: 13px; }}
+            QListWidget::item {{ padding: 8px 12px; }}
+            QListWidget::indicator {{
                 width: 18px;
                 height: 18px;
-                border: 2px solid #64748B;
-                border-radius: 4px;
-                background-color: #FFFFFF;
-            }
-            QListWidget::indicator:hover {
-                border-color: #2563EB;
-                background-color: #EFF6FF;
-            }
-            QListWidget::indicator:checked {
-                border-color: #2563EB;
-                background-color: #2563EB;
-            }
-            QPushButton { min-height: 32px; padding: 4px 14px; border-radius: 6px; font-weight: bold; font-size: 13px; }
+            }}
+            QListWidget::indicator:unchecked {{
+                image: url("{chk_unchk}");
+            }}
+            QListWidget::indicator:checked {{
+                image: url("{chk_checked}");
+            }}
+            QPushButton {{ min-height: 32px; padding: 4px 14px; border-radius: 6px; font-weight: bold; font-size: 13px; }}
         """)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(18, 18, 18, 18)
@@ -1512,13 +1525,19 @@ class CombinedClassesAssignDialog(QDialog):
         
         self.setWindowTitle("🔗 Birleşik Dersler Ayarla — Sınıf ve Ders Birleştirme")
         self.resize(520, 520)
-        self.setStyleSheet("""
-            QDialog { background-color: #F8FAFC; font-family: system-ui, -apple-system, sans-serif; }
-            QLabel { color: #1E293B; font-size: 12px; font-weight: bold; }
-            QGroupBox { font-weight: bold; border: 1px solid #CBD5E1; border-radius: 6px; margin-top: 10px; padding-top: 10px; background: white; }
-            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #1E40AF; }
-            QComboBox, QSpinBox { min-height: 28px; border: 1px solid #CBD5E1; border-radius: 4px; padding: 2px 8px; background: white; }
-            QPushButton { min-height: 32px; border-radius: 5px; font-weight: bold; padding: 6px 16px; }
+        chk_checked = get_asset_path("resources/chk_checked.png")
+        chk_unchk = get_asset_path("resources/chk_unchecked.png")
+        
+        self.setStyleSheet(f"""
+            QDialog {{ background-color: #F8FAFC; font-family: system-ui, -apple-system, sans-serif; }}
+            QLabel {{ color: #1E293B; font-size: 12px; font-weight: bold; }}
+            QGroupBox {{ font-weight: bold; border: 1px solid #CBD5E1; border-radius: 6px; margin-top: 10px; padding-top: 10px; background: white; }}
+            QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #1E40AF; }}
+            QComboBox, QSpinBox {{ min-height: 28px; border: 1px solid #CBD5E1; border-radius: 4px; padding: 2px 8px; background: white; }}
+            QListWidget::indicator {{ width: 18px; height: 18px; }}
+            QListWidget::indicator:unchecked {{ image: url("{chk_unchk}"); }}
+            QListWidget::indicator:checked {{ image: url("{chk_checked}"); }}
+            QPushButton {{ min-height: 32px; border-radius: 5px; font-weight: bold; padding: 6px 16px; }}
         """)
         
         lay = QVBoxLayout(self)
@@ -1543,10 +1562,14 @@ class CombinedClassesAssignDialog(QDialog):
         self.cls_list.setStyleSheet("border: 1px solid #E2E8F0; border-radius: 4px;")
         
         all_cls = [c.get("ad", "") for c in self.data_store.get("siniflar", []) if c.get("ad")]
+        from auto_scheduler import matches_class
         for c in all_cls:
-            item = QListWidgetItem(c)
+            clean_c = c.split("(")[0].strip()
+            item = QListWidgetItem(clean_c)
+            item.setData(Qt.UserRole, c)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(Qt.Checked if c in self.default_classes else Qt.Unchecked)
+            is_chk = any(matches_class(clean_c, d) or matches_class(c, d) for d in self.default_classes)
+            item.setCheckState(Qt.Checked if is_chk else Qt.Unchecked)
             self.cls_list.addItem(item)
         lay_cls.addWidget(self.cls_list)
         lay.addWidget(grp_cls)
@@ -1649,13 +1672,16 @@ class CombinedClassesAssignDialog(QDialog):
 
 class SubjectTeacherAssignmentDialog(QDialog):
     """Modernize Edilmiş Öğretmen Seç, Saat ve Sınıf Eşleştirme Sheet Ekranı"""
-    def __init__(self, subject_name="", data_store=None, parent=None, current_class="", preselect_class="", preselect_teacher="", **kwargs):
+    def __init__(self, subject_name="", data_store=None, parent=None, current_class="", preselect_class="", preselect_teacher="", is_cell_edit=False, cell_r=-1, cell_c=-1, **kwargs):
         super().__init__(parent)
         self.subject_name = subject_name
         self.data_store = data_store or {}
         self.current_class = current_class or preselect_class or ""
         self.preselect_teacher = preselect_teacher or ""
-        self.setWindowTitle(f"Öğretmen Seç & Saat Ata — {self.subject_name}")
+        self.is_cell_edit = is_cell_edit
+        self.cell_r = cell_r
+        self.cell_c = cell_c
+        self.new_teacher = None
         self.resize(920, 580)
         self.setStyleSheet("""
             QDialog { background-color: #F8FAFC; font-family: system-ui, -apple-system, sans-serif; }
@@ -1689,13 +1715,64 @@ class SubjectTeacherAssignmentDialog(QDialog):
             }
         """)
         
-        # Teacher data mapping: teacher_name -> {"checked": bool, "type": str, "classes": list}
         self.teacher_configs = {}
         self.all_classes = [c.get("ad", "") for c in self.data_store.get("siniflar", []) if c.get("ad")]
         
-        self._init_data()
-        self._build_ui()
-        self._populate_table()
+        if self.is_cell_edit:
+            self.setWindowTitle(f"Öğretmen Değiştir (Günlük) — {self.subject_name}")
+            self.resize(600, 250)
+            self._build_cell_edit_ui()
+        else:
+            self.setWindowTitle(f"Öğretmen Seç & Saat Ata — {self.subject_name}")
+            self._init_data()
+            self._build_ui()
+            self._populate_table()
+
+    def _build_cell_edit_ui(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(20, 20, 20, 20)
+        lay.setSpacing(14)
+        
+        lbl = QLabel(f"📚 <b>{self.subject_name}</b> dersine şu an <b>{self.preselect_teacher or 'Kimse'}</b> atanmış.<br>Sadece bu gün için öğretmeni değiştirmek için yeni öğretmeni seçiniz:")
+        lbl.setStyleSheet("font-size: 13px; color: #334155;")
+        lay.addWidget(lbl)
+        
+        f_row = QFrame()
+        f_row.setStyleSheet("background: white; border: 1px solid #CBD5E1; border-radius: 8px; padding: 10px;")
+        l_row = QHBoxLayout(f_row)
+        
+        l_row.addWidget(QLabel("Hedef Sınıf: <b>" + str(self.current_class) + "</b>"))
+        l_row.addSpacing(20)
+        l_row.addWidget(QLabel("Yeni Öğretmen:"))
+        
+        self.cb_teacher = QComboBox()
+        self.cb_teacher.setMinimumWidth(220)
+        self.cb_teacher.setEditable(True)
+        teachers = sorted([t.get("ad") for t in self.data_store.get("ogretmenler", []) if t.get("ad")])
+        self.cb_teacher.addItems(teachers)
+        if self.preselect_teacher in teachers:
+            self.cb_teacher.setCurrentText(self.preselect_teacher)
+            
+        l_row.addWidget(self.cb_teacher)
+        lay.addWidget(f_row)
+        
+        bot = QHBoxLayout()
+        bot.addStretch()
+        btn_cancel = QPushButton("İptal")
+        btn_cancel.setStyleSheet("background: #FFFFFF; border: 1px solid #CBD5E1; color: #475569;")
+        btn_cancel.clicked.connect(self.reject)
+        bot.addWidget(btn_cancel)
+        
+        btn_save = QPushButton("💾 Kaydet (Sadece Bu Gün)")
+        btn_save.setStyleSheet("background: #2563EB; color: white; border: none; padding: 6px 18px;")
+        
+        def save_action():
+            self.new_teacher = self.cb_teacher.currentText().strip()
+            self.accept()
+            
+        btn_save.clicked.connect(save_action)
+        bot.addWidget(btn_save)
+        lay.addLayout(bot)
 
     def _init_data(self):
         subj_target = format_tr_name(self.subject_name)

@@ -340,43 +340,118 @@ class TimetablePrintPreview(QDialog):
         painter.setViewport(0, 0, printer.width(), printer.height())
         painter.setWindow(0, 0, VW, VH)
         
-        if "Çarşaf Liste : Sınıflar" in mode:
-            self._render_carsaf_liste(painter, printer, VW, VH, is_teacher=False)
-        elif "Çarşaf Liste : Öğretmenler" in mode:
-            self._render_carsaf_liste(painter, printer, VW, VH, is_teacher=True)
-        elif "Tablo Olarak : Dersler" in mode:
-            self._render_tablo_dersler(painter, printer, VW, VH)
-        elif "Tüm Sınıflar" in mode:
-            self._render_asc_multi_grid(painter, printer, VW, VH, is_teacher=False)
-        elif "Tüm Öğretmenler" in mode:
-            self._render_asc_multi_grid(painter, printer, VW, VH, is_teacher=True)
-        elif "Sınıf Dersleri" in mode:
-            self._render_class_lessons_list(painter, VW, VH)
-        elif "Öğretmen Haftalık" in mode:
-            self._render_weekly_grid(painter, VW, VH, is_teacher=True)
-        elif "Sınıf Haftalık" in mode:
-            self._render_weekly_grid(painter, VW, VH, is_teacher=False)
-        elif "Tüm Öğretmenlerin Ders Yükü" in mode:
-            self._render_teacher_summary_list(painter, VW, VH)
-        else:
-            self._render_weekly_grid(painter, VW, VH, is_teacher=False)
-            
-        painter.end()
+        try:
+            if "Çarşaf Liste : Sınıflar" in mode:
+                self._render_carsaf_liste(painter, printer, VW, VH, is_teacher=False)
+            elif "Çarşaf Liste : Öğretmenler" in mode:
+                self._render_carsaf_liste(painter, printer, VW, VH, is_teacher=True)
+            elif "Tablo Olarak : Dersler" in mode:
+                self._render_tablo_dersler(painter, printer, VW, VH)
+            elif "Tüm Sınıflar" in mode:
+                self._render_asc_multi_grid(painter, printer, VW, VH, is_teacher=False)
+            elif "Tüm Öğretmenler" in mode:
+                self._render_asc_multi_grid(painter, printer, VW, VH, is_teacher=True)
+            elif "Sınıf Dersleri" in mode:
+                self._render_class_lessons_list(painter, VW, VH)
+            elif "Öğretmen Haftalık" in mode:
+                self._render_weekly_grid(painter, VW, VH, is_teacher=True)
+            elif "Sınıf Haftalık" in mode:
+                self._render_weekly_grid(painter, VW, VH, is_teacher=False)
+            elif "Tüm Öğretmenlerin Ders Yükü" in mode:
+                self._render_teacher_summary_list(painter, VW, VH)
+            else:
+                self._render_weekly_grid(painter, VW, VH, is_teacher=False)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            painter.fillRect(0, 0, VW, VH, Qt.white)
+            painter.setFont(QFont("Segoe UI", 12))
+            painter.setPen(QPen(QColor("#DC2626"), 1))
+            painter.drawText(QRectF(40, 40, VW - 80, VH - 80), Qt.AlignCenter, f"Yazdırma Görünümü Oluşturulurken Hata:\n{e}\n\n(Veriler boş veya eksik olabilir)")
+        finally:
+            painter.end()
 
     def _get_pseudo_placements(self, target_name, is_teacher=False):
         """Fetch placements for a class or teacher (day, period) mapped directly from grid_placements and live state."""
+        if not hasattr(self, "_placements_cache"):
+            self._placements_cache = {}
+            
+        cache_key = (target_name, is_teacher)
+        if cache_key in self._placements_cache:
+            return self._placements_cache[cache_key]
+            
         res = {}
         
+        tr_map = str.maketrans({'İ': 'i', 'I': 'ı', 'ı': 'i', 'Ş': 's', 'ş': 's', 'Ğ': 'g', 'ğ': 'g', 'Ü': 'u', 'ü': 'u', 'Ö': 'o', 'ö': 'o', 'Ç': 'c', 'ç': 'c'})
+        
+        from functools import lru_cache
+        @lru_cache(maxsize=2048)
         def normalize_clean(s):
             if not s: return ""
-            tr_map = str.maketrans({'İ': 'i', 'I': 'ı', 'ı': 'i', 'Ş': 's', 'ş': 's', 'Ğ': 'g', 'ğ': 'g', 'Ü': 'u', 'ü': 'u', 'Ö': 'o', 'ö': 'o', 'Ç': 'c', 'ç': 'c'})
             clean = "".join(c for c in str(s).translate(tr_map).lower() if c.isalnum())
             return clean.split("ea")[0].split("say")[0].split("soz")[0].split("dil")[0].strip()
             
         target_norm = normalize_clean(target_name)
         periods_per_day = int(self.data_store.get("settings", {}).get("periods", 8))
         
-        # 1. First priority: Live placed_lessons from TimetableGrid
+        # Comprehensive placements collector across all sources
+        # Source 1: data_store["grid_placements"] and auto_schedule_results
+        grid_data = list(self.data_store.get("grid_placements", []))
+        if not grid_data and self.data_store.get("auto_schedule_results"):
+            grid_data.extend(self.data_store.get("auto_schedule_results", []))
+        elif self.data_store.get("auto_schedule_results"):
+            grid_data.extend(self.data_store.get("auto_schedule_results", []))
+            
+        for item in grid_data:
+            if not isinstance(item, dict): continue
+            raw_col = int(item.get("col", 0))
+            raw_day = item.get("day")
+            raw_period = item.get("period")
+            
+            if raw_day is not None and raw_period is not None:
+                d_idx = int(raw_day)
+                p_idx = int(raw_period)
+            elif raw_col >= periods_per_day:
+                d_idx = raw_col // periods_per_day
+                p_idx = raw_col % periods_per_day
+            else:
+                d_idx = int(item.get("day", item.get("col", 0)))
+                p_idx = int(item.get("period", item.get("row", 0)))
+                
+            dur = int(item.get("duration", 1))
+            t_name = item.get("teacher_name") or item.get("teacher") or ""
+            c_name = item.get("class_name") or item.get("class") or ""
+            s_name = item.get("subject_name") or item.get("subject") or ""
+            scolor = item.get("color") or get_subject_color(s_name)
+            
+            match = False
+            if is_teacher:
+                if not t_name or not t_name.strip():
+                    continue
+                tn = normalize_clean(t_name)
+                if tn == target_norm or format_tr_name(t_name) == format_tr_name(target_name):
+                    match = True
+                    other_name = c_name
+            else:
+                if not c_name or not c_name.strip():
+                    continue
+                cn = normalize_clean(c_name)
+                from auto_scheduler import matches_class
+                if cn == target_norm or matches_class(c_name, target_name):
+                    match = True
+                    other_name = t_name
+                    
+            if match:
+                for off in range(dur):
+                    res[(d_idx, p_idx + off)] = {
+                        "subject_name": s_name,
+                        "teacher_name": other_name,
+                        "color": scolor,
+                        "is_start": (off == 0),
+                        "duration": dur
+                    }
+
+        # Source 2: Live placed_lessons from TimetableGrid (if not already set)
         if self.placed_lessons and isinstance(self.placed_lessons, dict):
             for (r, c), item in self.placed_lessons.items():
                 if not isinstance(item, dict): continue
@@ -386,83 +461,47 @@ class TimetablePrintPreview(QDialog):
                 scolor = item.get("color") or get_subject_color(s_name)
                 dur = int(item.get("duration", 1))
                 
-                # Determine actual day (0..4) and period (0..7)
-                d_idx = int(item.get("day", c // periods_per_day))
-                p_idx = int(item.get("period", c % periods_per_day))
-                
-                match = False
-                if is_teacher:
-                    tn = normalize_clean(t_name)
-                    if tn == target_norm or (len(target_norm) >= 3 and (target_norm in tn or tn in target_norm)):
-                        match = True
-                        other_name = c_name
+                # Check multi-sheet vs single entity coordinate system
+                if c >= periods_per_day:
+                    d_idx = c // periods_per_day
+                    p_idx = c % periods_per_day
+                elif item.get("day") is not None and item.get("period") is not None:
+                    d_idx = int(item["day"])
+                    p_idx = int(item["period"])
                 else:
-                    cn = normalize_clean(c_name)
-                    if cn == target_norm or (len(target_norm) >= 2 and (target_norm in cn or cn in target_norm)):
-                        match = True
-                        other_name = t_name
-                        
-                if match:
-                    for off in range(dur):
-                        res[(d_idx, p_idx + off)] = {
-                            "subject_name": s_name,
-                            "teacher_name": other_name,
-                            "color": scolor,
-                            "is_start": (off == 0),
-                            "duration": dur
-                        }
-                        
-            if res:
-                return res
-
-        # 2. Second priority: data_store["grid_placements"] (list)
-        grid_data = self.data_store.get("grid_placements", [])
-        if isinstance(grid_data, list) and grid_data:
-            for item in grid_data:
-                if not isinstance(item, dict): continue
-                raw_col = int(item.get("col", 0))
-                raw_day = item.get("day")
-                raw_period = item.get("period")
-                
-                if raw_day is not None and raw_period is not None:
-                    d_idx = int(raw_day)
-                    p_idx = int(raw_period)
-                elif raw_col >= periods_per_day:
-                    d_idx = raw_col // periods_per_day
-                    p_idx = raw_col % periods_per_day
-                else:
-                    d_idx = int(item.get("day", item.get("col", 0)))
-                    p_idx = int(item.get("period", item.get("row", 0)))
+                    d_idx = c
+                    p_idx = r
                     
-                dur = int(item.get("duration", 1))
-                t_name = item.get("teacher_name") or item.get("teacher") or ""
-                c_name = item.get("class_name") or item.get("class") or ""
-                s_name = item.get("subject_name") or item.get("subject") or ""
-                scolor = item.get("color") or get_subject_color(s_name)
-                
                 match = False
                 if is_teacher:
+                    if not t_name or not t_name.strip():
+                        continue
                     tn = normalize_clean(t_name)
-                    if tn == target_norm or (len(target_norm) >= 3 and (target_norm in tn or tn in target_norm)):
+                    if tn == target_norm or format_tr_name(t_name) == format_tr_name(target_name):
                         match = True
                         other_name = c_name
                 else:
+                    if not c_name or not c_name.strip():
+                        continue
                     cn = normalize_clean(c_name)
-                    if cn == target_norm or (len(target_norm) >= 2 and (target_norm in cn or cn in target_norm)):
+                    from auto_scheduler import matches_class
+                    if cn == target_norm or matches_class(c_name, target_name):
                         match = True
                         other_name = t_name
                         
                 if match:
                     for off in range(dur):
-                        res[(d_idx, p_idx + off)] = {
-                            "subject_name": s_name,
-                            "teacher_name": other_name,
-                            "color": scolor,
-                            "is_start": (off == 0),
-                            "duration": dur
-                        }
-            if res:
-                return res
+                        if (d_idx, p_idx + off) not in res:
+                            res[(d_idx, p_idx + off)] = {
+                                "subject_name": s_name,
+                                "teacher_name": other_name,
+                                "color": scolor,
+                                "is_start": (off == 0),
+                                "duration": dur
+                            }
+        if res:
+            self._placements_cache[cache_key] = res
+            return res
 
         # 3. Third priority: data_store["yerlesim"] (dict)
         yerlesim_data = self.data_store.get("yerlesim", {})
@@ -477,13 +516,18 @@ class TimetablePrintPreview(QDialog):
                 
                 match = False
                 if is_teacher:
+                    if not t_name or not t_name.strip():
+                        continue
                     tn = normalize_clean(t_name)
-                    if tn == target_norm or (len(target_norm) >= 3 and (target_norm in tn or tn in target_norm)):
+                    if tn == target_norm or format_tr_name(t_name) == format_tr_name(target_name):
                         match = True
                         other_name = c_name
                 else:
+                    if not c_name or not c_name.strip():
+                        continue
                     cn = normalize_clean(c_name)
-                    if cn == target_norm or (len(target_norm) >= 2 and (target_norm in cn or cn in target_norm)):
+                    from auto_scheduler import matches_class
+                    if cn == target_norm or matches_class(c_name, target_name):
                         match = True
                         other_name = t_name
                         
@@ -504,6 +548,7 @@ class TimetablePrintPreview(QDialog):
                     except Exception:
                         pass
 
+        self._placements_cache[cache_key] = res
         return res
 
     def _render_asc_multi_grid(self, painter, printer, VW, VH, is_teacher=False):
@@ -937,50 +982,92 @@ class TimetablePrintPreview(QDialog):
     def _render_carsaf_liste(self, painter, printer, VW, VH, is_teacher=False):
         """Toplu Çarşaf Liste: Sınıflar/Öğretmenler. 8 saatlik birebir aSc formatı."""
         import datetime
+        import re
+        
         date_str = datetime.datetime.now().strftime("%d.%m.%Y")
         school_name = self.data_store.get("okul_adi") or self.data_store.get("settings", {}).get("school_name", "Okul Adı")
         
+        def smart_abbr(subject_name):
+            s = str(subject_name).strip().upper()
+            match = re.search(r'([A-ZÇĞİÖŞÜ]+)\s*(\d+)$', s)
+            if match:
+                word, num = match.group(1), match.group(2)
+                if "MAT" in word: return f"M{num}"
+                if "FİZ" in word or "FIZ" in word: return f"F{num}"
+                if "KİM" in word or "KIM" in word:
+                    if num == "2": return f"KİM2"
+                    return f"K{num}"
+                if "BİY" in word or "BIY" in word: return f"B{num}"
+                return f"{word[:2]}{num}"
+                
+            if "MAT" in s: return "MAT"
+            if "EDE" in s: return "EDE"
+            if "TAR" in s: return "TAR"
+            if "FİZ" in s or "FIZ" in s: return "FİZ"
+            if "BED" in s: return "BED"
+            if "KİM" in s or "KIM" in s: return "KİM"
+            if "BİY" in s or "BIY" in s: return "BİY"
+            if "COĞ" in s or "COG" in s: return "COĞ"
+            if "FEL" in s: return "FEL"
+            if "DİN" in s or "DIN" in s: return "DİN"
+            if "İNG" in s or "ING" in s: return "İNG"
+            if "ALM" in s: return "ALM"
+            if "MÜZ" in s or "MUZ" in s: return "MÜZ"
+            if "GÖR" in s or "GOR" in s: return "GÖR"
+            if "REH" in s: return "REH"
+            
+            words = s.split()
+            if len(words) >= 2: return (words[0][:2] + words[1][:1]).upper()
+            return s[:3].upper()
+            
         items = self.filtered_teachers if is_teacher else self.filtered_classes
         if not items:
             items = [{"ad": "Örnek 1"}]
             
-        title = "Toplu Çarşaf Liste : Öğretmenler" if is_teacher else "Toplu Çarşaf Liste : Sınıflar"
+        base_title = "Toplu Çarşaf Liste : Öğretmenler" if is_teacher else "Toplu Çarşaf Liste : Sınıflar"
         
         margin_x, margin_y = 25, 35
         w = VW - (2 * margin_x)
         h = VH - (2 * margin_y)
         
-        days = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"]
-        periods = 8
-        
-        # Dimensions: Narrow compact name column (55px) to give maximum space to timetable grid
-        name_col_w = max(48, min(65, int(w * 0.052)))
+        settings = self.data_store.get("settings", {})
+        total_periods = int(settings.get("periods", self.data_store.get("ders_saati", 8)))
+        day_cnt = int(settings.get("day_count", self.data_store.get("gun_sayisi", 5)))
+        all_days = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
+        days = settings.get("days", all_days[:day_cnt])
+        if not days:
+            days = all_days[:5]
+            
+        # Period blocks for printing: If total_periods > 8, split into 1-8 and 9-total_periods
+        if total_periods <= 8:
+            period_blocks = [(0, total_periods)]
+        else:
+            period_blocks = [(0, 8), (8, total_periods)]
+            
+        name_col_w = max(100, min(140, int(w * 0.10)))
         grid_w = w - name_col_w
-        day_w = grid_w / len(days)
-        period_w = day_w / periods
         
         header_h = 42
-        row_h = max(34, min(46, int((h - 80) // min(len(items), 12))))
+        row_h = max(32, min(44, int((h - 80) // min(len(items), 12))))
+        rows_per_page = max(1, int((h - 80) // row_h))
+        total_item_pages = (len(items) + rows_per_page - 1) // rows_per_page
         
-        # Draw Title
-        painter.setFont(make_font(18, True))
-        painter.setPen(QPen(QColor("#0F172A"), 1))
-        painter.drawText(QRectF(margin_x, margin_y, w, 30), Qt.AlignCenter, title)
-        
-        # Draw School Name
-        painter.setFont(make_font(10, True))
-        painter.setPen(QPen(QColor("#475569"), 1))
-        painter.drawText(QRectF(margin_x, margin_y + 22, w, 18), Qt.AlignLeft | Qt.AlignBottom, school_name)
-        
-        table_y = margin_y + 44
-        
-        # Pagination
-        rows_per_page = max(1, int((h - 60) // row_h))
-        total_pages = (len(items) + rows_per_page - 1) // rows_per_page
-        
-        for p_idx in range(total_pages):
-            if p_idx > 0:
-                printer.newPage()
+        first_page = True
+        for b_idx, (start_p, end_p) in enumerate(period_blocks):
+            cur_periods_count = end_p - start_p
+            if len(period_blocks) > 1:
+                title = f"{base_title} (Bölüm {b_idx + 1}: {start_p + 1}–{end_p}. Dersler)"
+            else:
+                title = base_title
+                
+            day_w = grid_w / len(days)
+            period_w = day_w / cur_periods_count
+            
+            for p_idx in range(total_item_pages):
+                if not first_page:
+                    printer.newPage()
+                first_page = False
+                
                 painter.fillRect(0, 0, VW, VH, Qt.white)
                 painter.setFont(make_font(18, True))
                 painter.setPen(QPen(QColor("#0F172A"), 1))
@@ -988,102 +1075,177 @@ class TimetablePrintPreview(QDialog):
                 painter.setFont(make_font(10, True))
                 painter.setPen(QPen(QColor("#475569"), 1))
                 painter.drawText(QRectF(margin_x, margin_y + 22, w, 18), Qt.AlignLeft | Qt.AlignBottom, school_name)
-            
-            cur_y = table_y
-            
-            # --- Table Header ---
-            painter.setPen(QPen(QColor("#0F172A"), 1.5))
-            painter.setBrush(QBrush(QColor("#F1F5F9")))
-            
-            # Empty top-left cell
-            painter.drawRect(QRectF(margin_x, cur_y, name_col_w, header_h))
-            
-            # Days and Periods
-            for d_idx, day_name in enumerate(days):
-                dx = margin_x + name_col_w + d_idx * day_w
-                # Day cell header
+                
+                cur_y = margin_y + 44
+                
+                # --- Table Header ---
                 painter.setPen(QPen(QColor("#0F172A"), 1.5))
-                painter.setBrush(QBrush(QColor("#E2E8F0")))
-                painter.drawRect(QRectF(dx, cur_y, day_w, header_h / 2))
-                painter.setFont(make_font(11, True))
+                painter.setBrush(QBrush(QColor("#F1F5F9")))
+                painter.drawRect(QRectF(margin_x, cur_y, name_col_w, header_h))
+                painter.setFont(make_font(10.5, True))
                 painter.setPen(QPen(QColor("#0F172A"), 1))
-                painter.drawText(QRectF(dx, cur_y, day_w, header_h / 2), Qt.AlignCenter, day_name)
+                header_col_title = "Öğretmen" if is_teacher else "Sınıf"
+                painter.drawText(QRectF(margin_x, cur_y, name_col_w, header_h), Qt.AlignCenter, header_col_title)
                 
-                # Period cells (1..8)
-                for p in range(periods):
-                    px = dx + p * period_w
-                    is_last_p = (p == periods - 1)
-                    painter.setPen(QPen(QColor("#0F172A"), 2.0 if is_last_p else 0.8))
-                    painter.setBrush(QBrush(QColor("#F8FAFC")))
-                    painter.drawRect(QRectF(px, cur_y + header_h / 2, period_w, header_h / 2))
-                    painter.setFont(make_font(9.5, True))
-                    painter.setPen(QPen(QColor("#334155"), 1))
-                    painter.drawText(QRectF(px, cur_y + header_h / 2, period_w, header_h / 2), Qt.AlignCenter, str(p + 1))
-            
-            cur_y += header_h
-            
-            # --- Rows ---
-            page_items = items[p_idx * rows_per_page : (p_idx + 1) * rows_per_page]
-            
-            for item in page_items:
-                target_name = item.get("ad", "")
-                
-                # Draw Compact Name Cell (9A, 10B, etc.)
-                painter.setPen(QPen(QColor("#0F172A"), 1.5))
-                painter.setBrush(QBrush(QColor("#F8FAFC")))
-                painter.drawRect(QRectF(margin_x, cur_y, name_col_w, row_h))
-                painter.setFont(make_font(12, True))
-                painter.setPen(QPen(QColor("#0F172A"), 1))
-                
-                display_name = target_name
-                if is_teacher and item.get("kisa"):
-                    display_name = item.get("kisa")
-                elif not is_teacher:
-                    display_name = target_name.split("(")[0].strip().upper()
-                    
-                painter.drawText(QRectF(margin_x + 2, cur_y, name_col_w - 4, row_h), Qt.AlignCenter, display_name)
-                
-                # Fetch Placements
-                placements = self._get_pseudo_placements(target_name, is_teacher)
-                
-                # Draw Grid Cells
-                for d_idx in range(len(days)):
+                for d_idx, day_name in enumerate(days):
                     dx = margin_x + name_col_w + d_idx * day_w
-                    for p in range(periods):
-                        px = dx + p * period_w
-                        is_day_end = (p == periods - 1)
+                    painter.setPen(QPen(QColor("#0F172A"), 1.5))
+                    painter.setBrush(QBrush(QColor("#E2E8F0")))
+                    painter.drawRect(QRectF(dx, cur_y, day_w, header_h / 2))
+                    painter.setFont(make_font(11, True))
+                    painter.setPen(QPen(QColor("#0F172A"), 1))
+                    painter.drawText(QRectF(dx, cur_y, day_w, header_h / 2), Qt.AlignCenter, day_name)
+                    
+                    for p_offset in range(cur_periods_count):
+                        p = start_p + p_offset
+                        px = dx + p_offset * period_w
+                        painter.setPen(QPen(QColor("#0F172A"), 0.8))
+                        painter.setBrush(QBrush(QColor("#F8FAFC")))
+                        painter.drawRect(QRectF(px, cur_y + header_h / 2, period_w, header_h / 2))
+                        painter.setFont(make_font(9.5, True))
+                        painter.setPen(QPen(QColor("#334155"), 1))
+                        painter.drawText(QRectF(px, cur_y + header_h / 2, period_w, header_h / 2), Qt.AlignCenter, str(p + 1))
+                
+                cur_y += header_h
+                
+                page_items = items[p_idx * rows_per_page : (p_idx + 1) * rows_per_page]
+                used_subjects = {} # {abbr: full_name}
+                
+                for item in page_items:
+                    target_name = item.get("ad", "")
+                    
+                    painter.setPen(QPen(QColor("#0F172A"), 1.5))
+                    painter.setBrush(QBrush(QColor("#F8FAFC")))
+                    painter.drawRect(QRectF(margin_x, cur_y, name_col_w, row_h))
+                    painter.setPen(QPen(QColor("#0F172A"), 1))
+                    
+                    if is_teacher and item.get("kisa"):
+                        display_name = item.get("kisa")
+                    elif not is_teacher:
+                        display_name = target_name.replace("(ea)", "(EA)").replace("(say)", "(SAY)").replace("(soz)", "(SÖZ)").replace("(dil)", "(DİL)")
+                    else:
+                        display_name = target_name
                         
-                        lesson = placements.get((d_idx, p))
-                        if lesson:
-                            sname = lesson.get("subject_name", "")
-                            if is_teacher:
-                                cell_text = lesson.get("teacher_name", "").split("(")[0].strip().upper()
-                            else:
-                                cell_text = get_subject_badge(sname, self.data_store)
+                    # Dynamically fit font size so name never overflows
+                    font_sz = 11.0
+                    painter.setFont(make_font(font_sz, True))
+                    while painter.fontMetrics().horizontalAdvance(display_name) > (name_col_w - 10) and font_sz > 7.0:
+                        font_sz -= 0.5
+                        painter.setFont(make_font(font_sz, True))
+                        
+                    painter.drawText(QRectF(margin_x + 4, cur_y, name_col_w - 8, row_h), Qt.AlignCenter, display_name)
+                    
+                    placements = self._get_pseudo_placements(target_name, is_teacher)
+                    
+                    for d_idx in range(len(days)):
+                        dx = margin_x + name_col_w + d_idx * day_w
+                        for p_offset in range(cur_periods_count):
+                            p = start_p + p_offset
+                            px = dx + p_offset * period_w
+                            
+                            lesson = placements.get((d_idx, p))
+                            if lesson:
+                                sname = lesson.get("subject_name", "")
+                                if str(sname).strip().lower() in ["boş", "bos", "-", "—"]:
+                                    painter.setBrush(QBrush(QColor("#FFFFFF")))
+                                    painter.setPen(QPen(QColor("#0F172A"), 0.8))
+                                    painter.drawRect(QRectF(px, cur_y, period_w, row_h))
+                                    continue
+                                    
+                                if is_teacher:
+                                    raw_t = str(lesson.get("teacher_name", ""))
+                                    if "," in raw_t or "&" in raw_t:
+                                        parts = [c.split("(")[0].strip().replace(" ", "").upper() for c in raw_t.replace("&", ",").split(",") if c.strip()]
+                                        cell_text = parts[0] if parts else ""
+                                    else:
+                                        cell_text = raw_t.split("(")[0].strip().replace(" ", "").upper()
+                                else:
+                                    cell_text = smart_abbr(sname)
+                                    used_subjects[cell_text] = sname
+                                    
+                                painter.setBrush(QBrush(QColor("#FFFFFF")))
+                                painter.setPen(QPen(QColor("#0F172A"), 0.8))
+                                painter.drawRect(QRectF(px, cur_y, period_w, row_h))
                                 
-                            painter.setBrush(QBrush(QColor("#FFFFFF")))
-                            painter.setPen(QPen(QColor("#0F172A"), 2.0 if is_day_end else 0.8))
-                            painter.drawRect(QRectF(px, cur_y, period_w, row_h))
-                            
-                            font_sz = 10
-                            if len(cell_text) > 4: font_sz = 8.5
-                            if len(cell_text) > 6: font_sz = 7.5
-                            
-                            painter.setFont(make_font(font_sz, True))
+                                if cell_text:
+                                    font_sz = 9.5
+                                    painter.setFont(make_font(font_sz, True))
+                                    while painter.fontMetrics().horizontalAdvance(cell_text) > (period_w - 2) and font_sz > 5.0:
+                                        font_sz -= 0.5
+                                        painter.setFont(make_font(font_sz, True))
+                                    painter.setPen(QPen(QColor("#0F172A"), 1))
+                                    
+                                    painter.save()
+                                    painter.setClipRect(QRectF(px + 1, cur_y + 1, period_w - 2, row_h - 2))
+                                    painter.drawText(QRectF(px + 1, cur_y + 1, period_w - 2, row_h - 2), Qt.AlignCenter, cell_text)
+                                    painter.restore()
+                            else:
+                                painter.setBrush(QBrush(QColor("#FFFFFF")))
+                                painter.setPen(QPen(QColor("#0F172A"), 0.8))
+                                painter.drawRect(QRectF(px, cur_y, period_w, row_h))
+                    
+                    cur_y += row_h
+                    
+                # --- Structured Legend Section Immediately Under Table ---
+                if not is_teacher:
+                    if not used_subjects:
+                        for d_item in self.data_store.get("dersler", []):
+                            d_name = d_item.get("ad", "").strip()
+                            if d_name:
+                                used_subjects[smart_abbr(d_name)] = d_name
+
+                legend_items = sorted([(k, v) for k, v in used_subjects.items() if k and v], key=lambda x: x[0])
+                
+                leg_start_y = cur_y + 12
+                if legend_items:
+                    num_cols = 5
+                    col_w = (w - 20) / num_cols
+                    item_h = 16
+                    num_rows = (len(legend_items) + num_cols - 1) // num_cols
+                    box_h = 24 + num_rows * item_h + 8
+                    
+                    # Boundary safety
+                    if leg_start_y + box_h > VH - margin_y - 25:
+                        box_h = max(30, VH - margin_y - 25 - leg_start_y)
+                        
+                    painter.setPen(QPen(QColor("#CBD5E1"), 1.2))
+                    painter.setBrush(QBrush(QColor("#F8FAFC")))
+                    painter.drawRoundedRect(QRectF(margin_x, leg_start_y, w, box_h), 5, 5)
+                    
+                    # Legend Header
+                    painter.setFont(make_font(9.5, True))
+                    painter.setPen(QPen(QColor("#1E293B"), 1))
+                    painter.drawText(QRectF(margin_x + 10, leg_start_y + 4, w - 20, 16), Qt.AlignLeft | Qt.AlignVCenter, "📌 Ders Kısaltmaları ve Açıklamaları:")
+                    
+                    # Legend Items Grid
+                    for idx, (abbr, full_name) in enumerate(legend_items):
+                        c_idx = idx % num_cols
+                        r_idx = idx // num_cols
+                        
+                        item_x = margin_x + 12 + c_idx * col_w
+                        item_y = leg_start_y + 22 + r_idx * item_h
+                        
+                        if item_y + item_h <= leg_start_y + box_h:
+                            painter.setFont(make_font(8.5, True))
                             painter.setPen(QPen(QColor("#0F172A"), 1))
-                            painter.drawText(QRectF(px + 1, cur_y + 1, period_w - 2, row_h - 2), Qt.AlignCenter, cell_text)
-                        else:
-                            painter.setBrush(QBrush(QColor("#FFFFFF")))
-                            painter.setPen(QPen(QColor("#0F172A"), 2.0 if is_day_end else 0.6))
-                            painter.drawRect(QRectF(px, cur_y, period_w, row_h))
-                
-                cur_y += row_h
-                
-            # Footer
-            painter.setFont(make_font(8.5, False))
-            painter.setPen(QPen(QColor("#64748B"), 1))
-            painter.drawText(QRectF(margin_x, VH - margin_y + 10, w / 2, 18), Qt.AlignLeft, f"Ders Planı Oluşturuldu: {date_str}")
-            painter.drawText(QRectF(margin_x + w / 2, VH - margin_y + 10, w / 2, 18), Qt.AlignRight, "BGZ Ders Planlama")
+                            prefix = f"• {abbr}: "
+                            p_w = painter.fontMetrics().horizontalAdvance(prefix)
+                            painter.drawText(QRectF(item_x, item_y, p_w + 4, item_h), Qt.AlignLeft | Qt.AlignVCenter, prefix)
+                            
+                            painter.setFont(make_font(8.5, False))
+                            painter.setPen(QPen(QColor("#334155"), 1))
+                            val_rect = QRectF(item_x + p_w, item_y, col_w - p_w - 6, item_h)
+                            painter.drawText(val_rect, Qt.AlignLeft | Qt.AlignVCenter, full_name)
+                            
+                    leg_bottom = leg_start_y + box_h + 8
+                else:
+                    leg_bottom = leg_start_y + 8
+
+                # Footer
+                painter.setFont(make_font(8.5, False))
+                painter.setPen(QPen(QColor("#64748B"), 1))
+                painter.drawText(QRectF(margin_x, min(leg_bottom, VH - margin_y + 14), w / 2, 18), Qt.AlignLeft, f"Ders Planı Oluşturuldu: {date_str}")
+                painter.drawText(QRectF(margin_x + w / 2, min(leg_bottom, VH - margin_y + 14), w / 2, 18), Qt.AlignRight, "BGZ Ders Planlama")
 
 
     def _render_tablo_dersler(self, painter, printer, VW, VH):

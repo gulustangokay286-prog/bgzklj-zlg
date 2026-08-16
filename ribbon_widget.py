@@ -408,13 +408,31 @@ class RibbonPage(QWidget):
         return item
 
 
+def make_menu_icon(symbol: str, color1: str, color2: str) -> QIcon:
+    pix = QPixmap(28, 28)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    grad = QLinearGradient(0, 0, 0, 28)
+    grad.setColorAt(0, QColor(color1))
+    grad.setColorAt(1, QColor(color2))
+    p.setBrush(QBrush(grad))
+    p.setPen(QPen(QColor(0,0,0,30), 1))
+    p.drawRoundedRect(2, 2, 24, 24, 5, 5)
+    p.setPen(QPen(Qt.white, 2))
+    p.setFont(QFont("Segoe UI", 11, QFont.Bold))
+    p.drawText(2, 2, 24, 24, Qt.AlignCenter, symbol)
+    p.end()
+    return QIcon(pix)
+
+
 # ── Main Ribbon Widget ────────────────────────────────────────────────────────
 class RibbonWidget(QWidget):
     tab_changed = Signal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(110)
+        self.setFixedHeight(114)
         self._pages = []
         self._tab_buttons = []
         self._active = 0
@@ -425,16 +443,45 @@ class RibbonWidget(QWidget):
 
         # ── Tab bar ──
         self._tab_bar = QWidget(self)
-        self._tab_bar.setFixedHeight(28)
-        self._tab_bar.setStyleSheet(f"background: {TAB_INACTIVE_BG}; border-bottom: 1px solid {RIBBON_BORDER};")
+        self._tab_bar.setFixedHeight(30)
+        self._tab_bar.setStyleSheet(f"background: #F1F5F9; border-bottom: 1px solid {RIBBON_BORDER};")
         self._tab_layout = QHBoxLayout(self._tab_bar)
-        self._tab_layout.setContentsMargins(52, 0, 0, 0)
-        self._tab_layout.setSpacing(0)
+        self._tab_layout.setContentsMargins(6, 2, 8, 0)
+        self._tab_layout.setSpacing(2)
+
+        # File menu button (Integrated seamlessly on tab bar left)
+        self.file_btn = QToolButton(self._tab_bar)
+        self.file_btn.setIcon(make_menu_icon("M", "#0284C7", "#0369A1"))
+        self.file_btn.setIconSize(QSize(24, 24))
+        self.file_btn.setFixedSize(26, 26)
+        self.file_btn.setCursor(Qt.PointingHandCursor)
+        self.file_btn.setStyleSheet("""
+            QToolButton {
+                border: none;
+                border-radius: 4px;
+                background: transparent;
+            }
+            QToolButton:hover { background: #E2E8F0; }
+            QToolButton::menu-indicator { image: none; }
+        """)
+        from PySide6.QtWidgets import QMenu
+        self.file_menu = QMenu(self.file_btn)
+        self.file_menu.setStyleSheet("""
+            QMenu { background: #FFFFFF; border: 1px solid #CCC; font-family: 'Segoe UI'; font-size: 10pt; }
+            QMenu::item { padding: 8px 30px; }
+            QMenu::item:selected { background: #0284C7; color: white; }
+            QMenu::separator { height: 1px; background: #DDD; margin: 3px 10px; }
+        """)
+        self.file_btn.setMenu(self.file_menu)
+        self.file_btn.setPopupMode(QToolButton.InstantPopup)
+        self._tab_layout.addWidget(self.file_btn)
+        self._tab_layout.addSpacing(6)
+
         outer.addWidget(self._tab_bar)
 
         # ── Page area ──
         self._page_area = QWidget(self)
-        self._page_area.setFixedHeight(82)
+        self._page_area.setFixedHeight(84)
         self._page_area.setStyleSheet(f"background: {RIBBON_BG}; border-bottom: 1px solid {RIBBON_BORDER};")
         self._page_layout = QVBoxLayout(self._page_area)
         self._page_layout.setContentsMargins(0, 0, 0, 0)

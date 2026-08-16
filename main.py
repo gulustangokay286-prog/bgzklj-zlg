@@ -24,6 +24,11 @@ def global_exception_handler(exc_type, exc_value, exc_traceback):
 
 sys.excepthook = global_exception_handler
 
+def get_asset_path(rel_path):
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, rel_path)
+    return os.path.abspath(rel_path)
+
 def main():
     # Initialize the local SQLite database
     database.init_db()
@@ -59,7 +64,7 @@ def main():
     font = QFont("Segoe UI", 9)
     app.setFont(font)
 
-    logo_path = r"C:\Users\gokay\Desktop\aSc\ChatGPT Image 5 Tem 2026 01_04_30.png"
+    logo_path = get_asset_path("ChatGPT Image 5 Tem 2026 01_04_30.png")
 
     # Splash
     if os.path.exists(logo_path):

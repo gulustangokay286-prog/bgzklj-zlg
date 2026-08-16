@@ -220,6 +220,9 @@ class MasterDataDialog(QDialog):
         self._load_existing_data()
         self._select_tab(start_idx)
 
+    def _load_data(self):
+        self._load_existing_data()
+
     def _load_existing_data(self):
         # Reset row counts to avoid duplicate row stacking
         self.table_ders.setRowCount(0)
@@ -428,6 +431,16 @@ class MasterDataDialog(QDialog):
         btn_help.setFixedSize(90, 30)
         btn_help.setStyleSheet("background: #F0F0F0; border: 1px solid #CCC; border-radius: 4px;")
         
+        btn_undo = QPushButton("↺ Geri Al")
+        btn_undo.setFixedSize(90, 32)
+        btn_undo.setStyleSheet("background: #F1F5F9; border: 1px solid #CBD5E1; color: #334155; font-weight: bold; border-radius: 4px;")
+        btn_undo.clicked.connect(self._act_undo)
+
+        btn_redo = QPushButton("↻ Yinele")
+        btn_redo.setFixedSize(90, 32)
+        btn_redo.setStyleSheet("background: #F1F5F9; border: 1px solid #CBD5E1; color: #334155; font-weight: bold; border-radius: 4px;")
+        btn_redo.clicked.connect(self._act_redo)
+
         btn_save = QPushButton("Kaydet")
         btn_save.setFixedSize(110, 32)
         btn_save.setStyleSheet("background: #0078D7; color: white; font-weight: bold; border-radius: 4px; font-size: 13px;")
@@ -448,6 +461,8 @@ class MasterDataDialog(QDialog):
         btn_close.clicked.connect(self.reject)
         
         bottom_layout.addWidget(btn_help)
+        bottom_layout.addWidget(btn_undo)
+        bottom_layout.addWidget(btn_redo)
         bottom_layout.addWidget(btn_save)
         bottom_layout.addWidget(btn_reset_classes)
         bottom_layout.addWidget(btn_info)
@@ -455,6 +470,66 @@ class MasterDataDialog(QDialog):
         bottom_layout.addWidget(btn_close)
         
         main_layout.addLayout(bottom_layout)
+
+        # Keyboard shortcuts
+        from PySide6.QtGui import QKeySequence, QShortcut
+        QShortcut(QKeySequence("Ctrl+Z"), self, self._act_undo)
+        QShortcut(QKeySequence("Ctrl+Y"), self, self._act_redo)
+
+    def _push_undo_state(self):
+        import copy
+        if not hasattr(self, "_history_stack"): self._history_stack = []
+        if not hasattr(self, "_redo_stack"): self._redo_stack = []
+        if len(self._history_stack) > 50:
+            self._history_stack.pop(0)
+        self._history_stack.append(copy.deepcopy(self.data_store))
+        self._redo_stack.clear()
+
+    def _act_undo(self):
+        import copy
+        if hasattr(self, "_history_stack") and self._history_stack:
+            if not hasattr(self, "_redo_stack"): self._redo_stack = []
+            self._redo_stack.append(copy.deepcopy(self.data_store))
+            prev_state = self._history_stack.pop()
+            self.data_store.clear()
+            self.data_store.update(prev_state)
+            trigger_save_db(self, self.data_store)
+            if hasattr(self, "_load_data"):
+                self._load_data()
+            win = self.window() or self.parent()
+            if win and hasattr(win, "_refresh_tree"):
+                win._refresh_tree()
+            if win and hasattr(win, "_refresh_grid"):
+                win._refresh_grid()
+            if win and hasattr(win, "statusBar"):
+                win.statusBar().showMessage("↺ Yapılan son işlem başarıyla geri alındı.")
+        else:
+            win = self.window() or self.parent()
+            if win and hasattr(win, "statusBar"):
+                win.statusBar().showMessage("⚠️ Geri alınacak başka işlem yok.")
+
+    def _act_redo(self):
+        import copy
+        if hasattr(self, "_redo_stack") and self._redo_stack:
+            if not hasattr(self, "_history_stack"): self._history_stack = []
+            self._history_stack.append(copy.deepcopy(self.data_store))
+            next_state = self._redo_stack.pop()
+            self.data_store.clear()
+            self.data_store.update(next_state)
+            trigger_save_db(self, self.data_store)
+            if hasattr(self, "_load_data"):
+                self._load_data()
+            win = self.window() or self.parent()
+            if win and hasattr(win, "_refresh_tree"):
+                win._refresh_tree()
+            if win and hasattr(win, "_refresh_grid"):
+                win._refresh_grid()
+            if win and hasattr(win, "statusBar"):
+                win.statusBar().showMessage("↻ İşlem başarıyla tekrar uygulandı.")
+        else:
+            win = self.window() or self.parent()
+            if win and hasattr(win, "statusBar"):
+                win.statusBar().showMessage("⚠️ Yinelenecek başka işlem yok.")
 
     def _reset_all_class_assignments(self):
         r = QMessageBox.question(
@@ -912,8 +987,15 @@ class MasterDataDialog(QDialog):
         from dialogs.constraints_dialog import ConstraintsDialog
         idx = self.stack.currentIndex()
         target_type = "ogretmen" if idx == 3 else "sinif"
-        dlg = ConstraintsDialog(self.data_store, target_type=target_type, parent=self)
-        dlg.exec()
+        table = self.table_ogretmen if idx == 3 else self.table_sinif
+        r = table.currentRow()
+        preselected_name = ""
+        if r >= 0 and table.item(r, 0):
+            preselected_name = table.item(r, 0).text().strip()
+            
+        dlg = ConstraintsDialog(self.data_store, target_type=target_type, parent=self, preselected_name=preselected_name)
+        if dlg.exec():
+            trigger_save_db(self, self.data_store)
 
     def _act_delete_all(self):
         from PySide6.QtWidgets import QMessageBox

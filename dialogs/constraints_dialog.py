@@ -12,15 +12,20 @@ from PySide6.QtGui import QFont, QColor, QBrush
 DAYS = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"]
 
 class ConstraintsDialog(QDialog):
-    def __init__(self, data_store=None, target_type="ogretmen", parent=None):
+    def __init__(self, data_store=None, target_type="ogretmen", parent=None, preselected_name=""):
         super().__init__(parent)
         self.data_store = data_store if data_store is not None else {}
         self.target_type = target_type  # "ogretmen" veya "sinif"
+        self.preselected_name = preselected_name
         
         settings = self.data_store.get("settings", {})
-        self.periods = int(settings.get("periods", 8))
-        self.day_count = int(settings.get("day_count", 5))
-        self.days = DAYS[:self.day_count]
+        self.periods = int(settings.get("periods", self.data_store.get("ders_saati", 8)))
+        if self.periods <= 0: self.periods = 8
+        self.days = settings.get("days")
+        if not self.days:
+            self.day_count = int(settings.get("days_count", settings.get("day_count", self.data_store.get("gun_sayisi", 5))))
+            from timetable_grid import DAYS
+            self.days = DAYS[:self.day_count]
         
         self.setWindowTitle("Gelişmiş Planlama ve Zaman Kısıtlamaları")
         self.resize(840, 600)
@@ -190,6 +195,9 @@ class ConstraintsDialog(QDialog):
         for name in items:
             self.combo_target.addItem(name)
             
+        if self.preselected_name and self.preselected_name in items:
+            self.combo_target.setCurrentText(self.preselected_name)
+            
         self.combo_target.blockSignals(False)
         self._load_matrix_for_current()
 
@@ -203,12 +211,19 @@ class ConstraintsDialog(QDialog):
         name = self._get_current_name()
         if not name: return
         
-        entity_constraints = self.data_store["kisitlamalar"].get(name, {})
+        entity_constraints = self.data_store.get("kisitlamalar", {}).get(name, {})
+        key = "ogretmenler" if self.target_type == "ogretmen" else "siniflar"
+        entity = next((item for item in self.data_store.get(key, []) if item.get("ad") == name), {})
+        toff = entity.get("timeoff", [])
         
         for p in range(self.periods):
             for d in range(len(self.days)):
                 cell_key = f"{d},{p}"
-                is_available = entity_constraints.get(cell_key, True)
+                is_available = True
+                if cell_key in entity_constraints:
+                    is_available = entity_constraints[cell_key]
+                elif toff and d < len(toff) and p < len(toff[d]):
+                    is_available = (toff[d][p] > 0)
                 self._set_cell_state(p, d, is_available)
 
     def _set_cell_state(self, row, col, is_available):
@@ -268,4 +283,22 @@ class ConstraintsDialog(QDialog):
                 elif idx == 2:
                     sub_windows[s_name] = "afternoon"
         c["subject_windows"] = sub_windows
+        
+        # Synchronize timeoff matrix to all entities in data_store
+        kisitlamalar = self.data_store.get("kisitlamalar", {})
+        for key in ["ogretmenler", "siniflar"]:
+            for entity in self.data_store.get(key, []):
+                ent_name = entity.get("ad")
+                if ent_name in kisitlamalar:
+                    ent_k = kisitlamalar[ent_name]
+                    toff = []
+                    for d in range(len(self.days)):
+                        day_row = []
+                        for p in range(self.periods):
+                            cell_k = f"{d},{p}"
+                            val = 2 if ent_k.get(cell_k, True) else 0
+                            day_row.append(val)
+                        toff.append(day_row)
+                    entity["timeoff"] = toff
+                    
         self.accept()
