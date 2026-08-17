@@ -1153,12 +1153,12 @@ class TimetablePrintPreview(QDialog):
                                     continue
                                     
                                 if is_teacher:
-                                    raw_t = str(lesson.get("teacher_name", ""))
-                                    if "," in raw_t or "&" in raw_t:
-                                        parts = [c.split("(")[0].strip().replace(" ", "").upper() for c in raw_t.replace("&", ",").split(",") if c.strip()]
-                                        cell_text = parts[0] if parts else ""
+                                    raw_c = str(lesson.get("class_name", ""))
+                                    if "," in raw_c or "&" in raw_c or "+" in raw_c:
+                                        parts = [c.split("(")[0].strip().replace(" ", "").upper() for c in raw_c.replace("&", ",").replace("+", ",").split(",") if c.strip()]
+                                        cell_text = "+".join(parts) if parts else ""
                                     else:
-                                        cell_text = raw_t.split("(")[0].strip().replace(" ", "").upper()
+                                        cell_text = raw_c.split("(")[0].strip().replace(" ", "").upper()
                                 else:
                                     cell_text = smart_abbr(sname)
                                     used_subjects[cell_text] = sname
@@ -1349,8 +1349,19 @@ class TimetablePrintPreview(QDialog):
                     if placements:
                         # Draw first placement (typically there's only 1 or 2 classes doing this subject at this time)
                         cls, tchr = placements[0]
-                        painter.setFont(make_font(12, True))
-                        painter.drawText(QRectF(px, ry, period_w, row_h / 2), Qt.AlignCenter | Qt.AlignBottom, cls)
+                        if "," in cls or "&" in cls or "+" in cls:
+                            parts = [c.split("(")[0].strip().replace(" ", "").upper() for c in cls.replace("&", ",").replace("+", ",").split(",") if c.strip()]
+                            cls_str = "+".join(parts) if parts else ""
+                        else:
+                            cls_str = cls.split("(")[0].strip().replace(" ", "").upper()
+                        
+                        font_sz = 12
+                        painter.setFont(make_font(font_sz, True))
+                        while painter.fontMetrics().horizontalAdvance(cls_str) > (period_w - 4) and font_sz > 5.0:
+                            font_sz -= 0.5
+                            painter.setFont(make_font(font_sz, True))
+                            
+                        painter.drawText(QRectF(px, ry, period_w, row_h / 2), Qt.AlignCenter | Qt.AlignBottom, cls_str)
                         
                         painter.setFont(make_font(10, False))
                         if tchr:

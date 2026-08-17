@@ -731,41 +731,58 @@ class TimetableCellDelegate(QStyledItemDelegate):
             painter.setBrush(Qt.NoBrush)
             painter.drawRect(rect.adjusted(1, 1, -2, -2))
             
-        # 5. Draw text - Subject + Teacher (two lines)
-        if clean_str or subject_name:
-            lum = (0.299 * cell_color.red() + 0.587 * cell_color.green() + 0.114 * cell_color.blue())
-            text_color = QColor("#FFFFFF") if lum < 155 else QColor("#111827")
+        # 5. Draw text - Subject + Teacher/Class (two lines) - ALWAYS BLACK TEXT
+        if clean_str or (info and info.get("subject_name")):
+            text_color = QColor("#000000")  # Always black for readability
             painter.setPen(text_color)
             
             lock_prefix = "🔒 " if is_locked else ""
-            display_subj = lock_prefix + clean_str
             
-            if teacher_name:
-                # Two-line display: Subject (top, bold) + Teacher (bottom, smaller)
-                # Get short teacher name (first name initial + surname)
-                t_parts = teacher_name.strip().split()
-                if len(t_parts) >= 2:
-                    short_teacher = f"{t_parts[0][0]}.{t_parts[-1]}"
-                elif t_parts:
-                    short_teacher = t_parts[0]
+            s_name = info.get("subject_name", "") if info else ""
+            if not s_name:
+                s_name = clean_str
+                
+            display_mode = getattr(grid, "current_view_mode", "classes")
+            
+            if display_mode == "teachers":
+                top_text = lock_prefix + s_name
+                # Bottom text is the class name
+                c_name = info.get("class_name", "") if info else ""
+                if "," in c_name or "&" in c_name or "+" in c_name:
+                    bot_text = "+".join([c.strip().split("(")[0].strip() for c in c_name.replace("&", ",").replace("+", ",").split(",") if c.strip()])
                 else:
-                    short_teacher = ""
-                
-                top_rect = QRect(rect.left(), rect.top() + 1, rect.width(), rect.height() // 2)
-                bot_rect = QRect(rect.left(), rect.top() + rect.height() // 2 - 1, rect.width(), rect.height() // 2)
-                
-                painter.setFont(QFont("Segoe UI", 7, QFont.Bold))
-                painter.drawText(top_rect, Qt.AlignCenter | Qt.AlignBottom, display_subj)
-                
-                # Teacher name in slightly transparent color
-                t_color = QColor(text_color)
-                t_color.setAlpha(200)
-                painter.setPen(t_color)
-                painter.setFont(QFont("Segoe UI", 6))
-                painter.drawText(bot_rect, Qt.AlignCenter | Qt.AlignTop, short_teacher)
+                    bot_text = c_name.split("(")[0].strip()
             else:
-                painter.setFont(QFont("Segoe UI", 8, QFont.Bold))
-                painter.drawText(rect, Qt.AlignCenter, display_subj)
+                top_text = lock_prefix + s_name
+                t_name = info.get("teacher_name", "") if info else ""
+                t_parts = t_name.strip().split()
+                if len(t_parts) >= 2:
+                    bot_text = f"{t_parts[0][0]}.{t_parts[-1]}"
+                elif t_parts:
+                    bot_text = t_parts[0]
+                else:
+                    bot_text = ""
+                    
+            if not bot_text:
+                bot_text = clean_str if clean_str != s_name else ""
+            
+            top_rect = QRect(rect.left(), rect.top() + 1, rect.width(), rect.height() // 2)
+            bot_rect = QRect(rect.left(), rect.top() + rect.height() // 2 - 1, rect.width(), rect.height() // 2)
+            
+            # Dynamic font sizing to prevent overflow
+            top_font_size = 8 if len(top_text) < 12 else (7 if len(top_text) < 18 else 6)
+            bot_font_size = 7 if len(bot_text) < 12 else (6 if len(bot_text) < 18 else 5)
+            
+            if bot_text:
+                painter.setFont(QFont("Segoe UI", top_font_size, QFont.Bold))
+                painter.drawText(top_rect, Qt.AlignCenter | Qt.AlignBottom, top_text)
+                
+                painter.setPen(QColor("#1A1A1A"))
+                painter.setFont(QFont("Segoe UI", bot_font_size))
+                painter.drawText(bot_rect, Qt.AlignCenter | Qt.AlignTop, bot_text)
+            else:
+                painter.setFont(QFont("Segoe UI", 9, QFont.Bold))
+                painter.drawText(rect, Qt.AlignCenter, top_text)
             
         painter.restore()
 
@@ -1029,13 +1046,20 @@ class DropTableWidget(QTableWidget):
                     info["locked"] = True
                     win = self.window()
                     if hasattr(win, "data_store") and win.data_store:
+                        day_idx = info.get("day_idx", orig_c)
+                        period_idx = info.get("period", orig_r)
                         s_name = info.get("subject_name", "")
                         c_name = info.get("class_name", "")
                         for p in win.data_store.get("grid_placements", []):
-                            if (p.get("subject_name") or p.get("subject")) == s_name and (p.get("class_name") or p.get("class")) == c_name:
+                            p_day = int(p.get("day", p.get("col", -1)))
+                            p_per = int(p.get("period", p.get("row", -1)))
+                            p_subj = p.get("subject_name") or p.get("subject") or ""
+                            p_cls = p.get("class_name") or p.get("class") or ""
+                            if p_subj == s_name and p_cls == c_name and p_day == day_idx and p_per == period_idx:
                                 p["locked"] = True
+                                break
                     if hasattr(win, "save_db"): win.save_db(sync_from_grid=False)
-                    if hasattr(win, "statusBar"): win.statusBar().showMessage("🔒 Ders kilitlendi.")
+                    if hasattr(win, "statusBar"): win.statusBar().showMessage(f"🔒 {info.get('subject_name','')} dersi kilitlendi.")
                     self.viewport().update()
                     self.update()
             elif action == act_unlock:
@@ -1046,13 +1070,20 @@ class DropTableWidget(QTableWidget):
                         orig_item.setText(orig_item.text().replace("🔒", ""))
                     win = self.window()
                     if hasattr(win, "data_store") and win.data_store:
+                        day_idx = info.get("day_idx", orig_c)
+                        period_idx = info.get("period", orig_r)
                         s_name = info.get("subject_name", "")
                         c_name = info.get("class_name", "")
                         for p in win.data_store.get("grid_placements", []):
-                            if (p.get("subject_name") or p.get("subject")) == s_name and (p.get("class_name") or p.get("class")) == c_name:
+                            p_day = int(p.get("day", p.get("col", -1)))
+                            p_per = int(p.get("period", p.get("row", -1)))
+                            p_subj = p.get("subject_name") or p.get("subject") or ""
+                            p_cls = p.get("class_name") or p.get("class") or ""
+                            if p_subj == s_name and p_cls == c_name and p_day == day_idx and p_per == period_idx:
                                 p["locked"] = False
+                                break
                     if hasattr(win, "save_db"): win.save_db(sync_from_grid=False)
-                    if hasattr(win, "statusBar"): win.statusBar().showMessage("🔓 Dersin kilidi kaldırıldı.")
+                    if hasattr(win, "statusBar"): win.statusBar().showMessage(f"🔓 {info.get('subject_name','')} kilidini kaldırıldı.")
                     self.viewport().update()
                     self.update()
             elif action == act_unlock_all:

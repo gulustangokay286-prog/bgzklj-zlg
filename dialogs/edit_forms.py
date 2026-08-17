@@ -2070,8 +2070,12 @@ class SubjectTeacherAssignmentDialog(QDialog):
     def _filter_table(self, text):
         query = text.strip().lower()
         for r in range(self.table.rowCount()):
-            chk_widget = self.table.cellWidget(r, 0)
-            t_name = chk_widget.text().lower() if chk_widget else ""
+            w_chk = self.table.cellWidget(r, 0)
+            t_name = ""
+            if w_chk:
+                chk = w_chk.findChild(QCheckBox)
+                if chk:
+                    t_name = chk.text().lower()
             if query in t_name:
                 self.table.setRowHidden(r, False)
             else:

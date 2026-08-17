@@ -67,6 +67,20 @@ def get_subject_color(subject_name: str, data_store: dict = None) -> str:
     from dialogs.color_picker_dialog import resolve_subject_color
     return resolve_subject_color(subject_name, data_store)
 
+def get_teacher_color(teacher_name: str, data_store: dict = None) -> str:
+    """Returns a deterministic color for a teacher."""
+    if not teacher_name:
+        return "#2563EB"
+    if data_store and "ogretmenler" in data_store:
+        for t in data_store["ogretmenler"]:
+            if t.get("ad", "").strip().lower() == teacher_name.strip().lower():
+                c = t.get("color") or t.get("renk")
+                if c and QColor(c).isValid() and str(c).upper() not in ("#FFFFFF", "#000000"):
+                    return c
+    # Fallback to deterministic curated color
+    hash_val = sum(ord(ch) * (i + 1) for i, ch in enumerate(teacher_name.strip()))
+    return PASTEL_DISTINCT_COLORS[hash_val % len(PASTEL_DISTINCT_COLORS)]
+
 def make_clean_vector_icon(icon_type: str, is_expanded: bool = True) -> QIcon:
     pix = QPixmap(48, 28)
     pix.fill(Qt.transparent)
@@ -879,7 +893,7 @@ class MainWindow(QMainWindow):
         try:
             if mode == "teachers":
                 teachers = self.data_store.get("ogretmenler", [])
-                teacher_names = [t.get("ad", "").strip() for t in teachers if t.get("ad")]
+                teacher_names = sorted([t.get("ad", "").strip() for t in teachers if t.get("ad")])
                 if not teacher_names:
                     teacher_names = ["Öğretmen 1"]
                 self._grid.set_mode_all_teachers(teacher_names, periods, days_list)
@@ -913,15 +927,20 @@ class MainWindow(QMainWindow):
                                 
                     if matching_row >= 0:
                         actual_col = col * periods + period
-                        color = get_subject_color(s_name, self.data_store)
+                        color = get_teacher_color(t_name, self.data_store)
                         item["color"] = color
                         for ext in range(dur):
                             target_c = actual_col + ext
                             if target_c < len(days_list) * periods:
                                 self._grid.set_cell(matching_row, target_c, s_name, color, t_name, 1, c_name, display_mode="teachers", locked=is_locked)
             else:
+                import re
+                def cls_sort_key(c):
+                    m = re.match(r"(\d+)(.*)", c.strip())
+                    return (int(m.group(1)), m.group(2)) if m else (999, c)
+                
                 classes = self.data_store.get("siniflar", [])
-                class_names = [c.get("ad", "").strip() for c in classes if c.get("ad")]
+                class_names = sorted([c.get("ad", "").strip() for c in classes if c.get("ad")], key=cls_sort_key)
                 if not class_names:
                     class_names = ["9A", "9B", "10A", "10B", "11A", "11B", "11C", "12A", "12B"]
                     
