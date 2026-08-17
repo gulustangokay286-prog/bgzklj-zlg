@@ -133,8 +133,125 @@ def update_record(table_name, record_id, data_dict):
     conn.commit()
     conn.close()
 
+def sync_data_store_to_sqlite(data_store: dict):
+    """Syncs the entire JSON data_store into local SQLite tables."""
+    if not isinstance(data_store, dict):
+        return
+    try:
+        init_db()
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Clear existing data
+        cursor.execute("DELETE FROM teachers")
+        cursor.execute("DELETE FROM subjects")
+        cursor.execute("DELETE FROM classes")
+        cursor.execute("DELETE FROM rooms")
+        cursor.execute("DELETE FROM lessons")
+        cursor.execute("DELETE FROM grid_placements")
+        cursor.execute("DELETE FROM settings")
+        
+        # Insert teachers
+        for t in data_store.get("ogretmenler", []):
+            if isinstance(t, dict):
+                cursor.execute(
+                    "INSERT INTO teachers (name, short_name, gender, color, max_hours_day, max_hours_week, constraints_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        t.get("ad", t.get("name", "")),
+                        t.get("kisa", t.get("short_name", "")),
+                        t.get("cinsiyet", t.get("gender", "")),
+                        t.get("renk", t.get("color", "")),
+                        int(t.get("max_gunluk", t.get("max_hours_day", 8)) or 8),
+                        int(t.get("max_haftalik", t.get("max_hours_week", 40)) or 40),
+                        json.dumps(t.get("kisitlamalar", t.get("timeoff", [])), ensure_ascii=False)
+                    )
+                )
+                
+        # Insert subjects
+        for s in data_store.get("dersler", []):
+            if isinstance(s, dict):
+                cursor.execute(
+                    "INSERT INTO subjects (name, short_name, color, difficulty) VALUES (?, ?, ?, ?)",
+                    (
+                        s.get("ad", s.get("name", "")),
+                        s.get("kisa", s.get("short_name", "")),
+                        s.get("renk", s.get("color", "")),
+                        int(s.get("zorluk", s.get("difficulty", 1)) or 1)
+                    )
+                )
+                
+        # Insert classes
+        for c in data_store.get("siniflar", []):
+            if isinstance(c, dict):
+                cursor.execute(
+                    "INSERT INTO classes (name, capacity, grade_level) VALUES (?, ?, ?)",
+                    (
+                        c.get("ad", c.get("name", "")),
+                        int(c.get("kapasite", c.get("capacity", 30)) or 30),
+                        str(c.get("seviye", c.get("grade_level", "")))
+                    )
+                )
+                
+        # Insert rooms
+        for r in data_store.get("derslikler", []):
+            if isinstance(r, dict):
+                cursor.execute(
+                    "INSERT INTO rooms (name, short_name, capacity, building) VALUES (?, ?, ?, ?)",
+                    (
+                        r.get("ad", r.get("name", "")),
+                        r.get("kisa", r.get("short_name", "")),
+                        int(r.get("kapasite", r.get("capacity", 30)) or 30),
+                        str(r.get("bina", r.get("building", "")))
+                    )
+                )
+                
+        # Insert lessons (atamalar)
+        for a in data_store.get("atamalar", []):
+            if isinstance(a, dict):
+                t_list = [a.get("teacher")] if a.get("teacher") else a.get("teachers", [])
+                c_list = [a.get("class")] if a.get("class") else a.get("classes", [])
+                cursor.execute(
+                    "INSERT INTO lessons (subject_id, duration, locked, teacher_ids_json, class_ids_json) VALUES (?, ?, ?, ?, ?)",
+                    (
+                        1,
+                        int(a.get("duration", 1) or 1),
+                        1 if a.get("locked") else 0,
+                        json.dumps(t_list, ensure_ascii=False),
+                        json.dumps(c_list, ensure_ascii=False)
+                    )
+                )
+                
+        # Insert grid placements
+        for p in data_store.get("grid_placements", []):
+            if isinstance(p, dict):
+                cursor.execute(
+                    "INSERT INTO grid_placements (lesson_id, day_index, period_index, room_id) VALUES (?, ?, ?, ?)",
+                    (
+                        int(p.get("lesson_id", 1) or 1),
+                        int(p.get("day", p.get("col", 0)) or 0),
+                        int(p.get("period", p.get("row", 0)) or 0),
+                        1
+                    )
+                )
+                
+        # Insert settings
+        settings = data_store.get("settings", {})
+        if isinstance(settings, dict):
+            for k, v in settings.items():
+                cursor.execute(
+                    "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                    (str(k), json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else str(v))
+                )
+                
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[SQLITE_SYNC_ERR] {e}")
+
+
 def trigger_save_db(widget, data_store=None):
-    """Walks up the Qt parent hierarchy to find MainWindow and call save_db(). Fallbacks to direct disk write if needed."""
+    """Walks up the Qt parent hierarchy or top-level windows to find MainWindow/AppShell and call save_db(). Syncs to SQLite and ROZ."""
+    saved = False
     curr = widget
     while curr is not None:
         if hasattr(curr, "save_db") and callable(getattr(curr, "save_db")):
@@ -142,7 +259,8 @@ def trigger_save_db(widget, data_store=None):
                 curr.save_db()
                 if hasattr(curr, "_refresh_tree") and callable(getattr(curr, "_refresh_tree")):
                     curr._refresh_tree()
-                return True
+                saved = True
+                break
             except Exception as e:
                 print(f"[SAVE_DB_ERR] {e}")
         if hasattr(curr, "parent") and callable(getattr(curr, "parent")):
@@ -150,14 +268,26 @@ def trigger_save_db(widget, data_store=None):
         else:
             break
             
-    if data_store is not None:
+    if not saved:
         try:
-            base_dir = get_base_dir()
-            save_path = os.path.join(base_dir, "program.roz")
-            with open(save_path, "w", encoding="utf-8") as f:
-                json.dump(data_store, f, ensure_ascii=False, indent=4)
-            print(f"[TRIGGER_SAVE_DB_FALLBACK] Saved to {save_path}")
-            return True
-        except Exception as e:
-            print(f"[TRIGGER_SAVE_DB_FALLBACK_ERR] {e}")
-    return False
+            from PySide6.QtWidgets import QApplication
+            app = QApplication.instance()
+            if app:
+                for top in app.topLevelWidgets():
+                    if hasattr(top, "save_db") and callable(getattr(top, "save_db")):
+                        top.save_db()
+                        if hasattr(top, "_refresh_tree") and callable(getattr(top, "_refresh_tree")):
+                            top._refresh_tree()
+                        saved = True
+                        break
+        except Exception:
+            pass
+
+    # Sync to SQLite
+    ds = data_store
+    if ds is None and curr is not None and hasattr(curr, "data_store"):
+        ds = getattr(curr, "data_store")
+    if ds:
+        sync_data_store_to_sqlite(ds)
+        
+    return saved

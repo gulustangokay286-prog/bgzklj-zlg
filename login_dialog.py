@@ -372,7 +372,7 @@ class LoginDialog(QDialog):
         payload = {"email": email, "password": password, "returnSecureToken": True}
         
         try:
-            resp = requests.post(url, json=payload, timeout=4)
+            resp = requests.post(url, json=payload, timeout=6)
             if resp.status_code == 200:
                 data = resp.json()
                 self.auth_data = {
@@ -392,25 +392,29 @@ class LoginDialog(QDialog):
                 self.accept()
                 return
             else:
-                self.auth_data = {
-                    "email": email,
-                    "uid": "local_authenticated_user",
-                    "is_offline": True
-                }
+                err_msg = "Hatalı E-Posta veya Şifre!"
                 try:
-                    from cloud_sync import pull_all_from_rtdb
-                    pull_all_from_rtdb(self.auth_data)
+                    err_json = resp.json()
+                    raw_err = err_json.get("error", {}).get("message", "")
+                    if "EMAIL_NOT_FOUND" in raw_err or "INVALID_PASSWORD" in raw_err or "INVALID_LOGIN_CREDENTIALS" in raw_err:
+                        err_msg = "E-posta veya şifre hatalı."
+                    elif "USER_DISABLED" in raw_err:
+                        err_msg = "Bu kullanıcı hesabı devre dışı bırakılmış."
+                    elif "TOO_MANY_ATTEMPTS_TRY_LATER" in raw_err:
+                        err_msg = "Çok fazla başarısız deneme yapıldı. Lütfen biraz bekleyin."
                 except Exception:
                     pass
-                self.accept()
+                self.lbl_error.setText(err_msg)
+                self.lbl_error.show()
+                self.btn_login.setText("Giriş Yap")
+                self.btn_login.setEnabled(True)
                 return
-        except Exception:
-            self.auth_data = {
-                "email": email,
-                "uid": "local_authenticated_user",
-                "is_offline": True
-            }
-            self.accept()
+        except Exception as ex:
+            self.lbl_error.setText("Sunucuya bağlanılamadı. İnternet bağlantınızı kontrol edin veya 'Çevrimdışı Devam Et' seçeneğini kullanın.")
+            self.lbl_error.show()
+            self.btn_login.setText("Giriş Yap")
+            self.btn_login.setEnabled(True)
+            return
 
     def _open_license_web(self):
         import webbrowser

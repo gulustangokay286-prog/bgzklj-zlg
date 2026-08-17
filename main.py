@@ -124,17 +124,13 @@ class AppShell(QMainWindow):
     
     def _go_home(self):
         """Switch back to the dashboard."""
-        # Save current work before going home ONLY IF MODIFIED
-        if self._editor and self._active_slug and self._active_version:
-            if hasattr(self._editor, "is_dirty") and self._editor.is_dirty():
-                try:
-                    data = self._editor.data_store
-                    version_store.save_version(
-                        self._active_slug, data, source="manual",
-                        note="Düzenleme sonrası otomatik kayıt"
-                    )
-                except Exception as e:
-                    print(f"[GO_HOME] Auto-save error: {e}")
+        # Save current work before going home
+        if self._editor:
+            try:
+                if hasattr(self._editor, "save_db"):
+                    self._editor.save_db()
+            except Exception as e:
+                print(f"[GO_HOME] Save error: {e}")
         
         # Switch to dashboard FIRST
         self._dashboard._refresh_institutions()
@@ -149,6 +145,15 @@ class AppShell(QMainWindow):
                 editor.cleanup()
             self._stack.removeWidget(editor)
             editor.deleteLater()
+
+    def closeEvent(self, event):
+        """Save active editor before closing the application."""
+        if self._editor and hasattr(self._editor, "save_db"):
+            try:
+                self._editor.save_db()
+            except Exception as e:
+                print(f"[CLOSE] Auto-save error: {e}")
+        super().closeEvent(event)
 
     @property
     def data_store(self):

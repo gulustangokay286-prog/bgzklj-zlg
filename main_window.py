@@ -1181,11 +1181,41 @@ class MainWindow(QMainWindow):
             fname = os.path.basename(self.current_roz_path)
             self.statusBar().showMessage(f"💾 Tüm değişiklikler '{fname}' dosyasına anlık kaydedildi.")
             
-            # Bulut senkronizasyonu
-            if hasattr(self, "cloud_worker") and self.cloud_worker and hasattr(self, "auth_data") and self.auth_data:
-                uid = self.auth_data.get("uid")
+            # 1. SQLite Veritabanı Senkronizasyonu
+            try:
+                from database import sync_data_store_to_sqlite
+                sync_data_store_to_sqlite(self.data_store)
+            except Exception as ex_db:
+                print(f"[SAVE_DB] SQLite sync error: {ex_db}")
+
+            # 2. Firebase RTDB Senkronizasyonu
+            import threading
+            from cloud_sync import push_version_to_rtdb, push_institution_to_rtdb
+            
+            slug = getattr(self, "institution_slug", None)
+            ver_fn = getattr(self, "version_filename", None)
+            auth = getattr(self, "auth_data", None)
+            
+            if slug and ver_fn:
+                threading.Thread(
+                    target=push_version_to_rtdb,
+                    args=(slug, ver_fn, dict(self.data_store), auth),
+                    daemon=True
+                ).start()
+                if hasattr(self, "cloud_worker") and self.cloud_worker:
+                    self.cloud_worker.add_to_queue("push_version", slug, ver_fn, self.data_store)
+            elif slug:
+                threading.Thread(
+                    target=push_institution_to_rtdb,
+                    args=(slug, auth),
+                    daemon=True
+                ).start()
+                if hasattr(self, "cloud_worker") and self.cloud_worker:
+                    self.cloud_worker.add_to_queue("push_inst", slug)
+            elif auth and hasattr(self, "cloud_worker") and self.cloud_worker:
+                uid = auth.get("uid")
                 if uid:
-                    self.cloud_worker.add_to_queue("institutions", uid, self.data_store)
+                    self.cloud_worker.add_to_queue("push_inst", uid)
         except Exception as e:
             self.statusBar().showMessage(f"Kaydetme hatası: {e}")
 

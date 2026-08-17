@@ -741,10 +741,12 @@ class MasterDataDialog(QDialog):
                 from dialogs.edit_forms import ClassComprehensiveAssignmentDialog
                 d = ClassComprehensiveAssignmentDialog(class_name=c_name, data_store=self.data_store, parent=self)
                 if d.exec():
+                    self._load_existing_data()
                     trigger_save_db(self, self.data_store)
                     p = self.parent()
                     if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
-            return
+                    if p and hasattr(p, "_load_unplaced_lessons"): p._load_unplaced_lessons()
+                return
 
         from dialogs.edit_forms import LessonAssignmentDialog
         if not teacher_name and hasattr(self, "table_ogretmen"):
@@ -755,25 +757,11 @@ class MasterDataDialog(QDialog):
                 
         d = LessonAssignmentDialog(data_store=self.data_store, parent=self, selected_teacher=teacher_name)
         if d.exec():
-            data = d.get_data()
-            if "atamalar" not in self.data_store:
-                self.data_store["atamalar"] = []
-            
-            # Remove old assignments for this teacher (they are being re-saved from the dialog)
-            current_teacher = d.cb_ogretmen.currentText()
-            self.data_store["atamalar"] = [
-                a for a in self.data_store["atamalar"] 
-                if a.get("teacher") != current_teacher
-            ]
-                
-            if isinstance(data, list):
-                self.data_store["atamalar"].extend(data)
-            else:
-                self.data_store["atamalar"].append(data)
-                
             trigger_save_db(self, self.data_store)
+            self._load_existing_data()
             p = self.parent()
             if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
+            if p and hasattr(p, "_load_unplaced_lessons"): p._load_unplaced_lessons()
 
     def _act_new(self):
         idx = self.stack.currentIndex()
@@ -782,41 +770,28 @@ class MasterDataDialog(QDialog):
             if d.exec():
                 data = d.get_data()
                 self.data_store["dersler"].append(data)
-                self._add_row(self.table_ders, [data.get("ad",""), data.get("kisa",""), "0", "Mevcut", "İdeal", "8"])
         elif idx == 1:  # Sınıflar
             d = SinifEditDialog(self)
             if d.exec():
                 data = d.get_data()
                 self.data_store["siniflar"].append(data)
-                
-                settings = self.data_store.get("settings", {})
-                total_default = len(settings.get("days", ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"])) * int(settings.get("periods", 8))
-                
-                timeoff = data.get("timeoff", [])
-                if not timeoff:
-                    zaman_str = f"{total_default} Ders"
-                else:
-                    open_cells = sum(1 for r in timeoff for c in r if c > 0)
-                    zaman_str = f"{open_cells} Ders"
-                    
-                self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), "0", zaman_str, data.get("ders_bitimi","15:30"), data.get("sinif_ogretmeni",""), data.get("kapasite","30")])
         elif idx == 2:  # Derslikler
             d = DerslikEditDialog(self)
             if d.exec():
                 data = d.get_data()
                 self.data_store["derslikler"].append(data)
-                self._add_row(self.table_derslik, [data.get("ad",""), data.get("kisa",""), "0", "Mevcut", data.get("kapasite",""), "Merkez"])
         elif idx == 3:  # Öğretmenler
             d = OgretmenEditDialog(self)
             if d.exec():
                 data = d.get_data()
                 self.data_store["ogretmenler"].append(data)
-                self._add_row(self.table_ogretmen, [data.get("ad",""), data.get("kisa",""), "0", "Mevcut", data.get("sinif_ogretmeni",""), data.get("brans",""), ""])
                 self._act_assign(teacher_name=data.get("ad"))
 
+        self._load_existing_data()
         trigger_save_db(self, self.data_store)
         p = self.parent()
         if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
+        if p and hasattr(p, "_load_unplaced_lessons"): p._load_unplaced_lessons()
 
     def _act_update(self):
         idx = self.stack.currentIndex()
@@ -849,6 +824,9 @@ class MasterDataDialog(QDialog):
                 new_data = d.get_data()
                 old_name = old_data.get("ad")
                 new_name = new_data.get("ad")
+                old_color = old_data.get("renk")
+                new_color = new_data.get("renk")
+
                 if old_name and new_name and old_name != new_name:
                     key_map = {0: "subject", 1: "class", 3: "teacher"}
                     if idx in key_map:
@@ -856,6 +834,8 @@ class MasterDataDialog(QDialog):
                         for a in self.data_store.get("atamalar", []):
                             if a.get(attr) == old_name:
                                 a[attr] = new_name
+                            if idx == 1 and isinstance(a.get("combined_classes"), list):
+                                a["combined_classes"] = [new_name if c == old_name else c for c in a["combined_classes"]]
                         for p in self.data_store.get("grid_placements", []):
                             if idx == 0:
                                 if p.get("subject_name") == old_name or p.get("subject") == old_name:
@@ -869,51 +849,36 @@ class MasterDataDialog(QDialog):
                                 if p.get("teacher_name") == old_name or p.get("teacher") == old_name:
                                     p["teacher_name"] = new_name
                                     p["teacher"] = new_name
+                        for p in self.data_store.get("auto_schedule_results", []):
+                            if idx == 0:
+                                if p.get("subject_name") == old_name or p.get("subject") == old_name:
+                                    p["subject_name"] = new_name
+                                    p["subject"] = new_name
+                            elif idx == 1:
+                                if p.get("class_name") == old_name or p.get("class") == old_name:
+                                    p["class_name"] = new_name
+                                    p["class"] = new_name
+                            elif idx == 3:
+                                if p.get("teacher_name") == old_name or p.get("teacher") == old_name:
+                                    p["teacher_name"] = new_name
+                                    p["teacher"] = new_name
+
+                if idx == 0 and new_color and new_color != old_color:
+                    target_subj = new_name or old_name
+                    for a in self.data_store.get("atamalar", []):
+                        if a.get("subject") == target_subj:
+                            a["color"] = new_color
+                    for p in self.data_store.get("grid_placements", []):
+                        if p.get("subject_name") == target_subj or p.get("subject") == target_subj:
+                            p["color"] = new_color
 
                 data_list[matched_idx] = new_data
-                
-                # Refresh entire table to be safe
-                table.setRowCount(0)
-                
-                totals = {"dersler": {}, "siniflar": {}, "ogretmenler": {}}
-                for a in self.data_store.get("atamalar", []):
-                    dur = a.get("duration", 1)
-                    t = a.get("teacher", "")
-                    s = a.get("subject", "")
-                    c = a.get("class", "")
-                    if t: totals["ogretmenler"][t] = totals["ogretmenler"].get(t, 0) + dur
-                    if s: totals["dersler"][s] = totals["dersler"].get(s, 0) + dur
-                    if c: totals["siniflar"][c] = totals["siniflar"].get(c, 0) + dur
-
-                if idx == 0:
-                    for data in self.data_store.get("dersler", []):
-                        toplam = str(totals["dersler"].get(data.get("ad", ""), 0))
-                        self._add_row(self.table_ders, [data.get("ad",""), data.get("kisa",""), toplam, "Mevcut", "İdeal", "8"])
-                elif idx == 1:
-                    settings = self.data_store.get("settings", {})
-                    total_default = len(settings.get("days", ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"])) * int(settings.get("periods", 8))
-                    for data in self.data_store.get("siniflar", []):
-                        toplam = str(totals["siniflar"].get(data.get("ad", ""), 0))
-                        
-                        timeoff = data.get("timeoff", [])
-                        if not timeoff:
-                            zaman_str = f"{total_default} Ders"
-                        else:
-                            open_cells = sum(1 for r in timeoff for c in r if c > 0)
-                            zaman_str = f"{open_cells} Ders"
-                            
-                        self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), toplam, zaman_str, data.get("ders_bitimi","15:30"), data.get("sinif_ogretmeni",""), data.get("kapasite","30")])
-                elif idx == 2:
-                    for data in self.data_store.get("derslikler", []):
-                        self._add_row(self.table_derslik, [data.get("ad",""), data.get("kisa",""), "0", "Mevcut", data.get("kapasite",""), "Merkez"])
-                elif idx == 3:
-                    for data in self.data_store.get("ogretmenler", []):
-                        toplam = str(totals["ogretmenler"].get(data.get("ad", ""), 0))
-                        self._add_row(self.table_ogretmen, [data.get("ad",""), data.get("kisa",""), toplam, "Mevcut", data.get("sinif_ogretmeni",""), ""])
+                self._load_existing_data()
                 
                 trigger_save_db(self, self.data_store)
                 p = self.parent()
                 if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
+                if p and hasattr(p, "_load_unplaced_lessons"): p._load_unplaced_lessons()
                 if p and hasattr(p, "_restore_grid_placements"): p._restore_grid_placements()
 
     def _act_delete(self):
@@ -928,20 +893,25 @@ class MasterDataDialog(QDialog):
             item = table.item(row, 0)
             if not item: return
             del_name = item.text().strip()
-            r = QMessageBox.question(self, "Silme Onayı", f"{del_name} silmek istediğinize emin misiniz?", QMessageBox.Yes | QMessageBox.No)
+            r = QMessageBox.question(self, "Silme Onayı", f"{del_name} kaydını silmek istediğinize emin misiniz?", QMessageBox.Yes | QMessageBox.No)
             if r == QMessageBox.Yes:
-                table.removeRow(row)
                 data_list = self.data_store[stores[idx]]
                 self.data_store[stores[idx]] = [d for d in data_list if d.get("ad") != del_name and d.get("kisa") != del_name]
                 if idx == 3: # Teacher
                     self.data_store["atamalar"] = [a for a in self.data_store.get("atamalar", []) if a.get("teacher") != del_name]
+                    self.data_store["grid_placements"] = [p for p in self.data_store.get("grid_placements", []) if p.get("teacher_name") != del_name and p.get("teacher") != del_name]
                 elif idx == 0: # Subject
                     self.data_store["atamalar"] = [a for a in self.data_store.get("atamalar", []) if a.get("subject") != del_name]
+                    self.data_store["grid_placements"] = [p for p in self.data_store.get("grid_placements", []) if p.get("subject_name") != del_name and p.get("subject") != del_name]
                 elif idx == 1: # Class
                     self.data_store["atamalar"] = [a for a in self.data_store.get("atamalar", []) if a.get("class") != del_name]
+                    self.data_store["grid_placements"] = [p for p in self.data_store.get("grid_placements", []) if p.get("class_name") != del_name and p.get("class") != del_name]
+                
+                self._load_existing_data()
+                trigger_save_db(self, self.data_store)
                 p = self.parent() or getattr(self, "main_window", None)
-                if p and hasattr(p, "save_db"): p.save_db()
                 if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
+                if p and hasattr(p, "_load_unplaced_lessons"): p._load_unplaced_lessons()
 
     def _act_timeoff(self):
         idx = self.stack.currentIndex()
