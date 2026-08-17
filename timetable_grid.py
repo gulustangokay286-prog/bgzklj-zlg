@@ -253,15 +253,15 @@ def get_subject_abbr(subject_name: str, max_len: int = 6) -> str:
 from PySide6.QtCore import QRect
 
 class AsCTimetableHeader(QHeaderView):
-    """aSc Timetables style two-level header: Days on top spanning periods, Period numbers below."""
+    """aSc Timetables style two-level header: Days on top spanning periods, Period numbers below (Scaled down 25%)."""
     def __init__(self, periods: int = 8, days_list: list = None, parent=None):
         super().__init__(Qt.Horizontal, parent)
         self.periods = max(1, int(periods))
         self.days_list = days_list or DAYS[:5]
-        self.setFixedHeight(50)
+        self.setFixedHeight(38)
         self.setSectionResizeMode(QHeaderView.Fixed)
-        self.setDefaultSectionSize(64)
-        self.setMinimumSectionSize(20)
+        self.setDefaultSectionSize(48)
+        self.setMinimumSectionSize(16)
         self.sectionResized.connect(lambda *args: self.viewport().update())
         self.geometriesChanged.connect(lambda *args: self.viewport().update())
 
@@ -305,7 +305,7 @@ class AsCTimetableHeader(QHeaderView):
                 painter.drawRect(rect)
                 
                 painter.setPen(QPen(QColor("#0F172A")))
-                painter.setFont(QFont("Segoe UI", 9, QFont.Bold))
+                painter.setFont(QFont("Segoe UI", 8, QFont.Bold))
                 painter.drawText(rect, Qt.AlignCenter, day_name)
                 
                 # Thick day separator line on right edge
@@ -314,7 +314,7 @@ class AsCTimetableHeader(QHeaderView):
             painter.end()
             return
             
-        # ── MULTI-SHEET VIEW (Days on top row y=0..25, Period numbers on bottom row y=25..50)
+        # ── MULTI-SHEET VIEW (Days on top row y=0..19, Period numbers on bottom row y=19..38)
         # 1. Day headers (Top row)
         for d_idx, day_name in enumerate(days_list):
             start_col = d_idx * periods
@@ -329,21 +329,21 @@ class AsCTimetableHeader(QHeaderView):
             if x_end <= 0 or x_start >= vw:
                 continue
                 
-            day_rect = QRect(x_start, 0, day_w, 25)
+            day_rect = QRect(x_start, 0, day_w, 19)
             painter.setPen(QPen(QColor("#94A3B8"), 1))
             painter.setBrush(QBrush(QColor("#E2E8F0")))
             painter.drawRect(day_rect)
             
             painter.setPen(QPen(QColor("#0F172A")))
-            font_day = QFont("Segoe UI", 8.5, QFont.Bold)
+            font_day = QFont("Segoe UI", 7.5, QFont.Bold)
             painter.setFont(font_day)
             
             # Keep day label visible and centered in the viewport portion of that day
             vis_left = max(x_start, 0)
             vis_right = min(x_end, vw)
             if vis_right > vis_left:
-                vis_rect = QRect(vis_left, 0, vis_right - vis_left, 25)
-                if vis_rect.width() >= 25:
+                vis_rect = QRect(vis_left, 0, vis_right - vis_left, 19)
+                if vis_rect.width() >= 20:
                     painter.drawText(vis_rect, Qt.AlignCenter, day_name)
                 elif not day_rect.isEmpty():
                     painter.drawText(day_rect, Qt.AlignCenter, day_name)
@@ -356,13 +356,13 @@ class AsCTimetableHeader(QHeaderView):
                 continue
             period_num = (col_idx % periods) + 1
             
-            period_rect = QRect(x, 25, w, 25)
+            period_rect = QRect(x, 19, w, 19)
             painter.setPen(QPen(QColor("#CBD5E1"), 1))
             painter.setBrush(QBrush(QColor("#F8FAFC")))
             painter.drawRect(period_rect)
             
             painter.setPen(QPen(QColor("#334155")))
-            font_p = QFont("Segoe UI", 8, QFont.Bold)
+            font_p = QFont("Segoe UI", 7, QFont.Bold)
             painter.setFont(font_p)
             painter.drawText(period_rect, Qt.AlignCenter, str(period_num))
             
@@ -417,8 +417,8 @@ class DraggableLessonCard(QLabel):
             
         self.setText(display_text)
         self.setAlignment(Qt.AlignCenter)
-        card_width = max(64, 52 + (duration - 1)*18)
-        self.setFixedSize(card_width, 32)
+        card_width = max(52, 42 + (duration - 1)*14)
+        self.setFixedSize(card_width, 26)
         
         c = QColor(color)
         if c.isValid():
@@ -441,11 +441,11 @@ class DraggableLessonCard(QLabel):
                 background-color: {bg_hex};
                 color: {text_color};
                 font-family: system-ui, -apple-system, sans-serif;
-                font-size: 10px;
+                font-size: 8.5px;
                 font-weight: bold;
                 border: 1px solid rgba(0, 0, 0, 0.25);
-                border-radius: 4px;
-                padding: 1px 4px;
+                border-radius: 3px;
+                padding: 0px 2px;
             }}
             QLabel:hover {{
                 border: 2px solid #0078D7;
@@ -524,10 +524,10 @@ class DraggableLessonCard(QLabel):
                         background-color: {new_hex};
                         color: {text_color};
                         font-family: system-ui, -apple-system, sans-serif;
-                        font-size: 10px;
+                        font-size: 8.5px;
                         border: 1px solid rgba(0, 0, 0, 0.22);
-                        border-radius: 4px;
-                        padding: 1px 4px;
+                        border-radius: 3px;
+                        padding: 0px 2px;
                     }}
                     QLabel:hover {{
                         border: 2px solid #0078D7;
@@ -588,36 +588,61 @@ class UnplacedLessonsDock(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
-        self.setFixedHeight(54)
+        self.setFixedHeight(44)
         
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(0)
         
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("""
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setAcceptDrops(True)
+        self.scroll.viewport().setAcceptDrops(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll.setStyleSheet("""
             QScrollArea { border: none; background: transparent; }
-            QScrollBar:horizontal { height: 5px; background: transparent; margin: 0; }
+            QScrollBar:horizontal { height: 4px; background: transparent; margin: 0; }
             QScrollBar::handle:horizontal { background: #CBD5E1; border-radius: 2px; }
             QScrollBar::handle:horizontal:hover { background: #94A3B8; }
         """)
         
         self.container = QWidget()
+        self.container.setAcceptDrops(True)
         self.container.setStyleSheet("background: transparent;")
         self.container_layout = QHBoxLayout(self.container)
-        self.container_layout.setContentsMargins(8, 0, 8, 0)
-        self.container_layout.setSpacing(8)
+        self.container_layout.setContentsMargins(6, 0, 6, 0)
+        self.container_layout.setSpacing(6)
         self.container_layout.setAlignment(Qt.AlignLeft)
         
-        scroll.setWidget(self.container)
-        self.layout.addWidget(scroll)
+        self.scroll.setWidget(self.container)
+        self.layout.addWidget(self.scroll)
+        
+        self.scroll.installEventFilter(self)
+        self.scroll.viewport().installEventFilter(self)
+        self.container.installEventFilter(self)
+
+    def eventFilter(self, watched, event):
+        from PySide6.QtCore import QEvent
+        if event.type() in (QEvent.DragEnter, QEvent.DragMove):
+            if hasattr(event, "mimeData") and event.mimeData() and event.mimeData().hasFormat("application/x-lesson"):
+                event.acceptProposedAction()
+                return True
+        elif event.type() == QEvent.Drop:
+            if hasattr(event, "mimeData") and event.mimeData() and event.mimeData().hasFormat("application/x-lesson"):
+                self.dropEvent(event)
+                return True
+        return super().eventFilter(watched, event)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasFormat("application/x-lesson"):
-            event.accept()
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasFormat("application/x-lesson"):
+            event.acceptProposedAction()
         else:
             event.ignore()
 
@@ -630,11 +655,20 @@ class UnplacedLessonsDock(QWidget):
                     orig_c = data.get("origin_col", -1)
                     win = self.window()
                     grid = getattr(win, "_grid", None)
+                    if not grid:
+                        p = self.parent()
+                        while p:
+                            if hasattr(p, "table") and hasattr(p.table, "_delete_lesson_at"):
+                                grid = p
+                                break
+                            p = p.parent()
                     if grid and orig_r >= 0 and orig_c >= 0:
                         grid.table._delete_lesson_at(orig_r, orig_c)
+                        event.acceptProposedAction()
+                        return
             except Exception as e:
                 print("Dock drop error:", e)
-            event.accept()
+            event.acceptProposedAction()
 
     def load_unplaced(self, lessons_data, has_assignments=True, display_mode="classes"):
         self.container.setUpdatesEnabled(False)
@@ -652,9 +686,11 @@ class UnplacedLessonsDock(QWidget):
                 self.container_layout.setAlignment(Qt.AlignCenter)
                 msg_widget = QWidget()
                 msg_widget.setStyleSheet("background: transparent;")
+                msg_widget.setAcceptDrops(True)
+                msg_widget.installEventFilter(self)
                 msg_layout = QHBoxLayout(msg_widget)
                 msg_layout.setContentsMargins(0, 0, 0, 0)
-                msg_layout.setSpacing(8)
+                msg_layout.setSpacing(6)
                 msg_layout.setAlignment(Qt.AlignCenter)
                 
                 icon_lbl = QLabel()
@@ -663,14 +699,14 @@ class UnplacedLessonsDock(QWidget):
                 text_lbl.setStyleSheet("background: transparent; border: none;")
                 
                 if not has_assignments:
-                    icon_lbl.setPixmap(make_grid_action_icon("alert_triangle", 20).pixmap(20, 20))
+                    icon_lbl.setPixmap(make_grid_action_icon("alert_triangle", 18).pixmap(18, 18))
                     text_lbl.setText("Bu sınıfa / öğretmene henüz hiç ders atanmadı. Lütfen 'Ders Atama' bölümünden tanımlayın.")
-                    text_lbl.setFont(QFont("Segoe UI", 9, QFont.Bold))
+                    text_lbl.setFont(QFont("Segoe UI", 8.5, QFont.Bold))
                     text_lbl.setStyleSheet("color: #B45309; background: transparent; border: none;")
                 else:
-                    icon_lbl.setPixmap(make_grid_action_icon("check_circle", 20).pixmap(20, 20))
+                    icon_lbl.setPixmap(make_grid_action_icon("check_circle", 18).pixmap(18, 18))
                     text_lbl.setText("Bu sınıfın / öğretmenin tüm dersleri başarıyla programa yerleştirildi.")
-                    text_lbl.setFont(QFont("Segoe UI", 9, QFont.Bold))
+                    text_lbl.setFont(QFont("Segoe UI", 8.5, QFont.Bold))
                     text_lbl.setStyleSheet("color: #15803D; background: transparent; border: none;")
                     
                 msg_layout.addWidget(icon_lbl)
@@ -685,6 +721,8 @@ class UnplacedLessonsDock(QWidget):
                 teacher = l.get("teacher", "")
                 cls_name = l.get("class_name", "")
                 card = DraggableLessonCard(l["id"], l["subject_name"], l["color"], duration=dur, teacher=teacher, class_name=cls_name, display_mode=display_mode)
+                card.setAcceptDrops(True)
+                card.installEventFilter(self)
                 self.container_layout.addWidget(card)
         finally:
             self.container.setUpdatesEnabled(True)
@@ -883,21 +921,21 @@ class TimetableCellDelegate(QStyledItemDelegate):
                 # In class view, display ONLY the SUBJECT (e.g. MATE 9, FİZ 9, MAT 10)
                 main_text = get_subject_abbr(s_name) if s_name else clean_str
                 
-            # Dynamic font sizing for crystal clear readability
-            font_size = 10 if len(main_text) <= 6 else (9 if len(main_text) <= 10 else 8)
+            # Dynamic font sizing for crystal clear readability (Scaled down 25%)
+            font_size = 8 if len(main_text) <= 6 else (7.5 if len(main_text) <= 10 else 6.5)
             painter.setFont(QFont("Segoe UI", font_size, QFont.Bold))
             painter.drawText(rect, Qt.AlignCenter, main_text)
                 
             # Lock icon: draw on top of everything
             if is_locked:
-                lock_bg = QRectF(rect.left() + 1, rect.top() + 1, 14, 14)
+                lock_bg = QRectF(rect.left() + 1, rect.top() + 1, 11, 11)
                 painter.setBrush(QColor(255, 255, 255, 200))
                 painter.setPen(Qt.NoPen)
-                painter.drawRoundedRect(lock_bg, 3, 3)
+                painter.drawRoundedRect(lock_bg, 2, 2)
                 
-                painter.setFont(QFont("Segoe UI", 7))
+                painter.setFont(QFont("Segoe UI", 6))
                 painter.setPen(QColor("#000000"))
-                painter.drawText(QRectF(rect.left() + 1, rect.top() + 1, 14, 14), Qt.AlignCenter, "🔒")
+                painter.drawText(QRectF(rect.left() + 1, rect.top() + 1, 11, 11), Qt.AlignCenter, "🔒")
             
         painter.restore()
 
@@ -1629,12 +1667,12 @@ class TimetableGrid(QWidget):
 
         vh = self.table.verticalHeader()
         vh.setSectionResizeMode(QHeaderView.Fixed)
-        vh.setDefaultSectionSize(38)
+        vh.setDefaultSectionSize(28)
         vh.setDefaultAlignment(Qt.AlignCenter)
         vh.setStyleSheet("""
             QHeaderView::section {
                 background: #D4D4D4; font-weight: bold; border: 1px solid #888888;
-                padding: 2px 6px; font-size: 10px; color: #111111;
+                padding: 1px 4px; font-size: 8.5px; color: #111111;
             }
         """)
 
@@ -1642,7 +1680,7 @@ class TimetableGrid(QWidget):
             QTableWidget {
                 background: #B4B4B8;
                 gridline-color: #7E7E84;
-                font-size: 10px;
+                font-size: 8.5px;
                 selection-background-color: #FFFF00;
                 selection-color: #000;
             }
@@ -1666,19 +1704,19 @@ class TimetableGrid(QWidget):
         
         # Left: Lesson Info Panel (aSc-style)
         self.info_panel = QFrame(self)
-        self.info_panel.setFixedHeight(75)
-        self.info_panel.setMinimumWidth(280)
-        self.info_panel.setMaximumWidth(400)
+        self.info_panel.setFixedHeight(56)
+        self.info_panel.setMinimumWidth(220)
+        self.info_panel.setMaximumWidth(320)
         self.info_panel.setStyleSheet("QFrame { background: #B8B8C0; border: 1px solid #888; }")
         info_inner = QVBoxLayout(self.info_panel)
-        info_inner.setContentsMargins(8, 4, 8, 4)
-        info_inner.setSpacing(2)
+        info_inner.setContentsMargins(6, 3, 6, 3)
+        info_inner.setSpacing(1)
         
         # Color swatch + subject name
         info_top = QHBoxLayout()
-        info_top.setSpacing(6)
+        info_top.setSpacing(5)
         self.info_color_box = QLabel()
-        self.info_color_box.setFixedSize(22, 22)
+        self.info_color_box.setFixedSize(18, 18)
         self.info_color_box.setCursor(Qt.PointingHandCursor)
         self.info_color_box.setToolTip("Rengi Değiştirmek İçin Tıklayın")
         self.info_color_box.setStyleSheet("background: transparent; border: 1px solid #666; border-radius: 3px;")
@@ -1686,19 +1724,19 @@ class TimetableGrid(QWidget):
         info_top.addWidget(self.info_color_box)
         
         self.info_subject_lbl = QLabel("")
-        self.info_subject_lbl.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        self.info_subject_lbl.setFont(QFont("Segoe UI", 10, QFont.Bold))
         self.info_subject_lbl.setStyleSheet("color: #111; background: transparent; border: none;")
         info_top.addWidget(self.info_subject_lbl)
         info_top.addStretch(1)
         info_inner.addLayout(info_top)
         
         self.info_class_lbl = QLabel("")
-        self.info_class_lbl.setFont(QFont("Segoe UI", 10))
+        self.info_class_lbl.setFont(QFont("Segoe UI", 8.5))
         self.info_class_lbl.setStyleSheet("color: #D32F2F; background: transparent; border: none; font-weight: bold;")
         info_inner.addWidget(self.info_class_lbl)
         
         self.info_teacher_lbl = QLabel("")
-        self.info_teacher_lbl.setFont(QFont("Segoe UI", 10))
+        self.info_teacher_lbl.setFont(QFont("Segoe UI", 8.5))
         self.info_teacher_lbl.setStyleSheet("color: #333; background: transparent; border: none;")
         info_inner.addWidget(self.info_teacher_lbl)
         
@@ -1931,7 +1969,7 @@ class TimetableGrid(QWidget):
         self.clear_grid()
         
     def set_mode_all_classes(self, class_list: list, periods: int, days_list: list):
-        """Whole School View (aSc Çarşaf - Sınıflar): Rows=Classes, Cols=Days*Periods"""
+        """Whole School View (aSc Çarşaf - Sınıflar): Rows=Classes, Cols=Days*Periods (Scaled down 25%)"""
         self._periods = periods
         self.class_list = class_list
         self.current_view_mode = "classes"
@@ -1944,16 +1982,16 @@ class TimetableGrid(QWidget):
         if hasattr(self.table, "asc_header"):
             self.table.asc_header.set_config(periods, days_list)
         
-        # Set compact column widths and row heights (-5% adjusted for optimal UX)
+        # Set compact column widths (48px) and row heights (28px) for 25% scale reduction
         for i in range(total_cols):
-            self.table.setColumnWidth(i, 64)
+            self.table.setColumnWidth(i, 48)
         for r in range(len(class_list)):
-            self.table.setRowHeight(r, 38)
+            self.table.setRowHeight(r, 28)
             
         self.clear_grid()
 
     def set_mode_all_teachers(self, teacher_list: list, periods: int, days_list: list):
-        """Whole School View (aSc Çarşaf - Öğretmenler): Rows=Teachers, Cols=Days*Periods"""
+        """Whole School View (aSc Çarşaf - Öğretmenler): Rows=Teachers, Cols=Days*Periods (Scaled down 25%)"""
         self._periods = periods
         self.teacher_list = teacher_list
         self.current_view_mode = "teachers"
@@ -1966,11 +2004,11 @@ class TimetableGrid(QWidget):
         if hasattr(self.table, "asc_header"):
             self.table.asc_header.set_config(periods, days_list)
         
-        # Set compact column widths and row heights (-5% adjusted for optimal UX)
+        # Set compact column widths (48px) and row heights (28px) for 25% scale reduction
         for i in range(total_cols):
-            self.table.setColumnWidth(i, 64)
+            self.table.setColumnWidth(i, 48)
         for r in range(len(teacher_list)):
-            self.table.setRowHeight(r, 38)
+            self.table.setRowHeight(r, 28)
             
         self.clear_grid()
 
