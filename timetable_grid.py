@@ -834,15 +834,17 @@ class TimetableCellDelegate(QStyledItemDelegate):
             display_mode = getattr(grid, "current_view_mode", "classes")
             
             if display_mode == "teachers":
-                top_text = s_abbr
-                # Bottom text is the class name
-                c_name = info.get("class_name", "") if info else ""
+                # In teacher view, TOP text is prominently the CLASS NAME (e.g. 9A, 10B, 11A)
+                c_name = (info.get("class_name") or "") if info else ""
+                if not c_name and clean_str and clean_str != s_name:
+                    c_name = clean_str
                 if "," in c_name or "&" in c_name or "+" in c_name:
-                    bot_text = "+".join([c.strip().split("(")[0].strip() for c in c_name.replace("&", ",").replace("+", ",").split(",") if c.strip()])
+                    top_text = "+".join([c.strip().split("(")[0].strip() for c in c_name.replace("&", ",").replace("+", ",").split(",") if c.strip()])
                 else:
-                    bot_text = c_name.split("(")[0].strip()
+                    top_text = c_name.strip().split("(")[0].strip() if c_name else clean_str
+                bot_text = s_abbr  # Subject abbreviation below class (e.g. MAT, FİZ, BDN)
             else:
-                top_text = s_abbr
+                top_text = s_abbr  # Subject abbreviation on top (e.g. MAT, FİZ)
                 t_name = info.get("teacher_name", "") if info else ""
                 t_parts = t_name.strip().split()
                 if len(t_parts) >= 2:
@@ -853,7 +855,7 @@ class TimetableCellDelegate(QStyledItemDelegate):
                     bot_text = ""
                     
             if not bot_text:
-                bot_text = clean_str if clean_str != s_name else ""
+                bot_text = clean_str if clean_str != top_text else ""
             
             top_rect = QRect(rect.left() + 2, rect.top() + 1, rect.width() - 4, rect.height() // 2)
             bot_rect = QRect(rect.left() + 2, rect.top() + rect.height() // 2 - 1, rect.width() - 4, rect.height() // 2)
@@ -1644,6 +1646,7 @@ class TimetableGrid(QWidget):
     def _unlock_all_lessons(self):
         for (r, c), p_info in self._placed_lessons.items():
             p_info["locked"] = False
+            p_info["is_manual"] = False
             c_item = self.table.item(r, c)
             if c_item:
                 c_item.setText(c_item.text().replace("🔒", ""))
@@ -1651,12 +1654,22 @@ class TimetableGrid(QWidget):
         if hasattr(win, "data_store"):
             for p in win.data_store.get("grid_placements", []):
                 p["locked"] = False
+                p["is_manual"] = False
+            for p in win.data_store.get("auto_schedule_results", []):
+                p["locked"] = False
+                p["is_manual"] = False
+            for k, v in win.data_store.get("yerlesim", {}).items():
+                if isinstance(v, dict):
+                    v["locked"] = False
+                    v["is_manual"] = False
             if hasattr(win, "save_db"):
                 win.save_db(sync_from_grid=False)
             if hasattr(win, "_refresh_grid"):
                 win._refresh_grid()
-        if hasattr(win, "statusBar"):
-            win.statusBar().showMessage("Tüm derslerin kilitleri açıldı.")
+        self.table.viewport().update()
+        self.table.update()
+        if hasattr(win, "statusBar") and win.statusBar():
+            win.statusBar().showMessage("🔓 Tüm derslerin kilitleri başarıyla açıldı.", 3000)
 
     def _on_cell_clicked(self, row, col):
         """Show lesson info in the bottom-left panel when a cell is clicked (aSc-style)."""

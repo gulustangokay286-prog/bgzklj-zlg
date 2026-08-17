@@ -935,7 +935,7 @@ class MainWindow(QMainWindow):
                     dur = int(item.get("duration", 1))
                     col = int(item.get("day", item.get("col", 0)))
                     period = int(item.get("period", item.get("row", 0)))
-                    is_locked = bool(item.get("locked", False) or item.get("is_manual", False))
+                    is_locked = bool(item.get("locked", False))
                     is_man = bool(item.get("is_manual", False))
                     
                     # Find matching teacher row with cache
@@ -984,7 +984,7 @@ class MainWindow(QMainWindow):
                     dur = int(item.get("duration", 1))
                     col = int(item.get("day", item.get("col", 0)))
                     period = int(item.get("period", item.get("row", 0)))
-                    is_locked = bool(item.get("locked", False) or item.get("is_manual", False))
+                    is_locked = bool(item.get("locked", False))
                     is_man = bool(item.get("is_manual", False))
                     
                     # Support combined classes if comma or ampersand separated
