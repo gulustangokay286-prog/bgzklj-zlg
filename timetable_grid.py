@@ -258,9 +258,9 @@ class AsCTimetableHeader(QHeaderView):
         super().__init__(Qt.Horizontal, parent)
         self.periods = max(1, int(periods))
         self.days_list = days_list or DAYS[:5]
-        self.setFixedHeight(36)
+        self.setFixedHeight(46)
         self.setSectionResizeMode(QHeaderView.Fixed)
-        self.setDefaultSectionSize(44)
+        self.setDefaultSectionSize(58)
         self.setMinimumSectionSize(20)
         self.sectionResized.connect(lambda *args: self.viewport().update())
         self.geometriesChanged.connect(lambda *args: self.viewport().update())
@@ -310,7 +310,7 @@ class AsCTimetableHeader(QHeaderView):
             painter.end()
             return
             
-        # ── MULTI-SHEET VIEW (Days on top row y=0..18, Period numbers on bottom row y=18..36)
+        # ── MULTI-SHEET VIEW (Days on top row y=0..23, Period numbers on bottom row y=23..46)
         # 1. Day headers (Top row)
         for d_idx, day_name in enumerate(days_list):
             start_col = d_idx * periods
@@ -325,7 +325,7 @@ class AsCTimetableHeader(QHeaderView):
             if x_end <= 0 or x_start >= vw:
                 continue
                 
-            day_rect = QRect(x_start, 0, day_w, 18)
+            day_rect = QRect(x_start, 0, day_w, 23)
             painter.setPen(QPen(QColor("#94A3B8"), 1))
             painter.setBrush(QBrush(QColor("#E2E8F0")))
             painter.drawRect(day_rect)
@@ -338,7 +338,7 @@ class AsCTimetableHeader(QHeaderView):
             vis_left = max(x_start, 0)
             vis_right = min(x_end, vw)
             if vis_right > vis_left:
-                vis_rect = QRect(vis_left, 0, vis_right - vis_left, 18)
+                vis_rect = QRect(vis_left, 0, vis_right - vis_left, 23)
                 if vis_rect.width() >= 25:
                     painter.drawText(vis_rect, Qt.AlignCenter, day_name)
                 elif not day_rect.isEmpty():
@@ -352,7 +352,7 @@ class AsCTimetableHeader(QHeaderView):
                 continue
             period_num = (col_idx % periods) + 1
             
-            period_rect = QRect(x, 18, w, 18)
+            period_rect = QRect(x, 23, w, 23)
             painter.setPen(QPen(QColor("#CBD5E1"), 1))
             painter.setBrush(QBrush(QColor("#F8FAFC")))
             painter.drawRect(period_rect)
@@ -1502,7 +1502,7 @@ class TimetableGrid(QWidget):
 
         vh = self.table.verticalHeader()
         vh.setSectionResizeMode(QHeaderView.Fixed)
-        vh.setDefaultSectionSize(36)
+        vh.setDefaultSectionSize(34)
         vh.setDefaultAlignment(Qt.AlignCenter)
         vh.setStyleSheet("""
             QHeaderView::section {
@@ -1808,11 +1808,11 @@ class TimetableGrid(QWidget):
         if hasattr(self.table, "asc_header"):
             self.table.asc_header.set_config(periods, days_list)
         
-        # Set compact column widths and row heights
+        # Set compact column widths and row heights (30% zoomed for clear visibility)
         for i in range(total_cols):
-            self.table.setColumnWidth(i, 44)
+            self.table.setColumnWidth(i, 58)
         for r in range(len(class_list)):
-            self.table.setRowHeight(r, 26)
+            self.table.setRowHeight(r, 34)
             
         self.clear_grid()
 
@@ -1830,11 +1830,11 @@ class TimetableGrid(QWidget):
         if hasattr(self.table, "asc_header"):
             self.table.asc_header.set_config(periods, days_list)
         
-        # Set compact column widths and row heights
+        # Set compact column widths and row heights (30% zoomed for clear visibility)
         for i in range(total_cols):
-            self.table.setColumnWidth(i, 44)
+            self.table.setColumnWidth(i, 58)
         for r in range(len(teacher_list)):
-            self.table.setRowHeight(r, 26)
+            self.table.setRowHeight(r, 34)
             
         self.clear_grid()
 
