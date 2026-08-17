@@ -767,7 +767,7 @@ class LessonAssignmentDialog(QDialog):
         cb_tip.addItems(["1", "2", "3", "4", "5", "6", "1+1", "2+1", "2+2", "3+1", "3+2", "4+2", "3+3", "2+2+1", "2+2+2", "3+2+1"])
         if distribution:
             idx_t = cb_tip.findText(distribution)
-            if idx_t >= 0: cb_subject.setCurrentIndex(idx_t)
+            if idx_t >= 0: cb_tip.setCurrentIndex(idx_t)
             else: cb_tip.setCurrentText(distribution)
         top_h.addWidget(cb_tip, 1)
         
