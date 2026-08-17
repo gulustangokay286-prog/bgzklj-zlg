@@ -209,11 +209,20 @@ class TitleBar(QWidget):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, logo_path=None, auth_data=None):
+    def __init__(self, logo_path=None, auth_data=None, override_db_path=None,
+                 institution_slug=None, institution_name=None, version_filename=None):
         super().__init__()
         self.auth_data = auth_data
         self.logo_path = logo_path
-        self.setWindowTitle("BGZ Ders Programı Yöneticisi")
+        self.institution_slug = institution_slug
+        self.institution_name = institution_name or ""
+        self.version_filename = version_filename or ""
+        self.go_home_requested = None  # Callback set by AppShell
+        
+        title = "BGZ Ders Programı Yöneticisi"
+        if institution_name:
+            title = f"{institution_name} — {title}"
+        self.setWindowTitle(title)
         self.resize(1280, 780)
         self.setMinimumSize(900, 600)
 
@@ -225,9 +234,13 @@ class MainWindow(QMainWindow):
         user_dir = os.path.join(os.path.expanduser("~"), ".chenki_akademi")
         os.makedirs(user_dir, exist_ok=True)
         self.config_path = os.path.join(user_dir, "app_config.json")
-        self.db_path = self._get_last_db_path()
-        if not self.db_path or not os.path.exists(self.db_path):
-            self.db_path = os.path.join(user_dir, "bgz_database.json")
+        
+        if override_db_path and os.path.exists(override_db_path):
+            self.db_path = override_db_path
+        else:
+            self.db_path = self._get_last_db_path()
+            if not self.db_path or not os.path.exists(self.db_path):
+                self.db_path = os.path.join(user_dir, "bgz_database.json")
         
         # Seed from workspace data if user database does not exist yet
         base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -283,7 +296,31 @@ class MainWindow(QMainWindow):
         btn_download.clicked.connect(open_download_page)
         self.statusBar().addPermanentWidget(btn_download)
 
-        ver_lbl = QLabel(f"Chenki Akademi 2026 - 2027 Pro")
+        # Home button (back to dashboard)
+        btn_home = QPushButton("🏠  Ana Sayfa")
+        btn_home.setCursor(Qt.PointingHandCursor)
+        btn_home.setStyleSheet("""
+            QPushButton {
+                padding: 3px 14px; font-weight: bold; background: #7C3AED; color: white;
+                border-radius: 4px; border: none; font-size: 11px;
+            }
+            QPushButton:hover { background: #6D28D9; }
+        """)
+        btn_home.clicked.connect(self._go_home)
+        self.statusBar().addPermanentWidget(btn_home)
+
+        # Version / Institution info
+        inst_text = ""
+        if self.institution_name:
+            inst_text = f"🏫 {self.institution_name}"
+            if self.version_filename:
+                import re
+                m = re.match(r"v(\d+)_", self.version_filename)
+                if m:
+                    inst_text += f"  •  v{int(m.group(1))}"
+        else:
+            inst_text = "Chenki Akademi 2026 - 2027 Pro"
+        ver_lbl = QLabel(inst_text)
         ver_lbl.setStyleSheet("color: #64748B; font-weight: bold; margin-left: 10px; margin-right: 10px;")
         self.statusBar().addPermanentWidget(ver_lbl)
         
@@ -371,9 +408,23 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.information(self, "Güncelleme Kontrolü", f"Tebrikler! Sisteminiz en güncel haldedir.\n(Bulut Notu: {e})")
 
+    def cleanup(self):
+        """Clean up background workers and resources before deletion."""
+        if hasattr(self, 'cloud_worker') and self.cloud_worker:
+            try:
+                self.cloud_worker.stop()
+            except Exception as e:
+                print("Error stopping cloud_worker:", e)
+
     def closeEvent(self, event):
-        if hasattr(self, 'cloud_worker'):
-            self.cloud_worker.stop()
+        self.cleanup()
+        try:
+            self.save_db(sync_from_grid=False)
+            if hasattr(self, "institution_slug") and hasattr(self, "version_filename") and self.institution_slug and self.version_filename:
+                import version_store
+                version_store.update_version_in_place(self.institution_slug, self.version_filename, self.data_store)
+        except Exception as e:
+            print("Auto-save on exit error:", e)
         super().closeEvent(event)
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -495,6 +546,7 @@ class MainWindow(QMainWindow):
 
         # ── 1. Ana Menü ──────────────────────────────────────────────────────
         p1 = r.add_tab("Ana Menü")
+        p1.add_button("Ana Sayfa",      "anasayfa", self._go_home)
         p1.add_button("Yeni",           "yeni",     self._act_new)
         p1.add_button("Aç",             "ac",       self._act_open)
         p1.add_button("Kaydet",         "kaydet",   self._act_save)
@@ -759,14 +811,6 @@ class MainWindow(QMainWindow):
         
         return splitter
 
-    def closeEvent(self, event):
-        # Auto-save changes seamlessly
-        try:
-            self.save_db(sync_from_grid=True)
-        except Exception as e:
-            print("Auto-save on exit error:", e)
-        event.accept()
-
     def _get_last_db_path(self):
         import json
         default_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "program.roz")
@@ -828,6 +872,27 @@ class MainWindow(QMainWindow):
         self._refresh_grid()
         self._refresh_tree()
         self._is_loading = False
+        self._initial_hash = self._calc_data_hash()
+        self._is_dirty = False
+
+    def _calc_data_hash(self):
+        import hashlib, json
+        clean_data = {k: v for k, v in self.data_store.items() if k != "_version_meta"}
+        try:
+            raw = json.dumps(clean_data, sort_keys=True, ensure_ascii=False)
+            return hashlib.md5(raw.encode("utf-8")).hexdigest()
+        except Exception:
+            return ""
+
+    def mark_dirty(self):
+        self._is_dirty = True
+
+    def is_dirty(self) -> bool:
+        if getattr(self, "_is_dirty", False):
+            return True
+        current_hash = self._calc_data_hash()
+        initial_hash = getattr(self, "_initial_hash", "")
+        return bool(initial_hash and current_hash and current_hash != initial_hash)
 
     def _sync_grid_to_store(self, view_type=None, entity_name=None):
         if getattr(self, "_is_loading", False):
@@ -879,7 +944,15 @@ class MainWindow(QMainWindow):
                     p["teacher_name"] = teacher_names[r]
                     p["teacher"] = teacher_names[r]
                 p["color"] = get_subject_color(s_name, self.data_store)
-                new_global.append(p)
+                c_name = (p.get("class_name") or p.get("class") or "").strip()
+                if "," in c_name or "&" in c_name or "+" in c_name:
+                    for sub_c in [sc.strip().split("(")[0].strip() for sc in c_name.replace("&", ",").replace("+", ",").split(",") if sc.strip()]:
+                        p_sub = dict(p)
+                        p_sub["class_name"] = sub_c
+                        p_sub["class"] = sub_c
+                        new_global.append(p_sub)
+                else:
+                    new_global.append(p)
             else:
                 if r < len(class_names):
                     cls_name = class_names[r]
@@ -893,7 +966,7 @@ class MainWindow(QMainWindow):
     def _restore_grid_placements(self, view_type=None, entity_name=None):
         self._refresh_grid()
 
-    def _refresh_grid(self):
+    def _refresh_grid(self, skip_unplaced=False):
         if not hasattr(self, "_grid"):
             return
             
@@ -925,6 +998,7 @@ class MainWindow(QMainWindow):
                 self._grid.set_mode_all_teachers(teacher_names, periods, days_list)
                 
                 teacher_match_cache = {}
+                t_matrix = [[{} for _ in range(periods)] for _ in range(len(days_list) * len(teacher_names))]
                 
                 for item in grid_data:
                     s_name = (item.get("subject_name") or item.get("subject") or "").strip()
@@ -938,7 +1012,6 @@ class MainWindow(QMainWindow):
                     is_locked = bool(item.get("locked", False))
                     is_man = bool(item.get("is_manual", False))
                     
-                    # Find matching teacher row with cache
                     if t_name in teacher_match_cache:
                         matching_row = teacher_match_cache[t_name]
                     else:
@@ -952,14 +1025,44 @@ class MainWindow(QMainWindow):
                                     break
                         teacher_match_cache[t_name] = matching_row
                                 
-                    if matching_row >= 0:
-                        actual_col = col * periods + period
+                    if 0 <= matching_row < len(teacher_names) and 0 <= col < len(days_list):
                         color = get_teacher_color(t_name, self.data_store)
-                        item["color"] = color
                         for ext in range(dur):
-                            target_c = actual_col + ext
-                            if target_c < len(days_list) * periods:
-                                self._grid.set_cell(matching_row, target_c, s_name, color, t_name, 1, c_name, display_mode="teachers", locked=is_locked, is_manual=is_man)
+                            p_idx = period + ext
+                            if p_idx < periods:
+                                matrix_idx = matching_row * len(days_list) + col
+                                t_matrix[matrix_idx][p_idx] = {
+                                    "subject_name": s_name, "class_name": c_name, "teacher_name": t_name,
+                                    "color": color, "locked": is_locked, "is_manual": is_man
+                                }
+                                
+                for r_idx, t_name in enumerate(teacher_names):
+                    for d_idx in range(len(days_list)):
+                        matrix_idx = r_idx * len(days_list) + d_idx
+                        p = 0
+                        while p < periods:
+                            cell_info = t_matrix[matrix_idx][p]
+                            if not cell_info or not cell_info.get("subject_name"):
+                                p += 1
+                                continue
+                                
+                            s_name = cell_info["subject_name"]
+                            c_name = cell_info["class_name"]
+                            color = cell_info["color"]
+                            is_locked = cell_info["locked"]
+                            is_man = cell_info["is_manual"]
+                            
+                            span = 1
+                            while p + span < periods:
+                                next_info = t_matrix[matrix_idx][p + span]
+                                if next_info and next_info.get("subject_name") == s_name and next_info.get("class_name") == c_name:
+                                    span += 1
+                                else:
+                                    break
+                                    
+                            actual_col = d_idx * periods + p
+                            self._grid.set_cell(r_idx, actual_col, s_name, color, t_name, span, c_name, display_mode="teachers", locked=is_locked, is_manual=is_man)
+                            p += span
             else:
                 import re
                 def cls_sort_key(c):
@@ -974,6 +1077,7 @@ class MainWindow(QMainWindow):
                 self._grid.set_mode_all_classes(class_names, periods, days_list)
                 
                 class_match_cache = {}
+                c_matrix = [[{} for _ in range(periods)] for _ in range(len(days_list) * len(class_names))]
                 
                 for item in grid_data:
                     s_name = (item.get("subject_name") or item.get("subject") or "").strip()
@@ -987,7 +1091,6 @@ class MainWindow(QMainWindow):
                     is_locked = bool(item.get("locked", False))
                     is_man = bool(item.get("is_manual", False))
                     
-                    # Support combined classes if comma or ampersand separated
                     from auto_scheduler import matches_class
                     target_classes = [c.strip() for c in c_name.replace("&", ",").split(",") if c.strip()] if ("," in c_name or "&" in c_name) else [c_name]
                     for tc in target_classes:
@@ -1004,25 +1107,57 @@ class MainWindow(QMainWindow):
                                         break
                             class_match_cache[tc] = matching_row
                                         
-                        if matching_row >= 0:
-                            actual_col = col * periods + period
+                        if 0 <= matching_row < len(class_names) and 0 <= col < len(days_list):
                             color = get_subject_color(s_name, self.data_store)
-                            item["color"] = color
                             for ext in range(dur):
-                                target_c = actual_col + ext
-                                if target_c < len(days_list) * periods:
-                                    self._grid.set_cell(matching_row, target_c, s_name, color, t_name, 1, tc, display_mode="classes", locked=is_locked, is_manual=is_man)
+                                p_idx = period + ext
+                                if p_idx < periods:
+                                    matrix_idx = matching_row * len(days_list) + col
+                                    c_matrix[matrix_idx][p_idx] = {
+                                        "subject_name": s_name, "class_name": tc, "teacher_name": t_name,
+                                        "color": color, "locked": is_locked, "is_manual": is_man
+                                    }
+                                    
+                for r_idx, c_name in enumerate(class_names):
+                    for d_idx in range(len(days_list)):
+                        matrix_idx = r_idx * len(days_list) + d_idx
+                        p = 0
+                        while p < periods:
+                            cell_info = c_matrix[matrix_idx][p]
+                            if not cell_info or not cell_info.get("subject_name"):
+                                p += 1
+                                continue
+                                
+                            s_name = cell_info["subject_name"]
+                            tc = cell_info["class_name"]
+                            t_name = cell_info["teacher_name"]
+                            color = cell_info["color"]
+                            is_locked = cell_info["locked"]
+                            is_man = cell_info["is_manual"]
+                            
+                            span = 1
+                            while p + span < periods:
+                                next_info = c_matrix[matrix_idx][p + span]
+                                if next_info and next_info.get("subject_name") == s_name and next_info.get("class_name") == tc:
+                                    span += 1
+                                else:
+                                    break
+                                    
+                            actual_col = d_idx * periods + p
+                            self._grid.set_cell(r_idx, actual_col, s_name, color, t_name, span, tc, display_mode="classes", locked=is_locked, is_manual=is_man)
+                            p += span
         finally:
             if hasattr(self._grid, "table"):
                 self._grid.table.setUpdatesEnabled(True)
                 self._grid.table.viewport().update()
         
-        # Update unplaced dock
-        self._refresh_unplaced_lessons()
+        # Update unplaced dock (skip when called from _delete_lesson_at which does its own deferred refresh)
+        if not skip_unplaced:
+            self._refresh_unplaced_lessons()
 
 
 
-    def save_db(self, path=None, sync_from_grid=True):
+    def save_db(self, path=None, sync_from_grid=False):
         if getattr(self, "_is_loading", False):
             return
             
@@ -1152,10 +1287,6 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "_grid") or not hasattr(self._grid, "unplaced_dock"):
             return
             
-        # Ensure grid_placements is up-to-date with current _placed_lessons
-        if hasattr(self, "_sync_grid_to_store"):
-            self._sync_grid_to_store()
-            
         atamalar = self.data_store.get("atamalar", [])
         grid_placements = self.data_store.get("grid_placements", [])
         
@@ -1172,7 +1303,11 @@ class MainWindow(QMainWindow):
                 if cur_r >= 0:
                     v_item = self._grid.table.verticalHeaderItem(cur_r)
                     if v_item:
-                        target_entity = v_item.text()
+                        target_entity = v_item.text().strip()
+                elif self._grid.table.rowCount() > 0:
+                    v_item = self._grid.table.verticalHeaderItem(0)
+                    if v_item:
+                        target_entity = v_item.text().strip()
                         
         placed_pool = []
         for p in grid_placements:
@@ -1233,10 +1368,15 @@ class MainWindow(QMainWindow):
                 for p_item in placed_pool:
                     if p_item["remaining"] <= 0:
                         continue
-                    if format_tr_name(p_item["subject"]) != s_fmt:
+                    p_s = p_item["subject"]
+                    s_match = (format_tr_name(p_s) == s_fmt or normalize_clean(p_s) == normalize_clean(s_name) or p_s == s_name)
+                    if not s_match:
                         continue
-                    if t_name and p_item["teacher"] and format_tr_name(p_item["teacher"]) != t_fmt:
-                        continue
+                    if t_name and p_item["teacher"]:
+                        p_t = p_item["teacher"]
+                        t_match = (format_tr_name(p_t) == t_fmt or normalize_clean(p_t) == normalize_clean(t_name) or p_t == t_name)
+                        if not t_match:
+                            continue
                     p_c = p_item["class"]
                     if c_name and p_c:
                         if not (p_c == c_name or matches_class(p_c, c_name) or matches_class(c_name, p_c)):
@@ -1368,9 +1508,31 @@ class MainWindow(QMainWindow):
         return True, ""
 
     def _on_lesson_dropped(self, row, col, lesson_info):
+        from timetable_grid import DAYS
+        from auto_scheduler import matches_class, format_tr_name, normalize_clean
+        
+        display_mode = getattr(self._grid, "current_view_mode", "classes")
         subject_name = lesson_info.get("subject_name", "Ders")
-        color = get_subject_color(subject_name)
-        teacher = format_tr_name(lesson_info.get("teacher", ""))
+        color = get_subject_color(subject_name, self.data_store)
+        teacher = format_tr_name(lesson_info.get("teacher_name") or lesson_info.get("teacher") or "")
+        cls_name = (lesson_info.get("class_name") or lesson_info.get("class") or lesson_info.get("sinif") or "").strip()
+        
+        classes = self.data_store.get("siniflar", [])
+        import re
+        def cls_sort_key(c):
+            m = re.match(r"(\d+)(.*)", str(c).strip())
+            return (int(m.group(1)), m.group(2)) if m else (999, str(c))
+        class_names = sorted([c.get("ad", "").strip() for c in classes if c.get("ad")], key=cls_sort_key)
+        
+        teachers = self.data_store.get("ogretmenler", [])
+        teacher_names = sorted([t.get("ad", "").strip() for t in teachers if t.get("ad")])
+
+        if display_mode == "teachers":
+            if row < len(teacher_names):
+                teacher = teacher_names[row]
+        else:
+            if row < len(class_names):
+                cls_name = class_names[row]
         
         # Öğretmen yoksa otomatik olarak branşından müsait bir hoca bul ve ata
         if not teacher:
@@ -1386,17 +1548,16 @@ class MainWindow(QMainWindow):
             if not teacher and self.data_store.get("ogretmenler"):
                 teacher = format_tr_name(self.data_store["ogretmenler"][0].get("ad", ""))
                 
-        cls_name = lesson_info.get("class_name", "")
-        duration = lesson_info.get("duration", 1)
+        duration = int(lesson_info.get("duration", 1))
         is_move = lesson_info.get("is_move", False)
         orig_r = lesson_info.get("origin_row", -1)
         orig_c = lesson_info.get("origin_col", -1)
         
-        from timetable_grid import DAYS
         settings = self.data_store.get("settings", {})
         periods = int(settings.get("periods", self.data_store.get("ders_saati", 8)))
-        day_idx = col // periods if periods > 0 else 0
-        period_idx = col % periods if periods > 0 else 0
+        if periods <= 0: periods = 8
+        day_idx = col // periods
+        period_idx = col % periods
         day_name = DAYS[day_idx] if 0 <= day_idx < len(DAYS) else f"{day_idx+1}. Gün"
         
         # Check if moving to exact same spot
@@ -1411,37 +1572,60 @@ class MainWindow(QMainWindow):
                 f"Günün {period_idx+1}. saatine bırakıldı, ancak gün {periods} saatten oluşuyor."
             )
             return
+
+        orig_day = orig_c // periods if (is_move and orig_c >= 0) else -1
+        orig_per = orig_c % periods if (is_move and orig_c >= 0) else -1
+
+        def is_origin_placement(p):
+            if not is_move or orig_c < 0:
+                return False
+            p_d = int(p.get("day") if "day" in p else p.get("col", 0))
+            p_p = int(p.get("period") if "period" in p else p.get("row", 0))
+            p_dur = int(p.get("duration", 1))
+            if p_d != orig_day:
+                return False
+            overlap = max(0, min(p_p + p_dur, orig_per + duration) - max(p_p, orig_per))
+            if overlap <= 0:
+                return False
+            p_c = (p.get("class_name") or p.get("class") or "").strip()
+            p_t = format_tr_name(p.get("teacher_name") or p.get("teacher") or "")
+            if cls_name and (matches_class(p_c, cls_name) or matches_class(cls_name, p_c) or p_c == cls_name):
+                return True
+            if teacher and (p_t == teacher or format_tr_name(p_t) == teacher):
+                return True
+            return False
             
-        placed = self._grid.get_placed_lessons()
-        
-        # Check if any target cell in the span is occupied when adding from card dock (not a move)
-        if not is_move:
-            occupied_conflict = None
-            for ext in range(duration):
-                check_c = col + ext
-                if (row, check_c) in placed:
-                    occupied_conflict = placed[(row, check_c)]
-                    break
-            if occupied_conflict:
-                occ_subj = occupied_conflict.get("subject_name", occupied_conflict.get("subject", "Ders"))
-                occ_t = occupied_conflict.get("teacher_name", occupied_conflict.get("teacher", ""))
-                msg = QMessageBox(self)
-                msg.setWindowTitle("Ders Çakışması / Üzerine Yazma")
-                msg.setIcon(QMessageBox.Warning)
-                msg.setText(
-                    f"⚠️ <b>Bu Saatte Zaten Ders Var!</b><br><br>"
-                    f"<b>{day_name}</b> günü <b>{period_idx+1}. ders saatinde</b> bu sınıfta zaten <b>{occ_subj}</b> ({occ_t}) dersi bulunmaktadır.<br><br>"
-                    f"Mevcut dersin üzerine yazmak istiyor musunuz?"
+        # ── 1. KESİN KONTROL: Sınıf Çizelgesi Dolu mu?
+        if cls_name:
+            class_occupied = None
+            for p_item in self.data_store.get("grid_placements", []):
+                if is_origin_placement(p_item):
+                    continue
+                p_day = int(p_item.get("day") if "day" in p_item else p_item.get("col", 0))
+                p_period = int(p_item.get("period") if "period" in p_item else p_item.get("row", 0))
+                p_dur = int(p_item.get("duration", 1))
+                p_cls = (p_item.get("class_name") or p_item.get("class") or "").strip()
+                
+                if p_day == day_idx and (matches_class(p_cls, cls_name) or matches_class(cls_name, p_cls) or p_cls == cls_name):
+                    overlap = max(0, min(p_period + p_dur, period_idx + duration) - max(p_period, period_idx))
+                    if overlap > 0:
+                        class_occupied = p_item
+                        break
+                    
+            if class_occupied:
+                occ_s = class_occupied.get("subject_name") or class_occupied.get("subject") or "Ders"
+                occ_t = class_occupied.get("teacher_name") or class_occupied.get("teacher") or "Öğretmen"
+                QMessageBox.warning(
+                    self, "Sınıf Çizelgesi Dolu",
+                    f"⚠️ <b>Bu Saatte Sınıf Zaten Dolu!</b><br><br>"
+                    f"<b>{cls_name}</b> sınıfının <b>{day_name}</b> günü <b>{period_idx+1}. ders saatinde</b> "
+                    f"zaten <b>{occ_s}</b> ({occ_t}) dersi bulunmaktadır.<br><br>"
+                    f"Çizelgede bu saat zaten doludur. Önce sınıf çizelgesinden bu saati boşaltmalısınız."
                 )
-                btn_yes = msg.addButton("⚠️ Evet, Üzerine Yaz", QMessageBox.AcceptRole)
-                btn_no = msg.addButton("❌ İptal Et / Engelle", QMessageBox.RejectRole)
-                msg.setDefaultButton(btn_no)
-                msg.exec()
-                if msg.clickedButton() != btn_yes:
-                    self.statusBar().showMessage("İşlem iptal edildi (Mevcut ders korundu).")
-                    return
-            
-        # 1. Check Teacher Constraints (Time-off / Kapalı gün/saat)
+                self.statusBar().showMessage(f"Engellendi: {cls_name} sınıfının {day_name} {period_idx+1}. saati zaten dolu!")
+                return
+
+        # ── 2. KONTROL: Öğretmen Kapalı/Kısıtlı Saat Kontrolü
         kisitlamalar = self.data_store.get("kisitlamalar", {})
         if teacher and teacher in kisitlamalar:
             for ext in range(duration):
@@ -1455,88 +1639,135 @@ class MainWindow(QMainWindow):
                     )
                     self.statusBar().showMessage(f"Kısıtlama engeli: {teacher} - {day_name} {check_p+1}. saat kapalı!")
                     return
-                
-        # 2. Check Active Planning Relations in Real Time (Soft check - log to status bar)
-        is_rel_ok, rel_msg = self._check_planning_relations(
-            subject=subject_name, teacher=teacher, class_name=cls_name,
-            day=day_idx, period=period_idx, duration=duration,
-            is_move=is_move, orig_r=orig_r, orig_c=orig_c
-        )
-        if not is_rel_ok and rel_msg:
-            self.statusBar().showMessage(f"ℹ️ {rel_msg}")
-                
-        # 3. Check Teacher Conflict (Is teacher already placed elsewhere at this slot across ANY class?)
-        teacher_info = next((t for t in self.data_store.get("ogretmenler", []) if t.get("ad") == teacher), {})
+
+        # ── 3. KONTROL: Öğretmen Çakışması Kontrolü
+        teacher_info = next((t for t in self.data_store.get("ogretmenler", []) if format_tr_name(t.get("ad", "")) == teacher), {})
         allows_parallel = teacher_info.get("es_zamanli", False)
         
         if teacher and not allows_parallel:
-            conflict_found = False
-            conflict_class = ""
-            conflict_subj = ""
-            conflict_period = period_idx
-            
+            teacher_occupied = None
             for p_item in self.data_store.get("grid_placements", []):
+                if is_origin_placement(p_item):
+                    continue
+                p_day = int(p_item.get("day") if "day" in p_item else p_item.get("col", 0))
+                p_period = int(p_item.get("period") if "period" in p_item else p_item.get("row", 0))
+                p_dur = int(p_item.get("duration", 1))
                 p_t = format_tr_name(p_item.get("teacher_name") or p_item.get("teacher") or "")
-                if p_t == teacher:
-                    p_day = int(p_item.get("day") if "day" in p_item else p_item.get("col", 0))
-                    p_period = int(p_item.get("period") if "period" in p_item else p_item.get("row", 0))
-                    p_cls = p_item.get("class_name") or p_item.get("class") or ""
-                    p_sub = p_item.get("subject_name") or p_item.get("subject") or "Ders"
-                    
-                    if is_move and p_cls == cls_name and p_day == (orig_c // periods) and p_period == (orig_c % periods):
-                        continue
-                        
-                    if p_day == day_idx:
-                        for ext in range(duration):
-                            if p_period == period_idx + ext:
-                                if p_sub == subject_name and ("," in p_cls or "," in cls_name or p_item.get("is_combined")):
-                                    continue
-                                conflict_found = True
-                                conflict_class = p_cls or "Başka Bir Sınıf"
-                                conflict_subj = p_sub
-                                conflict_period = p_period
-                                break
-                    if conflict_found:
-                        break
-                                
-            if conflict_found:
-                msg_text = (
-                    f"⚠️ <b>Öğretmen Çakışması Algılandı!</b><br><br>"
-                    f"<b>{teacher}</b> isimli öğretmenin <b>{day_name}</b> günü <b>{conflict_period+1}. ders saatinde</b> "
-                    f"<b>{conflict_class}</b> sınıfında <b>{conflict_subj}</b> dersi bulunmaktadır.<br><br>"
-                    f"Ne yapmak istersiniz?"
-                )
-                msg_box = QMessageBox(self)
-                msg_box.setWindowTitle("Ders Çakışması Uyarısı")
-                msg_box.setText(msg_text)
-                msg_box.setIcon(QMessageBox.Warning)
-                btn_ignore = msg_box.addButton("⚠️ Yoksay ve Yerleştir", QMessageBox.AcceptRole)
-                btn_cancel = msg_box.addButton("❌ İptal Et / Engelle", QMessageBox.RejectRole)
-                msg_box.setDefaultButton(btn_cancel)
-                msg_box.exec()
+                p_cls = (p_item.get("class_name") or p_item.get("class") or "").strip()
                 
-                if msg_box.clickedButton() != btn_ignore:
-                    self.statusBar().showMessage(f"Çakışma engellendi: {teacher} - {conflict_class} ile çakışıyor.")
-                    return
+                if p_day == day_idx and (p_t == teacher or format_tr_name(p_t) == teacher):
+                    overlap = max(0, min(p_period + p_dur, period_idx + duration) - max(p_period, period_idx))
+                    if overlap > 0:
+                        if not (matches_class(p_cls, cls_name) or matches_class(cls_name, p_cls) or p_cls == cls_name or "," in p_cls or "," in cls_name or p_item.get("is_combined")):
+                            teacher_occupied = p_item
+                            break
+                    
+            if teacher_occupied:
+                occ_s = teacher_occupied.get("subject_name") or teacher_occupied.get("subject") or "Ders"
+                occ_c = teacher_occupied.get("class_name") or teacher_occupied.get("class") or "Başka Sınıf"
+                QMessageBox.warning(
+                    self, "Öğretmen Çakışması",
+                    f"⚠️ <b>Öğretmen Çakışması!</b><br><br>"
+                    f"<b>{teacher}</b> öğretmeninin <b>{day_name}</b> günü <b>{period_idx+1}. ders saatinde</b> "
+                    f"<b>{occ_c}</b> sınıfında <b>{occ_s}</b> dersi bulunmaktadır.<br><br>"
+                    f"Öğretmen aynı anda iki farklı sınıfa ders veremez."
+                )
+                self.statusBar().showMessage(f"Engellendi: {teacher} hocanın {day_name} {period_idx+1}. saati dolu!")
+                return
 
-        # Passed checks! If it's a move, delete original first
-        self._push_undo_state()
-        if is_move and orig_r >= 0 and orig_c >= 0:
+        # ── 3.5. KESİN KONTROL: Çapraz Kurum Öğretmen Çakışması Kontrolü
+        if teacher:
+            import version_store
+            cross_busy = version_store.get_cross_institution_teacher_busy_slots(exclude_slug=getattr(self, "institution_slug", None))
+            t_norm = version_store.normalize_teacher_name(teacher)
+            cross_conflict = None
             for ext in range(duration):
-                clear_c = orig_c + ext
-                if clear_c < self._grid.table.columnCount():
-                    self._grid.table.setItem(orig_r, clear_c, None)
-                self._grid._placed_lessons.pop((orig_r, clear_c), None)
-
-        # Place horizontally on the same day for all duration hours
-        for ext in range(duration):
-            target_c = col + ext
-            self._grid.set_cell(row, target_c, subject_name, color, teacher, 1, class_name=cls_name, is_manual=True)
+                check_slot = (t_norm, day_idx, period_idx + ext)
+                if check_slot in cross_busy:
+                    cross_conflict = cross_busy[check_slot]
+                    break
             
-        self.statusBar().showMessage(f"'{subject_name}' ({duration} saat) dersi {day_name} günü {period_idx+1}–{period_idx+duration}. saatlere yerleştirildi.")
-        self.save_db()
+            if cross_conflict:
+                c_inst = cross_conflict.get("institution_name", "Başka Kurum")
+                c_subj = cross_conflict.get("subject", "Ders")
+                c_cls = cross_conflict.get("class", "Sınıf")
+                c_per = cross_conflict.get("period", 0) + 1
+                QMessageBox.critical(
+                    self, "Çapraz Kurum Öğretmen Çakışması",
+                    f"⛔ <b>Çapraz Kurum Çakışması Tespit Edildi!</b><br><br>"
+                    f"<b>{teacher}</b> öğretmeni <b>{c_inst}</b> kurumunun aktif ders programında "
+                    f"<b>{day_name}</b> günü <b>{c_per}. ders saatinde</b> "
+                    f"zaten <b>{c_cls}</b> ({c_subj}) dersinde görevlidir!<br><br>"
+                    f"Bir öğretmen aynı saatte iki farklı kurumda ders veremez."
+                )
+                self.statusBar().showMessage(f"Çapraz çakışma engeli: {teacher} ({c_inst} - {day_name} {c_per}. saat)")
+                return
+
+        # ── 4. TÜM KONTROLLER BAŞARILI: Atomik ve Güvenli Yerleşim
+        self.mark_dirty()
+        self._push_undo_state()
+        
+        # Eğer taşıma (move) ise eski konumu grid_placements'tan sil
+        if is_move and orig_c >= 0:
+            self.data_store["grid_placements"] = [
+                p for p in self.data_store.get("grid_placements", [])
+                if not is_origin_placement(p)
+            ]
+            
+        # Yeni yerleşimi ekle (her saat bloğu için)
+        for ext in range(duration):
+            target_p = period_idx + ext
+            self.data_store.setdefault("grid_placements", [])
+            self.data_store["grid_placements"] = [
+                p for p in self.data_store["grid_placements"]
+                if not (
+                    (p.get("day") == day_idx or p.get("col") == day_idx) and
+                    (p.get("period") == target_p or p.get("row") == target_p) and
+                    (matches_class(p.get("class_name") or p.get("class", ""), cls_name) or
+                     (display_mode == "teachers" and format_tr_name(p.get("teacher_name") or p.get("teacher", "")) == teacher))
+                )
+            ]
+            self.data_store["grid_placements"].append({
+                "day": day_idx, "period": target_p,
+                "row": target_p, "col": day_idx,
+                "class_name": cls_name, "class": cls_name,
+                "teacher_name": teacher, "teacher": teacher,
+                "subject_name": subject_name, "subject": subject_name,
+                "duration": 1,
+                "locked": True,
+                "is_manual": True,
+                "color": color
+            })
+            
+        if "auto_schedule_results" in self.data_store:
+            self.data_store["auto_schedule_results"] = list(self.data_store.get("grid_placements", []))
+            
+        self._refresh_grid()
+        self.save_db(sync_from_grid=False)
+        if hasattr(self, "institution_slug") and hasattr(self, "version_filename") and self.institution_slug and self.version_filename:
+            import version_store
+            version_store.update_version_in_place(self.institution_slug, self.version_filename, self.data_store)
+            
+        self._refresh_unplaced_lessons()
+        self._refresh_tree()
+        self.statusBar().showMessage(f"'{subject_name}' ({cls_name} - {teacher}) dersi {day_name} günü {period_idx+1}. saate yerleştirildi.")
 
     # ── Actions ───────────────────────────────────────────────────────────────
+    def _go_home(self):
+        """Return to the Home Dashboard."""
+        try:
+            self.save_db(sync_from_grid=False)
+            if hasattr(self, "institution_slug") and hasattr(self, "version_filename") and self.institution_slug and self.version_filename:
+                import version_store
+                version_store.update_version_in_place(self.institution_slug, self.version_filename, self.data_store)
+        except Exception as e:
+            print("Auto-save on _go_home error:", e)
+        if callable(self.go_home_requested):
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, self.go_home_requested)
+        else:
+            self.statusBar().showMessage("Ana sayfa bağlantısı bulunamadı.")
+
     def _go_main_tab(self):
         self._ribbon._select(0)
 

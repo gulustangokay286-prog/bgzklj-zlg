@@ -256,7 +256,20 @@ def icon_key_lock(p, s):
     p.setPen(QPen(QColor("#D97706"), 2.5))
     p.drawArc(10, 4, 12, 16, 0, 180 * 16)
 
+def icon_home(p, s):
+    p.setBrush(QBrush(QColor("#7C3AED")))  # Purple color
+    p.setPen(Qt.NoPen)
+    p.drawRoundedRect(4, 12, s-8, s-14, 2, 2)
+    path = QPainterPath()
+    path.moveTo(s/2, 2)
+    path.lineTo(s-2, 14)
+    path.lineTo(2, 14)
+    p.drawPath(path)
+    p.setBrush(QBrush(QColor("#FFFFFF")))
+    p.drawRect(s/2 - 3, s-10, 6, 8)
+
 ICON_MAP = {
+    "anasayfa":   icon_home,
     "yeni":       icon_new,
     "ac":         icon_open,
     "kaydet":     icon_save,

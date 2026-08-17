@@ -21,15 +21,27 @@ hidden_modules = [
     'login_dialog',
     'database',
     'cloud_sync',
+    'version_store',
+    'home_dashboard',
     'core.timetable_data',
     'state_manager'
 ]
+
+import sys
+import os
+
+icon_file = 'app_icon.icns' if sys.platform == 'darwin' and os.path.exists('app_icon.icns') else 'app_icon.ico'
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[
+        ('dialogs', 'dialogs'),
+        ('app_icon.ico', '.'),
+        ('app_icon.png', '.'),
+        ('app_icon.icns', '.')
+    ],
     hiddenimports=hidden_modules,
     hookspath=[],
     hooksconfig={},
@@ -56,7 +68,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['app_icon.ico'],
+    icon=icon_file,
 )
 coll = COLLECT(
     exe,
@@ -70,6 +82,6 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name='Chenki_Akademi.app',
-    icon='app_icon.ico',
-    bundle_identifier=None,
+    icon=icon_file,
+    bundle_identifier='com.chenki.akademi',
 )

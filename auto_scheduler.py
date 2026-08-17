@@ -126,19 +126,35 @@ class AutoSchedulerWorker(QThread):
                         c_name = (asgn.get("class") or asgn.get("sinif") or asgn.get("class_name") or "").strip()
                         if c_name: break
 
-            is_locked = bool(p.get("locked") in [True, "true", "True", 1, "1"] or p.get("is_manual") in [True, "true", "True", 1, "1"])
+            is_locked = bool(p.get("locked") in [True, "true", "True", 1, "1"])
             if any(matches_class(c_name, tgt) for tgt in classes_to_schedule):
-                target_class_manual.append({
-                    "class_name": c_name, "teacher_name": t_name,
-                    "subject_name": subj, "day_idx": day, "period": period,
-                    "duration": dur, "is_manual": True, "locked": is_locked
-                })
-                for off in range(dur):
-                    if t_name: global_teacher_occupied.add((t_name, day, period + off))
+                if is_locked:
+                    target_class_manual.append({
+                        "class_name": c_name, "teacher_name": t_name,
+                        "subject_name": subj, "day_idx": day, "period": period,
+                        "duration": dur, "is_manual": True, "locked": True
+                    })
+                    for off in range(dur):
+                        if t_name: global_teacher_occupied.add((t_name, day, period + off))
             else:
                 other_classes_placements.append(p)
                 for off in range(dur):
                     if t_name: global_teacher_occupied.add((t_name, day, period + off))
+
+        # Çapraz Kurum Öğretmen Meşguliyetleri (Diğer kurumlarda derste olan hocalar bu saatte ders alamaz)
+        try:
+            import version_store
+            current_slug = self.data_store.get("settings", {}).get("institution_slug", None)
+            cross_busy = version_store.get_cross_institution_teacher_busy_slots(exclude_slug=current_slug)
+            for (t_norm, d, p_slot), conflict_info in cross_busy.items():
+                global_teacher_occupied.add((t_norm, d, p_slot))
+                t_raw = conflict_info.get("teacher_name", "")
+                if t_raw:
+                    global_teacher_occupied.add((t_raw, d, p_slot))
+                    global_teacher_occupied.add((format_tr_name(t_raw), d, p_slot))
+                    global_teacher_occupied.add((normalize_clean(t_raw), d, p_slot))
+        except Exception as e:
+            print(f"[AUTO_SCHEDULER] Cross-institution busy load notice: {e}")
 
         kisitlamalar_store = self.data_store.get("kisitlamalar", {})
         t_objs = {format_tr_name(t["ad"]): t for t in self.data_store.get("ogretmenler", []) if t.get("ad")}

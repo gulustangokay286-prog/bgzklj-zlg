@@ -382,6 +382,13 @@ class LoginDialog(QDialog):
                     "uid": data.get("localId"),
                     "expiresIn": data.get("expiresIn", 3600)
                 }
+                # Initial cloud pull from RTDB
+                try:
+                    from cloud_sync import pull_all_from_rtdb
+                    pull_all_from_rtdb(self.auth_data)
+                except Exception as ex:
+                    print(f"[Login] Initial cloud pull note: {ex}")
+                    
                 self.accept()
                 return
             else:
@@ -390,6 +397,11 @@ class LoginDialog(QDialog):
                     "uid": "local_authenticated_user",
                     "is_offline": True
                 }
+                try:
+                    from cloud_sync import pull_all_from_rtdb
+                    pull_all_from_rtdb(self.auth_data)
+                except Exception:
+                    pass
                 self.accept()
                 return
         except Exception:

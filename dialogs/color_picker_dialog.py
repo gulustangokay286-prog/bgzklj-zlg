@@ -9,10 +9,10 @@ from PySide6.QtGui import QColor, QFont, QPainter, QBrush, QPen
 from PySide6.QtCore import Qt, QSize, Signal
 
 CURATED_PALETTE = [
-    "#2563EB", "#0284C7", "#00ACC1", "#0D9488", "#059669", "#16A34A", "#65A30D",
-    "#CA8A04", "#D97706", "#EA580C", "#DC2626", "#E11D48", "#DB2777", "#C026D3",
-    "#9333EA", "#7C3AED", "#4F46E5", "#3B82F6", "#06B6D4", "#10B981", "#84CC16",
-    "#EAB308", "#F97316", "#EF4444", "#F43F5E", "#A855F7", "#64748B", "#334155"
+    "#4F75C2", "#388FB8", "#2E9AA6", "#2D9488", "#2E9970", "#43A066", "#73A034",
+    "#B8831B", "#C27419", "#C9612A", "#C24242", "#C73859", "#C23E80", "#AD3EBA",
+    "#8B4BC7", "#764FC2", "#5E56BF", "#5284D4", "#34A0B8", "#38AA80", "#7DBA2A",
+    "#CFA123", "#D9762E", "#D45050", "#D64964", "#9B5CCF", "#64748B", "#475569"
 ]
 
 class ColorSwatchButton(QPushButton):

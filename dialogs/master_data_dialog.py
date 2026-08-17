@@ -382,11 +382,11 @@ class MasterDataDialog(QDialog):
         self.btn_sil.clicked.connect(self._act_delete)
         right_panel.addWidget(self.btn_sil)
         
-        btn_yukari = ActionButton("▲ Yukarı Taşı", icon_name="edit")
+        btn_yukari = ActionButton("Yukarı Taşı", icon_name="edit")
         btn_yukari.clicked.connect(lambda: self._act_move_row(-1))
         right_panel.addWidget(btn_yukari)
         
-        btn_asagi = ActionButton("▼ Aşağı Taşı", icon_name="edit")
+        btn_asagi = ActionButton("Aşağı Taşı", icon_name="edit")
         btn_asagi.clicked.connect(lambda: self._act_move_row(1))
         right_panel.addWidget(btn_asagi)
         
@@ -665,7 +665,7 @@ class MasterDataDialog(QDialog):
         top_bar.addStretch(1)
         
         txt_search = QLineEdit()
-        txt_search.setPlaceholderText("🔍 Gerçek Zamanlı Ara...")
+        txt_search.setPlaceholderText("Gerçek Zamanlı Ara...")
         txt_search.setFixedWidth(220)
         txt_search.setStyleSheet("padding: 4px 8px; border: 1px solid #CCCCCC; border-radius: 4px; font-size: 9pt; background: #FFFFFF;")
         
@@ -1130,12 +1130,12 @@ class TeacherIndividualTimetableDialog(QDialog):
         lay.setSpacing(12)
         
         top_bar = QHBoxLayout()
-        lbl = QLabel(f"👨‍🏫 {self.teacher_name} — Haftalık Ders Çizelgesi")
+        lbl = QLabel(f"{self.teacher_name} — Haftalık Ders Çizelgesi")
         lbl.setStyleSheet("font-size: 16px; color: #2563EB; font-weight: bold;")
         top_bar.addWidget(lbl)
         top_bar.addStretch(1)
         
-        btn_yazdir = QPushButton("🖨️ Bu Öğretmenin Çizelgesini Yazdır")
+        btn_yazdir = QPushButton("Bu Öğretmenin Çizelgesini Yazdır")
         btn_yazdir.setStyleSheet("background: #2563EB; color: white; font-weight: bold; padding: 6px 16px; border-radius: 6px; border: none;")
         btn_yazdir.clicked.connect(self._print_teacher_timetable)
         top_bar.addWidget(btn_yazdir)
@@ -1249,7 +1249,7 @@ class TeacherIndividualTimetableDialog(QDialog):
         total_assigned_hours = sum(int(a.get("duration", 1)) for a in teacher_atamalar)
 
         # Summary footer bar
-        info_banner = QLabel(f"ℹ️ Toplam Tanımlı Ders: {total_assigned_hours} Saat  |  Haftalık Çizelgede Yerleşen: {placed_hours} Saat")
+        info_banner = QLabel(f"Toplam Tanımlı Ders: {total_assigned_hours} Saat  |  Haftalık Çizelgede Yerleşen: {placed_hours} Saat")
         info_banner.setStyleSheet("color: #1E293B; background: #E2E8F0; padding: 6px 12px; border-radius: 6px; font-weight: 600;")
         lay.addWidget(info_banner)
         lay.addWidget(table, 1)

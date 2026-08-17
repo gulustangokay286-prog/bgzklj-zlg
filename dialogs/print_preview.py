@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtPrintSupport import QPrintPreviewWidget, QPrinter
 from PySide6.QtGui import QPainter, QPen, QFont, QColor, QPageLayout, QBrush, QPageSize
-from PySide6.QtCore import Qt, QRectF
+from PySide6.QtCore import Qt, QRectF, QPointF
 from auto_scheduler import matches_class
 
 SUBJECT_COLORS = [
@@ -1140,16 +1140,31 @@ class TimetablePrintPreview(QDialog):
                             
                         # Detect horizontal contiguous span on this day
                         span = 1
+                        s1 = smart_abbr(sname)
+                        c1 = str(lesson.get("class_name") or lesson.get("teacher_name") or "").strip().upper()
+                        
                         while p_offset + span < periods_per_day:
                             next_p = p_offset + span
                             next_l = placements.get((d_idx, next_p))
-                            if not next_l: break
-                            next_s = next_l.get("subject_name", "")
-                            next_c = str(next_l.get("class_name") or next_l.get("teacher_name") or "")
-                            if next_s == sname and (next_c == raw_c if is_teacher else True):
-                                span += 1
-                            else:
+                            if not next_l:
                                 break
+                            next_s = next_l.get("subject_name", "")
+                            next_c = str(next_l.get("class_name") or next_l.get("teacher_name") or "").strip().upper()
+                            c2 = next_c
+                            s2 = smart_abbr(next_s)
+                            
+                            if is_teacher:
+                                # In teacher sheet, if same class (or multi-hour continuous assignment)
+                                if c1 and c1 == c2:
+                                    span += 1
+                                else:
+                                    break
+                            else:
+                                # In class sheet, if same subject abbreviation
+                                if s1 and s1 == s2:
+                                    span += 1
+                                else:
+                                    break
                                 
                         block_w = period_w * span
                         painter.setBrush(QBrush(QColor("#FFFFFF")))
@@ -1182,6 +1197,14 @@ class TimetablePrintPreview(QDialog):
                         
                 cur_y += row_h
                 
+            # --- Draw Thick Day Divider Strokes across table height ---
+            table_top_y = margin_y + 24
+            table_bottom_y = cur_y
+            for d_idx in range(len(days) + 1):
+                dx = margin_x + name_col_w + d_idx * day_w
+                painter.setPen(QPen(QColor("#0F172A"), 2.2))
+                painter.drawLine(QPointF(dx, table_top_y), QPointF(dx, table_bottom_y))
+                
             # --- Structured Legend Section Immediately Under Table ---
             leg_start_y = cur_y + 8
             if not is_teacher:
@@ -1210,7 +1233,7 @@ class TimetablePrintPreview(QDialog):
                     # Legend Header
                     painter.setFont(make_font(9.5, True))
                     painter.setPen(QPen(QColor("#1E293B"), 1))
-                    painter.drawText(QRectF(margin_x + 10, leg_start_y + 4, w - 20, 16), Qt.AlignLeft | Qt.AlignVCenter, "📌 Ders Kısaltmaları ve Açıklamaları:")
+                    painter.drawText(QRectF(margin_x + 10, leg_start_y + 4, w - 20, 16), Qt.AlignLeft | Qt.AlignVCenter, "Ders Kısaltmaları ve Açıklamaları:")
                     
                     # Legend Items Grid
                     for idx, (abbr, full_name) in enumerate(legend_items):

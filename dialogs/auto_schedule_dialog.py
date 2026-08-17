@@ -186,6 +186,15 @@ class AutoScheduleDialog(QDialog):
                 p._refresh_grid()
             if hasattr(p, "_refresh_tree"):
                 p._refresh_tree()
+            
+            # Auto-save as a new version
+            slug = getattr(p, "institution_slug", None)
+            if slug:
+                try:
+                    import version_store
+                    version_store.save_version(slug, self.data_store, source="auto", note="Otomatik planlayıcı tarafından oluşturuldu")
+                except Exception as ve:
+                    print(f"[AUTO_SCHEDULE] Version save error: {ve}")
                 
         self.btn_start.setEnabled(True)
         self.btn_start.setText("Tamam")

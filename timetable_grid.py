@@ -258,9 +258,9 @@ class AsCTimetableHeader(QHeaderView):
         super().__init__(Qt.Horizontal, parent)
         self.periods = max(1, int(periods))
         self.days_list = days_list or DAYS[:5]
-        self.setFixedHeight(46)
+        self.setFixedHeight(50)
         self.setSectionResizeMode(QHeaderView.Fixed)
-        self.setDefaultSectionSize(58)
+        self.setDefaultSectionSize(64)
         self.setMinimumSectionSize(20)
         self.sectionResized.connect(lambda *args: self.viewport().update())
         self.geometriesChanged.connect(lambda *args: self.viewport().update())
@@ -307,10 +307,14 @@ class AsCTimetableHeader(QHeaderView):
                 painter.setPen(QPen(QColor("#0F172A")))
                 painter.setFont(QFont("Segoe UI", 9, QFont.Bold))
                 painter.drawText(rect, Qt.AlignCenter, day_name)
+                
+                # Thick day separator line on right edge
+                painter.setPen(QPen(QColor("#334155"), 2))
+                painter.drawLine(x + w, 0, x + w, vh)
             painter.end()
             return
             
-        # ── MULTI-SHEET VIEW (Days on top row y=0..23, Period numbers on bottom row y=23..46)
+        # ── MULTI-SHEET VIEW (Days on top row y=0..25, Period numbers on bottom row y=25..50)
         # 1. Day headers (Top row)
         for d_idx, day_name in enumerate(days_list):
             start_col = d_idx * periods
@@ -325,20 +329,20 @@ class AsCTimetableHeader(QHeaderView):
             if x_end <= 0 or x_start >= vw:
                 continue
                 
-            day_rect = QRect(x_start, 0, day_w, 23)
+            day_rect = QRect(x_start, 0, day_w, 25)
             painter.setPen(QPen(QColor("#94A3B8"), 1))
             painter.setBrush(QBrush(QColor("#E2E8F0")))
             painter.drawRect(day_rect)
             
             painter.setPen(QPen(QColor("#0F172A")))
-            font_day = QFont("Segoe UI", 8, QFont.Bold)
+            font_day = QFont("Segoe UI", 8.5, QFont.Bold)
             painter.setFont(font_day)
             
             # Keep day label visible and centered in the viewport portion of that day
             vis_left = max(x_start, 0)
             vis_right = min(x_end, vw)
             if vis_right > vis_left:
-                vis_rect = QRect(vis_left, 0, vis_right - vis_left, 23)
+                vis_rect = QRect(vis_left, 0, vis_right - vis_left, 25)
                 if vis_rect.width() >= 25:
                     painter.drawText(vis_rect, Qt.AlignCenter, day_name)
                 elif not day_rect.isEmpty():
@@ -352,15 +356,20 @@ class AsCTimetableHeader(QHeaderView):
                 continue
             period_num = (col_idx % periods) + 1
             
-            period_rect = QRect(x, 23, w, 23)
+            period_rect = QRect(x, 25, w, 25)
             painter.setPen(QPen(QColor("#CBD5E1"), 1))
             painter.setBrush(QBrush(QColor("#F8FAFC")))
             painter.drawRect(period_rect)
             
             painter.setPen(QPen(QColor("#334155")))
-            font_p = QFont("Segoe UI", 7, QFont.Bold)
+            font_p = QFont("Segoe UI", 8, QFont.Bold)
             painter.setFont(font_p)
             painter.drawText(period_rect, Qt.AlignCenter, str(period_num))
+            
+            # Draw prominent thicker dividing stroke at each day boundary (pixel-perfect matching table cells)
+            if (col_idx + 1) % periods == 0:
+                painter.setPen(QPen(QColor("#334155"), 2))
+                painter.drawLine(x + w - 1, 0, x + w - 1, vh)
             
         painter.end()
 
@@ -412,16 +421,29 @@ class DraggableLessonCard(QLabel):
         self.setFixedSize(card_width, 32)
         
         c = QColor(color)
+        if c.isValid():
+            h, s, l, a = c.getHsl()
+            if s > 85:
+                new_s = max(65, int(s * 0.65))
+                new_l = min(220, max(120, int(l * 1.05))) if l < 180 else l
+                c = QColor()
+                c.setHsl(h, new_s, new_l, a)
+            self.color = c.name()
+        else:
+            self.color = color
+            
+        bg_hex = self.color
         luminance = (0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue())
-        text_color = "#FFFFFF" if luminance < 160 else "#111111"
+        text_color = "#FFFFFF" if luminance < 140 else "#000000"
         
         self.setStyleSheet(f"""
             QLabel {{
-                background-color: {color};
+                background-color: {bg_hex};
                 color: {text_color};
                 font-family: system-ui, -apple-system, sans-serif;
                 font-size: 10px;
-                border: 1px solid rgba(0, 0, 0, 0.22);
+                font-weight: bold;
+                border: 1px solid rgba(0, 0, 0, 0.25);
                 border-radius: 4px;
                 padding: 1px 4px;
             }}
@@ -620,8 +642,11 @@ class UnplacedLessonsDock(QWidget):
             # clear existing
             while self.container_layout.count():
                 item = self.container_layout.takeAt(0)
-                if item.widget():
-                    item.widget().deleteLater()
+                w = item.widget()
+                if w:
+                    w.hide()
+                    w.setParent(None)
+                    w.deleteLater()
                     
             if not lessons_data:
                 self.container_layout.setAlignment(Qt.AlignCenter)
@@ -804,7 +829,15 @@ class TimetableCellDelegate(QStyledItemDelegate):
             if c.isValid() and c.alpha() > 0 and c.name().upper() not in ("#C0C0C0", "#B4B4B8", "#D0D0D0", "#D8D8D8", "#FFFFFF"):
                 cell_color = c
                 
-        if not cell_color or not cell_color.isValid():
+        if cell_color and cell_color.isValid():
+            # Eye-friendly desaturation of harsh high-saturation neon tones (+2% subtle boost for perfect vibrancy)
+            h, s, l, a = cell_color.getHsl()
+            if s > 85:
+                new_s = max(65, int(s * 0.65))
+                new_l = min(220, max(120, int(l * 1.05))) if l < 180 else l
+                cell_color = QColor()
+                cell_color.setHsl(h, new_s, new_l, a)
+        else:
             cell_color = QColor("#D1D5DB") # Neutral empty slot
                 
         # 2. Fill background
@@ -814,13 +847,19 @@ class TimetableCellDelegate(QStyledItemDelegate):
         painter.setPen(QPen(QColor("#9CA3AF"), 1))
         painter.drawRect(rect.adjusted(0, 0, -1, -1))
         
+        # 3.1 Draw prominent thicker dividing stroke at each day boundary (pixel-perfect alignment with header)
+        periods = grid._periods if (grid and hasattr(grid, "_periods")) else 8
+        if periods > 0 and (col + 1) % periods == 0:
+            painter.setPen(QPen(QColor("#334155"), 2))
+            painter.drawLine(rect.right(), rect.top(), rect.right(), rect.bottom())
+        
         # 4. Selection border
         if option.state & QStyle.State_Selected:
             painter.setPen(QPen(QColor("#1D4ED8"), 2))
             painter.setBrush(Qt.NoBrush)
             painter.drawRect(rect.adjusted(1, 1, -2, -2))
             
-        # 5. Draw text - Subject + Teacher/Class (two lines) - ALWAYS BLACK TEXT
+        # 5. Draw text - Clean single centered text (Class in teacher view, Subject in class view) - ALWAYS BLACK TEXT
         if clean_str or (info and info.get("subject_name")):
             text_color = QColor("#000000")  # Always black for readability
             painter.setPen(text_color)
@@ -829,53 +868,25 @@ class TimetableCellDelegate(QStyledItemDelegate):
             if not s_name:
                 s_name = clean_str
                 
-            # Use grid abbreviation for display (max 6 chars)
-            s_abbr = get_subject_abbr(s_name)
             display_mode = getattr(grid, "current_view_mode", "classes")
             
             if display_mode == "teachers":
-                # In teacher view, TOP text is prominently the CLASS NAME (e.g. 9A, 10B, 11A)
+                # In teacher view, display ONLY the CLASS NAME (e.g. 9A, 10B, 11A)
                 c_name = (info.get("class_name") or "") if info else ""
                 if not c_name and clean_str and clean_str != s_name:
                     c_name = clean_str
                 if "," in c_name or "&" in c_name or "+" in c_name:
-                    top_text = "+".join([c.strip().split("(")[0].strip() for c in c_name.replace("&", ",").replace("+", ",").split(",") if c.strip()])
+                    main_text = "+".join([c.strip().split("(")[0].strip() for c in c_name.replace("&", ",").replace("+", ",").split(",") if c.strip()])
                 else:
-                    top_text = c_name.strip().split("(")[0].strip() if c_name else clean_str
-                bot_text = s_abbr  # Subject abbreviation below class (e.g. MAT, FİZ, BDN)
+                    main_text = c_name.strip().split("(")[0].strip() if c_name else clean_str
             else:
-                top_text = s_abbr  # Subject abbreviation on top (e.g. MAT, FİZ)
-                t_name = info.get("teacher_name", "") if info else ""
-                t_parts = t_name.strip().split()
-                if len(t_parts) >= 2:
-                    bot_text = f"{t_parts[0][0]}.{t_parts[-1]}"
-                elif t_parts:
-                    bot_text = t_parts[0]
-                else:
-                    bot_text = ""
-                    
-            if not bot_text:
-                bot_text = clean_str if clean_str != top_text else ""
-            
-            top_rect = QRect(rect.left() + 2, rect.top() + 1, rect.width() - 4, rect.height() // 2)
-            bot_rect = QRect(rect.left() + 2, rect.top() + rect.height() // 2 - 1, rect.width() - 4, rect.height() // 2)
-            
-            # Dynamic font sizing to prevent overflow
-            top_font_size = 8 if len(top_text) <= 6 else (7 if len(top_text) <= 10 else 6)
-            bot_font_size = 7 if len(bot_text) <= 8 else (6 if len(bot_text) <= 14 else 5)
-            
-            if bot_text:
-                painter.setPen(text_color)
-                painter.setFont(QFont("Segoe UI", top_font_size, QFont.Bold))
-                painter.drawText(top_rect, Qt.AlignCenter | Qt.AlignBottom, top_text)
+                # In class view, display ONLY the SUBJECT (e.g. MATE 9, FİZ 9, MAT 10)
+                main_text = get_subject_abbr(s_name) if s_name else clean_str
                 
-                painter.setPen(QColor("#1A1A1A"))
-                painter.setFont(QFont("Segoe UI", bot_font_size))
-                painter.drawText(bot_rect, Qt.AlignCenter | Qt.AlignTop, bot_text)
-            else:
-                painter.setPen(text_color)
-                painter.setFont(QFont("Segoe UI", 9, QFont.Bold))
-                painter.drawText(rect, Qt.AlignCenter, top_text)
+            # Dynamic font sizing for crystal clear readability
+            font_size = 10 if len(main_text) <= 6 else (9 if len(main_text) <= 10 else 8)
+            painter.setFont(QFont("Segoe UI", font_size, QFont.Bold))
+            painter.drawText(rect, Qt.AlignCenter, main_text)
                 
             # Lock icon: draw on top of everything
             if is_locked:
@@ -1030,6 +1041,11 @@ class DropTableWidget(QTableWidget):
                 teacher = lesson_info.get("teacher", "")
                 dur = int(lesson_info.get("duration", 1))
                 win = self.window()
+                periods = getattr(self.parent(), "_periods", 8)
+                if periods <= 0: periods = 8
+                day_idx = col // periods
+                period_idx = col % periods
+                
                 if teacher and hasattr(win, "data_store"):
                     for t in win.data_store.get("ogretmenler", []):
                         t_ad = t.get("ad", "")
@@ -1037,7 +1053,8 @@ class DropTableWidget(QTableWidget):
                             toff = t.get("timeoff", [])
                             if toff:
                                 for off in range(dur):
-                                    if col < len(toff) and (row + off) < len(toff[col]) and toff[col][row + off] == 0:
+                                    chk_p = period_idx + off
+                                    if day_idx < len(toff) and chk_p < len(toff[day_idx]) and toff[day_idx][chk_p] == 0:
                                         QMessageBox.warning(self, "Kısıtlama Engeli",
                                             f"⛔ {t_ad} öğretmeni bu zaman diliminde kısıtlıdır.\n"
                                             f"Önce öğretmenin kısıtlama ayarlarını değiştirin.")
@@ -1055,57 +1072,167 @@ class DropTableWidget(QTableWidget):
     def _get_lesson_origin(self, row, col):
         """Finds the true starting cell (origin_row, origin_col) and info of a placed lesson at (row, col)."""
         grid = self.parent()
-        if hasattr(grid, "_placed_lessons"):
-            for (r, c), info in list(grid._placed_lessons.items()):
-                dur = info.get("duration", 1)
-                if r == row and c <= col < c + dur:
-                    return r, c, dur, info
-                elif c == col and r <= row < r + dur:
-                    return r, c, dur, info
-        return row, col, max(1, self.rowSpan(row, col)), None
+        if hasattr(grid, "_placed_lessons") and (row, col) in grid._placed_lessons:
+            info = grid._placed_lessons[(row, col)]
+            orig_r = info.get("origin_row", row)
+            orig_c = info.get("origin_col", col)
+            dur = info.get("duration", 1)
+            return orig_r, orig_c, dur, info
+            
+        c_span = self.columnSpan(row, col)
+        r_span = self.rowSpan(row, col)
+        return row, col, max(c_span, r_span, 1), None
 
     def _delete_lesson_at(self, row, col):
+        from PySide6.QtCore import QTimer
         orig_r, orig_c, orig_dur, info = self._get_lesson_origin(row, col)
-        self.setSpan(orig_r, orig_c, 1, 1)
         grid = self.parent()
         
+        # Fallback: if info is None, try to get it from _placed_lessons at any offset
+        if not info and hasattr(grid, "_placed_lessons"):
+            for off in range(max(orig_dur, 3)):
+                info = grid._placed_lessons.get((orig_r, orig_c + off))
+                if info:
+                    break
+            if not info:
+                info = grid._placed_lessons.get((row, col))
+        
+        # ── Capture target_entity BEFORE any grid mutation ──
+        win = self.window()
+        view_mode = getattr(grid, "current_view_mode", "classes")
+        v_item = self.verticalHeaderItem(orig_r)
+        row_header_name = v_item.text().strip() if v_item else ""
+        
+        c_name = (info.get("class_name") or info.get("class") or "") if info else ""
+        t_name = (info.get("teacher_name") or info.get("teacher") or "") if info else ""
+        s_name = (info.get("subject_name") or info.get("subject") or "") if info else ""
+        
+        if view_mode == "classes":
+            target_entity = c_name or row_header_name
+        else:
+            target_entity = t_name or row_header_name
+        
+        import os as _os
+        _log_path = _os.path.join(_os.path.expanduser("~"), "Desktop", "delete_debug.log")
+        def _log(msg):
+            with open(_log_path, "a", encoding="utf-8") as _f:
+                _f.write(msg + "\n")
+            print(msg)
+        
+        _log(f"[DELETE] view={view_mode} row={orig_r} col={orig_c} dur={orig_dur} info={'YES' if info else 'NONE'}")
+        _log(f"[DELETE] c_name='{c_name}' t_name='{t_name}' s_name='{s_name}' row_header='{row_header_name}' target_entity='{target_entity}'")
+        
+        # ── 1. Clear grid cells visually ──
+        self.setSpan(orig_r, orig_c, 1, 1)
         for off in range(orig_dur):
-            # Horizontal (multi-sheet: row is class, col is time)
             tc = orig_c + off
             if tc < self.columnCount():
+                self.setSpan(orig_r, tc, 1, 1)
                 self.removeCellWidget(orig_r, tc)
                 self.takeItem(orig_r, tc)
                 self.setItem(orig_r, tc, None)
-            # Vertical (single entity: row is time, col is day)
-            tr = orig_r + off
-            if tr < self.rowCount() and tr != orig_r:
-                self.removeCellWidget(tr, orig_c)
-                self.takeItem(tr, orig_c)
-                self.setItem(tr, orig_c, None)
                 
+        # ── 2. Clear from in-memory placed_lessons dict ──
         if hasattr(grid, "_placed_lessons"):
             for off in range(orig_dur):
                 grid._placed_lessons.pop((orig_r, orig_c + off), None)
-                grid._placed_lessons.pop((orig_r + off, orig_c), None)
-            grid._placed_lessons.pop((orig_r, orig_c), None)
             
         self.viewport().update()
         self.update()
         
+        # ── 3. Update data_store in memory (NO disk write) ──
         win = self.window()
+        _log(f"[DEBUG] win is {type(win)}")
+        if not hasattr(win, "data_store") and hasattr(win, "parent") and hasattr(win.parent(), "data_store"):
+            win = win.parent()
+            _log(f"[DEBUG] fallback to win.parent() -> {type(win)}")
+
         if hasattr(win, "data_store"):
+            periods = int(getattr(grid, "_periods", 8))
+            if periods <= 0: periods = 8
+            del_day = int(orig_c) // periods
+            del_period = int(orig_c) % periods
+            
+            _log(f"[DELETE] periods={periods} del_day={del_day} del_period={del_period}")
+            
+            from auto_scheduler import matches_class, format_tr_name, normalize_clean
+            
+            target_cls = c_name or (row_header_name if view_mode == "classes" else "")
+            target_t = t_name or (row_header_name if view_mode == "teachers" else "")
+            
+            def safe_int(v, default=-1):
+                try: return int(v)
+                except: return default
+
+            def is_target_placement(p):
+                p_day = safe_int(p.get("day") if "day" in p else p.get("col", 0), 0)
+                p_period = safe_int(p.get("period") if "period" in p else p.get("row", 0), 0)
+                p_dur = safe_int(p.get("duration", 1), 1)
+                if p_day != del_day:
+                    return False
+                overlap = max(0, min(p_period + p_dur, del_period + orig_dur) - max(p_period, del_period))
+                if overlap <= 0:
+                    return False
+                
+                p_cls = (p.get("class_name") or p.get("class") or "").strip()
+                p_t = (p.get("teacher_name") or p.get("teacher") or "").strip()
+                p_s = (p.get("subject_name") or p.get("subject") or "").strip()
+                
+                if view_mode == "classes":
+                    if target_cls and not (matches_class(p_cls, target_cls) or matches_class(target_cls, p_cls) or p_cls == target_cls):
+                        return False
+                    if s_name and not (p_s == s_name or format_tr_name(p_s) == format_tr_name(s_name) or normalize_clean(p_s) == normalize_clean(s_name)):
+                        return False
+                    if t_name and p_t and not (p_t == t_name or format_tr_name(p_t) == format_tr_name(t_name) or normalize_clean(p_t) == normalize_clean(t_name)):
+                        return False
+                    return True
+                else:
+                    if target_t and not (format_tr_name(p_t) == format_tr_name(target_t) or normalize_clean(p_t) == normalize_clean(target_t) or p_t == target_t):
+                        return False
+                    if s_name and not (p_s == s_name or format_tr_name(p_s) == format_tr_name(s_name) or normalize_clean(p_s) == normalize_clean(s_name)):
+                        return False
+                    if c_name and p_cls and not (matches_class(p_cls, c_name) or matches_class(c_name, p_cls) or p_cls == c_name):
+                        return False
+                    return True
+            
+            gp_before = len(win.data_store.get("grid_placements", []))
+            
+            # Log first 3 placements that match day for debugging
+            day_matches = [p for p in win.data_store.get("grid_placements", []) if safe_int(p.get("day", p.get("col", -1))) == del_day]
+            for dm in day_matches[:5]:
+                _log(f"[DELETE] day_match: day={dm.get('day')} per={dm.get('period')} dur={dm.get('duration')} cls='{dm.get('class_name',dm.get('class',''))}' subj='{dm.get('subject_name',dm.get('subject',''))}' tch='{dm.get('teacher_name',dm.get('teacher',''))}' -> is_target={is_target_placement(dm)}")
+            
+            # Remove from grid_placements & auto_schedule_results (memory only)
+            if "grid_placements" in win.data_store:
+                win.data_store["grid_placements"] = [p for p in win.data_store.get("grid_placements", []) if not is_target_placement(p)]
+            if "auto_schedule_results" in win.data_store:
+                win.data_store["auto_schedule_results"] = [p for p in win.data_store.get("auto_schedule_results", []) if not is_target_placement(p)]
+            
+            gp_after = len(win.data_store.get("grid_placements", []))
+            _log(f"[DELETE] grid_placements: {gp_before} -> {gp_after} (removed {gp_before - gp_after})")
+            
+            # Remove from yerlesim (memory only)
             yerlesim = win.data_store.get("yerlesim", {})
             if isinstance(yerlesim, dict):
                 for off in range(orig_dur):
                     yerlesim.pop(f"{orig_r},{orig_c + off}", None)
-                    yerlesim.pop(f"{orig_r + off},{orig_c}", None)
                 
-        if hasattr(win, "save_db"):
-            win.save_db(sync_from_grid=True)
-        if hasattr(grid, "unplaced_dock") and hasattr(grid.unplaced_dock, "_rebuild_cards"):
-            grid.unplaced_dock._rebuild_cards()
-        if hasattr(win, "_refresh_tree"):
-            win._refresh_tree()
+            # Mark dirty for exit-time save
+            if hasattr(win, "mark_dirty"):
+                win.mark_dirty()
+                
+            if hasattr(win, "save_db"):
+                win.save_db(sync_from_grid=False)
+                
+            # ── 4. Refresh grid from updated memory (skip unplaced — we do our own deferred refresh) ──
+            if hasattr(win, "_refresh_grid"):
+                win._refresh_grid(skip_unplaced=True)
+                
+            # ── 5. Refresh of unplaced dock (after grid rebuild completes) ──
+            if hasattr(win, "_refresh_unplaced_lessons"):
+                win._refresh_unplaced_lessons(target_entity=target_entity)
+            if hasattr(win, "_refresh_tree"):
+                win._refresh_tree(target_entity=target_entity)
 
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
@@ -1502,7 +1629,7 @@ class TimetableGrid(QWidget):
 
         vh = self.table.verticalHeader()
         vh.setSectionResizeMode(QHeaderView.Fixed)
-        vh.setDefaultSectionSize(34)
+        vh.setDefaultSectionSize(38)
         vh.setDefaultAlignment(Qt.AlignCenter)
         vh.setStyleSheet("""
             QHeaderView::section {
@@ -1763,18 +1890,27 @@ class TimetableGrid(QWidget):
         
         self.table.setItem(row, col, item)
         
+        # Merge columns if duration > 1 (Whole school view spans horizontally)
+        if duration > 1:
+            self.table.setSpan(row, col, 1, duration)
+        else:
+            self.table.setSpan(row, col, 1, 1)
+        
         # Track placed lesson with day/period for lock matching
         periods = self._periods
         day_idx = col // periods if periods > 0 else 0
         period_idx = col % periods if periods > 0 else 0
-        self._placed_lessons[(row, col)] = {
+        info_dict = {
             "subject_name": subject_name, "color": color,
             "teacher_name": teacher_name, "class_name": class_name, "duration": duration,
             "locked": bool(locked),
             "is_manual": bool(is_manual),
-            "day_idx": day_idx, "period": period_idx
+            "day_idx": day_idx, "period": period_idx,
+            "origin_row": row, "origin_col": col
         }
-        
+        for off in range(duration):
+            self._placed_lessons[(row, col + off)] = info_dict
+            
     def get_placed_lessons(self):
         """Return dict of placed lessons for printing"""
         return self._placed_lessons
@@ -1808,11 +1944,11 @@ class TimetableGrid(QWidget):
         if hasattr(self.table, "asc_header"):
             self.table.asc_header.set_config(periods, days_list)
         
-        # Set compact column widths and row heights (30% zoomed for clear visibility)
+        # Set compact column widths and row heights (-5% adjusted for optimal UX)
         for i in range(total_cols):
-            self.table.setColumnWidth(i, 58)
+            self.table.setColumnWidth(i, 64)
         for r in range(len(class_list)):
-            self.table.setRowHeight(r, 34)
+            self.table.setRowHeight(r, 38)
             
         self.clear_grid()
 
@@ -1830,11 +1966,11 @@ class TimetableGrid(QWidget):
         if hasattr(self.table, "asc_header"):
             self.table.asc_header.set_config(periods, days_list)
         
-        # Set compact column widths and row heights (30% zoomed for clear visibility)
+        # Set compact column widths and row heights (-5% adjusted for optimal UX)
         for i in range(total_cols):
-            self.table.setColumnWidth(i, 58)
+            self.table.setColumnWidth(i, 64)
         for r in range(len(teacher_list)):
-            self.table.setRowHeight(r, 34)
+            self.table.setRowHeight(r, 38)
             
         self.clear_grid()
 
