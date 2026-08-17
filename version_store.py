@@ -159,6 +159,13 @@ def create_institution(name: str, color: str = None, password: str = "") -> dict
     # Automatically create initial empty version for this institution
     ensure_institution_has_version(slug)
     
+    try:
+        import threading
+        import cloud_sync
+        threading.Thread(target=cloud_sync.push_institution_to_rtdb, args=(slug,), daemon=True).start()
+    except Exception:
+        pass
+        
     return {"slug": slug, **meta, "version_count": 1, "path": inst_dir}
 
 def rename_institution(slug: str, new_name: str):
@@ -169,6 +176,13 @@ def rename_institution(slug: str, new_name: str):
         meta["name"] = new_name.strip()
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
+            
+        try:
+            import threading
+            import cloud_sync
+            threading.Thread(target=cloud_sync.push_institution_to_rtdb, args=(slug,), daemon=True).start()
+        except Exception:
+            pass
 
 def set_institution_color(slug: str, color: str):
     meta_path = os.path.join(_base_dir(), slug, "meta.json")
@@ -178,11 +192,25 @@ def set_institution_color(slug: str, color: str):
         meta["color"] = color
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
+            
+        try:
+            import threading
+            import cloud_sync
+            threading.Thread(target=cloud_sync.push_institution_to_rtdb, args=(slug,), daemon=True).start()
+        except Exception:
+            pass
 
 def delete_institution(slug: str):
     inst_dir = os.path.join(_base_dir(), slug)
     if os.path.isdir(inst_dir):
         shutil.rmtree(inst_dir)
+        
+    try:
+        import threading
+        import cloud_sync
+        threading.Thread(target=cloud_sync.delete_institution_from_rtdb, args=(slug,), daemon=True).start()
+    except Exception:
+        pass
 
 def get_institution_meta(slug: str) -> dict:
     meta_path = os.path.join(_base_dir(), slug, "meta.json")
@@ -398,6 +426,13 @@ def set_active_version(slug: str, version_filename: str):
         meta["active_version"] = version_filename
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
+            
+        try:
+            import threading
+            import cloud_sync
+            threading.Thread(target=cloud_sync.push_institution_to_rtdb, args=(slug,), daemon=True).start()
+        except Exception:
+            pass
 
 def ensure_institution_has_version(slug: str) -> str:
     """Ensures that the institution has at least one active version. Returns version filename."""

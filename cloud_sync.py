@@ -145,6 +145,23 @@ def push_institution_to_rtdb(slug: str, auth_data: dict = None) -> bool:
         return False
 
 
+def push_all_to_rtdb(auth_data: dict = None) -> tuple:
+    """Pushes all local institutions and their versions to RTDB."""
+    import version_store
+    base_dir = version_store._ensure_base()
+    if not os.path.exists(base_dir):
+        return True, "Yüklenecek kurum bulunamadı.", 0
+        
+    pushed = 0
+    for slug in os.listdir(base_dir):
+        inst_dir = os.path.join(base_dir, slug)
+        if os.path.isdir(inst_dir) and os.path.exists(os.path.join(inst_dir, "meta.json")):
+            if push_institution_to_rtdb(slug, auth_data):
+                pushed += 1
+                
+    return True, f"{pushed} kurum buluta başarıyla yüklendi.", pushed
+
+
 def delete_version_from_rtdb(slug: str, filename: str, auth_data: dict = None) -> bool:
     v_key = _sanitize_key(filename)
     url = f"{RTDB_URL}/institutions/{slug}/versions/{v_key}.json"

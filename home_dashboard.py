@@ -762,6 +762,30 @@ class HomeDashboard(QWidget):
         self._build_ui()
         self._refresh_institutions()
         
+        # Cross-PC Realtime Database Sync on startup
+        if self.auth_data and not self.auth_data.get("is_offline"):
+            self._start_initial_cloud_sync()
+            
+    def _start_initial_cloud_sync(self):
+        import threading
+        from cloud_sync import pull_all_from_rtdb
+        from PySide6.QtCore import QTimer
+        
+        def _worker():
+            try:
+                ok, _, _ = pull_all_from_rtdb(self.auth_data)
+                if ok:
+                    QTimer.singleShot(0, self._on_cloud_synced)
+            except Exception as e:
+                print(f"[HomeDashboard] Cloud pull note: {e}")
+                
+        threading.Thread(target=_worker, daemon=True).start()
+        
+    def _on_cloud_synced(self):
+        self._refresh_institutions()
+        if self._selected_slug:
+            self._refresh_versions()
+        
     def _build_ui(self):
         self.setStyleSheet(f"""
             HomeDashboard {{ background: {BG_CANVAS}; font-family: {FONT_FAMILY}; }}
@@ -1111,6 +1135,44 @@ class HomeDashboard(QWidget):
                 
         self._refresh_versions()
         
+    def _create_version_group_card(self, title: str, icon_str: str, badge_text: str, color_hex: str = "#0071E3"):
+        card = QFrame()
+        card.setStyleSheet(f"""
+            QFrame {{
+                background: #FFFFFF;
+                border: 1px solid {BORDER_HAIRLINE};
+                border-radius: 12px;
+            }}
+        """)
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(8)
+        
+        # Header
+        hdr = QHBoxLayout()
+        hdr.setContentsMargins(4, 2, 4, 6)
+        
+        title_lbl = QLabel(f"{icon_str}  <b>{title}</b>")
+        title_lbl.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        title_lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; background: transparent; border: none;")
+        hdr.addWidget(title_lbl)
+        hdr.addStretch(1)
+        
+        if badge_text:
+            badge = QLabel(badge_text)
+            badge.setFont(QFont("Segoe UI", 9, QFont.Bold))
+            badge.setStyleSheet(f"background: {color_hex}15; color: {color_hex}; padding: 3px 8px; border-radius: 6px; border: 1px solid {color_hex}30;")
+            hdr.addWidget(badge)
+            
+        lay.addLayout(hdr)
+        
+        content_lay = QVBoxLayout()
+        content_lay.setContentsMargins(0, 0, 0, 0)
+        content_lay.setSpacing(6)
+        lay.addLayout(content_lay)
+        
+        return card, content_lay
+
     def _refresh_versions(self):
         if not self._selected_slug:
             return
@@ -1145,13 +1207,54 @@ class HomeDashboard(QWidget):
             
             self.ver_list_layout.insertWidget(0, empty_box)
         else:
+            # Categorize into groups
+            active_list = []
+            manual_list = []
+            auto_list = []
+            
             for v in versions:
-                is_active = (v["filename"] == active_ver)
-                row = AppleVersionRow(self._selected_slug, v, is_active=is_active)
-                row.selected.connect(self._on_version_selected)
-                row.double_clicked.connect(self._on_version_double_clicked)
-                row.action_requested.connect(self._on_version_action)
-                self.ver_list_layout.insertWidget(self.ver_list_layout.count() - 1, row)
+                fn = v["filename"]
+                if fn == active_ver:
+                    active_list.append(v)
+                elif v.get("source") == "auto":
+                    auto_list.append(v)
+                else:
+                    manual_list.append(v)
+                    
+            # 1. Active Timetable Group
+            if active_list:
+                card, lay = self._create_version_group_card("Aktif ve Yayındaki Çizelge", "📌", "Aktif", APPLE_GREEN)
+                for v in active_list:
+                    row = AppleVersionRow(self._selected_slug, v, is_active=True)
+                    row.selected.connect(self._on_version_selected)
+                    row.double_clicked.connect(self._on_version_double_clicked)
+                    row.action_requested.connect(self._on_version_action)
+                    lay.addWidget(row)
+                self.ver_list_layout.insertWidget(self.ver_list_layout.count() - 1, card)
+                
+            # 2. Manual Saves Group
+            if manual_list:
+                card, lay = self._create_version_group_card("Manuel Kayıtlar & Düzenlemeler", "📂", f"{len(manual_list)} Kayıt", APPLE_BLUE)
+                for v in manual_list:
+                    is_active = (v["filename"] == active_ver)
+                    row = AppleVersionRow(self._selected_slug, v, is_active=is_active)
+                    row.selected.connect(self._on_version_selected)
+                    row.double_clicked.connect(self._on_version_double_clicked)
+                    row.action_requested.connect(self._on_version_action)
+                    lay.addWidget(row)
+                self.ver_list_layout.insertWidget(self.ver_list_layout.count() - 1, card)
+
+            # 3. Auto-Schedule Group
+            if auto_list:
+                card, lay = self._create_version_group_card("Otomatik Planlama Geçmişi", "⚡", f"{len(auto_list)} Versiyon", APPLE_AMBER)
+                for v in auto_list:
+                    is_active = (v["filename"] == active_ver)
+                    row = AppleVersionRow(self._selected_slug, v, is_active=is_active)
+                    row.selected.connect(self._on_version_selected)
+                    row.double_clicked.connect(self._on_version_double_clicked)
+                    row.action_requested.connect(self._on_version_action)
+                    lay.addWidget(row)
+                self.ver_list_layout.insertWidget(self.ver_list_layout.count() - 1, card)
                 
         # Password Protection with Blurred Content & Floating Modal
         is_locked = version_store.has_institution_password(self._selected_slug) and (self._selected_slug not in self._unlocked_slugs)
@@ -1172,10 +1275,8 @@ class HomeDashboard(QWidget):
             
     def _on_version_selected(self, filename):
         self._selected_version = filename
-        for i in range(self.ver_list_layout.count() - 1):
-            w = self.ver_list_layout.itemAt(i).widget()
-            if isinstance(w, AppleVersionRow):
-                w.set_selected(w.filename == filename)
+        for row in self.findChildren(AppleVersionRow):
+            row.set_selected(row.filename == filename)
                 
     def _on_version_double_clicked(self, slug, filename):
         self.open_timetable.emit(slug, filename)
@@ -1240,10 +1341,13 @@ class HomeDashboard(QWidget):
                 QMessageBox.critical(self, "Hata", msg)
 
     def _manual_cloud_sync(self):
-        from cloud_sync import pull_all_from_rtdb
-        ok, msg, count = pull_all_from_rtdb(self.auth_data)
-        if ok:
-            self._refresh_institutions()
-            QMessageBox.information(self, "Bulut Senkronizasyonu", f"{msg}\nTüm veriler güncellendi.")
+        from cloud_sync import push_all_to_rtdb, pull_all_from_rtdb
+        push_ok, push_msg, _ = push_all_to_rtdb(self.auth_data)
+        pull_ok, pull_msg, count = pull_all_from_rtdb(self.auth_data)
+        self._refresh_institutions()
+        if self._selected_slug:
+            self._refresh_versions()
+        if pull_ok:
+            QMessageBox.information(self, "Bulut Senkronizasyonu", f"{pull_msg}\n{push_msg}\nTüm cihazlar başarıyla eşitlendi.")
         else:
-            QMessageBox.warning(self, "Bulut Uyarısı", f"{msg}\nLütfen internet bağlantınızı kontrol edin.")
+            QMessageBox.warning(self, "Bulut Uyarısı", f"{pull_msg}\nLütfen internet bağlantınızı kontrol edin.")
