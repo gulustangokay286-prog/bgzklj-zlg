@@ -805,6 +805,7 @@ class LessonAssignmentDialog(QDialog):
         btn_del.clicked.connect(lambda: self._remove_subject_row(row_data))
         
         cb_subject.editTextChanged.connect(lambda t: self._on_subject_changed(row_data, t))
+        cb_subject.currentTextChanged.connect(lambda t: self._on_subject_changed(row_data, t))
         cb_tip.currentTextChanged.connect(lambda t: self._on_tip_changed(row_data))
         
         self._update_row_badge(row_data)
@@ -1118,7 +1119,8 @@ class LessonAssignmentDialog(QDialog):
                 if self.combined_classes:
                     assigned_classes = [" + ".join(self.combined_classes)]
                 else:
-                    assigned_classes = [default_class]
+                    # 'Tüm Sınıflar / Belirtilmedi' seçiliyse tüm sınıflara ata
+                    assigned_classes = list(all_classes_list) if all_classes_list else [default_class]
                     
             for c_name in assigned_classes:
                 cfg = r.get("class_configs", {}).get(c_name, {})
