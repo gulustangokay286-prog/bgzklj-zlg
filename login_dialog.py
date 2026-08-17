@@ -13,7 +13,7 @@ def get_asset_path(rel_path):
         return os.path.join(sys._MEIPASS, rel_path)
     return os.path.abspath(rel_path)
 
-LOGO_SHIELD_PATH = get_asset_path("IMG_4327 (1).PNG")
+LOGO_SHIELD_PATH = get_asset_path(os.path.join("resources", "logo.png"))
 TEACHER_CHAR_PATH = get_asset_path("ChatGPT Image 16 Ağu 2026 10_31_17.png")
 
 
@@ -221,7 +221,7 @@ class LoginDialog(QDialog):
         self.w_pass = ModernWhiteLineEdit("lock", "Şifre")
         self.w_pass.setEchoMode(QLineEdit.Password)
         self.w_pass.returnPressed.connect(self.check_login)
-        self.w_user.returnPressed.connect(lambda: self.w_pass.setFocus())
+        self.w_user.returnPressed.connect(self._on_user_return)
         
         card_lay.addWidget(self.w_user)
         card_lay.addWidget(self.w_pass)
@@ -290,6 +290,7 @@ class LoginDialog(QDialog):
                 background: #1E3A8A;
             }
         """)
+        self.btn_login.setDefault(True)
         self.btn_login.clicked.connect(self.check_login)
         card_lay.addWidget(self.btn_login)
         
@@ -345,6 +346,12 @@ class LoginDialog(QDialog):
             "is_offline": True
         }
         self.accept()
+
+    def _on_user_return(self):
+        if self.w_pass.text().strip():
+            self.check_login()
+        else:
+            self.w_pass.setFocus()
 
     def check_login(self):
         email = self.w_user.text().strip()

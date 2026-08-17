@@ -81,6 +81,13 @@ class BellAndBreakTimesDialog(QDialog):
         self.sp_lunch_dur.setValue(45)
         lay_wiz.addWidget(self.sp_lunch_dur, 1, 3)
         
+        # Connect signals for real-time calculation
+        self.tm_start.timeChanged.connect(self._auto_calculate_times)
+        self.sp_lesson_dur.valueChanged.connect(self._auto_calculate_times)
+        self.sp_break_dur.valueChanged.connect(self._auto_calculate_times)
+        self.cb_lunch_period.currentIndexChanged.connect(self._auto_calculate_times)
+        self.sp_lunch_dur.valueChanged.connect(self._auto_calculate_times)
+        
         btn_calc = QPushButton("⚡ Tüm Saatleri Otomatik Hesapla")
         btn_calc.setStyleSheet("background: #2563EB; color: white; border: none; padding: 6px 16px;")
         btn_calc.clicked.connect(self._auto_calculate_times)
@@ -256,5 +263,7 @@ class BellAndBreakTimesDialog(QDialog):
         settings = self.data_store.setdefault("settings", {})
         settings["bell_times"] = bell_times
         settings["bell_schedule"] = ", ".join(schedule_strs)
+        settings["periods"] = self.periods
         self.data_store["bell_times"] = bell_times
+        self.data_store["ders_saati"] = self.periods
         self.accept()

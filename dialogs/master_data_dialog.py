@@ -288,7 +288,7 @@ class MasterDataDialog(QDialog):
             so_class = class_teacher_map.get(t_name) or data.get("sinif_ogretmeni", "")
             
             # Branch
-            brans = data.get("brans") or data.get("kisa") or ""
+            brans = data.get("brans", "")
             
             # Assigned subjects & classes
             from dialogs.edit_forms import format_tr_name
@@ -811,7 +811,7 @@ class MasterDataDialog(QDialog):
             if d.exec():
                 data = d.get_data()
                 self.data_store["ogretmenler"].append(data)
-                self._add_row(self.table_ogretmen, [data.get("ad",""), data.get("kisa",""), "0", "Mevcut", data.get("sinif_ogretmeni",""), ""])
+                self._add_row(self.table_ogretmen, [data.get("ad",""), data.get("kisa",""), "0", "Mevcut", data.get("sinif_ogretmeni",""), data.get("brans",""), ""])
                 self._act_assign(teacher_name=data.get("ad"))
 
         trigger_save_db(self, self.data_store)

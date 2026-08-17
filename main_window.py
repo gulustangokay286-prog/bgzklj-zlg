@@ -546,6 +546,7 @@ class MainWindow(QMainWindow):
         p3.add_button("Sihirbaz",   "sihirbaz",self._open_wizard)
         p3.add_button("Temel\nBilgiler","bilgi",self._act_nyi)
         p3.add_divider()
+        p3.add_button("Toplu Atama\nListesi", "bilgi", self._act_assignment_list)
         p3.add_button("Dersler",    "ders",   self._open_subjects)
         p3.add_button("Sınıflar",   "sinif",  self._open_classes)
         p3.add_button("Derslikler", "derslik",self._open_rooms)
@@ -836,30 +837,55 @@ class MainWindow(QMainWindow):
             
         settings = self.data_store.get("settings", {})
         periods = int(settings.get("periods", 8))
+        if periods <= 0: periods = 8
+        
+        mode = getattr(self._grid, "current_view_mode", "classes")
+        placed = self._grid.get_placed_lessons()
+        if not placed:
+            return
+            
+        import re
+        def cls_sort_key(c):
+            m = re.match(r"(\d+)(.*)", str(c).strip())
+            return (int(m.group(1)), m.group(2)) if m else (999, str(c))
+            
         classes = self.data_store.get("siniflar", [])
-        class_names = [c.get("ad", "").strip() for c in classes if c.get("ad")]
+        class_names = sorted([c.get("ad", "").strip() for c in classes if c.get("ad")], key=cls_sort_key)
         if not class_names:
             class_names = ["9A", "9B", "10A", "10B", "11A", "11B", "11C", "12A", "12B"]
             
-        placed = self._grid.get_placed_lessons()
+        teachers = self.data_store.get("ogretmenler", [])
+        teacher_names = sorted([t.get("ad", "").strip() for t in teachers if t.get("ad")])
+        if not teacher_names:
+            teacher_names = ["Öğretmen 1"]
+
         new_global = []
         for (r, c), info in placed.items():
             p = dict(info)
             s_name = p.get("subject_name") or p.get("subject", "")
-            p["color"] = get_subject_color(s_name, self.data_store)
-            
-            # aSc multi-sheet görünümünde row = Sınıf indexi, c = Gün * period + saat
-            if r < len(class_names):
-                cls_name = class_names[r]
-                day = c // periods
-                period = c % periods
+            if not s_name or s_name.lower() in ["boş", "bos", "atanmadı"]:
+                continue
                 
-                p["class_name"] = cls_name
-                p["class"] = cls_name
-                p["day"] = day
-                p["col"] = day
-                p["period"] = period
-                p["row"] = period
+            day = c // periods
+            period = c % periods
+            p["day"] = day
+            p["col"] = day
+            p["period"] = period
+            p["row"] = period
+            p["duration"] = 1
+            
+            if mode == "teachers":
+                if r < len(teacher_names):
+                    p["teacher_name"] = teacher_names[r]
+                    p["teacher"] = teacher_names[r]
+                p["color"] = get_subject_color(s_name, self.data_store)
+                new_global.append(p)
+            else:
+                if r < len(class_names):
+                    cls_name = class_names[r]
+                    p["class_name"] = cls_name
+                    p["class"] = cls_name
+                p["color"] = get_subject_color(s_name, self.data_store)
                 new_global.append(p)
                 
         self.data_store["grid_placements"] = new_global
@@ -909,7 +935,8 @@ class MainWindow(QMainWindow):
                     dur = int(item.get("duration", 1))
                     col = int(item.get("day", item.get("col", 0)))
                     period = int(item.get("period", item.get("row", 0)))
-                    is_locked = bool(item.get("locked", False))
+                    is_locked = bool(item.get("locked", False) or item.get("is_manual", False))
+                    is_man = bool(item.get("is_manual", False))
                     
                     # Find matching teacher row with cache
                     if t_name in teacher_match_cache:
@@ -932,7 +959,7 @@ class MainWindow(QMainWindow):
                         for ext in range(dur):
                             target_c = actual_col + ext
                             if target_c < len(days_list) * periods:
-                                self._grid.set_cell(matching_row, target_c, s_name, color, t_name, 1, c_name, display_mode="teachers", locked=is_locked)
+                                self._grid.set_cell(matching_row, target_c, s_name, color, t_name, 1, c_name, display_mode="teachers", locked=is_locked, is_manual=is_man)
             else:
                 import re
                 def cls_sort_key(c):
@@ -957,7 +984,8 @@ class MainWindow(QMainWindow):
                     dur = int(item.get("duration", 1))
                     col = int(item.get("day", item.get("col", 0)))
                     period = int(item.get("period", item.get("row", 0)))
-                    is_locked = bool(item.get("locked", False))
+                    is_locked = bool(item.get("locked", False) or item.get("is_manual", False))
+                    is_man = bool(item.get("is_manual", False))
                     
                     # Support combined classes if comma or ampersand separated
                     from auto_scheduler import matches_class
@@ -983,15 +1011,14 @@ class MainWindow(QMainWindow):
                             for ext in range(dur):
                                 target_c = actual_col + ext
                                 if target_c < len(days_list) * periods:
-                                    self._grid.set_cell(matching_row, target_c, s_name, color, t_name, 1, tc, display_mode="classes", locked=is_locked)
+                                    self._grid.set_cell(matching_row, target_c, s_name, color, t_name, 1, tc, display_mode="classes", locked=is_locked, is_manual=is_man)
         finally:
             if hasattr(self._grid, "table"):
                 self._grid.table.setUpdatesEnabled(True)
                 self._grid.table.viewport().update()
         
         # Update unplaced dock
-        if hasattr(self._grid, "unplaced_dock"):
-            self._grid.unplaced_dock.update_list(self.data_store)
+        self._refresh_unplaced_lessons()
 
 
 
@@ -1119,89 +1146,120 @@ class MainWindow(QMainWindow):
         root_d.setExpanded(is_exp_d)
         root_r.setExpanded(is_exp_r)
         
-        unplaced = []
-        grid_placements = self.data_store.get("grid_placements", [])
-        for info in grid_placements:
-            if info.get("teacher_name"):
-                info["teacher_name"] = format_tr_name(info["teacher_name"])
-            if info.get("subject_name"):
-                info["color"] = get_subject_color(info["subject_name"])
+        self._refresh_unplaced_lessons(target_entity=target_entity)
 
-        if hasattr(self, "_grid") and hasattr(self._grid, "_placed_lessons"):
-            for key, info in self._grid._placed_lessons.items():
-                if info.get("teacher_name"):
-                    info["teacher_name"] = format_tr_name(info["teacher_name"])
-                if info.get("subject_name"):
-                    info["color"] = get_subject_color(info["subject_name"])
-        
-        unplaced = []
-        
-        # 1. Calculate already placed durations
-        placed_counts = {}
-        for info in self.data_store.get("grid_placements", []):
-            c_name = info.get("class_name", "").strip().upper()
-            t_name = format_tr_name(info.get("teacher_name", ""))
-            s_name = info.get("subject_name", "").strip().upper()
-            key = (c_name, s_name, t_name)
-            placed_counts[key] = placed_counts.get(key, 0) + info.get("duration", 1)
-
-        # 2. Add explicitly assigned lessons from self.data_store["atamalar"]
-        atamalar = self.data_store.get("atamalar", [])
-        existing_teachers = [t.get("ad") for t in self.data_store.get("ogretmenler", []) if t.get("ad")]
-        existing_subjects = [d.get("ad") for d in self.data_store.get("dersler", []) if d.get("ad")]
-        
-        # Auto-register subjects/teachers that were assigned but not yet in master data
-        for a in atamalar:
-            t_name = format_tr_name(a.get("teacher"))
-            s_name = a.get("subject")
-            if t_name and t_name not in existing_teachers:
-                self.data_store.setdefault("ogretmenler", []).append({"ad": t_name, "kisa": t_name[:4].upper()})
-                existing_teachers.append(t_name)
-            if s_name and s_name not in existing_subjects:
-                self.data_store.setdefault("dersler", []).append({"ad": s_name, "kisa": s_name[:3].upper(), "color": get_subject_color(s_name)})
-                existing_subjects.append(s_name)
-
-        for idx, atama in enumerate(atamalar):
-            subj_name = atama.get("subject", "Ders")
-            teacher_name = format_tr_name(atama.get("teacher", ""))
-            cls_name = atama.get("class", "")
-            dur = atama.get("duration", 1) # FIXED: Default is 1, not 2
-            type_str = str(atama.get("type", ""))
+    def _refresh_unplaced_lessons(self, target_entity=None):
+        if not hasattr(self, "_grid") or not hasattr(self._grid, "unplaced_dock"):
+            return
             
-            # Parse custom breakdown like "2+3", "3+1", "2+1", "1+1+1"
+        # Ensure grid_placements is up-to-date with current _placed_lessons
+        if hasattr(self, "_sync_grid_to_store"):
+            self._sync_grid_to_store()
+            
+        atamalar = self.data_store.get("atamalar", [])
+        grid_placements = self.data_store.get("grid_placements", [])
+        
+        from auto_scheduler import matches_class, format_tr_name, normalize_clean
+        from dialogs.color_picker_dialog import resolve_subject_color
+        
+        display_mode = getattr(self._grid, "current_view_mode", "classes")
+        if target_entity is None:
+            curr_item = self._tree.currentItem() if hasattr(self, "_tree") else None
+            if curr_item and curr_item.parent():
+                target_entity = curr_item.data(0, Qt.UserRole)
+            elif hasattr(self._grid, "table"):
+                cur_r = self._grid.table.currentRow()
+                if cur_r >= 0:
+                    v_item = self._grid.table.verticalHeaderItem(cur_r)
+                    if v_item:
+                        target_entity = v_item.text()
+                        
+        placed_pool = []
+        for p in grid_placements:
+            dur = int(p.get("duration", 1))
+            if dur > 0:
+                placed_pool.append({
+                    "subject": (p.get("subject_name") or p.get("subject") or "").strip(),
+                    "class": (p.get("class_name") or p.get("class") or "").strip(),
+                    "teacher": (p.get("teacher_name") or p.get("teacher") or "").strip(),
+                    "remaining": dur
+                })
+                
+        scoped_atamalar = []
+        if target_entity:
+            for a in atamalar:
+                c_a = (a.get("class") or a.get("sinif") or "").strip()
+                t_a = (a.get("teacher") or a.get("ogretmen") or "").strip()
+                if display_mode == "teachers":
+                    if t_a and (format_tr_name(t_a) == format_tr_name(target_entity) or normalize_clean(t_a) == normalize_clean(target_entity)):
+                        scoped_atamalar.append(a)
+                else:
+                    if c_a and (matches_class(c_a, target_entity) or matches_class(target_entity, c_a)):
+                        scoped_atamalar.append(a)
+        else:
+            scoped_atamalar = atamalar
+            
+        unplaced = []
+        for idx, atama in enumerate(scoped_atamalar):
+            s_name = (atama.get("subject") or atama.get("ders") or "Ders").strip()
+            t_name = (atama.get("teacher") or atama.get("ogretmen") or "").strip()
+            c_name = (atama.get("class") or atama.get("sinif") or "").strip()
+            dur = int(atama.get("duration", 1))
+            type_str = str(atama.get("type", "")).strip()
+            color = resolve_subject_color(s_name, self.data_store)
+            
+            # Breakdown
             parts = []
             if "+" in type_str:
                 for p in type_str.split("+"):
                     p_clean = p.strip()
-                    if p_clean.isdigit():
+                    if p_clean.isdigit() and int(p_clean) > 0:
                         parts.append(int(p_clean))
+            elif type_str.isdigit() and int(type_str) > 0:
+                parts = [int(type_str)]
             
             if not parts:
-                parts = [dur]
-                
-            key = (cls_name.strip().upper(), subj_name.strip().upper(), teacher_name)
+                rem = dur
+                while rem > 0:
+                    b = 2 if rem >= 2 else 1
+                    parts.append(b)
+                    rem -= b
+                    
+            s_fmt = format_tr_name(s_name)
+            t_fmt = format_tr_name(t_name)
             
             for p_idx, block_dur in enumerate(parts):
-                # Filter out placed durations!
-                if placed_counts.get(key, 0) >= block_dur:
-                    placed_counts[key] -= block_dur
-                    continue
-                elif placed_counts.get(key, 0) > 0:
-                    # Partially placed (e.g. 1 hour placed out of 2)
-                    remain = block_dur - placed_counts[key]
-                    placed_counts[key] = 0
-                    block_dur = remain
+                needed = block_dur
+                for p_item in placed_pool:
+                    if p_item["remaining"] <= 0:
+                        continue
+                    if format_tr_name(p_item["subject"]) != s_fmt:
+                        continue
+                    if t_name and p_item["teacher"] and format_tr_name(p_item["teacher"]) != t_fmt:
+                        continue
+                    p_c = p_item["class"]
+                    if c_name and p_c:
+                        if not (p_c == c_name or matches_class(p_c, c_name) or matches_class(c_name, p_c)):
+                            continue
                     
-                unplaced.append({
-                    "id": f"{idx}_{p_idx}",
-                    "subject_name": subj_name,
-                    "color": get_subject_color(subj_name),
-                    "teacher": teacher_name,
-                    "class_name": cls_name,
-                    "duration": block_dur
-                })
-            
-        self._grid.unplaced_dock.load_unplaced(unplaced, has_assignments=bool(atamalar))
+                    deduct = min(needed, p_item["remaining"])
+                    needed -= deduct
+                    p_item["remaining"] -= deduct
+                    if needed <= 0:
+                        break
+                        
+                if needed > 0:
+                    unplaced.append({
+                        "id": f"{idx}_{p_idx}",
+                        "subject_name": s_name,
+                        "color": color,
+                        "teacher": t_name,
+                        "class_name": c_name,
+                        "duration": needed
+                    })
+                    
+        has_assignments = bool(scoped_atamalar if target_entity else atamalar)
+        self._grid.unplaced_dock.load_unplaced(unplaced, has_assignments=has_assignments, display_mode=display_mode)
 
     def _check_planning_relations(self, subject, teacher, class_name, day, period, duration, is_move=False, orig_r=-1, orig_c=-1):
         """
@@ -1335,28 +1393,35 @@ class MainWindow(QMainWindow):
         orig_c = lesson_info.get("origin_col", -1)
         
         from timetable_grid import DAYS
-        day_name = DAYS[col] if 0 <= col < len(DAYS) else f"{col+1}. Gün"
+        settings = self.data_store.get("settings", {})
+        periods = int(settings.get("periods", self.data_store.get("ders_saati", 8)))
+        day_idx = col // periods if periods > 0 else 0
+        period_idx = col % periods if periods > 0 else 0
+        day_name = DAYS[day_idx] if 0 <= day_idx < len(DAYS) else f"{day_idx+1}. Gün"
         
         # Check if moving to exact same spot
         if is_move and orig_r == row and orig_c == col:
             return
             
-        # Check boundary
-        if row + duration > self._grid.table.rowCount():
-            QMessageBox.warning(self, "Geçersiz Konum", f"⚠️ Ders {duration} saatlik olduğu için {row+1}. saate sığmıyor (günlük sınır: {self._grid.table.rowCount()} saat)!")
+        # Check day boundary: multi-hour lesson must not spill over to next day
+        if period_idx + duration > periods:
+            QMessageBox.warning(
+                self, "Geçersiz Konum",
+                f"⚠️ Ders {duration} saatlik olduğu için günün kalan saatlerine sığmıyor!\n\n"
+                f"Günün {period_idx+1}. saatine bırakıldı, ancak gün {periods} saatten oluşuyor."
+            )
             return
             
         placed = self._grid.get_placed_lessons()
         
-        # Check if cell is occupied when adding from card dock (not a move)
+        # Check if any target cell in the span is occupied when adding from card dock (not a move)
         if not is_move:
             occupied_conflict = None
-            for (r, c), data in placed.items():
-                if c == col:
-                    placed_dur = data.get("duration", 1)
-                    if (row < r + placed_dur) and (r < row + duration):
-                        occupied_conflict = data
-                        break
+            for ext in range(duration):
+                check_c = col + ext
+                if (row, check_c) in placed:
+                    occupied_conflict = placed[(row, check_c)]
+                    break
             if occupied_conflict:
                 occ_subj = occupied_conflict.get("subject_name", occupied_conflict.get("subject", "Ders"))
                 occ_t = occupied_conflict.get("teacher_name", occupied_conflict.get("teacher", ""))
@@ -1365,7 +1430,7 @@ class MainWindow(QMainWindow):
                 msg.setIcon(QMessageBox.Warning)
                 msg.setText(
                     f"⚠️ <b>Bu Saatte Zaten Ders Var!</b><br><br>"
-                    f"<b>{day_name}</b> günü <b>{row+1}. ders saatinde</b> bu sınıfta zaten <b>{occ_subj}</b> ({occ_t}) dersi bulunmaktadır.<br><br>"
+                    f"<b>{day_name}</b> günü <b>{period_idx+1}. ders saatinde</b> bu sınıfta zaten <b>{occ_subj}</b> ({occ_t}) dersi bulunmaktadır.<br><br>"
                     f"Mevcut dersin üzerine yazmak istiyor musunuz?"
                 )
                 btn_yes = msg.addButton("⚠️ Evet, Üzerine Yaz", QMessageBox.AcceptRole)
@@ -1379,20 +1444,22 @@ class MainWindow(QMainWindow):
         # 1. Check Teacher Constraints (Time-off / Kapalı gün/saat)
         kisitlamalar = self.data_store.get("kisitlamalar", {})
         if teacher and teacher in kisitlamalar:
-            cell_key = f"{col},{row}"
-            is_available = kisitlamalar[teacher].get(cell_key, True)
-            if not is_available:
-                QMessageBox.warning(
-                    self, "Kısıtlama Engeli",
-                    f"⚠️ '{teacher}' öğretmeninin {day_name} günü {row+1}. ders saatinde 'ÇALIŞAMAZ / KAPALI' kısıtlaması bulunmaktadır!\nDers yerleştirilemez."
-                )
-                self.statusBar().showMessage(f"Kısıtlama engeli: {teacher} - {day_name} {row+1}. saat kapalı!")
-                return
+            for ext in range(duration):
+                check_p = period_idx + ext
+                cell_key = f"{day_idx},{check_p}"
+                is_available = kisitlamalar[teacher].get(cell_key, True)
+                if not is_available:
+                    QMessageBox.warning(
+                        self, "Kısıtlama Engeli",
+                        f"⚠️ '{teacher}' öğretmeninin {day_name} günü {check_p+1}. ders saatinde 'ÇALIŞAMAZ / KAPALI' kısıtlaması bulunmaktadır!\nDers yerleştirilemez."
+                    )
+                    self.statusBar().showMessage(f"Kısıtlama engeli: {teacher} - {day_name} {check_p+1}. saat kapalı!")
+                    return
                 
         # 2. Check Active Planning Relations in Real Time (Soft check - log to status bar)
         is_rel_ok, rel_msg = self._check_planning_relations(
             subject=subject_name, teacher=teacher, class_name=cls_name,
-            day=col, period=row, duration=duration,
+            day=day_idx, period=period_idx, duration=duration,
             is_move=is_move, orig_r=orig_r, orig_c=orig_c
         )
         if not is_rel_ok and rel_msg:
@@ -1406,42 +1473,22 @@ class MainWindow(QMainWindow):
             conflict_found = False
             conflict_class = ""
             conflict_subj = ""
-            conflict_period = row
+            conflict_period = period_idx
             
-            # Check 1: In active grid view
-            placed = self._grid.get_placed_lessons()
-            for (r, c), data in placed.items():
-                if is_move and r == orig_r and c == orig_c:
-                    continue
-                placed_dur = data.get("duration", 1)
-                if c == col:
-                    overlap = (row < r + placed_dur) and (r < row + duration)
-                    if overlap and data.get("teacher") == teacher and teacher != "":
-                        # Combined classes sharing the same teacher & subject are ALLOWED concurrently!
-                        if data.get("subject") == subject_name and (data.get("is_combined") or "," in str(data.get("class", "")) or "," in cls_name):
-                            continue
-                        conflict_found = True
-                        conflict_class = data.get("class", data.get("class_name", "Mevcut Sınıf"))
-                        conflict_subj = data.get("subject", data.get("subject_name", "Ders"))
-                        conflict_period = r
-                        break
+            for p_item in self.data_store.get("grid_placements", []):
+                p_t = format_tr_name(p_item.get("teacher_name") or p_item.get("teacher") or "")
+                if p_t == teacher:
+                    p_day = int(p_item.get("day") if "day" in p_item else p_item.get("col", 0))
+                    p_period = int(p_item.get("period") if "period" in p_item else p_item.get("row", 0))
+                    p_cls = p_item.get("class_name") or p_item.get("class") or ""
+                    p_sub = p_item.get("subject_name") or p_item.get("subject") or "Ders"
+                    
+                    if is_move and p_cls == cls_name and p_day == (orig_c // periods) and p_period == (orig_c % periods):
+                        continue
                         
-            # Check 2: Globally in data_store grid_placements
-            if not conflict_found:
-                for p_item in self.data_store.get("grid_placements", []):
-                    p_t = format_tr_name(p_item.get("teacher_name") or p_item.get("teacher") or "")
-                    if p_t == teacher:
-                        p_day = int(p_item.get("day") if "day" in p_item else p_item.get("col", 0))
-                        p_period = int(p_item.get("period") if "period" in p_item else p_item.get("row", 0))
-                        p_dur = int(p_item.get("duration", 1))
-                        p_cls = p_item.get("class_name") or p_item.get("class") or ""
-                        p_sub = p_item.get("subject_name") or p_item.get("subject") or "Ders"
-                        
-                        if is_move and p_cls == cls_name and p_day == orig_c and p_period == orig_r:
-                            continue
-                            
-                        if p_day == col:
-                            if (row < p_period + p_dur) and (p_period < row + duration):
+                    if p_day == day_idx:
+                        for ext in range(duration):
+                            if p_period == period_idx + ext:
                                 if p_sub == subject_name and ("," in p_cls or "," in cls_name or p_item.get("is_combined")):
                                     continue
                                 conflict_found = True
@@ -1449,6 +1496,8 @@ class MainWindow(QMainWindow):
                                 conflict_subj = p_sub
                                 conflict_period = p_period
                                 break
+                    if conflict_found:
+                        break
                                 
             if conflict_found:
                 msg_text = (
@@ -1470,60 +1519,21 @@ class MainWindow(QMainWindow):
                     self.statusBar().showMessage(f"Çakışma engellendi: {teacher} - {conflict_class} ile çakışıyor.")
                     return
 
-        # Check if Target is Occupied
-        target_info = None
-        target_r, target_c = -1, -1
-        
-        # Sadece move işlemiyse takas yapabiliriz
-        if is_move and orig_r >= 0 and orig_c >= 0:
-            for (r, c), data in placed.items():
-                placed_dur = data.get("duration", 1)
-                if c == col and r <= row < r + placed_dur:
-                    # Kendi kendimizle çakışmıyorsak hedefi bulduk
-                    if r != orig_r or c != orig_c:
-                        target_info = data
-                        target_r, target_c = r, c
-                    break
-
         # Passed checks! If it's a move, delete original first
         self._push_undo_state()
         if is_move and orig_r >= 0 and orig_c >= 0:
-            self._grid.table.setSpan(orig_r, orig_c, 1, 1)
-            for r_off in range(duration):
-                tr = orig_r + r_off
-                if tr < self._grid.table.rowCount():
-                    self._grid.table.setItem(tr, orig_c, None)
-            self._grid._placed_lessons.pop((orig_r, orig_c), None)
-            
-            if target_info:
-                # Delete target
-                target_dur = target_info.get("duration", 1)
-                self._grid.table.setSpan(target_r, target_c, 1, 1)
-                for r_off in range(target_dur):
-                    tr = target_r + r_off
-                    if tr < self._grid.table.rowCount():
-                        self._grid.table.setItem(tr, target_c, None)
-                self._grid._placed_lessons.pop((target_r, target_c), None)
-                
-                # Re-place target at origin (Swap)
-                target_teacher = target_info.get("teacher_name") or target_info.get("teacher", "")
-                target_cls = target_info.get("class_name") or target_info.get("class", "")
-                self._grid.set_cell(
-                    orig_r, orig_c, 
-                    target_info.get("subject_name", ""), 
-                    get_subject_color(target_info.get("subject_name", "")), 
-                    target_teacher, 
-                    target_dur, 
-                    class_name=target_cls
-                )
-                self.statusBar().showMessage(f"Takas (Swap) Başarılı: '{subject_name}' <-> '{target_info.get('subject_name', '')}'")
-            else:
-                self.statusBar().showMessage(f"'{subject_name}' dersi {day_name} günü {row+1}. ders saatine taşındı.")
+            for ext in range(duration):
+                clear_c = orig_c + ext
+                if clear_c < self._grid.table.columnCount():
+                    self._grid.table.setItem(orig_r, clear_c, None)
+                self._grid._placed_lessons.pop((orig_r, clear_c), None)
 
-        self._grid.set_cell(row, col, subject_name, color, teacher, duration, class_name=cls_name)
-        if not (is_move and orig_r >= 0 and orig_c >= 0 and target_info):
-            self.statusBar().showMessage(f"'{subject_name}' dersi {day_name} günü {row+1}. ders saatine yerleştirildi.")
+        # Place horizontally on the same day for all duration hours
+        for ext in range(duration):
+            target_c = col + ext
+            self._grid.set_cell(row, target_c, subject_name, color, teacher, 1, class_name=cls_name, is_manual=True)
             
+        self.statusBar().showMessage(f"'{subject_name}' ({duration} saat) dersi {day_name} günü {period_idx+1}–{period_idx+duration}. saatlere yerleştirildi.")
         self.save_db()
 
     # ── Actions ───────────────────────────────────────────────────────────────
@@ -1610,7 +1620,6 @@ class MainWindow(QMainWindow):
                 # Refresh selected cell info panel immediately
                 if hasattr(self._grid, "_on_cell_clicked"):
                     self._grid._on_cell_clicked(orig_r, orig_c)
-                    
                 self.statusBar().showMessage(f"Öğretmen Değiştirildi: {teacher_name} -> {d.new_teacher} (Sadece o gün için)")
             else:
                 self.save_db()
@@ -1652,35 +1661,77 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"💾 '{fname}' başarıyla kaydedildi.")
 
     def _act_print(self):
-        if hasattr(self, "save_db"):
-            self.save_db(sync_from_grid=True)
-        from PySide6.QtWidgets import QDialog
-        from dialogs.print_wizard import PrintWizardDialog
-        curr_view = "Sınıf Görünümü"
-        curr_entity = ""
-        wiz = PrintWizardDialog(self.data_store, default_entity=curr_entity, default_view=curr_view, parent=self)
-        if wiz.exec() == QDialog.Accepted:
-            filters = wiz.get_selected_filters()
-            filters["default_selection"] = curr_entity
-            from dialogs.print_preview import TimetablePrintPreview
-            dlg = TimetablePrintPreview(self.data_store, self._grid.get_placed_lessons(), filters, self)
-            dlg.direct_print()
+        self._handle_print_preview(is_direct_print=True)
 
     def _act_preview(self):
+        self._handle_print_preview(is_direct_print=False)
+
+    def _handle_print_preview(self, is_direct_print=False):
         if hasattr(self, "save_db"):
             self.save_db(sync_from_grid=True)
+            
+        selected_items = self._tree.selectedItems()
+        item = selected_items[0] if selected_items else self._tree.currentItem()
+        node_type = None
+        entity_name = None
+        
+        if item:
+            parent = item.parent()
+            if parent is None:
+                text = item.text(0)
+                if text.startswith("Öğretmenler"):
+                    node_type = "root_teachers"
+                elif text.startswith("Sınıflar"):
+                    node_type = "root_classes"
+            else:
+                p_text = parent.text(0)
+                if p_text.startswith("Öğretmenler"):
+                    node_type = "teacher"
+                    entity_name = item.text(0).split(" (")[0].strip()
+                elif p_text.startswith("Sınıflar"):
+                    node_type = "class"
+                    entity_name = item.text(0).strip()
+                    
+        # Fallback to current grid mode if nothing selected in tree
         from PySide6.QtWidgets import QDialog
-        from dialogs.print_wizard import PrintWizardDialog
+        from dialogs.report_selection_dialog import ReportSelectionDialog
         
-        curr_view = "Sınıf Görünümü"
-        curr_entity = ""
+        sel_dlg = ReportSelectionDialog(
+            self.data_store, 
+            default_type=node_type, 
+            default_entity=entity_name, 
+            is_direct_print=is_direct_print, 
+            parent=self
+        )
+        if sel_dlg.exec() != QDialog.Accepted:
+            return
+            
+        res = sel_dlg.get_result()
+        report_mode = res.get("mode")
+        entity_type = res.get("entity_type")
+        chosen_entity = res.get("entity_name")
         
-        wiz = PrintWizardDialog(self.data_store, default_entity=curr_entity, default_view=curr_view, parent=self)
-        if wiz.exec() == QDialog.Accepted:
-            filters = wiz.get_selected_filters()
-            filters["default_selection"] = curr_entity
-            dlg = TimetablePrintPreview(self.data_store, self._grid.get_placed_lessons(), filters, self)
+        filters = {
+            "lock_mode": report_mode,
+            "default_selection": chosen_entity or "",
+            "entity_type": entity_type
+        }
+        if entity_type == "class" and chosen_entity:
+            filters["classes"] = [chosen_entity]
+        elif entity_type == "teacher" and chosen_entity:
+            filters["teachers"] = [chosen_entity]
+            
+        from dialogs.print_preview import TimetablePrintPreview
+        dlg = TimetablePrintPreview(self.data_store, self._grid.get_placed_lessons(), filters, self)
+        if is_direct_print:
+            dlg.direct_print()
+        else:
             dlg.exec()
+
+    def _act_assignment_list(self):
+        from dialogs.assignment_list_dialog import ClassAssignmentsPreviewDialog
+        dlg = ClassAssignmentsPreviewDialog(self.data_store, self)
+        dlg.exec()
 
     def _act_close(self):
         self.data_store = {
@@ -1772,14 +1823,15 @@ class MainWindow(QMainWindow):
         self._push_undo_state()
         from dialogs.school_info import SchoolInfoDialog
         d = SchoolInfoDialog(parent=self, data_store=self.data_store)
-        if d.exec() == QDialog.Accepted:
-            settings = self.data_store.get("settings", {})
-            periods = int(settings.get("periods", 8))
-            if hasattr(self, "_grid"):
-                self._grid.set_periods(periods)
-            self.save_db()
-            self._refresh_tree()
-            self._restore_grid_placements()
+        d.exec()
+        
+        settings = self.data_store.get("settings", {})
+        periods = int(settings.get("periods", 8))
+        if hasattr(self, "_grid"):
+            self._grid.set_periods(periods)
+        self.save_db()
+        self._refresh_tree()
+        self._restore_grid_placements()
 
     def _open_classes(self):
         self._push_undo_state()
@@ -1889,6 +1941,8 @@ class MainWindow(QMainWindow):
 
     def _act_auto_schedule(self):
         self._push_undo_state()
+        self._sync_grid_to_store()
+        self.save_db(sync_from_grid=False)
         from dialogs.auto_schedule_dialog import AutoScheduleDialog
         from PySide6.QtWidgets import QDialog
         
@@ -1915,7 +1969,8 @@ class MainWindow(QMainWindow):
                     d_idx = r.get("day_idx") if "day_idx" in r else r.get("day", r.get("col", 0))
                     p_idx = r.get("period") if "period" in r else r.get("row", 0)
                     dur = int(r.get("duration", 1))
-                    color = get_subject_color(subj)
+                    color = get_subject_color(subj, self.data_store)
+                    is_lock = bool(r.get("locked", False) or r.get("is_manual", False))
                     
                     grid_placements.append({
                         "period": p_idx,
@@ -1929,7 +1984,9 @@ class MainWindow(QMainWindow):
                         "teacher": t_name,
                         "duration": dur,
                         "class_name": c_name,
-                        "class": c_name
+                        "class": c_name,
+                        "locked": is_lock,
+                        "is_manual": is_lock
                     })
                 
                 # Update datastore and save cleanly

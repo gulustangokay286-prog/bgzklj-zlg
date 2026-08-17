@@ -71,9 +71,12 @@ class AutoSchedulerWorker(QThread):
             if cn and cn not in all_class_names:
                 all_class_names.append(cn)
         for asgn in assignments:
-            cn = (asgn.get("class") or asgn.get("sinif") or asgn.get("class_name") or "").strip()
-            if cn and cn not in all_class_names:
-                all_class_names.append(cn)
+            raw_c = (asgn.get("class") or asgn.get("sinif") or asgn.get("class_name") or "").strip()
+            if raw_c:
+                parts = [p.strip() for p in raw_c.replace("&", ",").split(",") if p.strip()]
+                for cn in parts:
+                    if cn and cn not in all_class_names:
+                        all_class_names.append(cn)
         if not all_class_names:
             all_class_names = ["12/A"]
 
@@ -96,8 +99,24 @@ class AutoSchedulerWorker(QThread):
             t_name = format_tr_name(p.get("teacher_name") or p.get("teacher") or p.get("ogretmen") or "")
             subj = p.get("subject_name") or p.get("subject") or p.get("ders") or ""
             dur = int(p.get("duration", 1))
-            day = int(p.get("day") if "day" in p else (p.get("day_idx") if "day_idx" in p else p.get("col", 0)))
-            period = int(p.get("period") if "period" in p else p.get("row", 0))
+            if "day" in p and "period" in p:
+                day = int(p["day"])
+                period = int(p["period"])
+            elif "day_idx" in p and "period" in p:
+                day = int(p["day_idx"])
+                period = int(p["period"])
+            elif "col" in p and "row" in p:
+                col_val = int(p["col"])
+                row_val = int(p["row"])
+                if col_val >= len(days):
+                    day = col_val // periods if periods > 0 else 0
+                    period = col_val % periods if periods > 0 else 0
+                else:
+                    day = col_val
+                    period = row_val
+            else:
+                day = int(p.get("day", p.get("col", 0)))
+                period = int(p.get("period", p.get("row", 0)))
 
             if not c_name and t_name and subj:
                 for asgn in assignments:
@@ -107,11 +126,12 @@ class AutoSchedulerWorker(QThread):
                         c_name = (asgn.get("class") or asgn.get("sinif") or asgn.get("class_name") or "").strip()
                         if c_name: break
 
+            is_locked = bool(p.get("locked") in [True, "true", "True", 1, "1"] or p.get("is_manual") in [True, "true", "True", 1, "1"])
             if any(matches_class(c_name, tgt) for tgt in classes_to_schedule):
                 target_class_manual.append({
                     "class_name": c_name, "teacher_name": t_name,
                     "subject_name": subj, "day_idx": day, "period": period,
-                    "duration": dur, "is_manual": True
+                    "duration": dur, "is_manual": True, "locked": is_locked
                 })
                 for off in range(dur):
                     if t_name: global_teacher_occupied.add((t_name, day, period + off))
@@ -263,15 +283,22 @@ class AutoSchedulerWorker(QThread):
 
             # Manuel yerleşimleri son listeye ekle (ASLA SİLİNMEZ / DEĞİŞTİRİLMEZ)
             for m in existing_for_class:
-                total_scheduled_placements.append({
-                    "period": m["period"], "day": m["day_idx"],
-                    "row": m["period"], "col": m["day_idx"],
-                    "subject_name": m["subject_name"], "subject": m["subject_name"],
-                    "teacher_name": m["teacher_name"], "teacher": m["teacher_name"],
-                    "class_name": cn, "class": cn,
-                    "duration": m["duration"],
-                    "locked": True, "is_manual": True
-                })
+                already_in = any(
+                    (p_chk.get("day") == m["day_idx"] and 
+                     p_chk.get("period") == m["period"] and 
+                     matches_class(p_chk.get("class_name", ""), cn))
+                    for p_chk in total_scheduled_placements
+                )
+                if not already_in:
+                    total_scheduled_placements.append({
+                        "period": m["period"], "day": m["day_idx"],
+                        "row": m["period"], "col": m["day_idx"],
+                        "subject_name": m["subject_name"], "subject": m["subject_name"],
+                        "teacher_name": m["teacher_name"], "teacher": m["teacher_name"],
+                        "class_name": cn, "class": cn,
+                        "duration": m["duration"],
+                        "locked": True, "is_manual": True
+                    })
 
             if slots_needed == 0:
                 continue
@@ -315,24 +342,39 @@ class AutoSchedulerWorker(QThread):
                     candidate_blocks.append({"subject": s_name, "teacher": matching_t, "duration": 2, "is_combined": False})
                     candidate_blocks.append({"subject": s_name, "teacher": matching_t, "duration": 2, "is_combined": False})
 
-            # Manuel olarak önceden yerleştirilmiş ders saatlerini aday bloklardan düş (mükerrerliği önle)
+            # Manuel olarak önceden yerleştirilmiş ders saatlerini aday bloklardan tam saat bazında düş (mükerrerliği önle)
+            manual_hours_by_st = {}
             for m in existing_for_class:
                 m_subj = m.get("subject_name", "")
-                m_t = m.get("teacher_name", "")
+                m_t = format_tr_name(m.get("teacher_name", ""))
                 m_dur = int(m.get("duration", 1))
-                
-                found_idx = -1
-                for idx, cb in enumerate(candidate_blocks):
-                    if cb.get("subject") == m_subj and cb.get("teacher") == m_t and cb.get("duration") == m_dur:
-                        found_idx = idx
-                        break
-                if found_idx == -1:
-                    for idx, cb in enumerate(candidate_blocks):
-                        if cb.get("subject") == m_subj and cb.get("teacher") == m_t:
-                            found_idx = idx
-                            break
-                if found_idx != -1:
-                    candidate_blocks.pop(found_idx)
+                k = (m_subj, m_t)
+                manual_hours_by_st[k] = manual_hours_by_st.get(k, 0) + m_dur
+
+            for (m_subj, m_t), need_reduce in manual_hours_by_st.items():
+                rem_r = need_reduce
+                # 1. Önce tam veya daha küçük blokları çıkar
+                i = 0
+                while i < len(candidate_blocks) and rem_r > 0:
+                    cb = candidate_blocks[i]
+                    cb_t = format_tr_name(cb.get("teacher", ""))
+                    if cb.get("subject") == m_subj and (not m_t or not cb_t or cb_t == m_t):
+                        cb_dur = cb.get("duration", 1)
+                        if cb_dur <= rem_r:
+                            rem_r -= cb_dur
+                            candidate_blocks.pop(i)
+                            continue
+                    i += 1
+                # 2. Eğer hala düşülmesi gereken saat varsa ve daha büyük blok kaldıysa (örn. rem_r=1, blok=2), bloğun süresini kısalt
+                if rem_r > 0:
+                    for cb in candidate_blocks:
+                        cb_t = format_tr_name(cb.get("teacher", ""))
+                        if cb.get("subject") == m_subj and (not m_t or not cb_t or cb_t == m_t):
+                            cb_dur = cb.get("duration", 1)
+                            if cb_dur > rem_r:
+                                cb["duration"] -= rem_r
+                                rem_r = 0
+                                break
 
             # Saatlik bütçeyi hesapla ve eksik saatleri gerçek derslerle %100 doldur
             total_duration = sum(b.get("duration", 1) for b in candidate_blocks)
@@ -428,40 +470,47 @@ class AutoSchedulerWorker(QThread):
             unfilled_slots = [slot for slot in empty_slots if slot not in occupied_slots]
             
             if unfilled_slots:
-                class_subjects = [a.get("subject") for a in assignments if matches_class(a.get("class", ""), cn) and a.get("subject")]
-                if not class_subjects:
-                    class_subjects = [s.get("ad") for s in self.data_store.get("dersler", []) if s.get("ad")]
-                if not class_subjects:
-                    class_subjects = ["Rehberlik / Etüt"]
-                    
+                placed_counts = {}
+                for sol in solution:
+                    placed_counts[sol["subject"]] = placed_counts.get(sol["subject"], 0) + sol["duration"]
+                for m in existing_for_class:
+                    placed_counts[m["subject_name"]] = placed_counts.get(m["subject_name"], 0) + m["duration"]
+
+                needed_subjects = []
+                for asgn in assignments:
+                    if matches_class(asgn.get("class") or asgn.get("sinif") or asgn.get("class_name") or "", cn):
+                        s_name = asgn.get("subject") or asgn.get("ders") or ""
+                        t_name = format_tr_name(asgn.get("teacher") or asgn.get("ogretmen") or "")
+                        tot_req = int(asgn.get("duration") or asgn.get("saat") or asgn.get("toplam_saat") or 2)
+                        current_p = placed_counts.get(s_name, 0)
+                        if current_p < tot_req:
+                            for _ in range(tot_req - current_p):
+                                needed_subjects.append((s_name, t_name))
+
+                if not needed_subjects:
+                    for asgn in assignments:
+                        if matches_class(asgn.get("class") or asgn.get("sinif") or asgn.get("class_name") or "", cn):
+                            needed_subjects.append((asgn.get("subject", "Ders"), format_tr_name(asgn.get("teacher", ""))))
+                if not needed_subjects:
+                    for s in self.data_store.get("dersler", []):
+                        if s.get("ad"):
+                            needed_subjects.append((s["ad"], ""))
+                if not needed_subjects:
+                    needed_subjects = [("Rehberlik / Etüt", "")]
+
+                fill_idx = 0
                 for d, p in unfilled_slots:
-                    placed_fill = False
-                    for s_cand in class_subjects:
-                        orig_t = next((format_tr_name(a.get("teacher", "")) for a in assignments if a.get("subject") == s_cand and matches_class(a.get("class", ""), cn)), "")
-                        cand_t = find_available_branch_teacher(s_cand, orig_t, d, p, 1, global_teacher_occupied)
-                        
-                        solution.append({
-                            "day": d,
-                            "period": p,
-                            "duration": 1,
-                            "subject": s_cand,
-                            "teacher": cand_t
-                        })
-                        if cand_t: global_teacher_occupied.add((cand_t, d, p))
-                        placed_fill = True
-                        break
-                            
-                    if not placed_fill:
-                        s_fallback = class_subjects[0] if class_subjects else "Ders"
-                        cand_t = find_available_branch_teacher(s_fallback, "", d, p, 1, global_teacher_occupied)
-                        solution.append({
-                            "day": d,
-                            "period": p,
-                            "duration": 1,
-                            "subject": s_fallback,
-                            "teacher": cand_t
-                        })
-                        if cand_t: global_teacher_occupied.add((cand_t, d, p))
+                    s_cand, orig_t = needed_subjects[fill_idx % len(needed_subjects)]
+                    cand_t = find_available_branch_teacher(s_cand, orig_t, d, p, 1, global_teacher_occupied)
+                    solution.append({
+                        "day": d,
+                        "period": p,
+                        "duration": 1,
+                        "subject": s_cand,
+                        "teacher": cand_t
+                    })
+                    if cand_t: global_teacher_occupied.add((cand_t, d, p))
+                    fill_idx += 1
 
             for sol_item in solution:
                 dur = sol_item["duration"]
@@ -501,14 +550,21 @@ class AutoSchedulerWorker(QThread):
                             "duration": dur,
                             "is_manual": True
                         })
-                    total_scheduled_placements.append({
-                        "period": p, "day": d,
-                        "row": p, "col": d,
-                        "subject_name": s_name, "subject": s_name,
-                        "teacher_name": t_name, "teacher": t_name,
-                        "class_name": target_cn, "class": target_cn,
-                        "duration": dur
-                    })
+                    already_in = any(
+                        (p_chk.get("day") == d and 
+                         p_chk.get("period") == p and 
+                         matches_class(p_chk.get("class_name", ""), target_cn))
+                        for p_chk in total_scheduled_placements
+                    )
+                    if not already_in:
+                        total_scheduled_placements.append({
+                            "period": p, "day": d,
+                            "row": p, "col": d,
+                            "subject_name": s_name, "subject": s_name,
+                            "teacher_name": t_name, "teacher": t_name,
+                            "class_name": target_cn, "class": target_cn,
+                            "duration": dur
+                        })
 
             self.progress_updated.emit(total_placed_hours, total_target_hours)
 
@@ -604,6 +660,11 @@ class AutoSchedulerWorker(QThread):
                 for t in rel_teachers:
                     relation_teacher_afternoon.add(t)
 
+        max_block_by_subj = {}
+        for b in candidate_blocks:
+            s = b["subject"]
+            max_block_by_subj[s] = max(max_block_by_subj.get(s, 0), b.get("duration", 1))
+
         def get_max_daily_hours(s_name):
             if s_name in relation_max_daily:
                 return relation_max_daily[s_name]
@@ -611,17 +672,18 @@ class AutoSchedulerWorker(QThread):
                 return relation_max_daily[""]
             
             s_clean = s_name.upper().strip()
-            # Beden, Resim, Müzik, Görsel Sanatlar, Spor asla günde 2 saatten fazla olamaz!
+            req_min = max_block_by_subj.get(s_name, 2)
+            # Beden, Resim, Müzik, Görsel Sanatlar, Spor asla günde 2 saatten fazla olamaz (özel blok yoksa)!
             if any(k in s_clean for k in ["BEDEN", "MÜZİK", "MUZIK", "GÖRSEL", "GORSEL", "RESİM", "RESIM", "SANAT", "SPOR"]):
-                return 2
+                return max(2, req_min)
 
             w_total = subj_weekly_hours.get(s_name, 0)
             if w_total <= 5:
-                return 2
+                return max(2, req_min)
             elif w_total <= 10:
-                return 2
+                return max(2, req_min)
             else:
-                return max(2, (w_total + 4) // 5)
+                return max(2, req_min, (w_total + 4) // 5)
 
         units = list(candidate_blocks)
 

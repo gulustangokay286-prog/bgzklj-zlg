@@ -1149,20 +1149,23 @@ def _auto_short_code(text: str) -> str:
         # Diğer dersler kısa koda dönüştürülmeli
         "BİYOLOJİ": "BİYO",
         "BİYO": "BİYO",
-        "FİZİK": "FİZ",
-        "FİZ": "FİZ",
+        "FİZİK": "FİZİK",
+        "FİZ": "FİZİK",
         "KİMYA": "KİMYA",
         "KİM": "KİMYA",
-        "COĞRAFYA": "COĞ",
-        "COĞ": "COĞ",
-        "GEOMETRİ": "GEO",
-        "GEO": "GEO",
-        "EDEBİYAT": "EDEBİYAT",
-        "EDB": "EDEBİYAT",
-        "TÜRK DİLİ VE EDEBİYATI": "EDEBİYAT",
-        "TDE": "EDEBİYAT",
-        "MATEMATİK": "MAT",
-        "MAT": "MAT",
+        "COĞRAFYA": "COĞRAF",
+        "COĞ": "COĞRAF",
+        "GEOMETRİ": "GEOM",
+        "GEOMETRI": "GEOM",
+        "GEO": "GEOM",
+        "EDEBİYAT": "EDEB",
+        "EDB": "EDEB",
+        "TÜRK DİLİ VE EDEBİYATI": "TDE",
+        "TDE": "TDE",
+        "MATEMATİK": "MATE",
+        "MATEMATIK": "MATE",
+        "MAT": "MATE",
+        "MATE": "MATE",
         "İNGİLİZCE": "İNG",
         "İNG": "İNG",
         "ALMANCA": "ALM",
@@ -1176,8 +1179,8 @@ def _auto_short_code(text: str) -> str:
         "PROB": "PROB",
         
         # Kısa kodu olmayan diğer dersler
-        "BİLİŞİM": "BİLİŞİM",
-        "KODLAMA": "KODLAMA",
+        "BİLİŞİM": "BİLİŞ",
+        "KODLAMA": "KODLAM",
         "YAZILIM": "YAZILIM",
         "ROBOTİK": "ROBOTİK",
         "SAĞLIK": "SAĞLIK BİLGİSİ",
@@ -2449,6 +2452,10 @@ class OgretmenEditDialog(BaseEditForm):
         
         lay_gorev.addRow(QLabel("<b>Sınıf Öğretmeni (Rehberlik):</b>"), self.w_so)
         
+        self.w_brans = QLineEdit(self.existing_data.get("brans", ""))
+        self.w_brans.setPlaceholderText("Örn: Matematik, Geometri")
+        lay_gorev.addRow(QLabel("<b>Öğretmen Branşı:</b>"), self.w_brans)
+        
         self.chk_es_zamanli = QCheckBox("Aynı saatte çoklu/paralel ders girebilir (Çoklu Ders İzni)")
         self.chk_es_zamanli.setChecked(self.existing_data.get("es_zamanli", False))
         lay_gorev.addRow("", self.chk_es_zamanli)
@@ -2675,6 +2682,7 @@ class OgretmenEditDialog(BaseEditForm):
         return {
             "ad": ad_formatted, "kisa": self.w_kisa.text(),
             "renk": self._color, "sinif_ogretmeni": self.w_so.currentText(),
+            "brans": getattr(self, "w_brans", QLineEdit()).text().strip(),
             "ek_dersler": self.w_ek_dersler.text(),
             "es_zamanli": self.chk_es_zamanli.isChecked(),
             "ozel_alanlar": self.existing_data.get("ozel_alanlar", {})

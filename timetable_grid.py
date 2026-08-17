@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QFrame, QScrollArea, QMenu, QInputDialog,
     QMessageBox, QStyledItemDelegate, QStyle
 )
-from PySide6.QtCore import Qt, QMimeData, Signal, QByteArray, QRect
+from PySide6.QtCore import Qt, QMimeData, Signal, QByteArray, QRect, QRectF
 from PySide6.QtGui import QFont, QColor, QBrush, QDrag, QPainter, QPixmap, QAction, QPen, QLinearGradient, QIcon, QPainterPath
 
 def make_context_icon(symbol: str, color1: str, color2: str) -> QIcon:
@@ -176,43 +176,78 @@ def make_grid_action_icon(name: str, size: int = 24) -> QIcon:
     return QIcon(pix)
 
 def get_subject_abbr(subject_name: str, max_len: int = 6) -> str:
-    """Grid cell abbreviation: max 6 chars for readability."""
+    """Grid cell abbreviation: strictly max 6 chars for clean layout."""
     if not subject_name: return ""
-    s = subject_name.strip()
+    s = str(subject_name).strip()
+    tr_map = str.maketrans({'i': 'İ', 'ı': 'I', 'ç': 'Ç', 'ğ': 'Ğ', 'ö': 'Ö', 'ş': 'Ş', 'ü': 'Ü'})
+    s_up = s.translate(tr_map).upper()
+    
+    # Pre-process specific terms
+    s_up = s_up.replace("BEDEN EĞİTİMİ VE SPOR", "BEDEN")
+    s_up = s_up.replace("BEDEN EGITIMI VE SPOR", "BEDEN")
+    s_up = s_up.replace("BEDEN EĞİTİMİ", "BEDEN")
+    s_up = s_up.replace("BEDEN EGITIMI", "BEDEN")
+    s_up = s_up.replace("MATEMATİK", "MATE")
+    s_up = s_up.replace("MATEMATIK", "MATE")
+    s_up = s_up.replace("GEOMETRİ", "GEOM")
+    s_up = s_up.replace("GEOMETRI", "GEOM")
+    s_up = s_up.replace("COĞRAFYA", "COĞRAF")
+    s_up = s_up.replace("COGRAFYA", "COĞRAF")
     
     mapping = {
-        "MATEMATİK": "MAT", "FİZİK": "FİZ", "FİZ": "FİZ", "BİYOLOJİ": "BİY", "KİMYA": "KİM",
-        "GEOMETRİ": "GEO", "TARİH": "TAR", "COĞRAFYA": "COĞ", "TÜRKÇE": "TÜR",
-        "EDEBİYAT": "EDB", "TÜRK DİLİ VE EDEBİYATI": "TDE", "GÖRSEL SANATLAR": "GÖR",
-        "İNGİLİZCE": "İNG", "ALMANCA": "ALM", "FRANSIZCA": "FRA", "DİN": "DİN",
-        "DİN KÜLTÜRÜ": "DİN", "DİN KÜLTÜRÜ VE AHLAK BİLGİSİ": "DİN", "FELSEFE": "FEL",
-        "BEDEN": "BDN", "BEDEN EĞİTİMİ": "BDN", "BEDEN EĞİTİMİ VE SPOR": "BDN",
-        "MÜZİK": "MÜZ", "REHBERLİK": "REH", "SAĞLIK": "SAĞ", "ASTRONOMİ": "AST",
-        "SEÇMELİ": "SEÇ", "SEÇMELİ DERS": "SEÇ"
+        "TÜRK DİLİ VE EDEBİYATI": "TDE",
+        "TURK DILI VE EDEBIYATI": "TDE",
+        "TÜRKÇE": "TÜR",
+        "TURKCE": "TÜR",
+        "EDEBİYAT": "EDEB",
+        "EDEBIYAT": "EDEB",
+        "GÖRSEL SANATLAR": "GÖRSEL",
+        "GORSEL SANATLAR": "GÖRSEL",
+        "GÖRSEL": "GÖRSEL",
+        "GORSEL": "GÖRSEL",
+        "İNGİLİZCE": "İNG",
+        "INGILIZCE": "İNG",
+        "ALMANCA": "ALM",
+        "DİN KÜLTÜRÜ VE AHLAK BİLGİSİ": "DİN",
+        "DIN KULTURU VE AHLAK BILGISI": "DİN",
+        "DİN KÜLTÜRÜ": "DİN",
+        "DIN KULTURU": "DİN",
+        "FELSEFE": "FELS",
+        "REHBERLİK": "REHBER",
+        "REHBERLIK": "REHBER",
+        "BİYOLOJİ": "BİYO",
+        "BIYOLOJI": "BİYO",
+        "KİMYA": "KİMYA",
+        "KIMYA": "KİMYA",
+        "FİZİK": "FİZİK",
+        "FIZIK": "FİZİK",
+        "TARİH": "TARİH",
+        "TARIH": "TARİH",
+        "SEÇMELİ": "SEÇ",
+        "SECMELI": "SEÇ",
     }
     
-    import re
-    m = re.search(r'^(.+?)\s*(\d+)$', s)
-    num_suffix = ""
-    if m:
-        base_title = m.group(1).strip().upper()
-        num_suffix = m.group(2)
-    else:
-        base_title = s.upper()
-        
-    if base_title in mapping:
-        abbr = f"{mapping[base_title]}{num_suffix}"
-        return abbr[:max_len]
-        
     for k, v in mapping.items():
-        if base_title.startswith(k):
-            abbr = f"{v}{num_suffix}"
-            return abbr[:max_len]
+        if s_up == k or s_up.startswith(k):
+            s_up = s_up.replace(k, v)
+            break
             
-    # Smart abbreviation: first 3-4 chars + number suffix
-    base_abbr = base_title[:max(3, max_len - len(num_suffix))]
-    abbr = f"{base_abbr}{num_suffix}"
-    return abbr[:max_len]
+    import re
+    m = re.search(r'^(.+?)\s*(\d+)$', s_up)
+    if m:
+        base_title = m.group(1).strip()
+        num_suffix = f" {m.group(2)}"
+    else:
+        base_title = s_up
+        num_suffix = ""
+        
+    if len(base_title) + len(num_suffix) <= max_len:
+        return f"{base_title}{num_suffix}"
+        
+    allowed_base_len = max_len - len(num_suffix)
+    if allowed_base_len > 0:
+        return f"{base_title[:allowed_base_len]}{num_suffix}".strip()[:max_len]
+    return s_up[:max_len]
 
 
 from PySide6.QtCore import QRect
@@ -632,39 +667,88 @@ class UnplacedLessonsDock(QWidget):
     def update_list(self, data_store: dict = None, display_mode: str = None):
         if not data_store:
             return
+            
+        grid = self.parent()
+        if hasattr(grid, "window") and hasattr(grid.window(), "_refresh_unplaced_lessons"):
+            grid.window()._refresh_unplaced_lessons()
+            return
+
         if display_mode is None:
-            grid = self.parent()
             display_mode = getattr(grid, "current_view_mode", "classes") if grid else "classes"
             
         atamalar = data_store.get("atamalar", [])
         grid_placements = data_store.get("grid_placements", [])
+        from auto_scheduler import matches_class, format_tr_name
         from dialogs.color_picker_dialog import resolve_subject_color
+        
+        placed_pool = []
+        for p in grid_placements:
+            dur = int(p.get("duration", 1))
+            if dur > 0:
+                placed_pool.append({
+                    "subject": (p.get("subject_name") or p.get("subject") or "").strip(),
+                    "class": (p.get("class_name") or p.get("class") or "").strip(),
+                    "teacher": (p.get("teacher_name") or p.get("teacher") or "").strip(),
+                    "remaining": dur
+                })
+                
         unplaced_cards = []
         for idx, a in enumerate(atamalar):
-            s_name = a.get("subject", "")
-            c_name = a.get("class", "")
-            t_name = a.get("teacher", "")
+            s_name = (a.get("subject") or a.get("ders") or "Ders").strip()
+            c_name = (a.get("class") or a.get("sinif") or "").strip()
+            t_name = (a.get("teacher") or a.get("ogretmen") or "").strip()
             dur = int(a.get("duration", 1))
+            type_str = str(a.get("type", "")).strip()
             color = resolve_subject_color(s_name, data_store)
             
-            placed_count = 0
-            for p in grid_placements:
-                p_s = p.get("subject_name") or p.get("subject", "")
-                p_c = p.get("class_name") or p.get("class", "")
-                p_t = p.get("teacher_name") or p.get("teacher", "")
-                if p_s == s_name and (not c_name or p_c == c_name) and (not t_name or p_t == t_name):
-                    placed_count += int(p.get("duration", 1))
+            parts = []
+            if "+" in type_str:
+                for p in type_str.split("+"):
+                    p_clean = p.strip()
+                    if p_clean.isdigit() and int(p_clean) > 0:
+                        parts.append(int(p_clean))
+            elif type_str.isdigit() and int(type_str) > 0:
+                parts = [int(type_str)]
+                
+            if not parts:
+                rem = dur
+                while rem > 0:
+                    b = 2 if rem >= 2 else 1
+                    parts.append(b)
+                    rem -= b
                     
-            remaining = dur - placed_count
-            if remaining > 0:
-                unplaced_cards.append({
-                    "id": idx + 1,
-                    "subject_name": s_name,
-                    "color": color,
-                    "duration": remaining,
-                    "teacher": t_name,
-                    "class_name": c_name
-                })
+            s_fmt = format_tr_name(s_name)
+            t_fmt = format_tr_name(t_name)
+            
+            for p_idx, block_dur in enumerate(parts):
+                needed = block_dur
+                for p_item in placed_pool:
+                    if p_item["remaining"] <= 0:
+                        continue
+                    if format_tr_name(p_item["subject"]) != s_fmt:
+                        continue
+                    if t_name and p_item["teacher"] and format_tr_name(p_item["teacher"]) != t_fmt:
+                        continue
+                    p_c = p_item["class"]
+                    if c_name and p_c:
+                        if not (p_c == c_name or matches_class(p_c, c_name) or matches_class(c_name, p_c)):
+                            continue
+                            
+                    deduct = min(needed, p_item["remaining"])
+                    needed -= deduct
+                    p_item["remaining"] -= deduct
+                    if needed <= 0:
+                        break
+                        
+                if needed > 0:
+                    unplaced_cards.append({
+                        "id": f"{idx}_{p_idx}",
+                        "subject_name": s_name,
+                        "color": color,
+                        "duration": needed,
+                        "teacher": t_name,
+                        "class_name": c_name
+                    })
         self.load_unplaced(unplaced_cards, has_assignments=bool(atamalar), display_mode=display_mode)
 
 
@@ -771,12 +855,6 @@ class TimetableCellDelegate(QStyledItemDelegate):
             if not bot_text:
                 bot_text = clean_str if clean_str != s_name else ""
             
-            # Lock icon: draw small 🔒 in top-left corner
-            if is_locked:
-                painter.setFont(QFont("Segoe UI", 6))
-                painter.setPen(QColor("#000000"))
-                painter.drawText(QRect(rect.left() + 1, rect.top(), 14, 12), Qt.AlignLeft | Qt.AlignTop, "🔒")
-            
             top_rect = QRect(rect.left() + 2, rect.top() + 1, rect.width() - 4, rect.height() // 2)
             bot_rect = QRect(rect.left() + 2, rect.top() + rect.height() // 2 - 1, rect.width() - 4, rect.height() // 2)
             
@@ -796,6 +874,17 @@ class TimetableCellDelegate(QStyledItemDelegate):
                 painter.setPen(text_color)
                 painter.setFont(QFont("Segoe UI", 9, QFont.Bold))
                 painter.drawText(rect, Qt.AlignCenter, top_text)
+                
+            # Lock icon: draw on top of everything
+            if is_locked:
+                lock_bg = QRectF(rect.left() + 1, rect.top() + 1, 14, 14)
+                painter.setBrush(QColor(255, 255, 255, 200))
+                painter.setPen(Qt.NoPen)
+                painter.drawRoundedRect(lock_bg, 3, 3)
+                
+                painter.setFont(QFont("Segoe UI", 7))
+                painter.setPen(QColor("#000000"))
+                painter.drawText(QRectF(rect.left() + 1, rect.top() + 1, 14, 14), Qt.AlignCenter, "🔒")
             
         painter.restore()
 
@@ -967,21 +1056,35 @@ class DropTableWidget(QTableWidget):
         if hasattr(grid, "_placed_lessons"):
             for (r, c), info in list(grid._placed_lessons.items()):
                 dur = info.get("duration", 1)
-                if c == col and r <= row < r + dur:
+                if r == row and c <= col < c + dur:
+                    return r, c, dur, info
+                elif c == col and r <= row < r + dur:
                     return r, c, dur, info
         return row, col, max(1, self.rowSpan(row, col)), None
 
     def _delete_lesson_at(self, row, col):
         orig_r, orig_c, orig_dur, info = self._get_lesson_origin(row, col)
         self.setSpan(orig_r, orig_c, 1, 1)
-        for r_off in range(orig_dur):
-            tr = orig_r + r_off
-            if tr < self.rowCount():
+        grid = self.parent()
+        
+        for off in range(orig_dur):
+            # Horizontal (multi-sheet: row is class, col is time)
+            tc = orig_c + off
+            if tc < self.columnCount():
+                self.removeCellWidget(orig_r, tc)
+                self.takeItem(orig_r, tc)
+                self.setItem(orig_r, tc, None)
+            # Vertical (single entity: row is time, col is day)
+            tr = orig_r + off
+            if tr < self.rowCount() and tr != orig_r:
                 self.removeCellWidget(tr, orig_c)
                 self.takeItem(tr, orig_c)
                 self.setItem(tr, orig_c, None)
-        grid = self.parent()
+                
         if hasattr(grid, "_placed_lessons"):
+            for off in range(orig_dur):
+                grid._placed_lessons.pop((orig_r, orig_c + off), None)
+                grid._placed_lessons.pop((orig_r + off, orig_c), None)
             grid._placed_lessons.pop((orig_r, orig_c), None)
             
         self.viewport().update()
@@ -991,8 +1094,9 @@ class DropTableWidget(QTableWidget):
         if hasattr(win, "data_store"):
             yerlesim = win.data_store.get("yerlesim", {})
             if isinstance(yerlesim, dict):
-                yerlesim.pop(f"{orig_r},{orig_c}", None)
-                yerlesim.pop(f"{orig_c},{orig_r}", None)
+                for off in range(orig_dur):
+                    yerlesim.pop(f"{orig_r},{orig_c + off}", None)
+                    yerlesim.pop(f"{orig_r + off},{orig_c}", None)
                 
         if hasattr(win, "save_db"):
             win.save_db(sync_from_grid=True)
@@ -1031,7 +1135,7 @@ class DropTableWidget(QTableWidget):
         if orig_item and orig_item.text().strip():
             grid = self.parent()
             info = grid._placed_lessons.get((orig_r, orig_c), {}) if hasattr(grid, "_placed_lessons") else {}
-            is_currently_locked = info.get("locked", False)
+            is_currently_locked = bool(info.get("locked") in [True, "true", "True", 1, "1"])
             
             act_edit = menu.addAction(make_context_icon("✏️", "#2196F3", "#1976D2"), "Düzenle")
             act_move = menu.addAction(make_context_icon("✥", "#FFCA28", "#FF8F00"), "Taşı")
@@ -1040,9 +1144,9 @@ class DropTableWidget(QTableWidget):
                 act_unlock = None
             else:
                 act_lock = None
-                act_unlock = menu.addAction(make_context_icon("🔓", "#E53935", "#C62828"), "Bu Dersin Kilidini Aç")
+                act_unlock = menu.addAction(make_context_icon("🔓", "#E53935", "#C62828"), "Bu Dersin Kilidini Kaldır")
                 
-            act_unlock_all = menu.addAction(make_context_icon("🔓", "#E53935", "#C62828"), "Tüm Kilitleri Kaldır")
+            act_unlock_all = None
             act_color = menu.addAction(make_grid_action_icon("palette", 16), "Renk Paleti Ayarla...")
             menu.addSeparator()
             act_del = menu.addAction(make_context_icon("X", "#EF5350", "#C62828"), "Sil (Kaldır)")
@@ -1056,62 +1160,109 @@ class DropTableWidget(QTableWidget):
             elif action == act_lock:
                 if hasattr(grid, "_placed_lessons") and (orig_r, orig_c) in grid._placed_lessons:
                     info = grid._placed_lessons[(orig_r, orig_c)]
-                    info["locked"] = True
+                    s_name = info.get("subject_name", "")
+                    c_name = info.get("class_name", "")
+                    
+                    periods = getattr(grid, "_periods", 8)
+                    if periods <= 0: periods = 8
+                    day_idx = orig_c // periods
+                    day_start_col = day_idx * periods
+                    day_end_col = day_start_col + periods
+                    
+                    # Find all adjacent slots for the same lesson on this day
+                    cols_to_lock = [orig_c]
+                    # Scan left
+                    c_scan = orig_c - 1
+                    while c_scan >= day_start_col:
+                        nb = grid._placed_lessons.get((orig_r, c_scan))
+                        if nb and nb.get("subject_name") == s_name and nb.get("class_name") == c_name:
+                            cols_to_lock.append(c_scan)
+                            c_scan -= 1
+                        else:
+                            break
+                    # Scan right
+                    c_scan = orig_c + 1
+                    while c_scan < day_end_col:
+                        nb = grid._placed_lessons.get((orig_r, c_scan))
+                        if nb and nb.get("subject_name") == s_name and nb.get("class_name") == c_name:
+                            cols_to_lock.append(c_scan)
+                            c_scan += 1
+                        else:
+                            break
+                            
+                    for cl in cols_to_lock:
+                        if (orig_r, cl) in grid._placed_lessons:
+                            grid._placed_lessons[(orig_r, cl)]["locked"] = True
+                            
                     win = self.window()
                     if hasattr(win, "data_store") and win.data_store:
-                        day_idx = info.get("day_idx", orig_c)
-                        period_idx = info.get("period", orig_r)
-                        s_name = info.get("subject_name", "")
-                        c_name = info.get("class_name", "")
-                        for p in win.data_store.get("grid_placements", []):
-                            p_day = int(p.get("day", p.get("col", -1)))
-                            p_per = int(p.get("period", p.get("row", -1)))
-                            p_subj = p.get("subject_name") or p.get("subject") or ""
-                            p_cls = p.get("class_name") or p.get("class") or ""
-                            if p_subj == s_name and p_cls == c_name and p_day == day_idx and p_per == period_idx:
-                                p["locked"] = True
-                                break
+                        for cl in cols_to_lock:
+                            p_per = cl % periods
+                            for p in win.data_store.get("grid_placements", []):
+                                p_day = int(p.get("day", p.get("col", -1)))
+                                p_p = int(p.get("period", p.get("row", -1)))
+                                p_subj = p.get("subject_name") or p.get("subject") or ""
+                                p_cls = p.get("class_name") or p.get("class") or ""
+                                if p_subj == s_name and p_cls == c_name and p_day == day_idx and p_p == p_per:
+                                    p["locked"] = True
+                                    
                     if hasattr(win, "save_db"): win.save_db(sync_from_grid=False)
-                    if hasattr(win, "statusBar"): win.statusBar().showMessage(f"🔒 {info.get('subject_name','')} dersi kilitlendi.")
+                    if hasattr(win, "statusBar"): win.statusBar().showMessage(f"🔒 '{s_name}' ({len(cols_to_lock)} saat) dersi kilitlendi.")
                     self.viewport().update()
                     self.update()
             elif action == act_unlock:
                 if hasattr(grid, "_placed_lessons") and (orig_r, orig_c) in grid._placed_lessons:
                     info = grid._placed_lessons[(orig_r, orig_c)]
-                    info["locked"] = False
-                    if orig_item:
-                        orig_item.setText(orig_item.text().replace("🔒", ""))
-                    win = self.window()
-                    if hasattr(win, "data_store") and win.data_store:
-                        day_idx = info.get("day_idx", orig_c)
-                        period_idx = info.get("period", orig_r)
-                        s_name = info.get("subject_name", "")
-                        c_name = info.get("class_name", "")
-                        for p in win.data_store.get("grid_placements", []):
-                            p_day = int(p.get("day", p.get("col", -1)))
-                            p_per = int(p.get("period", p.get("row", -1)))
-                            p_subj = p.get("subject_name") or p.get("subject") or ""
-                            p_cls = p.get("class_name") or p.get("class") or ""
-                            if p_subj == s_name and p_cls == c_name and p_day == day_idx and p_per == period_idx:
-                                p["locked"] = False
-                                break
-                    if hasattr(win, "save_db"): win.save_db(sync_from_grid=False)
-                    if hasattr(win, "statusBar"): win.statusBar().showMessage(f"🔓 {info.get('subject_name','')} kilidini kaldırıldı.")
-                    self.viewport().update()
-                    self.update()
-            elif action == act_unlock_all:
-                if hasattr(grid, "_placed_lessons"):
-                    for (r, c), p_info in grid._placed_lessons.items():
-                        p_info["locked"] = False
-                        it = self.item(r, c)
+                    s_name = info.get("subject_name", "")
+                    c_name = info.get("class_name", "")
+                    
+                    periods = getattr(grid, "_periods", 8)
+                    if periods <= 0: periods = 8
+                    day_idx = orig_c // periods
+                    day_start_col = day_idx * periods
+                    day_end_col = day_start_col + periods
+                    
+                    cols_to_unlock = [orig_c]
+                    # Scan left
+                    c_scan = orig_c - 1
+                    while c_scan >= day_start_col:
+                        nb = grid._placed_lessons.get((orig_r, c_scan))
+                        if nb and nb.get("subject_name") == s_name and nb.get("class_name") == c_name:
+                            cols_to_unlock.append(c_scan)
+                            c_scan -= 1
+                        else:
+                            break
+                    # Scan right
+                    c_scan = orig_c + 1
+                    while c_scan < day_end_col:
+                        nb = grid._placed_lessons.get((orig_r, c_scan))
+                        if nb and nb.get("subject_name") == s_name and nb.get("class_name") == c_name:
+                            cols_to_unlock.append(c_scan)
+                            c_scan += 1
+                        else:
+                            break
+                            
+                    for cl in cols_to_unlock:
+                        if (orig_r, cl) in grid._placed_lessons:
+                            grid._placed_lessons[(orig_r, cl)]["locked"] = False
+                        it = self.item(orig_r, cl)
                         if it:
                             it.setText(it.text().replace("🔒", ""))
+                            
                     win = self.window()
                     if hasattr(win, "data_store") and win.data_store:
-                        for p in win.data_store.get("grid_placements", []):
-                            p["locked"] = False
+                        for cl in cols_to_unlock:
+                            p_per = cl % periods
+                            for p in win.data_store.get("grid_placements", []):
+                                p_day = int(p.get("day", p.get("col", -1)))
+                                p_p = int(p.get("period", p.get("row", -1)))
+                                p_subj = p.get("subject_name") or p.get("subject") or ""
+                                p_cls = p.get("class_name") or p.get("class") or ""
+                                if p_subj == s_name and p_cls == c_name and p_day == day_idx and p_p == p_per:
+                                    p["locked"] = False
+                                    
                     if hasattr(win, "save_db"): win.save_db(sync_from_grid=False)
-                    if hasattr(win, "statusBar"): win.statusBar().showMessage("🔓 Tüm derslerin kilitleri açıldı.")
+                    if hasattr(win, "statusBar"): win.statusBar().showMessage(f"🔓 '{s_name}' ({len(cols_to_unlock)} saat) dersinin kilidi kaldırıldı.")
                     self.viewport().update()
                     self.update()
             elif action == act_color:
@@ -1530,7 +1681,8 @@ class TimetableGrid(QWidget):
             win = self.window()
             data_store = getattr(win, "data_store", None)
             from dialogs.color_picker_dialog import resolve_subject_color
-            color = info.get("color") or resolve_subject_color(subj, data_store)
+            color_key = subj or info.get("subject") or ""
+            color = resolve_subject_color(color_key, data_store) if color_key else info.get("color")
             info["color"] = color
             is_locked = info.get("locked", False)
             
@@ -1558,6 +1710,12 @@ class TimetableGrid(QWidget):
             self.info_class_lbl.setText("")
             self.info_teacher_lbl.setText("")
 
+        win = self.window()
+        if hasattr(win, "_refresh_unplaced_lessons"):
+            v_item = self.table.verticalHeaderItem(row)
+            target_entity = v_item.text() if v_item else None
+            win._refresh_unplaced_lessons(target_entity=target_entity)
+
     def set_periods(self, periods: int):
         new_periods = max(1, min(16, int(periods)))
         if self._periods != new_periods:
@@ -1565,7 +1723,7 @@ class TimetableGrid(QWidget):
             self.table.setRowCount(self._periods)
             self.table.setVerticalHeaderLabels([f"{i+1}" for i in range(self._periods)])
 
-    def set_cell(self, row, col, subject_name, color, teacher_name="", duration=1, class_name="", display_mode="classes", locked=False):
+    def set_cell(self, row, col, subject_name, color, teacher_name="", duration=1, class_name="", display_mode="classes", locked=False, is_manual=False):
         class_name = str(class_name).replace("(ea)", "(EA)").replace("(say)", "(SAY)").replace("(soz)", "(SÖZ)").replace("(dil)", "(DİL)")
         if display_mode == "teachers":
             if "," in class_name or "&" in class_name or "+" in class_name:
@@ -1600,6 +1758,7 @@ class TimetableGrid(QWidget):
             "subject_name": subject_name, "color": color,
             "teacher_name": teacher_name, "class_name": class_name, "duration": duration,
             "locked": bool(locked),
+            "is_manual": bool(is_manual),
             "day_idx": day_idx, "period": period_idx
         }
         
