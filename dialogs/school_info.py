@@ -252,7 +252,11 @@ class SchoolInfoDialog(QDialog):
         from dialogs.bell_times_dialog import BellAndBreakTimesDialog
         cur_periods = int(self.cb_ders_saati.currentText())
         dlg = BellAndBreakTimesDialog(self.data_store, periods=cur_periods, parent=self)
-        dlg.exec()
+        if dlg.exec():
+            # Persist to file immediately
+            win = self.window()
+            if hasattr(win, "save_db"):
+                win.save_db(sync_from_grid=False)
 
     def _open_gunler_dialog(self):
         from dialogs.days_dialog import DaysAndHolidaysDialog

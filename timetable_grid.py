@@ -175,22 +175,24 @@ def make_grid_action_icon(name: str, size: int = 24) -> QIcon:
     p.end()
     return QIcon(pix)
 
-def get_subject_abbr(subject_name: str) -> str:
+def get_subject_abbr(subject_name: str, max_len: int = 6) -> str:
+    """Grid cell abbreviation: max 6 chars for readability."""
     if not subject_name: return ""
     s = subject_name.strip()
     
     mapping = {
-        "MATEMATİK": "MAT", "FİZİK": "F", "FİZ": "F", "BİYOLOJİ": "BİY", "KİMYA": "KİM",
+        "MATEMATİK": "MAT", "FİZİK": "FİZ", "FİZ": "FİZ", "BİYOLOJİ": "BİY", "KİMYA": "KİM",
         "GEOMETRİ": "GEO", "TARİH": "TAR", "COĞRAFYA": "COĞ", "TÜRKÇE": "TÜR",
         "EDEBİYAT": "EDB", "TÜRK DİLİ VE EDEBİYATI": "TDE", "GÖRSEL SANATLAR": "GÖR",
         "İNGİLİZCE": "İNG", "ALMANCA": "ALM", "FRANSIZCA": "FRA", "DİN": "DİN",
         "DİN KÜLTÜRÜ": "DİN", "DİN KÜLTÜRÜ VE AHLAK BİLGİSİ": "DİN", "FELSEFE": "FEL",
         "BEDEN": "BDN", "BEDEN EĞİTİMİ": "BDN", "BEDEN EĞİTİMİ VE SPOR": "BDN",
-        "MÜZİK": "MÜZ", "REHBERLİK": "REH", "SAĞLIK": "SAĞ", "ASTRONOMİ": "AST"
+        "MÜZİK": "MÜZ", "REHBERLİK": "REH", "SAĞLIK": "SAĞ", "ASTRONOMİ": "AST",
+        "SEÇMELİ": "SEÇ", "SEÇMELİ DERS": "SEÇ"
     }
     
     import re
-    m = re.search(r'^(.*?)\s*(\d+)$', s)
+    m = re.search(r'^(.+?)\s*(\d+)$', s)
     num_suffix = ""
     if m:
         base_title = m.group(1).strip().upper()
@@ -199,15 +201,18 @@ def get_subject_abbr(subject_name: str) -> str:
         base_title = s.upper()
         
     if base_title in mapping:
-        return f"{mapping[base_title]}{num_suffix}"
+        abbr = f"{mapping[base_title]}{num_suffix}"
+        return abbr[:max_len]
         
     for k, v in mapping.items():
         if base_title.startswith(k):
-            return f"{v}{num_suffix}"
+            abbr = f"{v}{num_suffix}"
+            return abbr[:max_len]
             
-    if len(base_title) >= 3:
-        return f"{base_title[:3]}{num_suffix}"
-    return f"{base_title}{num_suffix}"
+    # Smart abbreviation: first 3-4 chars + number suffix
+    base_abbr = base_title[:max(3, max_len - len(num_suffix))]
+    abbr = f"{base_abbr}{num_suffix}"
+    return abbr[:max_len]
 
 
 from PySide6.QtCore import QRect
@@ -736,16 +741,16 @@ class TimetableCellDelegate(QStyledItemDelegate):
             text_color = QColor("#000000")  # Always black for readability
             painter.setPen(text_color)
             
-            lock_prefix = "🔒 " if is_locked else ""
-            
             s_name = info.get("subject_name", "") if info else ""
             if not s_name:
                 s_name = clean_str
                 
+            # Use grid abbreviation for display (max 6 chars)
+            s_abbr = get_subject_abbr(s_name)
             display_mode = getattr(grid, "current_view_mode", "classes")
             
             if display_mode == "teachers":
-                top_text = lock_prefix + s_name
+                top_text = s_abbr
                 # Bottom text is the class name
                 c_name = info.get("class_name", "") if info else ""
                 if "," in c_name or "&" in c_name or "+" in c_name:
@@ -753,7 +758,7 @@ class TimetableCellDelegate(QStyledItemDelegate):
                 else:
                     bot_text = c_name.split("(")[0].strip()
             else:
-                top_text = lock_prefix + s_name
+                top_text = s_abbr
                 t_name = info.get("teacher_name", "") if info else ""
                 t_parts = t_name.strip().split()
                 if len(t_parts) >= 2:
@@ -766,14 +771,21 @@ class TimetableCellDelegate(QStyledItemDelegate):
             if not bot_text:
                 bot_text = clean_str if clean_str != s_name else ""
             
-            top_rect = QRect(rect.left(), rect.top() + 1, rect.width(), rect.height() // 2)
-            bot_rect = QRect(rect.left(), rect.top() + rect.height() // 2 - 1, rect.width(), rect.height() // 2)
+            # Lock icon: draw small 🔒 in top-left corner
+            if is_locked:
+                painter.setFont(QFont("Segoe UI", 6))
+                painter.setPen(QColor("#000000"))
+                painter.drawText(QRect(rect.left() + 1, rect.top(), 14, 12), Qt.AlignLeft | Qt.AlignTop, "🔒")
+            
+            top_rect = QRect(rect.left() + 2, rect.top() + 1, rect.width() - 4, rect.height() // 2)
+            bot_rect = QRect(rect.left() + 2, rect.top() + rect.height() // 2 - 1, rect.width() - 4, rect.height() // 2)
             
             # Dynamic font sizing to prevent overflow
-            top_font_size = 8 if len(top_text) < 12 else (7 if len(top_text) < 18 else 6)
-            bot_font_size = 7 if len(bot_text) < 12 else (6 if len(bot_text) < 18 else 5)
+            top_font_size = 8 if len(top_text) <= 6 else (7 if len(top_text) <= 10 else 6)
+            bot_font_size = 7 if len(bot_text) <= 8 else (6 if len(bot_text) <= 14 else 5)
             
             if bot_text:
+                painter.setPen(text_color)
                 painter.setFont(QFont("Segoe UI", top_font_size, QFont.Bold))
                 painter.drawText(top_rect, Qt.AlignCenter | Qt.AlignBottom, top_text)
                 
@@ -781,6 +793,7 @@ class TimetableCellDelegate(QStyledItemDelegate):
                 painter.setFont(QFont("Segoe UI", bot_font_size))
                 painter.drawText(bot_rect, Qt.AlignCenter | Qt.AlignTop, bot_text)
             else:
+                painter.setPen(text_color)
                 painter.setFont(QFont("Segoe UI", 9, QFont.Bold))
                 painter.drawText(rect, Qt.AlignCenter, top_text)
             
@@ -1336,7 +1349,7 @@ class TimetableGrid(QWidget):
 
         vh = self.table.verticalHeader()
         vh.setSectionResizeMode(QHeaderView.Fixed)
-        vh.setDefaultSectionSize(26)
+        vh.setDefaultSectionSize(36)
         vh.setDefaultAlignment(Qt.AlignCenter)
         vh.setStyleSheet("""
             QHeaderView::section {
@@ -1562,8 +1575,7 @@ class TimetableGrid(QWidget):
         else:
             display_text = get_subject_abbr(subject_name)
             
-        if locked:
-            display_text = f"🔒 {display_text}"
+        # Lock emoji is drawn by the delegate paint method, not in text
             
         item = QTableWidgetItem(display_text)
             
@@ -1580,11 +1592,15 @@ class TimetableGrid(QWidget):
         
         self.table.setItem(row, col, item)
         
-        # Track placed lesson
+        # Track placed lesson with day/period for lock matching
+        periods = self._periods
+        day_idx = col // periods if periods > 0 else 0
+        period_idx = col % periods if periods > 0 else 0
         self._placed_lessons[(row, col)] = {
             "subject_name": subject_name, "color": color,
             "teacher_name": teacher_name, "class_name": class_name, "duration": duration,
-            "locked": bool(locked)
+            "locked": bool(locked),
+            "day_idx": day_idx, "period": period_idx
         }
         
     def get_placed_lessons(self):

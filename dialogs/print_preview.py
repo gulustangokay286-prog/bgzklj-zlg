@@ -388,8 +388,12 @@ class TimetablePrintPreview(QDialog):
         @lru_cache(maxsize=2048)
         def normalize_clean(s):
             if not s: return ""
-            clean = "".join(c for c in str(s).translate(tr_map).lower() if c.isalnum())
-            return clean.split("ea")[0].split("say")[0].split("soz")[0].split("dil")[0].strip()
+            raw = str(s).strip()
+            # Remove parenthesized class type suffixes like (EA), (SAY), (SÖZ), (DİL)
+            import re
+            raw = re.sub(r'\s*\((?:ea|say|söz|soz|dil)\)\s*$', '', raw, flags=re.IGNORECASE)
+            clean = "".join(c for c in raw.translate(tr_map).lower() if c.isalnum())
+            return clean
             
         target_norm = normalize_clean(target_name)
         periods_per_day = int(self.data_store.get("settings", {}).get("periods", 8))
