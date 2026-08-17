@@ -760,8 +760,10 @@ class MasterDataDialog(QDialog):
             trigger_save_db(self, self.data_store)
             self._load_existing_data()
             p = self.parent()
+            if p and hasattr(p, "_refresh_grid"): p._refresh_grid()
             if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
             if p and hasattr(p, "_load_unplaced_lessons"): p._load_unplaced_lessons()
+            if p and hasattr(p, "_refresh_unplaced_lessons"): p._refresh_unplaced_lessons()
 
     def _act_new(self):
         idx = self.stack.currentIndex()

@@ -1035,6 +1035,44 @@ class LessonAssignmentDialog(QDialog):
             elif new_data:
                 self.data_store["atamalar"].append(new_data)
                 
+            # Clean up grid placements, auto_schedule_results, and yerlesim for removed assignments
+            active_tuples = {
+                (format_tr_name(a.get("subject", "")), format_tr_name(a.get("class", "")), teacher_name)
+                for a in (new_data if isinstance(new_data, list) else [new_data])
+                if a
+            }
+            
+            grid_data = self.data_store.get("grid_placements", [])
+            if isinstance(grid_data, list):
+                self.data_store["grid_placements"] = [
+                    p for p in grid_data
+                    if not (
+                        format_tr_name(p.get("teacher_name", p.get("teacher", ""))) == teacher_name and
+                        (format_tr_name(p.get("subject_name", p.get("subject", ""))), format_tr_name(p.get("class_name", p.get("class", ""))), teacher_name) not in active_tuples
+                    )
+                ]
+                
+            auto_data = self.data_store.get("auto_schedule_results", [])
+            if isinstance(auto_data, list):
+                self.data_store["auto_schedule_results"] = [
+                    p for p in auto_data
+                    if not (
+                        format_tr_name(p.get("teacher_name", p.get("teacher", ""))) == teacher_name and
+                        (format_tr_name(p.get("subject_name", p.get("subject", ""))), format_tr_name(p.get("class_name", p.get("class", ""))), teacher_name) not in active_tuples
+                    )
+                ]
+                
+            yerlesim = self.data_store.get("yerlesim", {})
+            if isinstance(yerlesim, dict):
+                for k in list(yerlesim.keys()):
+                    info = yerlesim[k]
+                    if isinstance(info, dict):
+                        p_sub = format_tr_name(info.get("subject_name", info.get("subject", "")))
+                        p_cls = format_tr_name(info.get("class_name", info.get("class", "")))
+                        p_tea = format_tr_name(info.get("teacher_name", info.get("teacher", "")))
+                        if p_tea == teacher_name and (p_sub, p_cls, p_tea) not in active_tuples:
+                            yerlesim.pop(k, None)
+
             trigger_save_db(self, self.data_store)
             
             # Refresh MainWindow and bottom dock if accessible
@@ -1048,8 +1086,10 @@ class LessonAssignmentDialog(QDialog):
                     p = p.parent()
             if win:
                 if hasattr(win, "save_db"): win.save_db(sync_from_grid=False)
+                if hasattr(win, "_refresh_grid"): win._refresh_grid()
                 if hasattr(win, "_refresh_tree"): win._refresh_tree()
                 if hasattr(win, "_load_unplaced_lessons"): win._load_unplaced_lessons()
+                if hasattr(win, "_refresh_unplaced_lessons"): win._refresh_unplaced_lessons()
                 
         super().accept()
 
