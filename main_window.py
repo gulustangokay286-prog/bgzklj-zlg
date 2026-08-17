@@ -2079,6 +2079,7 @@ class MainWindow(QMainWindow):
         self.save_db()
         self._refresh_tree()
         self._restore_grid_placements()
+        self._refresh_unplaced_lessons()
 
     def _open_school_info(self):
         self._push_undo_state()
@@ -2093,6 +2094,7 @@ class MainWindow(QMainWindow):
         self.save_db()
         self._refresh_tree()
         self._restore_grid_placements()
+        self._refresh_unplaced_lessons()
 
     def _open_classes(self):
         self._push_undo_state()
@@ -2102,6 +2104,7 @@ class MainWindow(QMainWindow):
         self.save_db()
         self._refresh_tree()
         self._restore_grid_placements()
+        self._refresh_unplaced_lessons()
 
     def _open_class_assignments(self, target_class=None):
         self._push_undo_state()
@@ -2132,6 +2135,7 @@ class MainWindow(QMainWindow):
             self.save_db()
             self._refresh_tree()
             self._restore_grid_placements()
+            self._refresh_unplaced_lessons()
 
     def _show_tree_context_menu(self, pos):
         from PySide6.QtWidgets import QMenu
@@ -2160,6 +2164,7 @@ class MainWindow(QMainWindow):
                     self.save_db()
                     self._refresh_tree()
                     self._restore_grid_placements()
+                    self._refresh_unplaced_lessons()
 
     def _open_rooms(self):
         self._push_undo_state()
@@ -2169,6 +2174,7 @@ class MainWindow(QMainWindow):
         self.save_db()
         self._refresh_tree()
         self._restore_grid_placements()
+        self._refresh_unplaced_lessons()
 
     def _open_teachers(self):
         self._push_undo_state()
@@ -2178,6 +2184,7 @@ class MainWindow(QMainWindow):
         self.save_db()
         self._refresh_tree()
         self._restore_grid_placements()
+        self._refresh_unplaced_lessons()
 
     def _open_electives(self):
         self._push_undo_state()
@@ -2185,6 +2192,8 @@ class MainWindow(QMainWindow):
         d = ElectivesDialog(data_store=self.data_store, parent=self)
         d.exec()
         self.save_db()
+        self._refresh_tree()
+        self._refresh_unplaced_lessons()
 
     def _open_relations(self):
         self._push_undo_state()
@@ -2192,6 +2201,8 @@ class MainWindow(QMainWindow):
         d = PlanningRelationsDialog(data_store=self.data_store, parent=self)
         d.exec()
         self.save_db()
+        self._refresh_tree()
+        self._refresh_unplaced_lessons()
 
     def _open_wizard(self):
         self._push_undo_state()
@@ -2199,6 +2210,8 @@ class MainWindow(QMainWindow):
         d.exec()
         self.save_db()
         self._refresh_tree()
+        self._restore_grid_placements()
+        self._refresh_unplaced_lessons()
 
     def _act_auto_schedule(self):
         self._push_undo_state()

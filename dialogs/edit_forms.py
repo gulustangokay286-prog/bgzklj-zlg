@@ -1077,13 +1077,21 @@ class LessonAssignmentDialog(QDialog):
             
             # Refresh MainWindow and bottom dock if accessible
             win = self.window()
-            if not win or not hasattr(win, "_grid"):
+            if not win or (not hasattr(win, "_grid") and not hasattr(win, "_refresh_unplaced_lessons")):
                 p = self.parent()
                 while p:
-                    if hasattr(p, "_grid"):
+                    if hasattr(p, "_grid") or hasattr(p, "_refresh_unplaced_lessons"):
                         win = p
                         break
                     p = p.parent()
+                    
+            if not win or (not hasattr(win, "_grid") and not hasattr(win, "_refresh_unplaced_lessons")):
+                from PySide6.QtWidgets import QApplication
+                for top in QApplication.topLevelWidgets():
+                    if hasattr(top, "_grid") or hasattr(top, "_refresh_unplaced_lessons"):
+                        win = top
+                        break
+                        
             if win:
                 if hasattr(win, "save_db"): win.save_db(sync_from_grid=False)
                 if hasattr(win, "_refresh_grid"): win._refresh_grid()
@@ -2658,6 +2666,9 @@ class OgretmenEditDialog(BaseEditForm):
             trigger_save_db(self, data_store)
             if hasattr(p, "save_db"): p.save_db()
             if hasattr(p, "_refresh_tree"): p._refresh_tree()
+            if hasattr(p, "_refresh_unplaced_lessons"): p._refresh_unplaced_lessons()
+            if hasattr(p, "_restore_grid_placements"): p._restore_grid_placements()
+            if hasattr(p, "_refresh_grid"): p._refresh_grid()
             
             # Update local UI list
             self.list_assignments.clear()

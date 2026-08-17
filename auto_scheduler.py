@@ -70,22 +70,30 @@ class AutoSchedulerWorker(QThread):
             cn = c.get("ad", "").strip()
             if cn and cn not in all_class_names:
                 all_class_names.append(cn)
+                
+        assigned_class_names = set()
         for asgn in assignments:
             raw_c = (asgn.get("class") or asgn.get("sinif") or asgn.get("class_name") or "").strip()
             if raw_c:
-                parts = [p.strip() for p in raw_c.replace("&", ",").split(",") if p.strip()]
-                for cn in parts:
-                    if cn and cn not in all_class_names:
-                        all_class_names.append(cn)
-        if not all_class_names:
-            all_class_names = ["12/A"]
+                for p_c in raw_c.replace("&", ",").replace("+", ",").split(","):
+                    p_clean = p_c.strip()
+                    if p_clean:
+                        assigned_class_names.add(p_clean)
+                        for full_c in all_class_names:
+                            if matches_class(full_c, p_clean):
+                                assigned_class_names.add(full_c)
 
         # Hangi sınıflar planlanacak?
         if self.target_class:
             matched_targets = [c for c in all_class_names if matches_class(c, self.target_class)]
             classes_to_schedule = matched_targets if matched_targets else [self.target_class]
         else:
-            classes_to_schedule = all_class_names
+            # SADECE ataması (atamalar) olan sınıfları planla! Ataması olmayan sınıflara (örn. 10, 11, 12) ASLA ders yerleştirme!
+            classes_to_schedule = [c for c in all_class_names if any(matches_class(c, ac) or matches_class(ac, c) for ac in assigned_class_names)]
+            if not classes_to_schedule and assigned_class_names:
+                classes_to_schedule = list(assigned_class_names)
+            if not classes_to_schedule:
+                classes_to_schedule = all_class_names
 
         # 1. Var olan yerleşimleri ayır:
         # - Hedef sınıfa ait olmayan yerleşimler aynen korunur.
@@ -267,7 +275,7 @@ class AutoSchedulerWorker(QThread):
         total_target_hours = 0
         total_placed_hours = 0
 
-        # Her hedef sınıf için A* SEARCH ile boşluksuz tam dolum yap
+        # Her hedef sınıf için A* SEARCH ile sadece gerçek atamaları yerleştir
         for cn in classes_to_schedule:
             if not self._is_running:
                 return
@@ -293,10 +301,6 @@ class AutoSchedulerWorker(QThread):
                     if (d, p) not in occupied_slots:
                         empty_slots.append((d, p))
 
-            slots_needed = len(empty_slots)
-            total_target_hours += total_class_slots
-            total_placed_hours += len(occupied_slots)
-
             # Manuel yerleşimleri son listeye ekle (ASLA SİLİNMEZ / DEĞİŞTİRİLMEZ)
             for m in existing_for_class:
                 already_in = any(
@@ -315,12 +319,14 @@ class AutoSchedulerWorker(QThread):
                         "duration": m["duration"],
                         "locked": True, "is_manual": True
                     })
+                    total_placed_hours += m["duration"]
 
-            if slots_needed == 0:
-                continue
-
-            # Aday dersleri hazırla
+            # Aday dersleri hazırla (SADECE bu sınıfa atanmış dersler)
             asgns = [a for a in assignments if matches_class(a.get("class") or a.get("sinif") or a.get("class_name") or "", cn)]
+            
+            if not asgns and not existing_for_class:
+                # Sınıfa hiçbir atama yapılmamışsa BU SINIFI BOŞ BIRAK, ASLA SAHTE DERS ÜRETME!
+                continue
             
             candidate_blocks = []
             if asgns:
@@ -328,9 +334,6 @@ class AutoSchedulerWorker(QThread):
                     raw_type = str(asgn.get("type", "")).strip()
                     t_name = format_tr_name(asgn.get("teacher") or asgn.get("ogretmen") or asgn.get("teacher_name") or "")
                     s_name = asgn.get("subject") or asgn.get("ders") or asgn.get("subject_name") or ""
-                    
-                    t_name_clean = normalize_clean(t_name) if t_name else ""
-                    t_name_fmt = format_tr_name(t_name) if t_name else ""
                     
                     is_comb = bool(asgn.get("is_combined") or "," in str(asgn.get("class", "")) or "&" in str(asgn.get("class", "")))
                     if raw_type and "+" in raw_type:
@@ -345,18 +348,6 @@ class AutoSchedulerWorker(QThread):
                             b_dur = 2 if h >= 2 else 1
                             candidate_blocks.append({"subject": s_name, "teacher": t_name, "duration": b_dur, "is_combined": is_comb})
                             h -= b_dur
-            else:
-                # Sınıfa özel atama yoksa okulun ders listesinden otomatik dağıt
-                all_school_subs = [s.get("ad") for s in self.data_store.get("dersler", []) if s.get("ad")]
-                if not all_school_subs:
-                    all_school_subs = ["Matematik", "Türkçe", "Fizik", "Kimya", "Biyoloji", "Tarih", "Coğrafya", "İngilizce"]
-                for s_name in all_school_subs:
-                    # Uygun branş hocası bul
-                    matching_t = next((format_tr_name(t.get("ad")) for t in self.data_store.get("ogretmenler", []) if t.get("ad") and (s_name.lower() in t.get("ad", "").lower() or t.get("brans", "") == s_name)), "")
-                    if not matching_t and self.data_store.get("ogretmenler"):
-                        matching_t = format_tr_name(self.data_store["ogretmenler"][0].get("ad", ""))
-                    candidate_blocks.append({"subject": s_name, "teacher": matching_t, "duration": 2, "is_combined": False})
-                    candidate_blocks.append({"subject": s_name, "teacher": matching_t, "duration": 2, "is_combined": False})
 
             # Manuel olarak önceden yerleştirilmiş ders saatlerini aday bloklardan tam saat bazında düş (mükerrerliği önle)
             manual_hours_by_st = {}
@@ -392,58 +383,11 @@ class AutoSchedulerWorker(QThread):
                                 rem_r = 0
                                 break
 
-            # Saatlik bütçeyi hesapla ve eksik saatleri gerçek derslerle %100 doldur
-            total_duration = sum(b.get("duration", 1) for b in candidate_blocks)
-            if slots_needed > total_duration:
-                diff = slots_needed - total_duration
-                # Havuzdaki tüm dersleri de ekle
-                available_subjects = [s.get("ad") for s in self.data_store.get("dersler", []) if s.get("ad")]
-                if asgns:
-                    asgn_idx = 0
-                    while diff > 0:
-                        target_asgn = asgns[asgn_idx % len(asgns)]
-                        s_name = target_asgn.get("subject") or target_asgn.get("ders") or "Ders"
-                        t_name = format_tr_name(target_asgn.get("teacher") or target_asgn.get("ogretmen") or "")
-                        t_clean = normalize_clean(t_name) if t_name else ""
-                        t_fmt = format_tr_name(t_name) if t_name else ""
-                        b_dur = 2 if diff >= 2 else 1
-                        candidate_blocks.append({
-                            "subject": s_name,
-                            "teacher": t_name,
-                            "duration": b_dur,
-                            "is_combined": bool(target_asgn.get("is_combined"))
-                        })
-                        diff -= b_dur
-                        asgn_idx += 1
-                        # If cycling through assigned subjects exceeds typical weekly limit, cycle through master subjects
-                        if asgn_idx >= len(asgns) * 4 and available_subjects:
-                            for extra_s in available_subjects:
-                                if diff <= 0: break
-                                b_dur = 2 if diff >= 2 else 1
-                                candidate_blocks.append({
-                                    "subject": extra_s,
-                                    "teacher": "",
-                                    "duration": b_dur,
-                                    "is_combined": False
-                                })
-                                diff -= b_dur
-                else:
-                    all_subs = available_subjects or ["Ders"]
-                    sub_idx = 0
-                    while diff > 0:
-                        s_name = all_subs[sub_idx % len(all_subs)]
-                        matching_t = next((format_tr_name(t.get("ad")) for t in self.data_store.get("ogretmenler", []) if t.get("ad") and (s_name.lower() in t.get("ad", "").lower() or t.get("brans", "") == s_name)), "")
-                        t_clean = normalize_clean(matching_t) if matching_t else ""
-                        t_fmt = format_tr_name(matching_t) if matching_t else ""
-                        b_dur = 2 if diff >= 2 else 1
-                        candidate_blocks.append({
-                            "subject": s_name,
-                            "teacher": matching_t,
-                            "duration": b_dur,
-                            "is_combined": False
-                        })
-                        diff -= b_dur
-                        sub_idx += 1
+            class_assigned_hours = sum(b.get("duration", 1) for b in candidate_blocks)
+            total_target_hours += (class_assigned_hours + len(occupied_slots))
+
+            if not candidate_blocks:
+                continue
 
             c_timeoff = next((c.get("timeoff", []) for c in self.data_store.get("siniflar", []) if matches_class(c.get("ad", ""), cn)), [])
             c_kisit = kisitlamalar_store.get(cn) or kisitlamalar_store.get(format_tr_name(cn)) or kisitlamalar_store.get(normalize_clean(cn))
@@ -462,7 +406,7 @@ class AutoSchedulerWorker(QThread):
                     new_c_toff.append(row_toff)
                 c_timeoff = new_c_toff
 
-            # A* Search ile Boşluksuz Çöz
+            # A* Search ile Gerçek Atamaları Yerleştir
             solution = self._astar_solve(
                 empty_slots=empty_slots,
                 candidate_blocks=candidate_blocks,
@@ -480,53 +424,6 @@ class AutoSchedulerWorker(QThread):
                 fully_blocked_teachers=fully_blocked_teachers,
                 find_branch_fn=find_available_branch_teacher
             )
-
-            # Sıfır Boşluk Garantisi: Çizelgede tek bir boş delik dahi bırakmadan %100 doldur
-            occupied_slots = {(sol["day"], sol["period"] + off) for sol in solution for off in range(sol["duration"])}
-            unfilled_slots = [slot for slot in empty_slots if slot not in occupied_slots]
-            
-            if unfilled_slots:
-                placed_counts = {}
-                for sol in solution:
-                    placed_counts[sol["subject"]] = placed_counts.get(sol["subject"], 0) + sol["duration"]
-                for m in existing_for_class:
-                    placed_counts[m["subject_name"]] = placed_counts.get(m["subject_name"], 0) + m["duration"]
-
-                needed_subjects = []
-                for asgn in assignments:
-                    if matches_class(asgn.get("class") or asgn.get("sinif") or asgn.get("class_name") or "", cn):
-                        s_name = asgn.get("subject") or asgn.get("ders") or ""
-                        t_name = format_tr_name(asgn.get("teacher") or asgn.get("ogretmen") or "")
-                        tot_req = int(asgn.get("duration") or asgn.get("saat") or asgn.get("toplam_saat") or 2)
-                        current_p = placed_counts.get(s_name, 0)
-                        if current_p < tot_req:
-                            for _ in range(tot_req - current_p):
-                                needed_subjects.append((s_name, t_name))
-
-                if not needed_subjects:
-                    for asgn in assignments:
-                        if matches_class(asgn.get("class") or asgn.get("sinif") or asgn.get("class_name") or "", cn):
-                            needed_subjects.append((asgn.get("subject", "Ders"), format_tr_name(asgn.get("teacher", ""))))
-                if not needed_subjects:
-                    for s in self.data_store.get("dersler", []):
-                        if s.get("ad"):
-                            needed_subjects.append((s["ad"], ""))
-                if not needed_subjects:
-                    needed_subjects = [("Rehberlik / Etüt", "")]
-
-                fill_idx = 0
-                for d, p in unfilled_slots:
-                    s_cand, orig_t = needed_subjects[fill_idx % len(needed_subjects)]
-                    cand_t = find_available_branch_teacher(s_cand, orig_t, d, p, 1, global_teacher_occupied)
-                    solution.append({
-                        "day": d,
-                        "period": p,
-                        "duration": 1,
-                        "subject": s_cand,
-                        "teacher": cand_t
-                    })
-                    if cand_t: global_teacher_occupied.add((cand_t, d, p))
-                    fill_idx += 1
 
             for sol_item in solution:
                 dur = sol_item["duration"]

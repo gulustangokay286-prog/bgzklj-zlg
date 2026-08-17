@@ -881,7 +881,9 @@ class MasterDataDialog(QDialog):
                 p = self.parent()
                 if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
                 if p and hasattr(p, "_load_unplaced_lessons"): p._load_unplaced_lessons()
+                if p and hasattr(p, "_refresh_unplaced_lessons"): p._refresh_unplaced_lessons()
                 if p and hasattr(p, "_restore_grid_placements"): p._restore_grid_placements()
+                if p and hasattr(p, "_refresh_grid"): p._refresh_grid()
 
     def _act_delete(self):
         from PySide6.QtWidgets import QMessageBox
@@ -914,6 +916,29 @@ class MasterDataDialog(QDialog):
                 p = self.parent() or getattr(self, "main_window", None)
                 if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
                 if p and hasattr(p, "_load_unplaced_lessons"): p._load_unplaced_lessons()
+                if p and hasattr(p, "_refresh_unplaced_lessons"): p._refresh_unplaced_lessons()
+                if p and hasattr(p, "_restore_grid_placements"): p._restore_grid_placements()
+                if p and hasattr(p, "_refresh_grid"): p._refresh_grid()
+
+    def _refresh_unplaced_lessons(self, *args, **kwargs):
+        p = self.parent() or getattr(self, "main_window", None)
+        if p and hasattr(p, "_refresh_unplaced_lessons"):
+            p._refresh_unplaced_lessons(*args, **kwargs)
+
+    def _refresh_grid(self, *args, **kwargs):
+        p = self.parent() or getattr(self, "main_window", None)
+        if p and hasattr(p, "_refresh_grid"):
+            p._refresh_grid(*args, **kwargs)
+
+    def _refresh_tree(self, *args, **kwargs):
+        p = self.parent() or getattr(self, "main_window", None)
+        if p and hasattr(p, "_refresh_tree"):
+            p._refresh_tree(*args, **kwargs)
+
+    def _restore_grid_placements(self, *args, **kwargs):
+        p = self.parent() or getattr(self, "main_window", None)
+        if p and hasattr(p, "_restore_grid_placements"):
+            p._restore_grid_placements(*args, **kwargs)
 
     def _act_timeoff(self):
         idx = self.stack.currentIndex()
