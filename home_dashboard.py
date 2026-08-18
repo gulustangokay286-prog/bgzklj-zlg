@@ -139,16 +139,92 @@ def make_apple_lock_badge(size: int = 44) -> QPixmap:
     p.end()
     return pix
 
-# ── Dialogs: Password Prompt & Set Password ──────────────────────────
+# ── Dialogs: Password Prompt, Set Password & Modern Apple White Alerts ─
+
+class AppleInfoDialog(QDialog):
+    def __init__(self, title: str, message: str, is_success: bool = True, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setFixedSize(400, 220)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #FFFFFF;
+                border: 1px solid #E2E8F0;
+                border-radius: 14px;
+            }
+            QLabel {
+                background: transparent;
+                color: #0F172A;
+            }
+        """)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(28, 24, 28, 24)
+        layout.setSpacing(12)
+        layout.setAlignment(Qt.AlignCenter)
+        
+        icon_lbl = QLabel()
+        icon_lbl.setAlignment(Qt.AlignCenter)
+        icon_lbl.setPixmap(make_dashboard_icon("check" if is_success else "info", color_hex="#10B981" if is_success else "#0071E3", size=40))
+        layout.addWidget(icon_lbl)
+        
+        t_lbl = QLabel(title)
+        t_lbl.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        t_lbl.setStyleSheet("color: #0F172A; font-weight: bold;")
+        t_lbl.setAlignment(Qt.AlignCenter)
+        layout.addWidget(t_lbl)
+        
+        msg_lbl = QLabel(message)
+        msg_lbl.setFont(QFont("Segoe UI", 9.5))
+        msg_lbl.setStyleSheet("color: #475569;")
+        msg_lbl.setAlignment(Qt.AlignCenter)
+        msg_lbl.setWordWrap(True)
+        layout.addWidget(msg_lbl)
+        
+        btn_ok = QPushButton("Tamam")
+        btn_ok.setFixedSize(130, 34)
+        btn_ok.setCursor(Qt.PointingHandCursor)
+        btn_ok.setStyleSheet("""
+            QPushButton {
+                background: #0071E3;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 8px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background: #0056B3;
+            }
+        """)
+        btn_ok.clicked.connect(self.accept)
+        
+        h_lay = QHBoxLayout()
+        h_lay.addStretch(1)
+        h_lay.addWidget(btn_ok)
+        h_lay.addStretch(1)
+        layout.addLayout(h_lay)
+
+def show_apple_info(parent, title: str, message: str, is_success: bool = True):
+    dlg = AppleInfoDialog(title, message, is_success=is_success, parent=parent)
+    dlg.exec()
+
 
 class PasswordPromptDialog(QDialog):
     def __init__(self, inst_name, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Kurum Şifresi")
-        self.setFixedSize(380, 220)
-        self.setStyleSheet(f"""
-            QDialog {{ background: {BG_CARD}; border-radius: 14px; font-family: {FONT_FAMILY}; }}
-            QLabel {{ color: {TEXT_PRIMARY}; }}
+        self.setFixedSize(400, 250)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #FFFFFF;
+                border: 1px solid #E2E8F0;
+                border-radius: 14px;
+            }
+            QLabel {
+                background: transparent;
+                color: #0F172A;
+            }
         """)
         
         layout = QVBoxLayout(self)
@@ -157,23 +233,32 @@ class PasswordPromptDialog(QDialog):
         
         title_lbl = QLabel(f"Korumalı Kurum: {inst_name}")
         title_lbl.setFont(QFont("Segoe UI", 13, QFont.Bold))
+        title_lbl.setStyleSheet("color: #0F172A; font-weight: bold;")
         layout.addWidget(title_lbl)
         
         sub_lbl = QLabel("Bu kurum şifre ile korunmaktadır. Lütfen erişim şifresini girin:")
-        sub_lbl.setFont(QFont("Segoe UI", 9))
-        sub_lbl.setStyleSheet(f"color: {TEXT_SECONDARY};")
+        sub_lbl.setFont(QFont("Segoe UI", 9.5))
+        sub_lbl.setStyleSheet("color: #64748B;")
         sub_lbl.setWordWrap(True)
         layout.addWidget(sub_lbl)
         
         self.input_pwd = QLineEdit()
         self.input_pwd.setEchoMode(QLineEdit.Password)
         self.input_pwd.setPlaceholderText("Şifre...")
-        self.input_pwd.setStyleSheet(f"""
-            QLineEdit {{
-                background: #F5F5F7; border: 1px solid {BORDER_HAIRLINE};
-                border-radius: 8px; padding: 8px 12px; font-size: 13px; color: {TEXT_PRIMARY};
-            }}
-            QLineEdit:focus {{ border: 1.5px solid {APPLE_BLUE}; background: #FFFFFF; }}
+        self.input_pwd.setFixedHeight(36)
+        self.input_pwd.setStyleSheet("""
+            QLineEdit {
+                background: #F8FAFC;
+                border: 1.5px solid #CBD5E1;
+                border-radius: 8px;
+                padding: 4px 12px;
+                font-size: 13px;
+                color: #0F172A;
+            }
+            QLineEdit:focus {
+                border: 1.5px solid #0071E3;
+                background: #FFFFFF;
+            }
         """)
         layout.addWidget(self.input_pwd)
         
@@ -181,27 +266,41 @@ class PasswordPromptDialog(QDialog):
         btn_box.setSpacing(10)
         
         btn_cancel = QPushButton("Vazgeç")
-        btn_cancel.setFont(QFont("Segoe UI", 9))
+        btn_cancel.setFont(QFont("Segoe UI", 9.5))
         btn_cancel.setCursor(Qt.PointingHandCursor)
-        btn_cancel.setStyleSheet(f"""
-            QPushButton {{
-                background: #E5E5EA; color: {TEXT_PRIMARY}; border: none;
-                border-radius: 8px; padding: 8px 16px; font-weight: 600;
-            }}
-            QPushButton:hover {{ background: #D1D1D6; }}
+        btn_cancel.setFixedHeight(34)
+        btn_cancel.setStyleSheet("""
+            QPushButton {
+                background: #F1F5F9;
+                color: #334155;
+                border: 1px solid #CBD5E1;
+                border-radius: 8px;
+                padding: 6px 18px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background: #E2E8F0;
+            }
         """)
         btn_cancel.clicked.connect(self.reject)
         btn_box.addWidget(btn_cancel)
         
         btn_ok = QPushButton("Giriş Yap")
-        btn_ok.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        btn_ok.setFont(QFont("Segoe UI", 9.5, QFont.Bold))
         btn_ok.setCursor(Qt.PointingHandCursor)
-        btn_ok.setStyleSheet(f"""
-            QPushButton {{
-                background: {APPLE_BLUE}; color: #FFFFFF; border: none;
-                border-radius: 8px; padding: 8px 20px; font-weight: 600;
-            }}
-            QPushButton:hover {{ background: #0062C4; }}
+        btn_ok.setFixedHeight(34)
+        btn_ok.setStyleSheet("""
+            QPushButton {
+                background: #0071E3;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 8px;
+                padding: 6px 22px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background: #0056B3;
+            }
         """)
         btn_ok.clicked.connect(self.accept)
         btn_box.addWidget(btn_ok)
@@ -217,10 +316,17 @@ class SetPasswordDialog(QDialog):
     def __init__(self, inst_name, has_current=False, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Kurum Şifresi Yönetimi")
-        self.setFixedSize(400, 260)
-        self.setStyleSheet(f"""
-            QDialog {{ background: {BG_CARD}; border-radius: 14px; font-family: {FONT_FAMILY}; }}
-            QLabel {{ color: {TEXT_PRIMARY}; }}
+        self.setFixedSize(420, 270)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #FFFFFF;
+                border: 1px solid #E2E8F0;
+                border-radius: 14px;
+            }
+            QLabel {
+                background: transparent;
+                color: #0F172A;
+            }
         """)
         
         layout = QVBoxLayout(self)
@@ -229,23 +335,32 @@ class SetPasswordDialog(QDialog):
         
         title_lbl = QLabel(f"{inst_name} — Şifre Ayarı")
         title_lbl.setFont(QFont("Segoe UI", 13, QFont.Bold))
+        title_lbl.setStyleSheet("color: #0F172A; font-weight: bold;")
         layout.addWidget(title_lbl)
         
         sub_lbl = QLabel("Kuruma erişimi kısıtlamak için bir şifre belirleyin. Boş bırakıp kaydederseniz şifre kaldırılır.")
-        sub_lbl.setFont(QFont("Segoe UI", 9))
-        sub_lbl.setStyleSheet(f"color: {TEXT_SECONDARY};")
+        sub_lbl.setFont(QFont("Segoe UI", 9.5))
+        sub_lbl.setStyleSheet("color: #64748B;")
         sub_lbl.setWordWrap(True)
         layout.addWidget(sub_lbl)
         
         self.input_pwd = QLineEdit()
         self.input_pwd.setEchoMode(QLineEdit.Password)
         self.input_pwd.setPlaceholderText("Yeni Şifre (boş = şifresiz)...")
-        self.input_pwd.setStyleSheet(f"""
-            QLineEdit {{
-                background: #F5F5F7; border: 1px solid {BORDER_HAIRLINE};
-                border-radius: 8px; padding: 8px 12px; font-size: 13px; color: {TEXT_PRIMARY};
-            }}
-            QLineEdit:focus {{ border: 1.5px solid {APPLE_BLUE}; background: #FFFFFF; }}
+        self.input_pwd.setFixedHeight(36)
+        self.input_pwd.setStyleSheet("""
+            QLineEdit {
+                background: #F8FAFC;
+                border: 1.5px solid #CBD5E1;
+                border-radius: 8px;
+                padding: 4px 12px;
+                font-size: 13px;
+                color: #0F172A;
+            }
+            QLineEdit:focus {
+                border: 1.5px solid #0071E3;
+                background: #FFFFFF;
+            }
         """)
         layout.addWidget(self.input_pwd)
         
@@ -253,27 +368,41 @@ class SetPasswordDialog(QDialog):
         btn_box.setSpacing(10)
         
         btn_cancel = QPushButton("Vazgeç")
-        btn_cancel.setFont(QFont("Segoe UI", 9))
+        btn_cancel.setFont(QFont("Segoe UI", 9.5))
         btn_cancel.setCursor(Qt.PointingHandCursor)
-        btn_cancel.setStyleSheet(f"""
-            QPushButton {{
-                background: #E5E5EA; color: {TEXT_PRIMARY}; border: none;
-                border-radius: 8px; padding: 8px 16px; font-weight: 600;
-            }}
-            QPushButton:hover {{ background: #D1D1D6; }}
+        btn_cancel.setFixedHeight(34)
+        btn_cancel.setStyleSheet("""
+            QPushButton {
+                background: #F1F5F9;
+                color: #334155;
+                border: 1px solid #CBD5E1;
+                border-radius: 8px;
+                padding: 6px 18px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background: #E2E8F0;
+            }
         """)
         btn_cancel.clicked.connect(self.reject)
         btn_box.addWidget(btn_cancel)
         
         btn_ok = QPushButton("Kaydet")
-        btn_ok.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        btn_ok.setFont(QFont("Segoe UI", 9.5, QFont.Bold))
         btn_ok.setCursor(Qt.PointingHandCursor)
-        btn_ok.setStyleSheet(f"""
-            QPushButton {{
-                background: {APPLE_BLUE}; color: #FFFFFF; border: none;
-                border-radius: 8px; padding: 8px 20px; font-weight: 600;
-            }}
-            QPushButton:hover {{ background: #0062C4; }}
+        btn_ok.setFixedHeight(34)
+        btn_ok.setStyleSheet("""
+            QPushButton {
+                background: #0071E3;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 8px;
+                padding: 6px 22px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background: #0056B3;
+            }
         """)
         btn_ok.clicked.connect(self.accept)
         btn_box.addWidget(btn_ok)
@@ -560,11 +689,11 @@ class AppleInstitutionCard(QFrame):
             if dlg.exec() == QDialog.Accepted:
                 pwd = dlg.get_password()
                 version_store.set_institution_password(self.slug, pwd)
-                QMessageBox.information(self, "Bilgi", "Kurum şifresi başarıyla güncellendi.")
+                show_apple_info(self, "Bilgi", "Kurum şifresi başarıyla güncellendi.", is_success=True)
                 self._notify_parent_refresh()
         elif act_rm_pwd and action == act_rm_pwd:
             version_store.remove_institution_password(self.slug)
-            QMessageBox.information(self, "Bilgi", "Kurum şifresi kaldırıldı.")
+            show_apple_info(self, "Bilgi", "Kurum şifresi kaldırıldı.", is_success=True)
             self._notify_parent_refresh()
         elif action == act_delete:
             ret = QMessageBox.warning(
@@ -588,7 +717,173 @@ class AppleInstitutionCard(QFrame):
             p = p.parent() if hasattr(p, "parent") and callable(p.parent) else None
 
 
-# ── Apple Clean Version Row ──────────────────────────────────────────
+# ── Vector Dashboard Icons ───────────────────────────────────────────
+
+def make_dashboard_icon(name: str, color_hex: str = "#0071E3", size: int = 18) -> QPixmap:
+    """Draws crisp, minimalist Apple-style vector iconography without relying on emojis."""
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    c = QColor(color_hex)
+    
+    if name == "active":
+        # Green Shield / Circle Check
+        p.setBrush(QBrush(c))
+        p.setPen(Qt.NoPen)
+        p.drawEllipse(QRectF(1, 1, size - 2, size - 2))
+        p.setPen(QPen(Qt.white, 2.0, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        path = QPainterPath()
+        path.moveTo(size * 0.28, size * 0.52)
+        path.lineTo(size * 0.45, size * 0.68)
+        path.lineTo(size * 0.73, size * 0.34)
+        p.drawPath(path)
+    elif name in ("history", "archive"):
+        # Clock / Archive circle
+        p.setPen(QPen(c, 1.8))
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(QRectF(2, 2, size - 4, size - 4))
+        p.drawLine(int(size / 2), int(size / 2), int(size / 2), int(size * 0.28))
+        p.drawLine(int(size / 2), int(size / 2), int(size * 0.72), int(size / 2))
+    elif name == "folder":
+        p.setBrush(QBrush(c))
+        p.setPen(Qt.NoPen)
+        path = QPainterPath()
+        path.moveTo(2, 5)
+        path.lineTo(size * 0.45, 5)
+        path.lineTo(size * 0.55, 7.5)
+        path.lineTo(size - 2, 7.5)
+        path.lineTo(size - 2, size - 3)
+        path.lineTo(2, size - 3)
+        path.closeSubpath()
+        p.drawPath(path)
+    elif name == "chevron_down":
+        p.setPen(QPen(c, 2.0, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.setBrush(Qt.NoBrush)
+        p.drawLine(int(size * 0.25), int(size * 0.38), int(size * 0.5), int(size * 0.65))
+        p.drawLine(int(size * 0.5), int(size * 0.65), int(size * 0.75), int(size * 0.38))
+    elif name == "chevron_right":
+        p.setPen(QPen(c, 2.0, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.setBrush(Qt.NoBrush)
+        p.drawLine(int(size * 0.38), int(size * 0.25), int(size * 0.65), int(size * 0.5))
+        p.drawLine(int(size * 0.65), int(size * 0.5), int(size * 0.38), int(size * 0.75))
+    else:
+        p.setBrush(QBrush(c))
+        p.setPen(Qt.NoPen)
+        p.drawEllipse(QRectF(3, 3, size - 6, size - 6))
+        
+    p.end()
+    return pix
+
+def get_user_display_name(email: str, parent=None) -> str:
+    clean_email = (email or "").strip().lower()
+    if not clean_email or clean_email in ("admin@bgz.local", "admin", "yonetici", "admin@chenki.net"):
+        return "Seher Şanlı"
+    
+    profiles_path = "bgz_user_profiles.json"
+    profiles = {}
+    if os.path.exists(profiles_path):
+        try:
+            with open(profiles_path, "r", encoding="utf-8") as f:
+                profiles = json.load(f)
+        except Exception:
+            profiles = {}
+            
+    if clean_email in profiles and profiles[clean_email].get("name"):
+        return profiles[clean_email]["name"]
+        
+    if parent:
+        from PySide6.QtWidgets import QInputDialog
+        dlg = QInputDialog(parent)
+        dlg.setWindowTitle("Kullanıcı Profili")
+        dlg.setLabelText(f"Hoşgeldiniz!\nSayın {clean_email}, lütfen adınızı ve soyadınızı giriniz:")
+        dlg.setTextValue(clean_email.split("@")[0].capitalize())
+        if dlg.exec() == QDialog.Accepted and dlg.textValue().strip():
+            name = dlg.textValue().strip()
+        else:
+            name = clean_email.split("@")[0].capitalize()
+    else:
+        name = clean_email.split("@")[0].capitalize()
+        
+    profiles[clean_email] = {"name": name, "email": clean_email}
+    try:
+        with open(profiles_path, "w", encoding="utf-8") as f:
+            json.dump(profiles, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+    return name
+
+# ── Collapsible Version Group with Chevron ───────────────────────────
+
+class CollapsibleVersionGroup(QFrame):
+    def __init__(self, title: str, icon_name: str, badge_text: str, color_hex: str = "#0071E3", is_collapsed: bool = False, parent=None):
+        super().__init__(parent)
+        self.is_collapsed = is_collapsed
+        self.color_hex = color_hex
+        self.setStyleSheet(f"""
+            CollapsibleVersionGroup {{
+                background: #FFFFFF;
+                border: 1px solid {BORDER_HAIRLINE};
+                border-radius: 10px;
+            }}
+        """)
+        
+        self.main_lay = QVBoxLayout(self)
+        self.main_lay.setContentsMargins(12, 10, 12, 10)
+        self.main_lay.setSpacing(6)
+        
+        # Header Button / Frame
+        self.header = QFrame()
+        self.header.setCursor(Qt.PointingHandCursor)
+        self.header.setStyleSheet("background: transparent; border: none;")
+        hdr_lay = QHBoxLayout(self.header)
+        hdr_lay.setContentsMargins(2, 2, 2, 2)
+        hdr_lay.setSpacing(10)
+        
+        # Icon
+        icon_lbl = QLabel()
+        icon_lbl.setPixmap(make_dashboard_icon(icon_name, color_hex, 18))
+        hdr_lay.addWidget(icon_lbl)
+        
+        # Title
+        title_lbl = QLabel(f"<b>{title}</b>")
+        title_lbl.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        title_lbl.setStyleSheet(f"color: {TEXT_PRIMARY};")
+        hdr_lay.addWidget(title_lbl)
+        
+        # Badge
+        if badge_text:
+            badge = QLabel(badge_text)
+            badge.setFont(QFont("Segoe UI", 8, QFont.Bold))
+            badge.setStyleSheet(f"background: {color_hex}15; color: {color_hex}; padding: 2px 7px; border-radius: 5px;")
+            hdr_lay.addWidget(badge)
+            
+        hdr_lay.addStretch(1)
+        
+        # Chevron icon
+        self.chevron_lbl = QLabel()
+        self.chevron_lbl.setPixmap(make_dashboard_icon("chevron_right" if is_collapsed else "chevron_down", "#64748B", 14))
+        hdr_lay.addWidget(self.chevron_lbl)
+        
+        self.main_lay.addWidget(self.header)
+        
+        # Inner content container
+        self.content_widget = QWidget()
+        self.content_lay = QVBoxLayout(self.content_widget)
+        self.content_lay.setContentsMargins(0, 4, 0, 2)
+        self.content_lay.setSpacing(5)
+        
+        self.main_lay.addWidget(self.content_widget)
+        self.content_widget.setVisible(not is_collapsed)
+        
+        self.header.mousePressEvent = self._toggle_collapse
+        
+    def _toggle_collapse(self, event):
+        self.is_collapsed = not self.is_collapsed
+        self.content_widget.setVisible(not self.is_collapsed)
+        self.chevron_lbl.setPixmap(make_dashboard_icon("chevron_right" if self.is_collapsed else "chevron_down", "#64748B", 14))
+
+# ── Apple Clean Version Row (Compact & Modern) ───────────────────────
 
 class AppleVersionRow(QFrame):
     double_clicked = Signal(str, str)  # slug, filename
@@ -603,28 +898,28 @@ class AppleVersionRow(QFrame):
         self._is_active = is_active
         self._is_selected = False
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedHeight(56)
+        self.setFixedHeight(44)
         self._update_style()
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(18, 8, 18, 8)
-        layout.setSpacing(16)
+        layout.setContentsMargins(14, 4, 14, 4)
+        layout.setSpacing(12)
         
         # Version Title: "Versiyon 10"
         num = version_info.get("number", 0)
         v_title = QLabel(f"Versiyon {num}")
-        v_title.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        v_title.setFont(QFont("Segoe UI", 10, QFont.Bold))
         v_title.setStyleSheet(f"color: {TEXT_PRIMARY}; background: transparent; border: none;")
-        v_title.setFixedWidth(100)
+        v_title.setFixedWidth(90)
         layout.addWidget(v_title)
         
         # Date & Time (Clean single block)
         d_str = version_info.get("date_str", "")
         t_str = version_info.get("time_str", "")
-        dt_lbl = QLabel(f"{d_str}  •  {t_str}")
-        dt_lbl.setFont(QFont("Segoe UI", 9))
+        dt_lbl = QLabel(f"{d_str}  {t_str}")
+        dt_lbl.setFont(QFont("Segoe UI", 8.5))
         dt_lbl.setStyleSheet(f"color: {TEXT_SECONDARY}; background: transparent; border: none;")
-        dt_lbl.setFixedWidth(160)
+        dt_lbl.setFixedWidth(145)
         layout.addWidget(dt_lbl)
         
         # Details: Unplaced stats badge + Note
@@ -634,17 +929,17 @@ class AppleVersionRow(QFrame):
         
         if tot > 0:
             if unp == 0:
-                stats_badge = QLabel(f"{tot} Saat  •  0 Artan Ders")
-                stats_badge.setFont(QFont("Segoe UI", 9, QFont.Bold))
-                stats_badge.setStyleSheet("background: #E8F8EE; color: #1E7E34; padding: 3px 8px; border-radius: 6px; border: 1px solid #B7E4C7;")
+                stats_badge = QLabel(f"{tot} Saat • Tamamı Yerleşti")
+                stats_badge.setFont(QFont("Segoe UI", 8, QFont.Bold))
+                stats_badge.setStyleSheet("background: #E8F8EE; color: #1E7E34; padding: 2px 7px; border-radius: 5px;")
             else:
-                stats_badge = QLabel(f"{plc}/{tot} Saat  •  {unp} Artan Ders")
-                stats_badge.setFont(QFont("Segoe UI", 9, QFont.Bold))
-                stats_badge.setStyleSheet("background: #FFF7ED; color: #C2410C; padding: 3px 8px; border-radius: 6px; border: 1px solid #FED7AA;")
+                stats_badge = QLabel(f"{plc}/{tot} Saat • {unp} Artan")
+                stats_badge.setFont(QFont("Segoe UI", 8, QFont.Bold))
+                stats_badge.setStyleSheet("background: #FFF7ED; color: #C2410C; padding: 2px 7px; border-radius: 5px;")
         else:
             stats_badge = QLabel("Boş Çizelge")
-            stats_badge.setFont(QFont("Segoe UI", 8))
-            stats_badge.setStyleSheet("background: #F1F5F9; color: #64748B; padding: 3px 8px; border-radius: 6px; border: 1px solid #E2E8F0;")
+            stats_badge.setFont(QFont("Segoe UI", 7.5))
+            stats_badge.setStyleSheet("background: #F1F5F9; color: #64748B; padding: 2px 7px; border-radius: 5px;")
             
         layout.addWidget(stats_badge)
         
@@ -652,12 +947,12 @@ class AppleVersionRow(QFrame):
         if note_text:
             from PySide6.QtGui import QFontMetrics
             fm = QFontMetrics(QFont("Segoe UI", 8))
-            elided_note = fm.elidedText(note_text, Qt.ElideRight, 240)
+            elided_note = fm.elidedText(note_text, Qt.ElideRight, 200)
             note_lbl = QLabel(elided_note)
             note_lbl.setToolTip(note_text)
             note_lbl.setFont(QFont("Segoe UI", 8))
             note_lbl.setStyleSheet(f"color: {TEXT_MUTED}; background: transparent; border: none;")
-            note_lbl.setMaximumWidth(240)
+            note_lbl.setMaximumWidth(200)
             layout.addWidget(note_lbl)
         layout.addStretch(1)
             
@@ -665,24 +960,24 @@ class AppleVersionRow(QFrame):
         size_lbl = QLabel(f"{version_info.get('size_kb', 0)} KB")
         size_lbl.setFont(QFont("Segoe UI", 8))
         size_lbl.setStyleSheet(f"color: {TEXT_MUTED}; background: transparent; border: none;")
-        size_lbl.setFixedWidth(55)
+        size_lbl.setFixedWidth(50)
         size_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         layout.addWidget(size_lbl)
         
         # Active Status Indicator
         if is_active:
-            act_badge = QLabel("●  Aktif")
-            act_badge.setFont(QFont("Segoe UI", 9, QFont.Bold))
-            act_badge.setStyleSheet(f"background: #E8F8EE; color: #1E7E34; padding: 4px 10px; border-radius: 6px; border: none;")
+            act_badge = QLabel("● Aktif")
+            act_badge.setFont(QFont("Segoe UI", 8, QFont.Bold))
+            act_badge.setStyleSheet(f"background: #E8F8EE; color: #1E7E34; padding: 3px 8px; border-radius: 5px; border: none;")
             layout.addWidget(act_badge)
         else:
             btn_make_act = QPushButton("Aktif Yap")
-            btn_make_act.setFont(QFont("Segoe UI", 8, QFont.Bold))
+            btn_make_act.setFont(QFont("Segoe UI", 8))
             btn_make_act.setCursor(Qt.PointingHandCursor)
             btn_make_act.setStyleSheet(f"""
                 QPushButton {{
                     background: transparent; color: {TEXT_SECONDARY}; border: 1px solid {BORDER_HAIRLINE};
-                    border-radius: 6px; padding: 4px 10px;
+                    border-radius: 5px; padding: 3px 8px;
                 }}
                 QPushButton:hover {{ background: #E5E5EA; color: {TEXT_PRIMARY}; }}
             """)
@@ -691,12 +986,12 @@ class AppleVersionRow(QFrame):
             
         # Open Button
         btn_open = QPushButton("Aç")
-        btn_open.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        btn_open.setFont(QFont("Segoe UI", 8.5, QFont.Bold))
         btn_open.setCursor(Qt.PointingHandCursor)
         btn_open.setStyleSheet(f"""
             QPushButton {{
                 background: {APPLE_BLUE}; color: #FFFFFF; border: none;
-                border-radius: 6px; padding: 5px 16px;
+                border-radius: 5px; padding: 4px 14px;
             }}
             QPushButton:hover {{ background: #0062C4; }}
         """)
@@ -707,21 +1002,21 @@ class AppleVersionRow(QFrame):
         if self._is_active:
             self.setStyleSheet(f"""
                 AppleVersionRow {{
-                    background: #FAFDFA; border: 1px solid #B7E4C7; border-radius: 10px;
+                    background: #FAFDFA; border: 1px solid #B7E4C7; border-radius: 8px;
                 }}
                 AppleVersionRow:hover {{ background: #F0FBF4; }}
             """)
         elif self._is_selected:
             self.setStyleSheet(f"""
                 AppleVersionRow {{
-                    background: #EBF5FF; border: 1px solid #B8DCFF; border-radius: 10px;
+                    background: #EBF5FF; border: 1px solid #B8DCFF; border-radius: 8px;
                 }}
                 AppleVersionRow:hover {{ background: #E1F0FF; }}
             """)
         else:
             self.setStyleSheet(f"""
                 AppleVersionRow {{
-                    background: #FFFFFF; border: 1px solid {BORDER_HAIRLINE}; border-radius: 10px;
+                    background: #FFFFFF; border: 1px solid {BORDER_HAIRLINE}; border-radius: 8px;
                 }}
                 AppleVersionRow:hover {{ background: #F8FAFC; border: 1px solid #CBD5E1; }}
             """)
@@ -746,6 +1041,7 @@ class AppleVersionRow(QFrame):
 class HomeDashboard(QWidget):
     open_timetable = Signal(str, str)  # slug, filename
     new_empty_timetable = Signal(str)  # slug
+    logout_requested = Signal()        # Trigger logout & return to login screen
     
     def __init__(self, auth_data=None, parent=None):
         super().__init__(parent)
@@ -757,6 +1053,7 @@ class HomeDashboard(QWidget):
         
         user_email = self.auth_data.get("email", "").lower()
         self.is_master_admin = bool(user_email or self.auth_data.get("uid"))
+        self.display_name = get_user_display_name(user_email, self)
         
         version_store.migrate_existing_data()
         self._build_ui()
@@ -827,16 +1124,17 @@ class HomeDashboard(QWidget):
         
         top_layout.addStretch(1)
         
-        user_email = self.auth_data.get("email", "Yönetici")
-        user_lbl = QLabel(f"{user_email}")
-        user_lbl.setFont(QFont("Segoe UI", 9, QFont.Bold))
-        user_lbl.setStyleSheet(f"color: {TEXT_SECONDARY};")
+        # Profile Greeting
+        user_lbl = QLabel(f"Hoşgeldiniz, <b>{self.display_name}</b>")
+        user_lbl.setFont(QFont("Segoe UI", 9.5))
+        user_lbl.setStyleSheet(f"color: {TEXT_PRIMARY};")
         top_layout.addWidget(user_lbl)
         
         if self.is_master_admin:
             admin_badge = QLabel("Ana Yönetici")
+            admin_badge.setFixedHeight(22)
             admin_badge.setFont(QFont("Segoe UI", 8, QFont.Bold))
-            admin_badge.setStyleSheet(f"background: #FDF4FF; color: {APPLE_PURPLE}; padding: 3px 8px; border-radius: 6px; border: 1px solid #F0ABFC;")
+            admin_badge.setStyleSheet(f"background: #FDF4FF; color: {APPLE_PURPLE}; padding: 2px 8px; border-radius: 5px; border: 1px solid #F0ABFC;")
             top_layout.addWidget(admin_badge)
             
         btn_cloud_sync = QPushButton("Bulut Eşitle")
@@ -878,123 +1176,141 @@ class HomeDashboard(QWidget):
         btn_new_inst.clicked.connect(self._on_new_institution_clicked)
         top_layout.addWidget(btn_new_inst)
         
+        # Logout Button
+        btn_logout = QPushButton("Çıkış Yap")
+        btn_logout.setFont(QFont("Segoe UI", 8.5, QFont.Bold))
+        btn_logout.setFixedHeight(30)
+        btn_logout.setCursor(Qt.PointingHandCursor)
+        btn_logout.setStyleSheet(f"""
+            QPushButton {{
+                background: #FEE2E2; color: #DC2626; border: 1px solid #FECACA;
+                border-radius: 6px; padding: 4px 12px;
+            }}
+            QPushButton:hover {{ background: #FCA5A5; color: #991B1B; }}
+        """)
+        btn_logout.clicked.connect(self._on_logout_clicked)
+        top_layout.addWidget(btn_logout)
+        
         root.addWidget(top_bar)
         
-        # ── 2. Splitter ──────────────────────────────────────────────
+        # ── 2. Splitter Body ─────────────────────────────────────────
         splitter = QSplitter(Qt.Horizontal)
-        splitter.setHandleWidth(1)
-        splitter.setStyleSheet(f"QSplitter::handle {{ background: {BORDER_HAIRLINE}; }}")
+        splitter.setStyleSheet(f"""
+            QSplitter::handle {{ background: {BORDER_HAIRLINE}; width: 1px; }}
+        """)
         
-        # Left Panel (Institutions List)
-        left_panel = QWidget()
-        left_panel.setFixedWidth(300)
-        left_panel.setStyleSheet(f"background: {BG_SIDEBAR};")
+        # Left Sidebar (Institutions)
+        left_panel = QFrame()
+        left_panel.setFixedWidth(280)
+        left_panel.setStyleSheet(f"background: {BG_SIDEBAR}; border-right: 1px solid {BORDER_HAIRLINE};")
         left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(14, 16, 14, 14)
+        left_layout.setContentsMargins(14, 16, 14, 16)
         left_layout.setSpacing(10)
         
-        left_header = QLabel("KURUMLAR")
-        left_header.setFont(QFont("Segoe UI", 9, QFont.Bold))
-        left_header.setStyleSheet(f"color: {TEXT_SECONDARY}; letter-spacing: 0.5px;")
-        left_layout.addWidget(left_header)
+        left_hdr = QHBoxLayout()
+        left_title = QLabel("KURUMLAR")
+        left_title.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        left_title.setStyleSheet(f"color: {TEXT_MUTED}; letter-spacing: 0.5px;")
+        left_hdr.addWidget(left_title)
+        left_hdr.addStretch(1)
+        left_layout.addLayout(left_hdr)
         
-        inst_scroll = QScrollArea()
-        inst_scroll.setWidgetResizable(True)
-        inst_scroll.setFrameShape(QFrame.NoFrame)
-        inst_scroll.setStyleSheet("background: transparent;")
+        scroll_inst = QScrollArea()
+        scroll_inst.setWidgetResizable(True)
+        scroll_inst.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         
-        self.inst_list_container = QWidget()
-        self.inst_list_layout = QVBoxLayout(self.inst_list_container)
+        self.inst_list_widget = QWidget()
+        self.inst_list_widget.setStyleSheet("background: transparent;")
+        self.inst_list_layout = QVBoxLayout(self.inst_list_widget)
         self.inst_list_layout.setContentsMargins(0, 0, 0, 0)
-        self.inst_list_layout.setSpacing(8)
+        self.inst_list_layout.setSpacing(6)
         self.inst_list_layout.addStretch(1)
-        inst_scroll.setWidget(self.inst_list_container)
         
-        left_layout.addWidget(inst_scroll, 1)
+        scroll_inst.setWidget(self.inst_list_widget)
+        left_layout.addWidget(scroll_inst, 1)
         splitter.addWidget(left_panel)
         
-        # Right Panel (Versions List with Glassmorphism Blur Support)
-        right_panel = QWidget()
+        # Right Main Panel (Versions)
+        right_panel = QFrame()
         right_panel.setStyleSheet(f"background: {BG_CANVAS};")
-        self.right_panel_stack = QStackedLayout(right_panel)
-        self.right_panel_stack.setStackingMode(QStackedLayout.StackAll)
+        self.right_panel_layout = QVBoxLayout(right_panel)
+        self.right_panel_layout.setContentsMargins(24, 20, 24, 20)
+        self.right_panel_layout.setSpacing(14)
         
-        # Layer 0: Main Right Content (Header + Versions)
-        self.right_content_widget = QWidget()
-        right_layout = QVBoxLayout(self.right_content_widget)
-        right_layout.setContentsMargins(28, 20, 28, 20)
-        right_layout.setSpacing(16)
-        
-        # Header Row
-        header_row = QHBoxLayout()
-        header_row.setSpacing(12)
-        
+        # Header of Selected Institution
+        right_hdr = QHBoxLayout()
         self.right_title = QLabel("Seçili Kurum")
         self.right_title.setFont(QFont("Segoe UI", 16, QFont.Bold))
         self.right_title.setStyleSheet(f"color: {TEXT_PRIMARY};")
-        header_row.addWidget(self.right_title)
+        right_hdr.addWidget(self.right_title)
         
         self.ver_count_lbl = QLabel("")
         self.ver_count_lbl.setFont(QFont("Segoe UI", 10))
         self.ver_count_lbl.setStyleSheet(f"color: {TEXT_SECONDARY};")
-        header_row.addWidget(self.ver_count_lbl)
+        right_hdr.addWidget(self.ver_count_lbl)
+        right_hdr.addStretch(1)
         
-        header_row.addStretch(1)
-        
-        # Action Button: Yeni Boş Çizelge
         self.btn_new_empty = QPushButton("+ Yeni Boş Çizelge")
         self.btn_new_empty.setFont(QFont("Segoe UI", 9, QFont.Bold))
         self.btn_new_empty.setCursor(Qt.PointingHandCursor)
         self.btn_new_empty.setStyleSheet(f"""
             QPushButton {{
-                background: {APPLE_BLUE}; color: #FFFFFF; border: none;
-                border-radius: 8px; padding: 7px 16px;
+                background: #FFFFFF; color: {APPLE_BLUE}; border: 1px solid {BORDER_HAIRLINE};
+                border-radius: 8px; padding: 6px 14px;
             }}
-            QPushButton:hover {{ background: #0062C4; }}
+            QPushButton:hover {{ background: #F5F5F7; border: 1.5px solid {APPLE_BLUE}; }}
         """)
         self.btn_new_empty.clicked.connect(self._on_new_empty_clicked)
-        header_row.addWidget(self.btn_new_empty)
+        right_hdr.addWidget(self.btn_new_empty)
         
-        right_layout.addLayout(header_row)
+        self.right_panel_layout.addLayout(right_hdr)
         
-        # Versions Scroll Area
-        ver_scroll = QScrollArea()
-        ver_scroll.setWidgetResizable(True)
-        ver_scroll.setFrameShape(QFrame.NoFrame)
-        ver_scroll.setStyleSheet("background: transparent;")
+        # Versions Stack Container
+        self.right_panel_stack = QStackedLayout()
+        self.right_panel_layout.addLayout(self.right_panel_stack, 1)
         
-        self.ver_list_container = QWidget()
-        self.ver_list_layout = QVBoxLayout(self.ver_list_container)
+        # Normal Versions List View
+        self.right_content_widget = QWidget()
+        self.right_content_layout = QVBoxLayout(self.right_content_widget)
+        self.right_content_layout.setContentsMargins(0, 0, 0, 0)
+        self.right_content_layout.setSpacing(10)
+        
+        scroll_ver = QScrollArea()
+        scroll_ver.setWidgetResizable(True)
+        scroll_ver.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        
+        self.ver_list_widget = QWidget()
+        self.ver_list_widget.setStyleSheet("background: transparent;")
+        self.ver_list_layout = QVBoxLayout(self.ver_list_widget)
         self.ver_list_layout.setContentsMargins(0, 0, 0, 0)
-        self.ver_list_layout.setSpacing(8)
+        self.ver_list_layout.setSpacing(12)
         self.ver_list_layout.addStretch(1)
-        ver_scroll.setWidget(self.ver_list_container)
         
-        right_layout.addWidget(ver_scroll, 1)
+        scroll_ver.setWidget(self.ver_list_widget)
+        self.right_content_layout.addWidget(scroll_ver, 1)
         self.right_panel_stack.addWidget(self.right_content_widget)
         
-        # Layer 1: Floating Password Prompt Overlay
+        # Password Protection Overlay Widget (Ultra-clean modern card)
         self.password_overlay_widget = QWidget()
-        self.password_overlay_widget.setAttribute(Qt.WA_TransparentForMouseEvents, False)
-        self.password_overlay_widget.setStyleSheet("background: rgba(245, 245, 247, 0.45);")
+        self.password_overlay_widget.setStyleSheet("background: #F8FAFC;")
         overlay_layout = QVBoxLayout(self.password_overlay_widget)
         overlay_layout.setAlignment(Qt.AlignCenter)
         overlay_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Modal Floating Card
+        # Modal Floating Card (Centered)
         self.pwd_card = QFrame()
-        self.pwd_card.setFixedSize(400, 310)
-        self.pwd_card.setStyleSheet(f"""
-            QFrame {{
+        self.pwd_card.setFixedSize(400, 300)
+        self.pwd_card.setStyleSheet("""
+            QFrame {
                 background: #FFFFFF;
-                border: 1px solid rgba(0, 0, 0, 0.12);
-                border-radius: 18px;
-            }}
+                border: 1px solid rgba(0, 0, 0, 0.08);
+                border-radius: 16px;
+            }
         """)
         card_shadow = QGraphicsDropShadowEffect()
-        card_shadow.setBlurRadius(40)
-        card_shadow.setColor(QColor(0, 0, 0, 60))
-        card_shadow.setOffset(0, 10)
+        card_shadow.setBlurRadius(30)
+        card_shadow.setColor(QColor(0, 0, 0, 40))
+        card_shadow.setOffset(0, 8)
         self.pwd_card.setGraphicsEffect(card_shadow)
         
         c_layout = QVBoxLayout(self.pwd_card)
@@ -1002,60 +1318,60 @@ class HomeDashboard(QWidget):
         c_layout.setSpacing(12)
         c_layout.setAlignment(Qt.AlignCenter)
         
-        # 3D Key Icon
         lock_lbl = QLabel()
         lock_lbl.setPixmap(make_apple_lock_badge(44))
         lock_lbl.setAlignment(Qt.AlignCenter)
         c_layout.addWidget(lock_lbl)
         
         self.pwd_card_title = QLabel("Kurum Şifresi Korumalı")
-        self.pwd_card_title.setFont(QFont("Segoe UI", 14, QFont.Bold))
-        self.pwd_card_title.setStyleSheet(f"color: {TEXT_PRIMARY};")
+        self.pwd_card_title.setFont(QFont("Segoe UI", 13, QFont.Bold))
+        self.pwd_card_title.setStyleSheet("color: #0F172A; font-weight: bold;")
         self.pwd_card_title.setAlignment(Qt.AlignCenter)
         c_layout.addWidget(self.pwd_card_title)
         
         desc_lbl = QLabel("Bu kurumun ders çizelgelerine erişmek için\nlütfen kurum şifresini girin.")
         desc_lbl.setFont(QFont("Segoe UI", 9))
-        desc_lbl.setStyleSheet(f"color: {TEXT_SECONDARY};")
+        desc_lbl.setStyleSheet("color: #64748B;")
         desc_lbl.setAlignment(Qt.AlignCenter)
         c_layout.addWidget(desc_lbl)
         
         self.pwd_card_input = QLineEdit()
         self.pwd_card_input.setEchoMode(QLineEdit.Password)
         self.pwd_card_input.setPlaceholderText("Kurum şifresini girin...")
-        self.pwd_card_input.setFixedHeight(40)
-        self.pwd_card_input.setStyleSheet(f"""
-            QLineEdit {{
-                border: 1.5px solid {BORDER_HAIRLINE};
-                border-radius: 10px;
-                padding: 6px 14px;
+        self.pwd_card_input.setFixedHeight(38)
+        self.pwd_card_input.setStyleSheet("""
+            QLineEdit {
+                border: 1.5px solid #CBD5E1;
+                border-radius: 8px;
+                padding: 4px 12px;
                 font-size: 13px;
-                background: #F8F8FA;
-            }}
-            QLineEdit:focus {{
-                border: 1.5px solid {APPLE_BLUE};
+                background: #F8FAFC;
+                color: #0F172A;
+            }
+            QLineEdit:focus {
+                border: 1.5px solid #0071E3;
                 background: #FFFFFF;
-            }}
+            }
         """)
         c_layout.addWidget(self.pwd_card_input)
         
         self.pwd_err_lbl = QLabel("")
         self.pwd_err_lbl.setFont(QFont("Segoe UI", 9, QFont.Bold))
-        self.pwd_err_lbl.setStyleSheet(f"color: {APPLE_RED};")
+        self.pwd_err_lbl.setStyleSheet("color: #EF4444;")
         self.pwd_err_lbl.setAlignment(Qt.AlignCenter)
         self.pwd_err_lbl.hide()
         c_layout.addWidget(self.pwd_err_lbl)
         
         btn_unlock = QPushButton("Kilidi Aç ve Giriş Yap")
-        btn_unlock.setFont(QFont("Segoe UI", 10, QFont.Bold))
-        btn_unlock.setFixedHeight(38)
+        btn_unlock.setFont(QFont("Segoe UI", 9.5, QFont.Bold))
+        btn_unlock.setFixedHeight(36)
         btn_unlock.setCursor(Qt.PointingHandCursor)
-        btn_unlock.setStyleSheet(f"""
-            QPushButton {{
-                background: {APPLE_BLUE}; color: #FFFFFF; border: none;
-                border-radius: 10px; padding: 6px 18px;
-            }}
-            QPushButton:hover {{ background: #0062C4; }}
+        btn_unlock.setStyleSheet("""
+            QPushButton {
+                background: #0071E3; color: #FFFFFF; border: none;
+                border-radius: 8px; padding: 4px 16px; font-weight: bold;
+            }
+            QPushButton:hover { background: #0056B3; }
         """)
         btn_unlock.clicked.connect(self._on_submit_password_overlay)
         self.pwd_card_input.returnPressed.connect(self._on_submit_password_overlay)
@@ -1066,9 +1382,13 @@ class HomeDashboard(QWidget):
         self.right_panel_stack.addWidget(self.password_overlay_widget)
         
         splitter.addWidget(right_panel)
-        
-        splitter.setSizes([300, 800])
+        splitter.setSizes([280, 820])
         root.addWidget(splitter, 1)
+
+    def _on_logout_clicked(self):
+        r = QMessageBox.question(self, "Çıkış Onayı", "Oturumunuzu kapatmak istediğinize emin misiniz?", QMessageBox.Yes | QMessageBox.No)
+        if r == QMessageBox.Yes:
+            self.logout_requested.emit()
         
     def _on_submit_password_overlay(self):
         pwd = self.pwd_card_input.text()
@@ -1078,20 +1398,23 @@ class HomeDashboard(QWidget):
             self._unlocked_slugs.add(self._selected_slug)
             self.pwd_err_lbl.hide()
             self.pwd_card_input.clear()
+            self.right_panel_stack.setCurrentWidget(self.right_content_widget)
+            self.btn_new_empty.setEnabled(True)
             self._refresh_versions()
         else:
-            self.pwd_err_lbl.setText("❌ Hatalı şifre girdiniz!")
+            self.pwd_err_lbl.setText("Hatalı kurum şifresi. Lütfen tekrar deneyin.")
             self.pwd_err_lbl.show()
-            self.pwd_card_input.setStyleSheet(f"""
-                QLineEdit {{
-                    border: 1.5px solid {APPLE_RED};
-                    border-radius: 10px;
-                    padding: 6px 14px;
+            self.pwd_card_input.setStyleSheet("""
+                QLineEdit {
+                    border: 1.5px solid #EF4444;
+                    border-radius: 8px;
+                    padding: 4px 12px;
                     font-size: 13px;
-                    background: #FFF5F5;
-                }}
+                    background: #FEF2F2;
+                    color: #0F172A;
+                }
             """)
-            self.pwd_card_input.clear()
+            self.pwd_card_input.selectAll()
             self.pwd_card_input.setFocus()
         
     def _on_search_changed(self, text):
@@ -1135,40 +1458,44 @@ class HomeDashboard(QWidget):
                 
         self._refresh_versions()
         
-    def _create_version_group_card(self, title: str, icon_str: str, badge_text: str, color_hex: str = "#0071E3"):
+    def _create_version_group_card(self, title: str, icon_name: str, badge_text: str, color_hex: str = "#0071E3"):
         card = QFrame()
         card.setStyleSheet(f"""
             QFrame {{
                 background: #FFFFFF;
                 border: 1px solid {BORDER_HAIRLINE};
-                border-radius: 12px;
+                border-radius: 10px;
             }}
         """)
         lay = QVBoxLayout(card)
-        lay.setContentsMargins(14, 12, 14, 12)
-        lay.setSpacing(8)
+        lay.setContentsMargins(12, 10, 12, 10)
+        lay.setSpacing(6)
         
         # Header
         hdr = QHBoxLayout()
-        hdr.setContentsMargins(4, 2, 4, 6)
+        hdr.setContentsMargins(2, 2, 2, 4)
         
-        title_lbl = QLabel(f"{icon_str}  <b>{title}</b>")
-        title_lbl.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        icon_lbl = QLabel()
+        icon_lbl.setPixmap(make_dashboard_icon(icon_name, color_hex, 18))
+        hdr.addWidget(icon_lbl)
+        
+        title_lbl = QLabel(f"<b>{title}</b>")
+        title_lbl.setFont(QFont("Segoe UI", 10, QFont.Bold))
         title_lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; background: transparent; border: none;")
         hdr.addWidget(title_lbl)
         hdr.addStretch(1)
         
         if badge_text:
             badge = QLabel(badge_text)
-            badge.setFont(QFont("Segoe UI", 9, QFont.Bold))
-            badge.setStyleSheet(f"background: {color_hex}15; color: {color_hex}; padding: 3px 8px; border-radius: 6px; border: 1px solid {color_hex}30;")
+            badge.setFont(QFont("Segoe UI", 8, QFont.Bold))
+            badge.setStyleSheet(f"background: {color_hex}15; color: {color_hex}; padding: 2px 7px; border-radius: 5px;")
             hdr.addWidget(badge)
             
         lay.addLayout(hdr)
         
         content_lay = QVBoxLayout()
         content_lay.setContentsMargins(0, 0, 0, 0)
-        content_lay.setSpacing(6)
+        content_lay.setSpacing(5)
         lay.addLayout(content_lay)
         
         return card, content_lay
@@ -1207,23 +1534,19 @@ class HomeDashboard(QWidget):
             
             self.ver_list_layout.insertWidget(0, empty_box)
         else:
-            # Categorize into groups
+            # 1. Separate Active and Older Versions
             active_list = []
-            manual_list = []
-            auto_list = []
+            older_list = []
             
             for v in versions:
-                fn = v["filename"]
-                if fn == active_ver:
+                if v["filename"] == active_ver:
                     active_list.append(v)
-                elif v.get("source") == "auto":
-                    auto_list.append(v)
                 else:
-                    manual_list.append(v)
+                    older_list.append(v)
                     
-            # 1. Active Timetable Group
+            # 1. Active Timetable Card at top
             if active_list:
-                card, lay = self._create_version_group_card("Aktif ve Yayındaki Çizelge", "📌", "Aktif", APPLE_GREEN)
+                card, lay = self._create_version_group_card("Aktif ve Yayındaki Çizelge", "active", "Yayında", APPLE_GREEN)
                 for v in active_list:
                     row = AppleVersionRow(self._selected_slug, v, is_active=True)
                     row.selected.connect(self._on_version_selected)
@@ -1232,45 +1555,44 @@ class HomeDashboard(QWidget):
                     lay.addWidget(row)
                 self.ver_list_layout.insertWidget(self.ver_list_layout.count() - 1, card)
                 
-            # 2. Manual Saves Group
-            if manual_list:
-                card, lay = self._create_version_group_card("Manuel Kayıtlar & Düzenlemeler", "📂", f"{len(manual_list)} Kayıt", APPLE_BLUE)
-                for v in manual_list:
-                    is_active = (v["filename"] == active_ver)
-                    row = AppleVersionRow(self._selected_slug, v, is_active=is_active)
+            # 2. Collapsible Older Versions Group with Chevron
+            if older_list:
+                hist_group = CollapsibleVersionGroup("Eski Sürümler & Geçmiş Kayıtlar", "history", f"{len(older_list)} Versiyon", APPLE_PURPLE, is_collapsed=False)
+                for v in older_list:
+                    row = AppleVersionRow(self._selected_slug, v, is_active=False)
                     row.selected.connect(self._on_version_selected)
                     row.double_clicked.connect(self._on_version_double_clicked)
                     row.action_requested.connect(self._on_version_action)
-                    lay.addWidget(row)
-                self.ver_list_layout.insertWidget(self.ver_list_layout.count() - 1, card)
-
-            # 3. Auto-Schedule Group
-            if auto_list:
-                card, lay = self._create_version_group_card("Otomatik Planlama Geçmişi", "⚡", f"{len(auto_list)} Versiyon", APPLE_AMBER)
-                for v in auto_list:
-                    is_active = (v["filename"] == active_ver)
-                    row = AppleVersionRow(self._selected_slug, v, is_active=is_active)
-                    row.selected.connect(self._on_version_selected)
-                    row.double_clicked.connect(self._on_version_double_clicked)
-                    row.action_requested.connect(self._on_version_action)
-                    lay.addWidget(row)
-                self.ver_list_layout.insertWidget(self.ver_list_layout.count() - 1, card)
+                    hist_group.content_lay.addWidget(row)
+                self.ver_list_layout.insertWidget(self.ver_list_layout.count() - 1, hist_group)
                 
-        # Password Protection with Blurred Content & Floating Modal
+        # Password Protection with Full Coverage Modal in Stack
         is_locked = version_store.has_institution_password(self._selected_slug) and (self._selected_slug not in self._unlocked_slugs)
         if is_locked:
-            blur = QGraphicsBlurEffect()
-            blur.setBlurRadius(24)
-            self.right_content_widget.setGraphicsEffect(blur)
-            self.btn_new_empty.setEnabled(False)
+            self.pwd_card_title.setText(f"{inst_name}")
             self.pwd_err_lbl.hide()
             self.pwd_card_input.clear()
+            self.pwd_card_input.setStyleSheet("""
+                QLineEdit {
+                    border: 1.5px solid #CBD5E1;
+                    border-radius: 8px;
+                    padding: 4px 12px;
+                    font-size: 13px;
+                    background: #F8FAFC;
+                    color: #0F172A;
+                }
+                QLineEdit:focus {
+                    border: 1.5px solid #0071E3;
+                    background: #FFFFFF;
+                }
+            """)
+            self.btn_new_empty.setEnabled(False)
+            self.right_panel_stack.setCurrentWidget(self.password_overlay_widget)
             self.password_overlay_widget.show()
-            self.password_overlay_widget.raise_()
             self.pwd_card_input.setFocus()
         else:
-            self.right_content_widget.setGraphicsEffect(None)
             self.btn_new_empty.setEnabled(True)
+            self.right_panel_stack.setCurrentWidget(self.right_content_widget)
             self.password_overlay_widget.hide()
             
     def _on_version_selected(self, filename):

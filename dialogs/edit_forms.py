@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QColor, QBrush
 from database import trigger_save_db
+from auto_scheduler import matches_class
 
 def get_asset_path(rel_path):
     if hasattr(sys, '_MEIPASS'):
@@ -379,19 +380,23 @@ class SubjectClassMultiSelectDialog(QDialog):
 
 
 class CombinedClassesDialog(QDialog):
-    """Birleşik Sınıflar Seçimi ve Çakışma Yönetimi Penceresi"""
-    def __init__(self, data_store=None, selected_classes=None, parent=None):
+    """Birleşik / Ortak Ders Oluşturma ve Sınıf Eşleştirme Penceresi (aSc Tarzı)"""
+    def __init__(self, data_store=None, selected_classes=None, parent=None, subject_name="", duration="2", teacher_name=""):
         super().__init__(parent)
-        self.setWindowTitle("Birleşik Sınıflar Seçimi")
-        self.setFixedSize(460, 530)
+        self.setWindowTitle("Birleşik / Ortak Ders Oluştur")
+        self.setFixedSize(540, 620)
         self.data_store = data_store or {}
         self.selected_classes = list(selected_classes or [])
+        self.init_subject = subject_name or ""
+        self.init_duration = str(duration or "2")
+        self.init_teacher = teacher_name or ""
         self.bypass_conflict = False
         
         self.setStyleSheet("""
             QDialog { background-color: #F8FAFC; font-family: system-ui, -apple-system, sans-serif; font-size: 13px; }
             QLabel { color: #1E293B; font-size: 13px; }
-            QCheckBox { font-size: 13px; font-weight: 500; padding: 4px; }
+            QComboBox { min-height: 28px; padding: 2px 6px; border: 1px solid #CBD5E1; border-radius: 4px; background: #FFFFFF; font-size: 13px; }
+            QComboBox:focus { border: 1px solid #0078D7; }
             QPushButton { min-height: 30px; padding: 4px 12px; border: 1px solid #CBD5E1; border-radius: 4px; background: #FFFFFF; font-weight: 500; }
             QPushButton:hover { background: #F1F5F9; }
         """)
@@ -404,49 +409,95 @@ class CombinedClassesDialog(QDialog):
         info_card = QFrame()
         info_card.setStyleSheet("background: #FFFBEB; border: 1px solid #FDE68A; border-radius: 6px; padding: 8px;")
         info_lay = QVBoxLayout(info_card)
-        lbl_h = QLabel("🔗 <b>Birleştirilecek Sınıfları Seçin</b> (En az 2 sınıf gereklidir)")
+        lbl_h = QLabel("🔗 <b>Birleşik / Ortak Ders Tanımlama</b> (En az 2 sınıf gereklidir)")
         lbl_h.setStyleSheet("color: #92400E; font-size: 13px;")
         info_lay.addWidget(lbl_h)
-        lbl_sub = QLabel("Seçilen sınıflar aynı saatte tek bir derslikte birleşik ders alacak şekilde planlanır.\nBirleşik sınıfı kaldırmak için 'Birleşik Sınıfı Kaldır' butonunu kullanabilirsiniz.")
+        lbl_sub = QLabel("Farklı sınıflar veya gruplar aynı saatte, aynı öğretmenle ortak ders işleyecek şekilde eşleştirilir.")
         lbl_sub.setStyleSheet("color: #B45309; font-size: 11px;")
         info_lay.addWidget(lbl_sub)
         layout.addWidget(info_card)
         
-        # Quick Select Bar
-        quick_lay = QHBoxLayout()
-        self.btn_select_all = QPushButton("Tümünü Seç")
-        self.btn_select_all.clicked.connect(self._toggle_select_all)
-        self.lbl_selected_count = QLabel("Seçili: 0 Sınıf")
-        self.lbl_selected_count.setStyleSheet("font-weight: bold; color: #0284C7;")
-        quick_lay.addWidget(self.btn_select_all)
-        quick_lay.addStretch(1)
-        quick_lay.addWidget(self.lbl_selected_count)
-        layout.addLayout(quick_lay)
+        # 1. Ders ve Saat Seçim Kartı
+        meta_frame = QFrame()
+        meta_frame.setStyleSheet("background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 6px;")
+        meta_lay = QGridLayout(meta_frame)
+        meta_lay.setContentsMargins(12, 10, 12, 10)
+        meta_lay.setHorizontalSpacing(10)
+        meta_lay.setVerticalSpacing(8)
         
-        # Classes Scroll Checklist
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 6px; }")
+        meta_lay.addWidget(QLabel("<b>Ders Seçimi:</b>"), 0, 0)
+        self.cb_subject = NoScrollComboBox()
+        self.cb_subject.setEditable(True)
+        all_subjs = sorted(list({d.get("ad", "").strip() for d in self.data_store.get("dersler", []) if d.get("ad", "").strip()}))
+        self.cb_subject.addItems(all_subjs)
+        from PySide6.QtWidgets import QCompleter
+        completer = QCompleter(all_subjs, self.cb_subject)
+        completer.setCaseSensitivity(Qt.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchContains)
+        self.cb_subject.setCompleter(completer)
+        if self.init_subject:
+            idx_s = self.cb_subject.findText(self.init_subject)
+            if idx_s >= 0: self.cb_subject.setCurrentIndex(idx_s)
+            else: self.cb_subject.setCurrentText(self.init_subject)
+        meta_lay.addWidget(self.cb_subject, 0, 1)
         
-        w = QWidget()
-        w.setStyleSheet("background: #FFFFFF;")
-        self.v_lay = QVBoxLayout(w)
-        self.v_lay.setContentsMargins(10, 10, 10, 10)
-        self.v_lay.setSpacing(6)
+        meta_lay.addWidget(QLabel("<b>Haftalık Saat / Dağılım:</b>"), 0, 2)
+        self.cb_tip = NoScrollComboBox()
+        self.cb_tip.setEditable(True)
+        self.cb_tip.addItems(["1", "2", "3", "4", "5", "6", "1+1", "2+1", "2+2", "3+1", "3+2", "4+2", "3+3", "2+2+1", "2+2+2"])
+        if self.init_duration:
+            idx_t = self.cb_tip.findText(self.init_duration)
+            if idx_t >= 0: self.cb_tip.setCurrentIndex(idx_t)
+            else: self.cb_tip.setCurrentText(self.init_duration)
+        meta_lay.addWidget(self.cb_tip, 0, 3)
         
-        classes = sorted([c.get("ad", "") for c in self.data_store.get("siniflar", []) if c.get("ad")])
-        self.chks = []
-        for c in classes:
-            chk = QCheckBox(c)
-            if c in self.selected_classes:
-                chk.setChecked(True)
-            chk.stateChanged.connect(self._on_check_changed)
-            self.v_lay.addWidget(chk)
-            self.chks.append(chk)
+        meta_lay.addWidget(QLabel("<b>Öğretmen:</b>"), 1, 0)
+        self.cb_teacher = NoScrollComboBox()
+        self.cb_teacher.setEditable(True)
+        all_t = sorted([t.get("ad", "") for t in self.data_store.get("ogretmenler", []) if t.get("ad")])
+        self.cb_teacher.addItems(all_t)
+        if self.init_teacher:
+            idx_tea = self.cb_teacher.findText(self.init_teacher)
+            if idx_tea >= 0: self.cb_teacher.setCurrentIndex(idx_tea)
+            else: self.cb_teacher.setCurrentText(self.init_teacher)
+        meta_lay.addWidget(self.cb_teacher, 1, 1, 1, 3)
+        
+        layout.addWidget(meta_frame)
+        
+        # 2. Birleştirilecek Sınıflar Kartı
+        rows_frame = QFrame()
+        rows_frame.setStyleSheet("background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 6px;")
+        rows_lay = QVBoxLayout(rows_frame)
+        rows_lay.setContentsMargins(12, 10, 12, 10)
+        rows_lay.setSpacing(6)
+        
+        header_lay = QHBoxLayout()
+        lbl_c = QLabel("<b>Birleştirilecek Sınıf</b>")
+        lbl_g = QLabel("<b>Grup / Alt Kısım</b>")
+        header_lay.addWidget(lbl_c, 1)
+        header_lay.addWidget(lbl_g, 1)
+        rows_lay.addLayout(header_lay)
+        
+        classes = [""] + sorted([c.get("ad", "") for c in self.data_store.get("siniflar", []) if c.get("ad")])
+        groups = ["Bütün Sınıf", "Grup 1", "Grup 2", "Erkekler", "Kızlar", "Seçmeli Ders"]
+        
+        self.rows = []
+        for i in range(8):
+            row_lay = QHBoxLayout()
+            cb_class = NoScrollComboBox()
+            cb_class.addItems(classes)
+            cb_group = NoScrollComboBox()
+            cb_group.addItems(groups)
             
-        self.v_lay.addStretch(1)
-        scroll.setWidget(w)
-        layout.addWidget(scroll)
+            row_lay.addWidget(cb_class, 1)
+            row_lay.addWidget(cb_group, 1)
+            rows_lay.addLayout(row_lay)
+            self.rows.append((cb_class, cb_group))
+            
+        layout.addWidget(rows_frame)
+        
+        # Load existing
+        self._load_existing()
         
         # Conflict Warning Label
         self.lbl_conflict = QLabel("")
@@ -461,72 +512,106 @@ class CombinedClassesDialog(QDialog):
         self.btn_clear.setStyleSheet("background: #FEE2E2; color: #DC2626; font-weight: bold; border: 1px solid #FECACA; border-radius: 4px; padding: 6px 12px;")
         self.btn_clear.clicked.connect(self._do_clear)
         
-        self.btn_yoksay = QPushButton("⚠️ Çakışmayı Yoksay ve Birleştir")
-        self.btn_yoksay.setStyleSheet("background: #EA580C; color: white; font-weight: bold; border-radius: 4px; padding: 6px 12px;")
-        self.btn_yoksay.setVisible(False)
-        self.btn_yoksay.clicked.connect(lambda: self._do_accept(bypass=True))
-        
         btn_cancel = QPushButton("İptal")
         btn_cancel.setFixedSize(80, 32)
         btn_cancel.clicked.connect(self.reject)
         
-        self.btn_ok = QPushButton("✅ Tamam")
-        self.btn_ok.setFixedSize(110, 32)
+        self.btn_ok = QPushButton("✅ Birleşik Dersi Onayla")
+        self.btn_ok.setFixedSize(170, 32)
         self.btn_ok.setStyleSheet("background: #0078D7; color: white; font-weight: bold; border-radius: 4px;")
-        self.btn_ok.clicked.connect(lambda: self._do_accept(bypass=False))
+        self.btn_ok.clicked.connect(self._do_accept)
         
         bot.addWidget(self.btn_clear)
-        bot.addWidget(self.btn_yoksay)
         bot.addStretch(1)
         bot.addWidget(btn_cancel)
         bot.addWidget(self.btn_ok)
         layout.addLayout(bot)
         
-        self._on_check_changed()
-        
-    def _toggle_select_all(self):
-        all_checked = all(c.isChecked() for c in self.chks)
-        for c in self.chks:
-            c.setChecked(not all_checked)
-        self.btn_select_all.setText("Tümünü Kaldır" if not all_checked else "Tümünü Seç")
-        
+    def _load_existing(self):
+        import re
+        raw_list = []
+        if isinstance(self.selected_classes, str):
+            raw_list = [p.strip() for p in self.selected_classes.replace("&", "+").replace(",", "+").split("+") if p.strip()]
+        elif isinstance(self.selected_classes, (list, tuple, set)):
+            for item in self.selected_classes:
+                if isinstance(item, str):
+                    for sub in item.replace("&", "+").replace(",", "+").split("+"):
+                        if sub.strip():
+                            raw_list.append(sub.strip())
+                            
+        for i, item in enumerate(raw_list):
+            if i >= 8: break
+            m = re.match(r"^(.*?)\s*\((.*?)\)$", item.strip())
+            if m:
+                c_name = m.group(1).strip()
+                g_name = m.group(2).strip()
+            else:
+                c_name = item.strip()
+                g_name = "Bütün Sınıf"
+                
+            idx_c = self.rows[i][0].findText(c_name)
+            if idx_c < 0:
+                for idx in range(self.rows[i][0].count()):
+                    if self.rows[i][0].itemText(idx).strip().upper() == c_name.upper():
+                        idx_c = idx
+                        break
+            if idx_c >= 0: self.rows[i][0].setCurrentIndex(idx_c)
+            
+            idx_g = self.rows[i][1].findText(g_name)
+            if idx_g < 0:
+                for idx in range(self.rows[i][1].count()):
+                    if g_name.upper() in self.rows[i][1].itemText(idx).upper():
+                        idx_g = idx
+                        break
+            if idx_g >= 0: self.rows[i][1].setCurrentIndex(idx_g)
+
     def _do_clear(self):
-        for c in self.chks:
-            c.setChecked(False)
+        for cb_c, cb_g in self.rows:
+            cb_c.setCurrentIndex(0)
+            cb_g.setCurrentIndex(0)
         self.selected_classes = []
         self.accept()
         
-    def _check_conflicts(self, selected_names):
-        grid_placements = self.data_store.get("grid_placements", [])
-        if not grid_placements:
-            return False, ""
+    def get_selected_classes(self):
+        sel = []
+        for cb_c, cb_g in self.rows:
+            c_name = cb_c.currentText().strip()
+            g_name = cb_g.currentText().strip()
+            if c_name:
+                if g_name == "Bütün Sınıf":
+                    sel.append(c_name)
+                else:
+                    sel.append(f"{c_name} ({g_name})")
+        return sel
+
+    def get_combined_string(self):
+        sel = self.get_selected_classes()
+        return " + ".join(sel)
+
+    def get_subject(self):
+        return self.cb_subject.currentText().strip()
+
+    def get_teacher(self):
+        return self.cb_teacher.currentText().strip()
+
+    def get_type(self):
+        return self.cb_tip.currentText().strip() or "2"
+
+    def get_duration(self):
+        t_val = self.get_type()
+        if "+" in t_val:
+            parts = [int(p.strip()) for p in t_val.split("+") if p.strip().isdigit()]
+            return sum(parts) if parts else 2
+        return int(t_val) if t_val.isdigit() else 2
+
+    def _do_accept(self):
+        subj = self.get_subject()
+        if not subj:
+            QMessageBox.warning(self, "Ders Seçimi Gerekli", "Lütfen birleşik ders için atanacak Dersi seçiniz veya yazınız!")
+            self.cb_subject.setFocus()
+            return
             
-        slot_map = {}
-        for item in grid_placements:
-            c_name = item.get("class_name") or item.get("class")
-            if c_name in selected_names:
-                key = (item.get("day"), item.get("period"))
-                if key in slot_map and slot_map[key] != c_name:
-                    return True, f"Çakışma Tespit Edildi: {c_name} ve {slot_map[key]} sınıflarının aynı zaman diliminde yerleştirilmiş dersi var."
-                slot_map[key] = c_name
-        return False, ""
-        
-    def _on_check_changed(self):
-        sel = [c.text() for c in self.chks if c.isChecked()]
-        self.lbl_selected_count.setText(f"Seçili: {len(sel)} Sınıf")
-        
-        has_conflict, msg = self._check_conflicts(sel)
-        if has_conflict:
-            self.lbl_conflict.setText(f"⚠️ {msg}")
-            self.lbl_conflict.setVisible(True)
-            self.btn_yoksay.setVisible(True)
-        else:
-            self.lbl_conflict.setText("")
-            self.lbl_conflict.setVisible(False)
-            self.btn_yoksay.setVisible(False)
-            
-    def _do_accept(self, bypass=False):
-        sel = [c.text() for c in self.chks if c.isChecked()]
+        sel = self.get_selected_classes()
         if len(sel) == 0:
             self.selected_classes = []
             self.accept()
@@ -534,20 +619,14 @@ class CombinedClassesDialog(QDialog):
         if len(sel) < 2:
             QMessageBox.warning(self, "Yetersiz Sınıf Seçimi", "Birleşik sınıf oluşturabilmek için en az 2 sınıf seçiniz veya seçimi temizlemek için 'Birleşik Sınıfı Kaldır' butonuna basınız.")
             return
+            
         self.selected_classes = sel
-        self.bypass_conflict = bypass
         self.accept()
-        
-    def get_selected_classes(self):
-        return self.selected_classes
-        
-    def get_combined_string(self):
-        return " + ".join(self.selected_classes) if self.selected_classes else ""
 
 
 class LessonAssignmentDialog(QDialog):
     """
-    Gelişmiş Çoklu Ders, Sınıf ve Saat Eşleştirme Paneli (Prompt 1, 2, 3 Gereksinimleri)
+    Gelişmiş Çoklu Ders, Sınıf ve Birleşik Ders Atama Paneli
     """
     def __init__(self, *args, **kwargs):
         data_store = kwargs.get("data_store")
@@ -562,8 +641,8 @@ class LessonAssignmentDialog(QDialog):
                 
         super().__init__(parent)
         self.setWindowTitle("Öğretmene Ders ve Sınıf Atama Paneli")
-        self.resize(760, 700)
-        self.setMinimumSize(700, 640)
+        self.resize(800, 720)
+        self.setMinimumSize(720, 640)
         self.setStyleSheet("""
             QDialog { background-color: #F8FAFC; font-family: system-ui, -apple-system, sans-serif; font-size: 13px; }
             QLabel { border: none; background: transparent; color: #1E293B; font-size: 13px; }
@@ -576,7 +655,6 @@ class LessonAssignmentDialog(QDialog):
         self.data_store = data_store or {}
         self.selected_teacher = kwargs.get("selected_teacher") or kwargs.get("target_teacher")
         self.subject_rows = []
-        self.combined_classes = []
         
         self._build_ui()
         self._load_teacher_initial_data()
@@ -625,21 +703,13 @@ class LessonAssignmentDialog(QDialog):
         self.l2_main.setContentsMargins(14, 12, 14, 12)
         self.l2_main.setSpacing(10)
         
-        # Header + Info Badge
+        # Header (Clean Title Only - Row level combined buttons exist per input)
         h_ders_head = QHBoxLayout()
-        lbl_dersler_title = QLabel("<b>Atanacak Dersler</b> (Otomatik Genişleyen Ders & Sınıf Eşleme)")
+        lbl_dersler_title = QLabel("<b>Atanacak Dersler</b> (Bireysel veya Birleşik Sınıf Eşleme)")
         lbl_dersler_title.setStyleSheet("color: #0F172A; font-size: 13px;")
         h_ders_head.addWidget(lbl_dersler_title)
         h_ders_head.addStretch(1)
         
-        btn_info = QPushButton("İpucu")
-        btn_info.setStyleSheet("background: #EFF6FF; color: #1D4ED8; font-size: 11px; padding: 2px 8px; border: 1px solid #BFDBFE;")
-        btn_info.clicked.connect(lambda: QMessageBox.information(
-            self, "Ders Girişi İpucu",
-            "Ders seçtikçe veya arama alanına yazdıkça aşağıda otomatik olarak yeni bir ders satırı açılır.\n"
-            "Tüm derslerinizi tamamladıysanız en altta boş kalan satırı doldurmanıza gerek yoktur, doğrudan kaydedebilirsiniz."
-        ))
-        h_ders_head.addWidget(btn_info)
         self.l2_main.addLayout(h_ders_head)
         
         # Container for dynamic subject rows
@@ -649,47 +719,25 @@ class LessonAssignmentDialog(QDialog):
         
         self.scroll_layout.addWidget(row2)
         
-        # 3. Sınıf / Sınıflarım Kartı
+        # 3. Sınıf / Sınıflarım Özet Kartı
         row3 = self._create_row_frame()
         l3 = QHBoxLayout(row3)
         l3.setContentsMargins(14, 12, 14, 12)
         
         v3 = QVBoxLayout()
-        lbl_sinif = QLabel("<b>Sınıf / Sınıflarım (Genel Özet & Birleşik Sınıf)</b>")
+        lbl_sinif = QLabel("<b>Tüm Atanan Sınıflar (Genel Özet)</b>")
         lbl_sinif.setStyleSheet("color: #0F172A; font-size: 13px;")
         v3.addWidget(lbl_sinif)
         
         self.txt_classes_summary = QLineEdit()
         self.txt_classes_summary.setReadOnly(True)
-        self.txt_classes_summary.setPlaceholderText("Derslere atanan sınıflar burada otomatik listelenir (Örn: 9A, 10B, 11C)")
+        self.txt_classes_summary.setPlaceholderText("Derslere atanan sınıflar burada otomatik listelenir (Örn: 9A, 10B, 11A + 10B)")
         self.txt_classes_summary.setStyleSheet("background: #F1F5F9; color: #0F172A; font-weight: bold;")
         v3.addWidget(self.txt_classes_summary)
         l3.addLayout(v3)
-        l3.addSpacing(10)
-        
-        btn_birl_sinif = QPushButton("Birleşik Sınıflar...")
-        btn_birl_sinif.setStyleSheet("background: #FFFBEB; color: #B45309; font-weight: bold; border: 1px solid #FDE68A; border-radius: 4px; padding: 6px 14px;")
-        btn_birl_sinif.clicked.connect(self._open_combined_classes_modal)
-        l3.addWidget(btn_birl_sinif, alignment=Qt.AlignBottom)
         self.scroll_layout.addWidget(row3)
         
-        # 4. Derslik Seçim Kartı
-        row4 = self._create_row_frame()
-        l4 = QHBoxLayout(row4)
-        l4.setContentsMargins(14, 12, 14, 12)
-        
-        v4 = QVBoxLayout()
-        lbl_derslik = QLabel("<b>Derslik Seçimi</b>")
-        lbl_derslik.setStyleSheet("color: #0F172A; font-size: 13px;")
-        v4.addWidget(lbl_derslik)
-        
-        self.txt_derslik = QLineEdit()
-        self.txt_derslik.setPlaceholderText("Derslik Seç (Opsiyonel)")
-        v4.addWidget(self.txt_derslik)
-        l4.addLayout(v4)
-        self.scroll_layout.addWidget(row4)
-        
-        # 5. Canlı Özet Çubuğu
+        # 4. Canlı Özet Çubuğu
         self.lbl_ozet = QLabel("Otomatik Eşleşme: -")
         self.lbl_ozet.setStyleSheet("background: #EFF6FF; color: #1D4ED8; font-weight: bold; border-radius: 6px; padding: 10px; border: 1px solid #BFDBFE;")
         self.scroll_layout.addWidget(self.lbl_ozet)
@@ -722,7 +770,7 @@ class LessonAssignmentDialog(QDialog):
             return sorted([c.get("ad", "") for c in self.data_store.get("siniflar", []) if c.get("ad")])
         return []
 
-    def _add_subject_row(self, subject_name="", hours="2", distribution="2", assigned_classes=None, class_configs=None):
+    def _add_subject_row(self, subject_name="", hours="2", distribution="2", assigned_classes=None, class_configs=None, is_combined=False, combined_classes=None):
         row_widget = QWidget()
         row_widget.setStyleSheet("background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 4px;")
         row_layout = QVBoxLayout(row_widget)
@@ -738,7 +786,6 @@ class LessonAssignmentDialog(QDialog):
         all_subjs = self._get_all_subjects()
         cb_subject.addItems(all_subjs)
         
-        # Autocomplete search
         from PySide6.QtWidgets import QCompleter
         completer = QCompleter(all_subjs, cb_subject)
         completer.setCaseSensitivity(Qt.CaseInsensitive)
@@ -760,9 +807,9 @@ class LessonAssignmentDialog(QDialog):
             
         top_h.addWidget(cb_subject, 2)
         
-        # Hours / Tip Combo (Mouse Wheel Blocked)
+        # Hours / Tip Combo
         cb_tip = NoScrollComboBox()
-        cb_tip.setMinimumWidth(100)
+        cb_tip.setMinimumWidth(90)
         cb_tip.setEditable(True)
         cb_tip.addItems(["1", "2", "3", "4", "5", "6", "1+1", "2+1", "2+2", "3+1", "3+2", "4+2", "3+3", "2+2+1", "2+2+2", "3+2+1"])
         if distribution:
@@ -772,9 +819,14 @@ class LessonAssignmentDialog(QDialog):
         top_h.addWidget(cb_tip, 1)
         
         # Sınıfları Seç Butonu
-        btn_classes = QPushButton("Sınıf(lar) Ata...")
+        btn_classes = QPushButton("🏫 Sınıf(lar) Ata...")
         btn_classes.setStyleSheet("background: #F0FDF4; color: #166534; font-weight: bold; border: 1px solid #BBF7D0;")
         top_h.addWidget(btn_classes, 1)
+        
+        # Birleşik Sınıf Butonu
+        btn_comb = QPushButton("🔗 Birleşik Sınıf...")
+        btn_comb.setStyleSheet("background: #FFFBEB; color: #B45309; font-weight: bold; border: 1px solid #FDE68A;")
+        top_h.addWidget(btn_comb, 1)
         
         # Sil Butonu
         btn_del = QPushButton("X")
@@ -785,23 +837,33 @@ class LessonAssignmentDialog(QDialog):
         row_layout.addLayout(top_h)
         
         # Badge showing assigned classes for this row with their individual hours
-        lbl_classes_badge = QLabel("Atanan Sınıflar: " + (", ".join(assigned_classes) if assigned_classes else "Tüm Sınıflar / Belirtilmedi"))
-        lbl_classes_badge.setStyleSheet("color: #0369A1; font-size: 11px; font-weight: bold; padding-left: 4px;")
+        lbl_classes_badge = QLabel("Atanan Sınıflar: Belirtilmedi")
+        lbl_classes_badge.setStyleSheet("color: #0369A1; font-size: 11px; font-weight: bold; padding: 3px 6px; border-radius: 4px;")
         row_layout.addWidget(lbl_classes_badge)
         
+        comb_cls_list = list(combined_classes or [])
+        if not comb_cls_list and is_combined and assigned_classes:
+            for item in assigned_classes:
+                for p in str(item).replace("&", "+").replace(",", "+").split("+"):
+                    if p.strip() and p.strip() not in comb_cls_list:
+                        comb_cls_list.append(p.strip())
+                        
         row_data = {
             "widget": row_widget,
             "cb_subject": cb_subject,
             "cb_tip": cb_tip,
             "lbl_badge": lbl_classes_badge,
             "classes": list(assigned_classes or []),
-            "class_configs": dict(class_configs or {})
+            "class_configs": dict(class_configs or {}),
+            "is_combined": bool(is_combined),
+            "combined_classes": comb_cls_list
         }
         self.subject_rows.append(row_data)
         self.subjects_container.addWidget(row_widget)
         
         # Connect signals
         btn_classes.clicked.connect(lambda: self._edit_classes_for_row(row_data))
+        btn_comb.clicked.connect(lambda: self._edit_combined_for_row(row_data))
         btn_del.clicked.connect(lambda: self._remove_subject_row(row_data))
         
         cb_subject.editTextChanged.connect(lambda t: self._on_subject_changed(row_data, t))
@@ -812,12 +874,21 @@ class LessonAssignmentDialog(QDialog):
         self._update_ozet()
 
     def _update_row_badge(self, row_data):
+        is_comb = bool(row_data.get("is_combined"))
         assigned_classes = row_data["classes"]
         configs = row_data.get("class_configs", {})
         default_dist = row_data["cb_tip"].currentText().strip() or "2"
         
+        if is_comb:
+            comb_classes = row_data.get("combined_classes") or assigned_classes
+            comb_str = " + ".join(comb_classes) if comb_classes else (assigned_classes[0] if assigned_classes else "-")
+            row_data["lbl_badge"].setText(f"🔗 BİRLEŞİK / ORTAK DERS: {comb_str} ({default_dist} Saat)")
+            row_data["lbl_badge"].setStyleSheet("background: #FEF3C7; color: #92400E; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 4px; border: 1px solid #FDE68A;")
+            return
+            
+        row_data["lbl_badge"].setStyleSheet("background: #F0F9FF; color: #0369A1; font-size: 11px; font-weight: bold; padding: 3px 6px; border-radius: 4px; border: 1px solid #BAE6FD;")
         if not assigned_classes:
-            row_data["lbl_badge"].setText("Atanan Sınıflar: Tüm Sınıflar / Belirtilmedi")
+            row_data["lbl_badge"].setText("Atanan Sınıflar: Henüz Seçilmedi")
             return
             
         badge_parts = []
@@ -843,7 +914,6 @@ class LessonAssignmentDialog(QDialog):
     def _on_subject_changed(self, row_data, text):
         clean = text.strip()
         if clean:
-            # If this is the last row, automatically append a new empty row below it!
             if self.subject_rows and self.subject_rows[-1] == row_data:
                 self._add_subject_row("", "2", "2", [], {})
         self._update_classes_summary()
@@ -856,17 +926,60 @@ class LessonAssignmentDialog(QDialog):
         dlg = SubjectClassMultiSelectDialog(
             subject_name=subj,
             all_classes=all_cls,
-            selected_classes=row_data["classes"],
+            selected_classes=row_data["classes"] if not row_data.get("is_combined") else [],
             default_distribution=default_dist,
             class_configs=row_data.get("class_configs", {}),
             parent=self
         )
         if dlg.exec() == QDialog.Accepted:
+            row_data["is_combined"] = False
+            row_data["combined_classes"] = []
             row_data["classes"] = dlg.get_selected()
             row_data["class_configs"] = dlg.get_configs()
             self._update_row_badge(row_data)
             self._update_classes_summary()
             self._update_ozet()
+
+    def _edit_combined_for_row(self, row_data):
+        current_subj = row_data["cb_subject"].currentText().strip()
+        current_tip = row_data["cb_tip"].currentText().strip() or "2"
+        current_t = self.cb_ogretmen.currentText().strip()
+        current_classes = row_data.get("combined_classes") or row_data.get("classes", [])
+        dlg = CombinedClassesDialog(
+            data_store=self.data_store,
+            selected_classes=current_classes,
+            parent=self,
+            subject_name=current_subj,
+            duration=current_tip,
+            teacher_name=current_t
+        )
+        if dlg.exec() == QDialog.Accepted:
+            sel_classes = dlg.get_selected_classes()
+            if sel_classes:
+                row_data["is_combined"] = True
+                row_data["combined_classes"] = sel_classes
+                row_data["classes"] = [dlg.get_combined_string()]
+                
+                # Update subject and hours if changed in dialog
+                s = dlg.get_subject()
+                if s:
+                    idx = row_data["cb_subject"].findText(s)
+                    if idx >= 0: row_data["cb_subject"].setCurrentIndex(idx)
+                    else: row_data["cb_subject"].setCurrentText(s)
+                row_data["cb_tip"].setCurrentText(dlg.get_type())
+                
+                self._update_row_badge(row_data)
+                self._update_classes_summary()
+                self._update_ozet()
+                
+                if self.subject_rows and self.subject_rows[-1] == row_data:
+                    self._add_subject_row("", "2", "2", [], {})
+            else:
+                row_data["is_combined"] = False
+                row_data["combined_classes"] = []
+                self._update_row_badge(row_data)
+                self._update_classes_summary()
+                self._update_ozet()
 
     def _remove_subject_row(self, row_data):
         if len(self.subject_rows) <= 1:
@@ -876,6 +989,8 @@ class LessonAssignmentDialog(QDialog):
                 row_data["cb_subject"].lineEdit().setPlaceholderText("Ders Ara veya Seç...")
             row_data["classes"] = []
             row_data["class_configs"] = {}
+            row_data["is_combined"] = False
+            row_data["combined_classes"] = []
             self._update_row_badge(row_data)
         else:
             self.subject_rows.remove(row_data)
@@ -886,26 +1001,57 @@ class LessonAssignmentDialog(QDialog):
         self._update_ozet()
 
     def _open_combined_classes_modal(self):
-        dlg = CombinedClassesDialog(self.data_store, self.combined_classes, self)
+        cur_t = self.cb_ogretmen.currentText().strip()
+        dlg = CombinedClassesDialog(
+            data_store=self.data_store,
+            parent=self,
+            teacher_name=cur_t
+        )
         if dlg.exec() == QDialog.Accepted:
-            self.combined_classes = dlg.get_selected_classes()
-            comb_str = dlg.get_combined_string()
-            if comb_str:
-                self.txt_classes_summary.setText(f"BİRLEŞİK: {comb_str}")
-            else:
+            sel_classes = dlg.get_selected_classes()
+            subj = dlg.get_subject()
+            tip = dlg.get_type()
+            if sel_classes and subj:
+                # Find an empty subject row, or create a new row
+                target_row = None
+                for r in self.subject_rows:
+                    if not r["cb_subject"].currentText().strip():
+                        target_row = r
+                        break
+                if not target_row:
+                    self._add_subject_row(subj, tip, tip, [dlg.get_combined_string()], {}, is_combined=True, combined_classes=sel_classes)
+                    target_row = self.subject_rows[-1]
+                else:
+                    idx = target_row["cb_subject"].findText(subj)
+                    if idx >= 0: target_row["cb_subject"].setCurrentIndex(idx)
+                    else: target_row["cb_subject"].setCurrentText(subj)
+                    target_row["cb_tip"].setCurrentText(tip)
+                    target_row["classes"] = [dlg.get_combined_string()]
+                    target_row["is_combined"] = True
+                    target_row["combined_classes"] = sel_classes
+                
+                self._update_row_badge(target_row)
                 self._update_classes_summary()
+                self._update_ozet()
+                
+                if self.subject_rows and self.subject_rows[-1]["cb_subject"].currentText().strip():
+                    self._add_subject_row("", "2", "2", [], {})
 
     def _update_classes_summary(self):
-        if self.combined_classes:
-            self.txt_classes_summary.setText(f"BİRLEŞİK: {' + '.join(self.combined_classes)}")
-            return
-            
         all_assigned = []
         for r in self.subject_rows:
-            for c in r["classes"]:
-                clean_c = c.replace(",", "+").replace(" ", "") if ("," in c or "+" in c or "&" in c) else c
-                if clean_c and clean_c not in all_assigned:
-                    all_assigned.append(clean_c)
+            if not r["cb_subject"].currentText().strip():
+                continue
+            if r.get("is_combined"):
+                comb_cls = r.get("combined_classes") or r.get("classes") or []
+                c_str = " + ".join(comb_cls)
+                if c_str and f"BİRLEŞİK: {c_str}" not in all_assigned:
+                    all_assigned.append(f"BİRLEŞİK: {c_str}")
+            else:
+                for c in r["classes"]:
+                    clean_c = c.replace(",", "+").replace(" ", "") if ("," in c or "+" in c or "&" in c) else c
+                    if clean_c and clean_c not in all_assigned:
+                        all_assigned.append(clean_c)
                     
         if all_assigned:
             self.txt_classes_summary.setText(", ".join(all_assigned))
@@ -921,21 +1067,32 @@ class LessonAssignmentDialog(QDialog):
         all_cls = set()
         total_hours = 0
         for r in valid_rows:
-            cfg_map = r.get("class_configs", {})
-            assigned_c = r["classes"] or (self.combined_classes if self.combined_classes else ["9A"])
             def_dist = r["cb_tip"].currentText().strip() or "2"
-            
-            for c in assigned_c:
-                all_cls.add(c)
-                cfg = cfg_map.get(c, {})
-                c_type = cfg.get("type", def_dist)
-                if "+" in c_type:
-                    parts = [int(p.strip()) for p in c_type.split("+") if p.strip().isdigit()]
+            if r.get("is_combined"):
+                comb_cls = r.get("combined_classes") or r.get("classes") or []
+                for c in comb_cls:
+                    all_cls.add(c)
+                if "+" in def_dist:
+                    parts = [int(p.strip()) for p in def_dist.split("+") if p.strip().isdigit()]
                     total_hours += sum(parts) if parts else 2
-                elif c_type.isdigit():
-                    total_hours += int(c_type)
+                elif def_dist.isdigit():
+                    total_hours += int(def_dist)
                 else:
-                    total_hours += int(cfg.get("duration", 2))
+                    total_hours += 2
+            else:
+                cfg_map = r.get("class_configs", {})
+                assigned_c = r["classes"] or []
+                for c in assigned_c:
+                    all_cls.add(c)
+                    cfg = cfg_map.get(c, {})
+                    c_type = cfg.get("type", def_dist)
+                    if "+" in c_type:
+                        parts = [int(p.strip()) for p in c_type.split("+") if p.strip().isdigit()]
+                        total_hours += sum(parts) if parts else 2
+                    elif c_type.isdigit():
+                        total_hours += int(c_type)
+                    else:
+                        total_hours += int(cfg.get("duration", 2))
                     
         cls_count = len(all_cls)
         
@@ -983,43 +1140,144 @@ class LessonAssignmentDialog(QDialog):
             r["widget"].deleteLater()
         self.subject_rows.clear()
         
-        # Group by subject
-        subj_map = {}
+        normal_subj_map = {}
+        combined_list = []
+        
         for a in my_atamalar:
             s_name = a.get("subject", "").strip()
             if not s_name: continue
-            cls_name = a.get("class", "").strip()
+            c_name = a.get("class", "").strip()
             dur = a.get("duration", 2)
             typ = a.get("type", str(dur))
-            if s_name not in subj_map:
-                subj_map[s_name] = {
-                    "classes": [],
+            is_comb = bool(a.get("is_combined") or ("+" in c_name or "&" in c_name))
+            
+            if is_comb:
+                comb_cls = a.get("combined_classes") or [p.strip() for p in c_name.replace("&", "+").replace(",", "+").split("+") if p.strip()]
+                combined_list.append({
+                    "subject": s_name,
                     "duration": dur,
                     "type": typ,
-                    "class_configs": {}
-                }
-            if cls_name:
-                if cls_name not in subj_map[s_name]["classes"]:
-                    subj_map[s_name]["classes"].append(cls_name)
-                subj_map[s_name]["class_configs"][cls_name] = {"type": typ, "duration": dur}
+                    "class_str": c_name,
+                    "combined_classes": comb_cls
+                })
+            else:
+                if s_name not in normal_subj_map:
+                    normal_subj_map[s_name] = {
+                        "classes": [],
+                        "duration": dur,
+                        "type": typ,
+                        "class_configs": {}
+                    }
+                if c_name and c_name not in normal_subj_map[s_name]["classes"]:
+                    normal_subj_map[s_name]["classes"].append(c_name)
+                normal_subj_map[s_name]["class_configs"][c_name] = {"type": typ, "duration": dur}
                 
-        if subj_map:
-            for s_name, s_data in subj_map.items():
-                self._add_subject_row(s_name, str(s_data.get("duration", 2)), s_data.get("type", "2"), s_data.get("classes", []), class_configs=s_data.get("class_configs", {}))
-        else:
-            self._add_subject_row("", "2", "2", [], {})
+        # Add normal rows
+        for s_name, s_data in normal_subj_map.items():
+            self._add_subject_row(
+                s_name, str(s_data.get("duration", 2)), s_data.get("type", "2"),
+                s_data.get("classes", []), class_configs=s_data.get("class_configs", {}),
+                is_combined=False
+            )
             
-        # Add trailing empty row for frictionless addition
-        if self.subject_rows and self.subject_rows[-1]["cb_subject"].currentText().strip():
+        # Add combined rows
+        for c_item in combined_list:
+            self._add_subject_row(
+                c_item["subject"], str(c_item["duration"]), c_item["type"],
+                [c_item["class_str"]], class_configs={},
+                is_combined=True, combined_classes=c_item["combined_classes"]
+            )
+            
+        # Add trailing empty row
+        if not self.subject_rows or self.subject_rows[-1]["cb_subject"].currentText().strip():
             self._add_subject_row("", "2", "2", [], {})
             
         self._update_classes_summary()
         self._update_ozet()
 
-    def accept(self):
-        # 1. Update data_store["atamalar"] for this teacher
+    def get_data(self):
         teacher_name = format_tr_name(self.cb_ogretmen.currentText().strip())
-        if self.data_store is not None and teacher_name:
+        if not teacher_name:
+            QMessageBox.warning(self, "Öğretmen Seçilmedi", "Lütfen bir öğretmen seçiniz.")
+            return None
+            
+        assignments = []
+        valid_rows = [r for r in self.subject_rows if r["cb_subject"].currentText().strip()]
+        
+        for r in valid_rows:
+            subj = r["cb_subject"].currentText().strip()
+            default_type_val = r["cb_tip"].currentText().strip() or "2"
+            is_comb = bool(r.get("is_combined"))
+            
+            if is_comb:
+                comb_classes = r.get("combined_classes") or r.get("classes") or []
+                if not comb_classes or len(comb_classes) < 2:
+                    QMessageBox.warning(self, "Eksik Sınıf", f"'{subj}' birleşik dersi için en az 2 sınıf seçilmelidir!")
+                    return None
+                comb_str = " + ".join(comb_classes)
+                cfg = r.get("class_configs", {}).get(comb_str, {})
+                type_val = cfg.get("type", default_type_val)
+                if "+" in type_val:
+                    parts = [int(p.strip()) for p in type_val.split("+") if p.strip().isdigit()]
+                    duration = sum(parts) if parts else 2
+                else:
+                    duration = int(type_val) if type_val.isdigit() else 2
+                    
+                assignments.append({
+                    "teacher": teacher_name,
+                    "subject": subj,
+                    "class": comb_str,
+                    "duration": duration,
+                    "type": type_val,
+                    "color": get_subject_color(subj),
+                    "is_combined": True,
+                    "combined_classes": list(comb_classes)
+                })
+            else:
+                assigned_classes = r["classes"]
+                if not assigned_classes:
+                    QMessageBox.warning(self, "Eksik Sınıf Seçimi", f"Lütfen '{subj}' dersi için en az bir sınıf seçiniz!")
+                    return None
+                for c_name in assigned_classes:
+                    cfg = r.get("class_configs", {}).get(c_name, {})
+                    type_val = cfg.get("type", default_type_val)
+                    if "+" in type_val:
+                        parts = [int(p.strip()) for p in type_val.split("+") if p.strip().isdigit()]
+                        duration = sum(parts) if parts else 2
+                    else:
+                        duration = int(type_val) if type_val.isdigit() else 2
+                        
+                    assignments.append({
+                        "teacher": teacher_name,
+                        "subject": subj,
+                        "class": c_name,
+                        "duration": duration,
+                        "type": type_val,
+                        "color": get_subject_color(subj),
+                        "is_combined": False,
+                        "combined_classes": []
+                    })
+                    
+        return assignments
+
+    def accept(self):
+        teacher_name = format_tr_name(self.cb_ogretmen.currentText().strip())
+        if not teacher_name:
+            QMessageBox.warning(self, "Öğretmen Seçilmedi", "Lütfen bir öğretmen seçiniz.")
+            return
+            
+        new_data = self.get_data()
+        if new_data is None:
+            return # Validation failed
+            
+        if not new_data:
+            # Check if user had any rows typed
+            any_typed = any(r["cb_subject"].currentText().strip() for r in self.subject_rows)
+            if not any_typed:
+                QMessageBox.warning(self, "Ders Seçilmedi", "Kaydedilecek geçerli bir ders veya sınıf seçimi bulunamadı.\nLütfen atanacak dersi seçtiğinizden emin olunuz.")
+                return
+                
+        if self.data_store is not None:
             if "atamalar" not in self.data_store:
                 self.data_store["atamalar"] = []
                 
@@ -1030,17 +1288,12 @@ class LessonAssignmentDialog(QDialog):
             ]
             
             # Add new assignments
-            new_data = self.get_data()
-            if isinstance(new_data, list):
-                self.data_store["atamalar"].extend(new_data)
-            elif new_data:
-                self.data_store["atamalar"].append(new_data)
-                
+            self.data_store["atamalar"].extend(new_data)
+            
             # Clean up grid placements, auto_schedule_results, and yerlesim for removed assignments
             active_tuples = {
                 (format_tr_name(a.get("subject", "")), format_tr_name(a.get("class", "")), teacher_name)
-                for a in (new_data if isinstance(new_data, list) else [new_data])
-                if a
+                for a in new_data
             }
             
             grid_data = self.data_store.get("grid_placements", [])
@@ -1101,46 +1354,6 @@ class LessonAssignmentDialog(QDialog):
                 if hasattr(win, "_refresh_unplaced_lessons"): win._refresh_unplaced_lessons()
                 
         super().accept()
-
-    def get_data(self):
-        teacher_name = format_tr_name(self.cb_ogretmen.currentText().strip())
-        all_classes_list = self._get_all_classes()
-        default_class = all_classes_list[0] if all_classes_list else "9A"
-        
-        assignments = []
-        for r in self.subject_rows:
-            subj = r["cb_subject"].currentText().strip()
-            if not subj:
-                continue
-                
-            default_type_val = r["cb_tip"].currentText().strip()
-            assigned_classes = r["classes"]
-            if not assigned_classes:
-                if self.combined_classes:
-                    assigned_classes = [" + ".join(self.combined_classes)]
-                else:
-                    # 'Tüm Sınıflar / Belirtilmedi' seçiliyse tüm sınıflara ata
-                    assigned_classes = list(all_classes_list) if all_classes_list else [default_class]
-                    
-            for c_name in assigned_classes:
-                cfg = r.get("class_configs", {}).get(c_name, {})
-                type_val = cfg.get("type", default_type_val)
-                if "+" in type_val:
-                    parts = [int(p.strip()) for p in type_val.split("+") if p.strip().isdigit()]
-                    duration = sum(parts) if parts else 1
-                else:
-                    duration = int(type_val) if type_val.isdigit() else 1
-                    
-                assignments.append({
-                    "teacher": teacher_name,
-                    "subject": subj,
-                    "class": c_name,
-                    "duration": duration,
-                    "type": type_val,
-                    "color": get_subject_color(subj)
-                })
-                
-        return assignments
 
 
 def _auto_short_code(text: str) -> str:
@@ -1644,6 +1857,16 @@ class CombinedClassesAssignDialog(QDialog):
         self.cb_type.addItems(["2 Saat (2'li Blok)", "2+2 Saat (4 Saat)", "1 Saat (Tekli)", "1+1 Saat (2 Tekli)", "3 Saat", "Özel"])
         form_subj.addRow("Ders Dağılımı:", self.cb_type)
         
+        self.txt_custom_type = QLineEdit()
+        self.txt_custom_type.setPlaceholderText("Örn: 2+2+1 veya 1+1+1+1")
+        self.txt_custom_type.setText("2+2+1")
+        self.txt_custom_type.hide()
+        self.lbl_custom_type = QLabel("Özel Dağılım (Format):")
+        self.lbl_custom_type.hide()
+        form_subj.addRow(self.lbl_custom_type, self.txt_custom_type)
+        
+        self.cb_type.currentTextChanged.connect(self._on_type_changed)
+        
         lay.addWidget(grp_subj)
         
         # Buttons
@@ -1661,6 +1884,13 @@ class CombinedClassesAssignDialog(QDialog):
         btns.addWidget(btn_save)
         lay.addLayout(btns)
         
+    def _on_type_changed(self, text):
+        is_custom = (text == "Özel")
+        self.lbl_custom_type.setVisible(is_custom)
+        self.txt_custom_type.setVisible(is_custom)
+        if is_custom:
+            self.txt_custom_type.setFocus()
+        
     def _save_combined(self):
         selected_classes = [self.cls_list.item(i).text() for i in range(self.cls_list.count()) if self.cls_list.item(i).checkState() == Qt.Checked]
         if len(selected_classes) < 2:
@@ -1673,7 +1903,21 @@ class CombinedClassesAssignDialog(QDialog):
         
         type_str = "2"
         tot_dur = 2
-        if "2+2" in type_choice:
+        if type_choice == "Özel":
+            custom_val = self.txt_custom_type.text().strip()
+            if not custom_val:
+                QMessageBox.warning(self, "Eksik Bilgi", "Lütfen özel ders dağılımını girin (Örn: 2+2+1).")
+                return
+            try:
+                parts = [int(p.strip()) for p in custom_val.split("+") if p.strip()]
+                if not parts or any(p <= 0 for p in parts):
+                    raise ValueError()
+                type_str = "+".join(map(str, parts))
+                tot_dur = sum(parts)
+            except:
+                QMessageBox.warning(self, "Geçersiz Format", "Özel dağılım formatı geçersiz! Örnek format: 2+2+1 veya 1+1+1+1")
+                return
+        elif "2+2" in type_choice:
             type_str = "2+2"; tot_dur = 4
         elif "1+1" in type_choice:
             type_str = "1+1"; tot_dur = 2
@@ -1829,26 +2073,38 @@ class SubjectTeacherAssignmentDialog(QDialog):
             if t_asgns:
                 t_classes = list({a.get("class", "") for a in t_asgns if a.get("class")})
                 t_type = t_asgns[0].get("type", str(t_asgns[0].get("duration", 2)))
+                is_comb = any(a.get("is_combined") for a in t_asgns) or any("+" in a.get("class", "") or "&" in a.get("class", "") for a in t_asgns)
+                
+                comb_cls = []
+                for a in t_asgns:
+                    if a.get("combined_classes"):
+                        for c in a["combined_classes"]:
+                            if c not in comb_cls: comb_cls.append(c)
+                if comb_cls:
+                    t_classes = comb_cls
                 
                 # If current_class is specified (e.g. "9A"), is THIS teacher assigned to THIS class?
                 if self.current_class:
-                    is_for_cur = any(format_tr_name(c) == format_tr_name(self.current_class) for c in t_classes)
+                    is_for_cur = any(format_tr_name(c) == format_tr_name(self.current_class) or matches_class(c, self.current_class) for c in t_classes)
                     self.teacher_configs[t] = {
                         "checked": is_for_cur,
                         "type": t_type,
-                        "classes": t_classes if is_for_cur else [self.current_class]
+                        "classes": t_classes if is_for_cur else [self.current_class],
+                        "is_combined": is_comb
                     }
                 else:
                     self.teacher_configs[t] = {
                         "checked": True,
                         "type": t_type,
-                        "classes": t_classes
+                        "classes": t_classes,
+                        "is_combined": is_comb
                     }
             else:
                 self.teacher_configs[t] = {
                     "checked": False,
                     "type": "2",
-                    "classes": [self.current_class] if self.current_class else (self.all_classes[:1] if self.all_classes else [])
+                    "classes": [self.current_class] if self.current_class else (self.all_classes[:1] if self.all_classes else []),
+                    "is_combined": False
                 }
 
     def _build_ui(self):
@@ -2214,14 +2470,21 @@ class SubjectTeacherAssignmentDialog(QDialog):
                 target_classes = cfg["classes"]
                 is_combined = bool(cfg.get("is_combined", False)) and len(target_classes) > 1
                 
-                for c_name in target_classes:
-                    if c_name:
-                        if not any(
-                            format_tr_name(a.get("teacher", "")) == format_tr_name(t_name) and
-                            format_tr_name(a.get("subject", "")) == subj_target and
-                            format_tr_name(a.get("class", "")) == format_tr_name(c_name)
-                            for a in clean_atamalar
-                        ):
+                if is_combined:
+                    comb_name = " + ".join(target_classes)
+                    clean_atamalar.append({
+                        "teacher": t_name.strip(),
+                        "subject": self.subject_name.strip(),
+                        "class": comb_name,
+                        "duration": total_dur,
+                        "type": type_str,
+                        "color": get_subject_color(self.subject_name),
+                        "is_combined": True,
+                        "combined_classes": list(target_classes)
+                    })
+                else:
+                    for c_name in target_classes:
+                        if c_name:
                             clean_atamalar.append({
                                 "teacher": t_name.strip(),
                                 "subject": self.subject_name.strip(),
@@ -2229,8 +2492,8 @@ class SubjectTeacherAssignmentDialog(QDialog):
                                 "duration": total_dur,
                                 "type": type_str,
                                 "color": get_subject_color(self.subject_name),
-                                "is_combined": is_combined,
-                                "combined_classes": target_classes if is_combined else []
+                                "is_combined": False,
+                                "combined_classes": []
                             })
                         
         self.data_store["atamalar"] = clean_atamalar
@@ -2353,12 +2616,21 @@ class SinifEditDialog(BaseEditForm):
         
         self.w_so = QComboBox()
         teachers = [""]
-        if self.parent() and hasattr(self.parent(), "data_store"):
-            raw_teachers = [t.get("ad", "") for t in self.parent().data_store.get("ogretmenler", []) if t.get("ad")]
-            teachers.extend(sorted(raw_teachers))
+        p = self.parent()
+        data_store = getattr(p, "data_store", {}) if p else {}
+        if not data_store and hasattr(p, "main_window"):
+            data_store = getattr(p.main_window, "data_store", {})
+        raw_teachers = [t.get("ad", "") for t in data_store.get("ogretmenler", []) if t.get("ad")]
+        teachers.extend(sorted(raw_teachers))
         self.w_so.addItems(teachers)
         
-        existing_so = self.existing_data.get("sinif_ogretmeni", "")
+        c_name = self.existing_data.get("ad", "").strip()
+        existing_so = self.existing_data.get("sinif_ogretmeni", "").strip()
+        if not existing_so and data_store and c_name:
+            for t in data_store.get("ogretmenler", []):
+                if (t.get("sinif_ogretmeni") or "").strip().upper() == c_name.upper():
+                    existing_so = t.get("ad", "").strip()
+                    break
         idx_so = self.w_so.findText(existing_so)
         if idx_so >= 0:
             self.w_so.setCurrentIndex(idx_so)
@@ -2478,24 +2750,44 @@ class OgretmenEditDialog(BaseEditForm):
         frame_gorev = QFrame()
         frame_gorev.setStyleSheet(".QFrame { background: #FFFFFF; border: 1px solid #E0E0E0; border-radius: 6px; }")
         lay_gorev = QFormLayout(frame_gorev)
-        lay_gorev.setContentsMargins(15, 15, 15, 15)
-        lay_gorev.setSpacing(12)
-        
         self.w_so = QComboBox()
         classes = [""]
         p = self.parent()
         data_store = getattr(p, "data_store", {}) if p else {}
+        if not data_store and hasattr(p, "main_window"):
+            data_store = getattr(p.main_window, "data_store", {})
         raw_classes = [c.get("ad", "") for c in data_store.get("siniflar", []) if c.get("ad")]
         classes.extend(sorted(raw_classes))
         self.w_so.addItems(classes)
-        existing_so = self.existing_data.get("sinif_ogretmeni", "")
+        
+        t_name = self.existing_data.get("ad", "").strip()
+        existing_so = self.existing_data.get("sinif_ogretmeni", "").strip()
+        if not existing_so and data_store and t_name:
+            for s in data_store.get("siniflar", []):
+                if format_tr_name(s.get("sinif_ogretmeni", "").strip()) == format_tr_name(t_name):
+                    existing_so = s.get("ad", "").strip()
+                    break
         idx_so = self.w_so.findText(existing_so)
-        if idx_so >= 0: self.w_so.setCurrentIndex(idx_so)
+        if idx_so >= 0:
+            self.w_so.setCurrentIndex(idx_so)
         
         lay_gorev.addRow(QLabel("<b>Sınıf Öğretmeni (Rehberlik):</b>"), self.w_so)
         
-        self.w_brans = QLineEdit(self.existing_data.get("brans", ""))
-        self.w_brans.setPlaceholderText("Örn: Matematik, Geometri")
+        # Branch is now a static dropdown populated with existing subjects (dersler)
+        self.w_brans = QComboBox()
+        subjects = [""]
+        raw_subjects = [d.get("ad", "") for d in data_store.get("dersler", []) if d.get("ad")]
+        subjects.extend(sorted(raw_subjects))
+        
+        existing_brans = self.existing_data.get("brans", "").strip()
+        if existing_brans and existing_brans not in subjects:
+            subjects.append(existing_brans)
+            
+        self.w_brans.addItems(subjects)
+        idx_brans = self.w_brans.findText(existing_brans)
+        if idx_brans >= 0:
+            self.w_brans.setCurrentIndex(idx_brans)
+            
         lay_gorev.addRow(QLabel("<b>Öğretmen Branşı:</b>"), self.w_brans)
         
         self.chk_es_zamanli = QCheckBox("Aynı saatte çoklu/paralel ders girebilir (Çoklu Ders İzni)")
@@ -2533,18 +2825,7 @@ class OgretmenEditDialog(BaseEditForm):
             
         lay_ders.addWidget(self.list_assignments)
         
-        self.w_ek_dersler = QLineEdit(", ".join(my_subjects) if my_subjects else self.existing_data.get("ek_dersler", ""))
-        self.w_ek_dersler.setReadOnly(True)
-        self.w_ek_dersler.setStyleSheet("background: #EAEAEA; color: #333; border: 1px solid #CCC; border-radius: 4px; padding: 4px 8px;")
-        self.w_ek_dersler.setToolTip("Bu alan atamalardan otomatik olarak çekilir.")
-        
-        lay_ek = QHBoxLayout()
-        lay_ek.setSpacing(10)
-        lbl_ek = QLabel("<b>Otomatik Ek Dersler:</b>")
-        lbl_ek.setFont(QFont("Segoe UI", 9))
-        lay_ek.addWidget(lbl_ek)
-        lay_ek.addWidget(self.w_ek_dersler, 1)
-        lay_ders.addLayout(lay_ek)
+
         
         # Action Buttons (Clean text, no emojis)
         h_btn_lay = QHBoxLayout()
@@ -2680,9 +2961,6 @@ class OgretmenEditDialog(BaseEditForm):
                 self.list_assignments.addItem(QListWidgetItem(item_text))
             if not my_atamalar:
                 self.list_assignments.addItem(QListWidgetItem("❌ Henüz hiçbir derse veya sınıfa atanmadı."))
-            
-            my_subjects = list({a.get("subject", "") for a in my_atamalar if a.get("subject")})
-            self.w_ek_dersler.setText(", ".join(my_subjects))
 
     def _open_custom_fields(self):
         t_name = self.w_ad.text().strip() or "Öğretmen"
@@ -2731,12 +3009,16 @@ class OgretmenEditDialog(BaseEditForm):
     def get_data(self):
         raw_ad = self.w_ad.text().strip()
         ad_formatted = format_tr_name(raw_ad)
+        brans_val = ""
+        if hasattr(self, "w_brans"):
+            if isinstance(self.w_brans, QComboBox):
+                brans_val = self.w_brans.currentText().strip()
+            else:
+                brans_val = self.w_brans.text().strip()
         return {
-            "ad": ad_formatted, "kisa": self.w_kisa.text(),
-            "renk": self._color, "sinif_ogretmeni": self.w_so.currentText(),
-            "brans": getattr(self, "w_brans", QLineEdit()).text().strip(),
-            "ek_dersler": self.w_ek_dersler.text(),
-            "es_zamanli": self.chk_es_zamanli.isChecked(),
+            "ad": ad_formatted, "kisa": self.w_kisa.text().strip(),
+            "renk": self._color, "sinif_ogretmeni": self.w_so.currentText().strip(),
+            "brans": brans_val,
             "ozel_alanlar": self.existing_data.get("ozel_alanlar", {})
         }
 
@@ -2843,7 +3125,7 @@ class DerslikEditDialog(BaseEditForm):
         if self.current_class:
             self.data_store["atamalar"] = [
                 a for a in atamalar
-                if not (format_tr_name(a.get("subject", "")) == subj_target and a.get("class") == self.current_class)
+                if not (format_tr_name(a.get("subject", "")) == subj_target and matches_class(a.get("class", ""), self.current_class))
             ]
         else:
             self.data_store["atamalar"] = [
@@ -2861,7 +3143,7 @@ class DerslikEditDialog(BaseEditForm):
         if self.current_class:
             atamalar = [
                 a for a in atamalar
-                if not (format_tr_name(a.get("subject", "")) == subj_target and a.get("class") == self.current_class)
+                if not (format_tr_name(a.get("subject", "")) == subj_target and matches_class(a.get("class", ""), self.current_class))
             ]
         else:
             atamalar = [
@@ -3016,17 +3298,17 @@ class ClassComprehensiveAssignmentDialog(QDialog):
             QMessageBox.No
         )
         if reply == QMessageBox.Yes:
-            target_cls = format_tr_name(self.class_name)
+            target_cls = self.class_name
             atamalar = self.data_store.get("atamalar", [])
-            self.data_store["atamalar"] = [a for a in atamalar if format_tr_name(a.get("class", "")) != target_cls]
+            self.data_store["atamalar"] = [a for a in atamalar if not matches_class(a.get("class", ""), target_cls)]
             grid_data = self.data_store.get("grid_placements", [])
             if isinstance(grid_data, list):
-                self.data_store["grid_placements"] = [p for p in grid_data if format_tr_name(p.get("class_name", p.get("class", ""))) != target_cls]
+                self.data_store["grid_placements"] = [p for p in grid_data if not matches_class(p.get("class_name", p.get("class", "")), target_cls)]
             yerlesim = self.data_store.get("yerlesim", {})
             if isinstance(yerlesim, dict):
                 for k in list(yerlesim.keys()):
                     info = yerlesim[k]
-                    if isinstance(info, dict) and format_tr_name(info.get("class_name", info.get("class", ""))) == target_cls:
+                    if isinstance(info, dict) and matches_class(info.get("class_name", info.get("class", "")), target_cls):
                         yerlesim.pop(k, None)
             trigger_save_db(self, self.data_store)
             
@@ -3055,7 +3337,7 @@ class ClassComprehensiveAssignmentDialog(QDialog):
         
         class_atamalar = {}
         for a in atamalar:
-            if format_tr_name(a.get("class", "")) == format_tr_name(self.class_name):
+            if matches_class(a.get("class", ""), self.class_name):
                 s = a.get("subject", "")
                 if s:
                     class_atamalar.setdefault(s, []).append(a)
@@ -3152,19 +3434,18 @@ class ClassComprehensiveAssignmentDialog(QDialog):
     def _remove_subject_assignment(self, subject_name):
         v_scroll = self.table.verticalScrollBar().value()
         target_s = format_tr_name(subject_name)
-        target_c = format_tr_name(self.class_name)
         
         atamalar = self.data_store.get("atamalar", [])
         self.data_store["atamalar"] = [
             a for a in atamalar
-            if not (format_tr_name(a.get("subject", "")) == target_s and format_tr_name(a.get("class", "")) == target_c)
+            if not (format_tr_name(a.get("subject", "")) == target_s and matches_class(a.get("class", ""), self.class_name))
         ]
         grid_data = self.data_store.get("grid_placements", [])
         if isinstance(grid_data, list):
             self.data_store["grid_placements"] = [
                 p for p in grid_data
                 if not (format_tr_name(p.get("subject_name", p.get("subject", ""))) == target_s and
-                        format_tr_name(p.get("class_name", p.get("class", ""))) == target_c)
+                        matches_class(p.get("class_name", p.get("class", "")), self.class_name))
             ]
         yerlesim = self.data_store.get("yerlesim", {})
         if isinstance(yerlesim, dict):
@@ -3172,7 +3453,7 @@ class ClassComprehensiveAssignmentDialog(QDialog):
                 info = yerlesim[k]
                 if isinstance(info, dict):
                     if (format_tr_name(info.get("subject_name", info.get("subject", ""))) == target_s and
-                        format_tr_name(info.get("class_name", info.get("class", ""))) == target_c):
+                        matches_class(info.get("class_name", info.get("class", "")), self.class_name)):
                         yerlesim.pop(k, None)
                         
         trigger_save_db(self, self.data_store)

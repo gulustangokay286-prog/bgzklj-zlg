@@ -146,6 +146,8 @@ class DaysAndHolidaysDialog(QDialog):
             
         settings = self.data_store.setdefault("settings", {})
         settings["days"] = selected_days
+        settings["days_list"] = selected_days
+        settings["days_count"] = len(selected_days)
         settings["day_count"] = len(selected_days)
         self.data_store["gun_sayisi"] = len(selected_days)
         
@@ -159,6 +161,17 @@ class DaysAndHolidaysDialog(QDialog):
             settings["weekend"] = "Hafta Sonu Tatili Yok"
         else:
             settings["weekend"] = " - ".join(unselected)
+            
+        win = self.window()
+        if not win or not hasattr(win, "_grid"):
+            p = self.parent()
+            while p:
+                if hasattr(p, "_grid"): win = p; break
+                p = p.parent()
+        if win:
+            if hasattr(win, "save_db"): win.save_db(sync_from_grid=False)
+            if hasattr(win, "_refresh_grid"): win._refresh_grid()
+            if hasattr(win, "_refresh_tree"): win._refresh_tree()
             
         self.accept()
         

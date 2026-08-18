@@ -143,6 +143,7 @@ class BellAndBreakTimesDialog(QDialog):
             # Connect live duration updates
             tm_s.timeChanged.connect(lambda _, row=i: self._on_time_modified(row))
             tm_e.timeChanged.connect(lambda _, row=i: self._on_time_modified(row))
+            sp_b.valueChanged.connect(lambda _, row=i: self._on_break_modified(row))
             
         main_lay.addWidget(self.table)
         
@@ -172,15 +173,47 @@ class BellAndBreakTimesDialog(QDialog):
         
         main_lay.addLayout(bot)
         
-    def _on_time_modified(self, row):
+    def _on_time_modified(self, row, cascade=True):
         if row < len(self.rows_data):
             s = self.rows_data[row]["start"].time()
             e = self.rows_data[row]["end"].time()
             diff_mins = (e.hour() * 60 + e.minute()) - (s.hour() * 60 + s.minute())
             if diff_mins > 0:
                 self.rows_data[row]["dur_item"].setText(f"{diff_mins} dk")
+                if cascade:
+                    self._cascade_from(row)
             else:
                 self.rows_data[row]["dur_item"].setText("Geçersiz")
+
+    def _on_break_modified(self, row):
+        if row < len(self.rows_data):
+            self._cascade_from(row)
+
+    def _cascade_from(self, row):
+        if row + 1 < len(self.rows_data):
+            e = self.rows_data[row]["end"].time()
+            b_dur = self.rows_data[row]["break"].value()
+            
+            next_start = e.addSecs(b_dur * 60)
+            
+            next_s = self.rows_data[row+1]["start"].time()
+            next_e = self.rows_data[row+1]["end"].time()
+            next_dur = (next_e.hour() * 60 + next_e.minute()) - (next_s.hour() * 60 + next_s.minute())
+            if next_dur <= 0: next_dur = 40
+            
+            new_next_e = next_start.addSecs(next_dur * 60)
+            
+            self.rows_data[row+1]["start"].blockSignals(True)
+            self.rows_data[row+1]["end"].blockSignals(True)
+            
+            self.rows_data[row+1]["start"].setTime(next_start)
+            self.rows_data[row+1]["end"].setTime(new_next_e)
+            
+            self.rows_data[row+1]["start"].blockSignals(False)
+            self.rows_data[row+1]["end"].blockSignals(False)
+            
+            self._on_time_modified(row + 1, cascade=False)
+            self._cascade_from(row + 1)
                 
     def _auto_calculate_times(self):
         curr = self.tm_start.time()
@@ -224,8 +257,19 @@ class BellAndBreakTimesDialog(QDialog):
         self._auto_calculate_times()
         
     def _load_data(self):
+        self.tm_start.blockSignals(True)
+        self.sp_lesson_dur.blockSignals(True)
+        self.sp_break_dur.blockSignals(True)
+        self.cb_lunch_period.blockSignals(True)
+        self.sp_lunch_dur.blockSignals(True)
+
         saved = self.data_store.get("settings", {}).get("bell_times", [])
         if saved and len(saved) >= self.periods:
+            first_s_str = saved[0].get("start", "08:30")
+            first_s_time = QTime.fromString(first_s_str, "HH:mm") if ":" in first_s_str else QTime(8, 30)
+            if first_s_time.isValid():
+                self.tm_start.setTime(first_s_time)
+
             for i in range(self.periods):
                 item = saved[i]
                 s_str = item.get("start", "08:30")
@@ -238,19 +282,59 @@ class BellAndBreakTimesDialog(QDialog):
                 if not s_time.isValid(): s_time = QTime(8, 30)
                 if not e_time.isValid(): e_time = QTime(9, 10)
                 
+                self.rows_data[i]["start"].blockSignals(True)
+                self.rows_data[i]["end"].blockSignals(True)
+                
                 self.rows_data[i]["start"].setTime(s_time)
                 self.rows_data[i]["end"].setTime(e_time)
                 self.rows_data[i]["break"].setValue(int(b_val))
-                self._on_time_modified(i)
+                
+                self.rows_data[i]["start"].blockSignals(False)
+                self.rows_data[i]["end"].blockSignals(False)
+                
+                self._on_time_modified(i, cascade=False)
         else:
             self._apply_meb_preset()
+
+        self.tm_start.blockSignals(False)
+        self.sp_lesson_dur.blockSignals(False)
+        self.sp_break_dur.blockSignals(False)
+        self.cb_lunch_period.blockSignals(False)
+        self.sp_lunch_dur.blockSignals(False)
             
     def _save_and_accept(self):
         bell_times = []
         schedule_strs = []
+        
+        # Validation checks
         for i, row in enumerate(self.rows_data):
-            s_str = row["start"].time().toString("HH:mm")
-            e_str = row["end"].time().toString("HH:mm")
+            s_time = row["start"].time()
+            e_time = row["end"].time()
+            s_mins = s_time.hour() * 60 + s_time.minute()
+            e_mins = e_time.hour() * 60 + e_time.minute()
+            dur = e_mins - s_mins
+            
+            if dur < 20:
+                QMessageBox.warning(
+                    self, "Geçersiz Ders Süresi",
+                    f"⚠️ <b>{i+1}. Ders</b> için ders süresi yetersiz ({dur} dk)!\n"
+                    f"Ders süresi en az 20 dakika olmalı ve bitiş saati başlangıç saatinden sonra olmalıdır."
+                )
+                return
+                
+            if i > 0:
+                prev_e = self.rows_data[i-1]["end"].time()
+                prev_e_mins = prev_e.hour() * 60 + prev_e.minute()
+                if s_mins < prev_e_mins:
+                    QMessageBox.warning(
+                        self, "Çakışan Ders Saatleri",
+                        f"⚠️ <b>{i+1}. Ders</b> ({s_time.toString('HH:mm')}), bir önceki dersin bitiş saatinden "
+                        f"({prev_e.toString('HH:mm')}) daha önce başlayamaz!\n\nLütfen saat sıralamasını kontrol ediniz."
+                    )
+                    return
+            
+            s_str = s_time.toString("HH:mm")
+            e_str = e_time.toString("HH:mm")
             b_val = row["break"].value()
             bell_times.append({
                 "period": i + 1,

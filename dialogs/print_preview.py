@@ -538,8 +538,13 @@ class TimetablePrintPreview(QDialog):
         grid_w = w
         grid_h = h - top_gap
         
-        days = ["Pa", "Sa", "Ça", "Pe", "Cu"]
-        periods = int(self.data_store.get("settings", {}).get("periods", 8))
+        all_days = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
+        short_days = ["Pa", "Sa", "Ça", "Pe", "Cu", "Cts", "Paz"]
+        settings = self.data_store.get("settings", {})
+        cnt = int(settings.get("day_count") or settings.get("days_count") or self.data_store.get("gun_sayisi", 5))
+        saved_days = settings.get("days") or settings.get("days_list") or all_days[:cnt]
+        days = [short_days[all_days.index(d)] if d in all_days else d[:3] for d in saved_days]
+        periods = int(settings.get("periods", 8))
         
         hour_col_w = max(55 if is_single_page else 40, grid_w * (0.08 if is_single_page else 0.08))
         col_header_h = max(32 if is_single_page else 24, grid_h * (0.10 if is_single_page else 0.14))
@@ -658,7 +663,7 @@ class TimetablePrintPreview(QDialog):
                     selected_class = self.filtered_classes[0].get("ad", "11SAY")
                 else:
                     selected_class = "11SAY"
-            atamalar = [a for a in atamalar if a.get("class") == selected_class]
+            atamalar = [a for a in atamalar if matches_class(a.get("class"), selected_class)]
             title_name = selected_class.upper()
             clean_sub = selected_class.replace(" ", "").replace("/", "").replace("-", "").upper()
             panel_title = "Sınıfın Dersleri"
@@ -1009,8 +1014,11 @@ class TimetablePrintPreview(QDialog):
         base_title = "Toplu Çarşaf Liste : Öğretmenler" if is_teacher else "Toplu Çarşaf Liste : Sınıflar"
         
         # Grid parameters
-        days = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"]
-        periods_per_day = int(self.data_store.get("settings", {}).get("periods", 8))
+        all_days = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
+        settings = self.data_store.get("settings", {})
+        cnt = int(settings.get("day_count") or settings.get("days_count") or self.data_store.get("gun_sayisi", 5))
+        days = settings.get("days") or settings.get("days_list") or all_days[:cnt]
+        periods_per_day = int(settings.get("periods", 8))
         
         margin_x = 18
         margin_y = 16
@@ -1280,8 +1288,13 @@ class TimetablePrintPreview(QDialog):
         w = VW - (2 * margin_x)
         h = VH - (2 * margin_y)
         
-        days = ["Pa", "Sa", "Ça", "Pe", "Cu"]
-        periods = 8
+        all_days = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
+        short_days = ["Pa", "Sa", "Ça", "Pe", "Cu", "Cts", "Paz"]
+        settings = self.data_store.get("settings", {})
+        cnt = int(settings.get("day_count") or settings.get("days_count") or self.data_store.get("gun_sayisi", 5))
+        saved_days = settings.get("days") or settings.get("days_list") or all_days[:cnt]
+        days = [short_days[all_days.index(d)] if d in all_days else d[:3] for d in saved_days]
+        periods = int(settings.get("periods", 8))
         times = [
             "8:00 - 8:45", "9:00 - 9:45", "10:00 - 10:45", "11:00 - 11:45",
             "12:00 - 12:45", "13:00 - 13:45", "14:00 - 14:45", "15:00 - 15:45"

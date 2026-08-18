@@ -119,11 +119,16 @@ class TimeoffDialog(QDialog):
         
         # Lejand (Legend)
         legend_layout = QHBoxLayout()
-        legend_layout.addWidget(self._create_legend_item("✔ Müsait (2)", "#15803D"))
-        legend_layout.addWidget(self._create_legend_item("✖ Kapalı / Kısıtlı (0)", "#B91C1C"))
-        legend_layout.addWidget(self._create_legend_item("? Tercih Edilmez (1)", "#A16207"))
+        self.lbl_musait = self._create_legend_item("✔ Müsait (0)", "#15803D")
+        self.lbl_kapali = self._create_legend_item("✖ Kapalı / Kısıtlı (0)", "#B91C1C")
+        self.lbl_tercih = self._create_legend_item("? Tercih Edilmez (0)", "#A16207")
+        legend_layout.addWidget(self.lbl_musait)
+        legend_layout.addWidget(self.lbl_kapali)
+        legend_layout.addWidget(self.lbl_tercih)
         legend_layout.addStretch()
         layout.addLayout(legend_layout)
+        
+        self._update_counters()
         
         # Alt Butonlar
         btn_layout = QHBoxLayout()
@@ -145,6 +150,22 @@ class TimeoffDialog(QDialog):
         lbl.setStyleSheet(f"color: {color}; font-weight: bold; margin-right: 15px;")
         return lbl
         
+    def _update_counters(self):
+        c_musait = 0
+        c_kapali = 0
+        c_tercih = 0
+        for d in range(len(self.days)):
+            for p in range(self.periods):
+                state = self.timeoff_data[d][p]
+                if state == 2: c_musait += 1
+                elif state == 0: c_kapali += 1
+                elif state == 1: c_tercih += 1
+                
+        self.lbl_musait.setText(f"✔ Müsait ({c_musait})")
+        self.lbl_kapali.setText(f"✖ Kapalı / Kısıtlı ({c_kapali})")
+        self.lbl_tercih.setText(f"? Tercih Edilmez ({c_tercih})")
+
+
     def _update_item_visuals(self, item, state):
         item.setTextAlignment(Qt.AlignCenter)
         font = QFont("Segoe UI", 11, QFont.Bold)
@@ -176,6 +197,7 @@ class TimeoffDialog(QDialog):
         self.timeoff_data[col][row] = new_state
         item = self.table.item(row, col)
         self._update_item_visuals(item, new_state)
+        self._update_counters()
 
     def _toggle_column(self, col):
         # col = d_idx (toggle entire day)
@@ -185,6 +207,7 @@ class TimeoffDialog(QDialog):
             self.timeoff_data[col][p] = new_st
             item = self.table.item(p, col)
             if item: self._update_item_visuals(item, new_st)
+        self._update_counters()
 
     def _toggle_row(self, row):
         # row = p_idx (toggle entire period)
@@ -194,6 +217,7 @@ class TimeoffDialog(QDialog):
             self.timeoff_data[d][row] = new_st
             item = self.table.item(row, d)
             if item: self._update_item_visuals(item, new_st)
+        self._update_counters()
 
     def _make_all_open(self):
         for d in range(len(self.days)):
@@ -201,6 +225,7 @@ class TimeoffDialog(QDialog):
                 self.timeoff_data[d][p] = 2
                 item = self.table.item(p, d)
                 if item: self._update_item_visuals(item, 2)
+        self._update_counters()
 
     def _make_all_close(self):
         for d in range(len(self.days)):
@@ -208,6 +233,7 @@ class TimeoffDialog(QDialog):
                 self.timeoff_data[d][p] = 0
                 item = self.table.item(p, d)
                 if item: self._update_item_visuals(item, 0)
+        self._update_counters()
 
     def _save_data(self):
         self.accept()

@@ -547,12 +547,22 @@ class PlanningRelationsDialog(QDialog):
         for idx, item in enumerate(items):
             self.table.insertRow(idx)
 
-            # Checkbox
-            chk_item = QTableWidgetItem()
-            chk_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            # Checkbox using widget for perfect centering and avoiding the extra square bug
+            chk_widget = QWidget()
+            chk_lay = QHBoxLayout(chk_widget)
+            chk_lay.setContentsMargins(0, 0, 0, 0)
+            chk_lay.setAlignment(Qt.AlignCenter)
+            chk_box = QCheckBox()
             is_active = item.get("aktif", True)
-            chk_item.setCheckState(Qt.Checked if is_active else Qt.Unchecked)
-            self.table.setItem(idx, 0, chk_item)
+            chk_box.setChecked(is_active)
+            chk_box.stateChanged.connect(lambda state, r=idx: self._on_widget_checkbox_changed(r, state))
+            chk_lay.addWidget(chk_box)
+            self.table.setCellWidget(idx, 0, chk_widget)
+            
+            # Keep a dummy item for sorting/selection
+            dummy_item = QTableWidgetItem()
+            dummy_item.setFlags(Qt.ItemIsEnabled)
+            self.table.setItem(idx, 0, dummy_item)
             if is_active:
                 active_count += 1
 
@@ -604,26 +614,27 @@ class PlanningRelationsDialog(QDialog):
         total = len(items)
         self.lbl_summary.setText(f"Toplam {total} kural tanımlı, {active_count} aktif")
 
+    def _on_widget_checkbox_changed(self, row, state):
+        relations = self.data_store.get("planlama_iliskileri", [])
+        if 0 <= row < len(relations):
+            is_active = (state == Qt.Checked)
+            relations[row]["aktif"] = is_active
+
+            kural_item = self.table.item(row, 1)
+            if kural_item:
+                if is_active:
+                    kural_item.setForeground(QBrush(QColor("#1E293B")))
+                    kural_item.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+                else:
+                    kural_item.setForeground(QBrush(QColor("#94A3B8")))
+                    kural_item.setFont(QFont("Segoe UI", 10, QFont.Weight.Normal))
+
+            active_count = sum(1 for r in relations if r.get("aktif", True))
+            self.lbl_summary.setText(f"Toplam {len(relations)} kural tanımlı, {active_count} aktif")
+            self._save()
+
     def _on_checkbox_changed(self, item):
-        if item.column() == 0:
-            row = item.row()
-            relations = self.data_store.get("planlama_iliskileri", [])
-            if 0 <= row < len(relations):
-                is_active = (item.checkState() == Qt.Checked)
-                relations[row]["aktif"] = is_active
-
-                kural_item = self.table.item(row, 1)
-                if kural_item:
-                    if is_active:
-                        kural_item.setForeground(QBrush(QColor("#1E293B")))
-                        kural_item.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-                    else:
-                        kural_item.setForeground(QBrush(QColor("#94A3B8")))
-                        kural_item.setFont(QFont("Segoe UI", 10, QFont.Weight.Normal))
-
-                active_count = sum(1 for r in relations if r.get("aktif", True))
-                self.lbl_summary.setText(f"Toplam {len(relations)} kural tanımlı, {active_count} aktif")
-                self._save()
+        pass
 
     def _add_relation(self):
         d = EditRelationDialog(self.data_store, parent=self)

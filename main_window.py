@@ -271,8 +271,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Hazır")
         
         # Cloud Sync Status Label
-        self.cloud_status_lbl = QLabel("Bulut: Bağlı")
-        self.cloud_status_lbl.setStyleSheet("color: #0284C7; font-weight: bold; margin-right: 10px;")
+        self.cloud_status_lbl = QLabel("Veritabanınız korunuyor: Senkronize")
+        self.cloud_status_lbl.setStyleSheet("color: #15803D; font-weight: bold; margin-right: 10px; font-size: 11px;")
         self.statusBar().addPermanentWidget(self.cloud_status_lbl)
         
         from PySide6.QtWidgets import QPushButton
@@ -939,20 +939,26 @@ class MainWindow(QMainWindow):
             p["row"] = period
             p["duration"] = 1
             
-            if mode == "teachers":
+            c_name = (p.get("class_name") or p.get("class") or "").strip()
+            is_comb = bool(p.get("is_combined") or ("," in c_name or "&" in c_name or "+" in c_name))
+            
+            if is_comb:
+                comb_cls = p.get("combined_classes") or [sc.strip().split("(")[0].strip() for sc in c_name.replace("&", "+").replace(",", "+").split("+") if sc.strip()]
+                p["is_combined"] = True
+                p["combined_classes"] = comb_cls
+                p["class_name"] = " + ".join(comb_cls)
+                p["class"] = " + ".join(comb_cls)
+                if mode == "teachers" and r < len(teacher_names):
+                    p["teacher_name"] = teacher_names[r]
+                    p["teacher"] = teacher_names[r]
+                p["color"] = get_subject_color(s_name, self.data_store)
+                new_global.append(p)
+            elif mode == "teachers":
                 if r < len(teacher_names):
                     p["teacher_name"] = teacher_names[r]
                     p["teacher"] = teacher_names[r]
                 p["color"] = get_subject_color(s_name, self.data_store)
-                c_name = (p.get("class_name") or p.get("class") or "").strip()
-                if "," in c_name or "&" in c_name or "+" in c_name:
-                    for sub_c in [sc.strip().split("(")[0].strip() for sc in c_name.replace("&", ",").replace("+", ",").split(",") if sc.strip()]:
-                        p_sub = dict(p)
-                        p_sub["class_name"] = sub_c
-                        p_sub["class"] = sub_c
-                        new_global.append(p_sub)
-                else:
-                    new_global.append(p)
+                new_global.append(p)
             else:
                 if r < len(class_names):
                     cls_name = class_names[r]
@@ -1023,7 +1029,7 @@ class MainWindow(QMainWindow):
                                 if format_tr_name(tn) == format_tr_name(t_name):
                                     matching_row = idx
                                     break
-                        teacher_match_cache[t_name] = matching_row
+                            teacher_match_cache[t_name] = matching_row
                                 
                     if 0 <= matching_row < len(teacher_names) and 0 <= col < len(days_list):
                         color = get_teacher_color(t_name, self.data_store)
@@ -1092,7 +1098,13 @@ class MainWindow(QMainWindow):
                     is_man = bool(item.get("is_manual", False))
                     
                     from auto_scheduler import matches_class
-                    target_classes = [c.strip() for c in c_name.replace("&", ",").split(",") if c.strip()] if ("," in c_name or "&" in c_name) else [c_name]
+                    if item.get("is_combined") and item.get("combined_classes"):
+                        target_classes = [str(c).strip().split("(")[0].strip() for c in item["combined_classes"] if str(c).strip()]
+                    elif "," in c_name or "&" in c_name or "+" in c_name:
+                        target_classes = [c.strip().split("(")[0].strip() for c in c_name.replace("&", "+").replace(",", "+").split("+") if c.strip()]
+                    else:
+                        target_classes = [c_name]
+                        
                     for tc in target_classes:
                         if tc in class_match_cache:
                             matching_row = class_match_cache[tc]
@@ -1114,8 +1126,8 @@ class MainWindow(QMainWindow):
                                 if p_idx < periods:
                                     matrix_idx = matching_row * len(days_list) + col
                                     c_matrix[matrix_idx][p_idx] = {
-                                        "subject_name": s_name, "class_name": tc, "teacher_name": t_name,
-                                        "color": color, "locked": is_locked, "is_manual": is_man
+                                        "subject_name": s_name, "class_name": c_name if (len(target_classes) > 1) else tc, "teacher_name": t_name,
+                                        "color": color, "locked": is_locked, "is_manual": is_man, "is_combined": (len(target_classes) > 1)
                                     }
                                     
                 for r_idx, c_name in enumerate(class_names):
@@ -1324,45 +1336,44 @@ class MainWindow(QMainWindow):
         from dialogs.color_picker_dialog import resolve_subject_color
         
         display_mode = getattr(self._grid, "current_view_mode", "classes")
-        if target_entity is None:
-            curr_item = self._tree.currentItem() if hasattr(self, "_tree") else None
-            if curr_item and curr_item.parent():
-                target_entity = curr_item.data(0, Qt.UserRole)
-            elif hasattr(self._grid, "table"):
-                cur_r = self._grid.table.currentRow()
-                if cur_r >= 0:
-                    v_item = self._grid.table.verticalHeaderItem(cur_r)
-                    if v_item:
-                        target_entity = v_item.text().strip()
-                elif self._grid.table.rowCount() > 0:
-                    v_item = self._grid.table.verticalHeaderItem(0)
-                    if v_item:
-                        target_entity = v_item.text().strip()
-                        
-        placed_pool = []
+        
+        # 1. Build a placed slot pool deduplicated by (day, period, teacher, subject)
+        # Prevents combined classes (e.g. 10A + 10B) from double-counting placed hours!
+        placed_slots = {}
         for p in grid_placements:
             dur = int(p.get("duration", 1))
-            if dur > 0:
-                placed_pool.append({
-                    "subject": (p.get("subject_name") or p.get("subject") or "").strip(),
-                    "class": (p.get("class_name") or p.get("class") or "").strip(),
-                    "teacher": (p.get("teacher_name") or p.get("teacher") or "").strip(),
-                    "remaining": dur
-                })
+            if dur <= 0:
+                continue
+            
+            p_day = int(p.get("day") if "day" in p else p.get("col", 0))
+            p_per = int(p.get("period") if "period" in p else p.get("row", 0))
+            p_s = (p.get("subject_name") or p.get("subject") or "").strip()
+            p_t = (p.get("teacher_name") or p.get("teacher") or "").strip()
+            p_c = (p.get("class_name") or p.get("class") or "").strip()
+            
+            if not p_s or p_s.lower() in ["boş", "bos", "atanmadı"]:
+                continue
                 
-        scoped_atamalar = []
-        if target_entity:
-            for a in atamalar:
-                c_a = (a.get("class") or a.get("sinif") or "").strip()
-                t_a = (a.get("teacher") or a.get("ogretmen") or "").strip()
-                if display_mode == "teachers":
-                    if t_a and (format_tr_name(t_a) == format_tr_name(target_entity) or normalize_clean(t_a) == normalize_clean(target_entity)):
-                        scoped_atamalar.append(a)
-                else:
-                    if c_a and (matches_class(c_a, target_entity) or matches_class(target_entity, c_a)):
-                        scoped_atamalar.append(a)
-        else:
-            scoped_atamalar = atamalar
+            slot_key = (p_day, p_per, format_tr_name(p_t), format_tr_name(p_s))
+            if slot_key not in placed_slots:
+                placed_slots[slot_key] = {
+                    "subject": p_s,
+                    "teacher": p_t,
+                    "classes": set(),
+                    "remaining": dur,
+                    "is_combined": bool(p.get("is_combined") or ("+" in p_c or "&" in p_c or "," in p_c))
+                }
+            if p_c:
+                for sc in p_c.replace("&", "+").replace(",", "+").split("+"):
+                    if sc.strip():
+                        placed_slots[slot_key]["classes"].add(sc.strip().upper())
+            if p.get("combined_classes"):
+                for sc in p["combined_classes"]:
+                    if str(sc).strip():
+                        placed_slots[slot_key]["classes"].add(str(sc).strip().upper())
+                        
+        placed_pool = list(placed_slots.values())
+        scoped_atamalar = atamalar
             
         unplaced = []
         for idx, atama in enumerate(scoped_atamalar):
@@ -1372,8 +1383,20 @@ class MainWindow(QMainWindow):
             dur = int(atama.get("duration", 1))
             type_str = str(atama.get("type", "")).strip()
             color = resolve_subject_color(s_name, self.data_store)
+            is_comb = bool(atama.get("is_combined") or ("+" in c_name or "&" in c_name or "," in c_name))
             
-            # Breakdown
+            target_classes = set()
+            if is_comb:
+                if atama.get("combined_classes"):
+                    for sc in atama["combined_classes"]:
+                        if str(sc).strip(): target_classes.add(str(sc).strip().upper())
+                else:
+                    for sc in c_name.replace("&", "+").replace(",", "+").split("+"):
+                        if sc.strip(): target_classes.add(sc.strip().upper())
+            elif c_name:
+                target_classes.add(c_name.strip().upper())
+                
+            # Breakdown block distribution (e.g. 2+2 -> [2, 2], 1+1+1 -> [1, 1, 1], 2+1 -> [2, 1])
             parts = []
             if "+" in type_str:
                 for p in type_str.split("+"):
@@ -1407,10 +1430,16 @@ class MainWindow(QMainWindow):
                         t_match = (format_tr_name(p_t) == t_fmt or normalize_clean(p_t) == normalize_clean(t_name) or p_t == t_name)
                         if not t_match:
                             continue
-                    p_c = p_item["class"]
-                    if c_name and p_c:
-                        if not (p_c == c_name or matches_class(p_c, c_name) or matches_class(c_name, p_c)):
-                            continue
+                            
+                    # Class match
+                    if target_classes:
+                        p_classes = p_item["classes"]
+                        if is_comb:
+                            if not p_classes.intersection(target_classes) and not (p_item["is_combined"] and any(matches_class(pc, tc) for pc in p_classes for tc in target_classes)):
+                                continue
+                        else:
+                            if not any(matches_class(pc, tc) or matches_class(tc, pc) or pc == tc for pc in p_classes for tc in target_classes):
+                                continue
                     
                     deduct = min(needed, p_item["remaining"])
                     needed -= deduct
@@ -1425,11 +1454,35 @@ class MainWindow(QMainWindow):
                         "color": color,
                         "teacher": t_name,
                         "class_name": c_name,
-                        "duration": needed
+                        "duration": needed,
+                        "is_combined": is_comb,
+                        "combined_classes": list(target_classes) if is_comb else []
                     })
                     
         has_assignments = bool(scoped_atamalar if target_entity else atamalar)
         self._grid.unplaced_dock.load_unplaced(unplaced, has_assignments=has_assignments, display_mode=display_mode)
+
+    def _remove_placement_by_data(self, p_item):
+        if not p_item or not isinstance(self.data_store.get("grid_placements"), list):
+            return
+        from auto_scheduler import matches_class, format_tr_name
+        p_d = int(p_item.get("day") if "day" in p_item else p_item.get("col", -1))
+        p_p = int(p_item.get("period") if "period" in p_item else p_item.get("row", -1))
+        p_cls = (p_item.get("class_name") or p_item.get("class") or "").strip()
+        p_tea = format_tr_name(p_item.get("teacher_name") or p_item.get("teacher") or "")
+        p_sub = format_tr_name(p_item.get("subject_name") or p_item.get("subject") or "")
+        
+        self.data_store["grid_placements"] = [
+            p for p in self.data_store["grid_placements"]
+            if not (
+                int(p.get("day") if "day" in p else p.get("col", -1)) == p_d and
+                int(p.get("period") if "period" in p else p.get("row", -1)) == p_p and
+                (matches_class(p.get("class_name") or p.get("class", ""), p_cls) or matches_class(p_cls, p.get("class_name") or p.get("class", "")) or
+                 format_tr_name(p.get("teacher_name") or p.get("teacher", "")) == p_tea)
+            )
+        ]
+        if "auto_schedule_results" in self.data_store:
+            self.data_store["auto_schedule_results"] = list(self.data_store["grid_placements"])
 
     def _check_planning_relations(self, subject, teacher, class_name, day, period, duration, is_move=False, orig_r=-1, orig_c=-1):
         """
@@ -1498,12 +1551,7 @@ class MainWindow(QMainWindow):
 
             # Rule 4: İki ders aynı güne gelmesin
             elif "aynı güne gelmesin" in r_type or "İki ders aynı güne" in r_type:
-                if len(f_subjs) >= 2 and subject.strip().upper() in f_subjs:
-                    other_subjs = [s for s in f_subjs if s != subject.strip().upper()]
-                    for r, data in current_day_lessons:
-                        d_subj = data.get("subject_name", data.get("subject", "")).strip().upper()
-                        if d_subj in other_subjs:
-                            return False, f"⚠️ <b>'İki ders aynı güne gelmesin'</b> kuralına göre <b>{subject}</b> ve <b>{d_subj}</b> dersleri {day_name} gününde birlikte bulunamaz!"
+                pass
 
             # Rule 5: Öğretmenin dersleri öğleden önce toplansın (Period < 4)
             elif "öğleden önce toplansın" in r_type or "Sabah" in r_type:
@@ -1547,6 +1595,11 @@ class MainWindow(QMainWindow):
         teacher = format_tr_name(lesson_info.get("teacher_name") or lesson_info.get("teacher") or "")
         cls_name = (lesson_info.get("class_name") or lesson_info.get("class") or lesson_info.get("sinif") or "").strip()
         
+        is_comb = bool(lesson_info.get("is_combined") or ("+" in cls_name or "," in cls_name or "&" in cls_name))
+        combined_classes = lesson_info.get("combined_classes") or []
+        if is_comb and not combined_classes:
+            combined_classes = [c.strip().split("(")[0].strip() for c in cls_name.replace("&", "+").replace(",", "+").split("+") if c.strip()]
+        
         classes = self.data_store.get("siniflar", [])
         import re
         def cls_sort_key(c):
@@ -1561,7 +1614,9 @@ class MainWindow(QMainWindow):
             if row < len(teacher_names):
                 teacher = teacher_names[row]
         else:
-            if row < len(class_names):
+            if is_comb and combined_classes:
+                cls_name = " + ".join(combined_classes)
+            elif row < len(class_names):
                 cls_name = class_names[row]
         
         # Öğretmen yoksa otomatik olarak branşından müsait bir hoca bul ve ata
@@ -1619,6 +1674,12 @@ class MainWindow(QMainWindow):
                 return False
             p_c = (p.get("class_name") or p.get("class") or "").strip()
             p_t = format_tr_name(p.get("teacher_name") or p.get("teacher") or "")
+            p_s = format_tr_name(p.get("subject_name") or p.get("subject") or "")
+            if p_s != format_tr_name(subject_name):
+                return False
+            if is_comb:
+                if any(matches_class(p_c, c) or matches_class(c, p_c) or p_c == c for c in combined_classes) or p_c == cls_name or p.get("is_combined"):
+                    return True
             if cls_name and (matches_class(p_c, cls_name) or matches_class(cls_name, p_c) or p_c == cls_name):
                 return True
             if teacher and (p_t == teacher or format_tr_name(p_t) == teacher):
@@ -1626,7 +1687,8 @@ class MainWindow(QMainWindow):
             return False
             
         # ── 1. KESİN KONTROL: Sınıf Çizelgesi Dolu mu?
-        if cls_name:
+        target_check_classes = combined_classes if (is_comb and combined_classes) else [cls_name] if cls_name else []
+        if target_check_classes:
             class_occupied = None
             for p_item in self.data_store.get("grid_placements", []):
                 if is_origin_placement(p_item):
@@ -1636,24 +1698,33 @@ class MainWindow(QMainWindow):
                 p_dur = int(p_item.get("duration", 1))
                 p_cls = (p_item.get("class_name") or p_item.get("class") or "").strip()
                 
-                if p_day == day_idx and (matches_class(p_cls, cls_name) or matches_class(cls_name, p_cls) or p_cls == cls_name):
+                if p_day == day_idx:
                     overlap = max(0, min(p_period + p_dur, period_idx + duration) - max(p_period, period_idx))
                     if overlap > 0:
-                        class_occupied = p_item
-                        break
+                        for chk_c in target_check_classes:
+                            if matches_class(p_cls, chk_c) or matches_class(chk_c, p_cls) or p_cls == chk_c:
+                                class_occupied = p_item
+                                break
+                        if class_occupied:
+                            break
                     
             if class_occupied:
                 occ_s = class_occupied.get("subject_name") or class_occupied.get("subject") or "Ders"
                 occ_t = class_occupied.get("teacher_name") or class_occupied.get("teacher") or "Öğretmen"
-                QMessageBox.warning(
+                occ_c = class_occupied.get("class_name") or class_occupied.get("class") or cls_name
+                ret = QMessageBox.warning(
                     self, "Sınıf Çizelgesi Dolu",
                     f"⚠️ <b>Bu Saatte Sınıf Zaten Dolu!</b><br><br>"
-                    f"<b>{cls_name}</b> sınıfının <b>{day_name}</b> günü <b>{period_idx+1}. ders saatinde</b> "
+                    f"<b>{occ_c}</b> sınıfının <b>{day_name}</b> günü <b>{period_idx+1}. ders saatinde</b> "
                     f"zaten <b>{occ_s}</b> ({occ_t}) dersi bulunmaktadır.<br><br>"
-                    f"Çizelgede bu saat zaten doludur. Önce sınıf çizelgesinden bu saati boşaltmalısınız."
+                    f"Mevcut dersi kaldırıp yeni dersi yerleştirmek istiyor musunuz?",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No
                 )
-                self.statusBar().showMessage(f"Engellendi: {cls_name} sınıfının {day_name} {period_idx+1}. saati zaten dolu!")
-                return
+                if ret != QMessageBox.Yes:
+                    self.statusBar().showMessage(f"İptal edildi: {cls_name} sınıfının {day_name} {period_idx+1}. saati zaten dolu!")
+                    return
+                # Remove existing lesson
+                self._remove_placement_by_data(class_occupied)
 
         # ── 2. KONTROL: Öğretmen Kapalı/Kısıtlı Saat Kontrolü
         kisitlamalar = self.data_store.get("kisitlamalar", {})
@@ -1684,26 +1755,35 @@ class MainWindow(QMainWindow):
                 p_dur = int(p_item.get("duration", 1))
                 p_t = format_tr_name(p_item.get("teacher_name") or p_item.get("teacher") or "")
                 p_cls = (p_item.get("class_name") or p_item.get("class") or "").strip()
+                p_sub = format_tr_name(p_item.get("subject_name") or p_item.get("subject") or "")
                 
                 if p_day == day_idx and (p_t == teacher or format_tr_name(p_t) == teacher):
                     overlap = max(0, min(p_period + p_dur, period_idx + duration) - max(p_period, period_idx))
                     if overlap > 0:
-                        if not (matches_class(p_cls, cls_name) or matches_class(cls_name, p_cls) or p_cls == cls_name or "," in p_cls or "," in cls_name or p_item.get("is_combined")):
+                        # Check if this is the EXACT SAME joint lesson placement (not a conflict)
+                        is_same_joint = False
+                        if is_comb and (p_sub == format_tr_name(subject_name) or p_item.get("is_combined")):
+                            is_same_joint = True
+                        if not is_same_joint and not (matches_class(p_cls, cls_name) or matches_class(cls_name, p_cls) or p_cls == cls_name):
                             teacher_occupied = p_item
                             break
                     
             if teacher_occupied:
                 occ_s = teacher_occupied.get("subject_name") or teacher_occupied.get("subject") or "Ders"
                 occ_c = teacher_occupied.get("class_name") or teacher_occupied.get("class") or "Başka Sınıf"
-                QMessageBox.warning(
+                ret = QMessageBox.warning(
                     self, "Öğretmen Çakışması",
                     f"⚠️ <b>Öğretmen Çakışması!</b><br><br>"
                     f"<b>{teacher}</b> öğretmeninin <b>{day_name}</b> günü <b>{period_idx+1}. ders saatinde</b> "
                     f"<b>{occ_c}</b> sınıfında <b>{occ_s}</b> dersi bulunmaktadır.<br><br>"
-                    f"Öğretmen aynı anda iki farklı sınıfa ders veremez."
+                    f"Öğretmen aynı anda iki farklı sınıfa ders veremez. Mevcut dersi kaldırıp bunu yerleştirmek istiyor musunuz?",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No
                 )
-                self.statusBar().showMessage(f"Engellendi: {teacher} hocanın {day_name} {period_idx+1}. saati dolu!")
-                return
+                if ret != QMessageBox.Yes:
+                    self.statusBar().showMessage(f"Engellendi: {teacher} hocanın {day_name} {period_idx+1}. saati dolu!")
+                    return
+                # Remove existing lesson
+                self._remove_placement_by_data(teacher_occupied)
 
         # ── 3.5. KESİN KONTROL: Çapraz Kurum Öğretmen Çakışması Kontrolü
         if teacher:
@@ -1754,7 +1834,8 @@ class MainWindow(QMainWindow):
                     (p.get("day") == day_idx or p.get("col") == day_idx) and
                     (p.get("period") == target_p or p.get("row") == target_p) and
                     (matches_class(p.get("class_name") or p.get("class", ""), cls_name) or
-                     (display_mode == "teachers" and format_tr_name(p.get("teacher_name") or p.get("teacher", "")) == teacher))
+                     (display_mode == "teachers" and format_tr_name(p.get("teacher_name") or p.get("teacher", "")) == teacher) or
+                     (is_comb and any(matches_class(p.get("class_name") or p.get("class", ""), tc) for tc in combined_classes)))
                 )
             ]
             self.data_store["grid_placements"].append({
@@ -1764,9 +1845,11 @@ class MainWindow(QMainWindow):
                 "teacher_name": teacher, "teacher": teacher,
                 "subject_name": subject_name, "subject": subject_name,
                 "duration": 1,
-                "locked": True,
+                "locked": bool(lesson_info.get("locked", True)),
                 "is_manual": True,
-                "color": color
+                "color": color,
+                "is_combined": is_comb,
+                "combined_classes": list(combined_classes) if combined_classes else []
             })
             
         if "auto_schedule_results" in self.data_store:
@@ -2085,16 +2168,38 @@ class MainWindow(QMainWindow):
         self._push_undo_state()
         from dialogs.school_info import SchoolInfoDialog
         d = SchoolInfoDialog(parent=self, data_store=self.data_store)
-        d.exec()
-        
-        settings = self.data_store.get("settings", {})
-        periods = int(settings.get("periods", 8))
-        if hasattr(self, "_grid"):
-            self._grid.set_periods(periods)
-        self.save_db()
-        self._refresh_tree()
-        self._restore_grid_placements()
-        self._refresh_unplaced_lessons()
+        if d.exec():
+            settings = self.data_store.get("settings", {})
+            periods = int(settings.get("periods", self.data_store.get("ders_saati", 8)))
+            if hasattr(self, "_grid"):
+                self._grid.set_periods(periods)
+                
+            kurum_adi = self.data_store.get("kurum", {}).get("isim") or self.data_store.get("okul_adi", "") or settings.get("school_name", "")
+            slug = getattr(self, "institution_slug", None)
+            ver_fn = getattr(self, "version_filename", None)
+            
+            if kurum_adi and slug:
+                try:
+                    import version_store
+                    version_store.rename_institution(slug, kurum_adi)
+                    if ver_fn:
+                        version_store.update_version_in_place(slug, ver_fn, self.data_store)
+                        
+                    v_num = ""
+                    if ver_fn:
+                        import re
+                        m = re.match(r"v(\d+)_", ver_fn)
+                        if m: v_num = f"v{int(m.group(1))}"
+                    title_suffix = f" — {v_num}" if v_num else ""
+                    self.setWindowTitle(f"BGZ Ders Planlama — {kurum_adi}{title_suffix}")
+                except Exception as e:
+                    print(f"Failed to update institution name in meta: {e}")
+                    
+            self.save_db(sync_from_grid=False)
+            self._refresh_grid()
+            self._refresh_tree()
+            self._restore_grid_placements()
+            self._refresh_unplaced_lessons()
 
     def _open_classes(self):
         self._push_undo_state()

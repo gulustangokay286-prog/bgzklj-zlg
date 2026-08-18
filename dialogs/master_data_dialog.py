@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt, QSize, QPoint
 from PySide6.QtGui import QFont, QPixmap, QPainter, QColor, QPen, QBrush, QPolygon, QIcon
 
 from dialogs.edit_forms import DersEditDialog, SinifEditDialog, OgretmenEditDialog, DerslikEditDialog
+from auto_scheduler import format_tr_name, matches_class
 from database import trigger_save_db
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QAbstractItemView
@@ -199,6 +200,9 @@ class ActionButton(QPushButton):
 class MasterDataDialog(QDialog):
     def __init__(self, start_idx=0, parent=None, data_store=None):
         super().__init__(parent)
+        if isinstance(start_idx, dict):
+            data_store = start_idx
+            start_idx = 0
         self.setWindowTitle("Sınıflar") # Will be updated in select_tab
         self.resize(900, 650)
         self.setFont(QFont("Segoe UI", 9))
@@ -253,13 +257,14 @@ class MasterDataDialog(QDialog):
             if s: totals["dersler"][s] = totals["dersler"].get(s, 0) + dur
             if c: totals["siniflar"][c] = totals["siniflar"].get(c, 0) + dur
 
-        for data in self.data_store.get("dersler", []):
-            toplam = str(totals["dersler"].get(data.get("ad", ""), 0))
-            self._add_row(self.table_ders, [data.get("ad",""), data.get("kisa",""), toplam, "Mevcut", "İdeal", "8"])
         settings = self.data_store.get("settings", {})
         days = settings.get("days", ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"])
-        periods = int(settings.get("periods", 8))
+        periods = int(settings.get("periods", self.data_store.get("ders_saati", 8)))
         total_default = len(days) * periods
+
+        for data in self.data_store.get("dersler", []):
+            toplam = str(totals["dersler"].get(data.get("ad", ""), 0))
+            self._add_row(self.table_ders, [data.get("ad",""), data.get("kisa",""), toplam, "Mevcut", "İdeal", str(data.get("max_gunluk", periods))])
         
         for data in self.data_store.get("siniflar", []):
             toplam = str(totals["siniflar"].get(data.get("ad", ""), 0))
@@ -273,30 +278,41 @@ class MasterDataDialog(QDialog):
             self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), toplam, zaman_str, data.get("ders_bitimi","15:30"), data.get("sinif_ogretmeni",""), data.get("kapasite","30")])
         for data in self.data_store.get("derslikler", []):
             self._add_row(self.table_derslik, [data.get("ad",""), data.get("kisa",""), "0", "Mevcut", data.get("kapasite",""), "Merkez"])
-        # Build Class Teacher mapping (e.g. 11A, 9B)
+        # Build Class Teacher mapping strictly from siniflar
         class_teacher_map = {}
         for s in self.data_store.get("siniflar", []):
             so = s.get("sinif_ogretmeni")
-            if so:
-                class_teacher_map[so] = s.get("ad")
+            if so and str(so).strip():
+                class_teacher_map[format_tr_name(str(so))] = s.get("ad", "")
+
+        totals = {"dersler": {}, "siniflar": {}, "ogretmenler": {}}
+        for a in self.data_store.get("atamalar", []):
+            dur = int(a.get("duration", 1))
+            t = format_tr_name(a.get("teacher", ""))
+            s = format_tr_name(a.get("subject", ""))
+            c = (a.get("class") or "").strip()
+            if t: totals["ogretmenler"][t] = totals["ogretmenler"].get(t, 0) + dur
+            if s: totals["dersler"][s] = totals["dersler"].get(s, 0) + dur
+            if c: totals["siniflar"][c] = totals["siniflar"].get(c, 0) + dur
 
         for data in self.data_store.get("ogretmenler", []):
             t_name = data.get("ad", "")
-            toplam = str(totals["ogretmenler"].get(t_name, 0))
+            t_fmt = format_tr_name(t_name)
+            toplam = str(totals["ogretmenler"].get(t_fmt, totals["ogretmenler"].get(t_name, 0)))
             
-            # Class teacher of which class (e.g. 11A)
-            so_class = class_teacher_map.get(t_name) or data.get("sinif_ogretmeni", "")
+            # Class teacher of which class (e.g. 11A) - only if actually registered in siniflar
+            so_class = class_teacher_map.get(t_fmt, "")
             
             # Branch
             brans = data.get("brans", "")
             
-            # Assigned subjects & classes
-            from dialogs.edit_forms import format_tr_name
-            teacher_atamalar = [a for a in self.data_store.get("atamalar", []) if format_tr_name(a.get("teacher", "")) == format_tr_name(t_name)]
+            # Assigned subjects & classes computed in real time from atamalar
+            teacher_atamalar = [a for a in self.data_store.get("atamalar", []) if format_tr_name(a.get("teacher", "")) == t_fmt]
             assignments_summary_list = []
             for a in teacher_atamalar:
                 subj = a.get("subject", "")
                 cls = a.get("class", "")
+                dur = a.get("duration", "")
                 if subj and cls:
                     assignments_summary_list.append(f"{subj} ({cls})")
                 elif subj:
@@ -460,6 +476,13 @@ class MasterDataDialog(QDialog):
         btn_close.setStyleSheet("background: #F0F0F0; border: 1px solid #CCC; border-radius: 4px;")
         btn_close.clicked.connect(self.reject)
         
+        self.btn_help = btn_help
+        self.btn_undo = btn_undo
+        self.btn_redo = btn_redo
+        self.btn_save = btn_save
+        self.btn_reset_classes = btn_reset_classes
+        self.btn_info = btn_info
+        
         bottom_layout.addWidget(btn_help)
         bottom_layout.addWidget(btn_undo)
         bottom_layout.addWidget(btn_redo)
@@ -475,6 +498,62 @@ class MasterDataDialog(QDialog):
         from PySide6.QtGui import QKeySequence, QShortcut
         QShortcut(QKeySequence("Ctrl+Z"), self, self._act_undo)
         QShortcut(QKeySequence("Ctrl+Y"), self, self._act_redo)
+        
+        self._update_undo_redo_ui()
+
+    def _update_undo_redo_ui(self):
+        can_undo = bool(hasattr(self, "_history_stack") and self._history_stack)
+        can_redo = bool(hasattr(self, "_redo_stack") and self._redo_stack)
+        if hasattr(self, "btn_undo"):
+            self.btn_undo.setEnabled(can_undo)
+            if can_undo:
+                self.btn_undo.setStyleSheet("background: #0078D7; border: 1px solid #005A9E; color: #FFFFFF; font-weight: bold; border-radius: 4px;")
+            else:
+                self.btn_undo.setStyleSheet("background: #F1F5F9; border: 1px solid #CBD5E1; color: #94A3B8; font-weight: bold; border-radius: 4px;")
+        if hasattr(self, "btn_redo"):
+            self.btn_redo.setEnabled(can_redo)
+            if can_redo:
+                self.btn_redo.setStyleSheet("background: #0078D7; border: 1px solid #005A9E; color: #FFFFFF; font-weight: bold; border-radius: 4px;")
+            else:
+                self.btn_redo.setStyleSheet("background: #F1F5F9; border: 1px solid #CBD5E1; color: #94A3B8; font-weight: bold; border-radius: 4px;")
+
+    def _sync_class_teacher_two_way(self):
+        """
+        Ensure 100% two-way consistency between siniflar and ogretmenler:
+        If class C has sinif_ogretmeni = T, teacher T must have sinif_ogretmeni = C.
+        If teacher T has sinif_ogretmeni = C, class C must have sinif_ogretmeni = T.
+        """
+        from auto_scheduler import format_tr_name
+        siniflar = self.data_store.get("siniflar", [])
+        ogretmenler = self.data_store.get("ogretmenler", [])
+        
+        # 1. Map from siniflar: teacher_fmt -> class_name
+        teacher_to_class = {}
+        for s in siniflar:
+            so = s.get("sinif_ogretmeni")
+            if so and str(so).strip():
+                teacher_to_class[format_tr_name(str(so))] = s.get("ad", "")
+                
+        # 2. Map from ogretmenler: class_name -> teacher_name
+        class_to_teacher = {}
+        for t in ogretmenler:
+            soc = t.get("sinif_ogretmeni")
+            if soc and str(soc).strip():
+                class_to_teacher[str(soc).strip()] = t.get("ad", "")
+                
+        # Reconcile: If teacher has class assignment, set in siniflar
+        for c_name, t_name in class_to_teacher.items():
+            for s in siniflar:
+                if s.get("ad", "").strip() == c_name:
+                    s["sinif_ogretmeni"] = t_name
+                    teacher_to_class[format_tr_name(t_name)] = c_name
+                    break
+                    
+        # Update all teachers based on teacher_to_class
+        for t in ogretmenler:
+            t_fmt = format_tr_name(t.get("ad", ""))
+            assigned_cls = teacher_to_class.get(t_fmt, "")
+            t["sinif_ogretmeni"] = assigned_cls
 
     def _push_undo_state(self):
         import copy
@@ -484,6 +563,7 @@ class MasterDataDialog(QDialog):
             self._history_stack.pop(0)
         self._history_stack.append(copy.deepcopy(self.data_store))
         self._redo_stack.clear()
+        self._update_undo_redo_ui()
 
     def _act_undo(self):
         import copy
@@ -493,9 +573,11 @@ class MasterDataDialog(QDialog):
             prev_state = self._history_stack.pop()
             self.data_store.clear()
             self.data_store.update(prev_state)
+            self._sync_class_teacher_two_way()
             trigger_save_db(self, self.data_store)
-            if hasattr(self, "_load_data"):
-                self._load_data()
+            if hasattr(self, "_load_existing_data"):
+                self._load_existing_data()
+            self._update_undo_redo_ui()
             win = self.window() or self.parent()
             if win and hasattr(win, "_refresh_tree"):
                 win._refresh_tree()
@@ -516,9 +598,11 @@ class MasterDataDialog(QDialog):
             next_state = self._redo_stack.pop()
             self.data_store.clear()
             self.data_store.update(next_state)
+            self._sync_class_teacher_two_way()
             trigger_save_db(self, self.data_store)
-            if hasattr(self, "_load_data"):
-                self._load_data()
+            if hasattr(self, "_load_existing_data"):
+                self._load_existing_data()
+            self._update_undo_redo_ui()
             win = self.window() or self.parent()
             if win and hasattr(win, "_refresh_tree"):
                 win._refresh_tree()
@@ -769,6 +853,7 @@ class MasterDataDialog(QDialog):
                 if hasattr(p, "_refresh_unplaced_lessons"): p._refresh_unplaced_lessons()
 
     def _act_new(self):
+        self._push_undo_state()
         idx = self.stack.currentIndex()
         if idx == 0:  # Dersler
             d = DersEditDialog(self)
@@ -780,6 +865,17 @@ class MasterDataDialog(QDialog):
             if d.exec():
                 data = d.get_data()
                 self.data_store["siniflar"].append(data)
+                c_name = data.get("ad", "").strip()
+                new_so = data.get("sinif_ogretmeni", "").strip()
+                if new_so:
+                    for s in self.data_store.get("siniflar", [])[:-1]:
+                        if format_tr_name(s.get("sinif_ogretmeni", "")) == format_tr_name(new_so):
+                            s["sinif_ogretmeni"] = ""
+                    for t in self.data_store.get("ogretmenler", []):
+                        if format_tr_name(t.get("ad", "")) == format_tr_name(new_so):
+                            t["sinif_ogretmeni"] = c_name
+                        elif t.get("sinif_ogretmeni", "").strip().upper() == c_name.upper():
+                            t["sinif_ogretmeni"] = ""
         elif idx == 2:  # Derslikler
             d = DerslikEditDialog(self)
             if d.exec():
@@ -790,6 +886,17 @@ class MasterDataDialog(QDialog):
             if d.exec():
                 data = d.get_data()
                 self.data_store["ogretmenler"].append(data)
+                t_name = data.get("ad", "").strip()
+                new_class = data.get("sinif_ogretmeni", "").strip()
+                if new_class:
+                    for t in self.data_store.get("ogretmenler", [])[:-1]:
+                        if t.get("sinif_ogretmeni", "").strip().upper() == new_class.upper():
+                            t["sinif_ogretmeni"] = ""
+                    for s in self.data_store.get("siniflar", []):
+                        if s.get("ad", "").strip().upper() == new_class.upper():
+                            s["sinif_ogretmeni"] = t_name
+                        elif format_tr_name(s.get("sinif_ogretmeni", "")) == format_tr_name(t_name):
+                            s["sinif_ogretmeni"] = ""
                 self._act_assign(teacher_name=data.get("ad"))
 
         self._load_existing_data()
@@ -826,6 +933,7 @@ class MasterDataDialog(QDialog):
         if matched_idx >= 0 and old_data:
             d = dialogs[idx](parent=self, existing_data=old_data)
             if d.exec():
+                self._push_undo_state()
                 new_data = d.get_data()
                 old_name = old_data.get("ad")
                 new_name = new_data.get("ad")
@@ -877,6 +985,42 @@ class MasterDataDialog(QDialog):
                         if p.get("subject_name") == target_subj or p.get("subject") == target_subj:
                             p["color"] = new_color
 
+                # Specific Two-Way Sync for Classes
+                if idx == 1:
+                    c_name = new_data.get("ad", "").strip()
+                    new_so = new_data.get("sinif_ogretmeni", "").strip()
+                    if new_so:
+                        for s in self.data_store.get("siniflar", []):
+                            if s is not data_list[matched_idx] and format_tr_name(s.get("sinif_ogretmeni", "")) == format_tr_name(new_so):
+                                s["sinif_ogretmeni"] = ""
+                        for t in self.data_store.get("ogretmenler", []):
+                            if format_tr_name(t.get("ad", "")) == format_tr_name(new_so):
+                                t["sinif_ogretmeni"] = c_name
+                            elif t.get("sinif_ogretmeni", "").strip().upper() == c_name.upper():
+                                t["sinif_ogretmeni"] = ""
+                    else:
+                        for t in self.data_store.get("ogretmenler", []):
+                            if t.get("sinif_ogretmeni", "").strip().upper() == c_name.upper():
+                                t["sinif_ogretmeni"] = ""
+
+                # Specific Two-Way Sync for Teachers
+                elif idx == 3:
+                    t_name = new_data.get("ad", "").strip()
+                    new_class = new_data.get("sinif_ogretmeni", "").strip()
+                    if new_class:
+                        for t in self.data_store.get("ogretmenler", []):
+                            if t is not data_list[matched_idx] and t.get("sinif_ogretmeni", "").strip().upper() == new_class.upper():
+                                t["sinif_ogretmeni"] = ""
+                        for s in self.data_store.get("siniflar", []):
+                            if s.get("ad", "").strip().upper() == new_class.upper():
+                                s["sinif_ogretmeni"] = t_name
+                            elif format_tr_name(s.get("sinif_ogretmeni", "")) == format_tr_name(t_name):
+                                s["sinif_ogretmeni"] = ""
+                    else:
+                        for s in self.data_store.get("siniflar", []):
+                            if format_tr_name(s.get("sinif_ogretmeni", "")) == format_tr_name(t_name):
+                                s["sinif_ogretmeni"] = ""
+
                 data_list[matched_idx] = new_data
                 self._load_existing_data()
                 
@@ -890,6 +1034,7 @@ class MasterDataDialog(QDialog):
 
     def _act_delete(self):
         from PySide6.QtWidgets import QMessageBox
+        from auto_scheduler import matches_class, format_tr_name
         idx = self.stack.currentIndex()
         tables = [self.table_ders, self.table_sinif, self.table_derslik, self.table_ogretmen]
         stores = ["dersler", "siniflar", "derslikler", "ogretmenler"]
@@ -900,19 +1045,75 @@ class MasterDataDialog(QDialog):
             item = table.item(row, 0)
             if not item: return
             del_name = item.text().strip()
-            r = QMessageBox.question(self, "Silme Onayı", f"{del_name} kaydını silmek istediğinize emin misiniz?", QMessageBox.Yes | QMessageBox.No)
+            del_fmt = format_tr_name(del_name)
+            if not getattr(self, "_test_mode", False) and not getattr(getattr(self, "main_window", None), "_test_mode", False):
+                r = QMessageBox.question(self, "Silme Onayı", f"'{del_name}' kaydını ve bağlı tüm atama/program verilerini silmek istediğinize emin misiniz?", QMessageBox.Yes | QMessageBox.No)
+            else:
+                r = QMessageBox.Yes
             if r == QMessageBox.Yes:
+                self._push_undo_state()
                 data_list = self.data_store[stores[idx]]
-                self.data_store[stores[idx]] = [d for d in data_list if d.get("ad") != del_name and d.get("kisa") != del_name]
+                self.data_store[stores[idx]] = [d for d in data_list if format_tr_name(d.get("ad", "")) != del_fmt and d.get("kisa") != del_name]
+                
                 if idx == 3: # Teacher
-                    self.data_store["atamalar"] = [a for a in self.data_store.get("atamalar", []) if a.get("teacher") != del_name]
-                    self.data_store["grid_placements"] = [p for p in self.data_store.get("grid_placements", []) if p.get("teacher_name") != del_name and p.get("teacher") != del_name]
+                    self.data_store["atamalar"] = [
+                        a for a in self.data_store.get("atamalar", [])
+                        if format_tr_name(a.get("teacher", "")) != del_fmt
+                    ]
+                    self.data_store["grid_placements"] = [
+                        p for p in self.data_store.get("grid_placements", [])
+                        if format_tr_name(p.get("teacher_name") or p.get("teacher", "")) != del_fmt
+                    ]
+                    if "auto_schedule_results" in self.data_store:
+                        self.data_store["auto_schedule_results"] = [
+                            p for p in self.data_store.get("auto_schedule_results", [])
+                            if format_tr_name(p.get("teacher_name") or p.get("teacher", "")) != del_fmt
+                        ]
+                    # Clear class teacher references in siniflar
+                    for s in self.data_store.get("siniflar", []):
+                        if format_tr_name(str(s.get("sinif_ogretmeni", ""))) == del_fmt:
+                            s["sinif_ogretmeni"] = ""
+                    # Remove teacher constraints
+                    if "kisitlamalar" in self.data_store:
+                        self.data_store["kisitlamalar"].pop(del_name, None)
+                        self.data_store["kisitlamalar"].pop(del_fmt, None)
+                        
                 elif idx == 0: # Subject
-                    self.data_store["atamalar"] = [a for a in self.data_store.get("atamalar", []) if a.get("subject") != del_name]
-                    self.data_store["grid_placements"] = [p for p in self.data_store.get("grid_placements", []) if p.get("subject_name") != del_name and p.get("subject") != del_name]
+                    self.data_store["atamalar"] = [
+                        a for a in self.data_store.get("atamalar", [])
+                        if format_tr_name(a.get("subject", "")) != del_fmt
+                    ]
+                    self.data_store["grid_placements"] = [
+                        p for p in self.data_store.get("grid_placements", [])
+                        if format_tr_name(p.get("subject_name") or p.get("subject", "")) != del_fmt
+                    ]
+                    if "auto_schedule_results" in self.data_store:
+                        self.data_store["auto_schedule_results"] = [
+                            p for p in self.data_store.get("auto_schedule_results", [])
+                            if format_tr_name(p.get("subject_name") or p.get("subject", "")) != del_fmt
+                        ]
+                        
                 elif idx == 1: # Class
-                    self.data_store["atamalar"] = [a for a in self.data_store.get("atamalar", []) if a.get("class") != del_name]
-                    self.data_store["grid_placements"] = [p for p in self.data_store.get("grid_placements", []) if p.get("class_name") != del_name and p.get("class") != del_name]
+                    self.data_store["atamalar"] = [
+                        a for a in self.data_store.get("atamalar", [])
+                        if not (matches_class(a.get("class", ""), del_name) or a.get("class") == del_name or
+                                (isinstance(a.get("combined_classes"), list) and del_name in a["combined_classes"]))
+                    ]
+                    self.data_store["grid_placements"] = [
+                        p for p in self.data_store.get("grid_placements", [])
+                        if not (matches_class(p.get("class_name") or p.get("class", ""), del_name) or
+                                (isinstance(p.get("combined_classes"), list) and del_name in p["combined_classes"]))
+                    ]
+                    if "auto_schedule_results" in self.data_store:
+                        self.data_store["auto_schedule_results"] = [
+                            p for p in self.data_store.get("auto_schedule_results", [])
+                            if not (matches_class(p.get("class_name") or p.get("class", ""), del_name) or
+                                    (isinstance(p.get("combined_classes"), list) and del_name in p["combined_classes"]))
+                        ]
+                    # Clear class teacher on teachers if this class is deleted
+                    for t in self.data_store.get("ogretmenler", []):
+                        if t.get("sinif_ogretmeni", "").strip().upper() == del_name.upper():
+                            t["sinif_ogretmeni"] = ""
                 
                 self._load_existing_data()
                 trigger_save_db(self, self.data_store)

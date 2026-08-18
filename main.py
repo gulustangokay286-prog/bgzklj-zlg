@@ -55,12 +55,26 @@ class AppShell(QMainWindow):
         self._dashboard = HomeDashboard(auth_data=auth_data)
         self._dashboard.open_timetable.connect(self._open_timetable)
         self._dashboard.new_empty_timetable.connect(self._open_empty_timetable)
+        self._dashboard.logout_requested.connect(self._handle_logout)
         self._stack.addWidget(self._dashboard)
         
         # Page 1: Will be created when a timetable is opened
         self._editor = None
         self._active_slug = None
         self._active_version = None
+
+    def _handle_logout(self):
+        try:
+            from api_client import token_manager
+            token_manager.delete_token()
+        except Exception:
+            pass
+        self.close()
+        login = LoginDialog(self.logo_path if self.logo_path and os.path.exists(self.logo_path) else None)
+        if login.exec() == LoginDialog.Accepted:
+            new_auth = getattr(login, "auth_data", None)
+            self._new_shell = AppShell(logo_path=self.logo_path, auth_data=new_auth)
+            self._new_shell.show()
     
     def _open_timetable(self, slug, version_filename):
         """Load a version and switch to the timetable editor."""
@@ -147,12 +161,20 @@ class AppShell(QMainWindow):
             editor.deleteLater()
 
     def closeEvent(self, event):
-        """Save active editor before closing the application."""
+        """Save active editor and flush database & cloud sync before closing the application."""
         if self._editor and hasattr(self._editor, "save_db"):
             try:
-                self._editor.save_db()
+                self._editor.save_db(sync_from_grid=True)
             except Exception as e:
                 print(f"[CLOSE] Auto-save error: {e}")
+                
+        # 1-second graceful database and cloud sync flush as requested
+        import time
+        t_end = time.time() + 1.0
+        while time.time() < t_end:
+            QApplication.processEvents()
+            time.sleep(0.05)
+            
         super().closeEvent(event)
 
     @property

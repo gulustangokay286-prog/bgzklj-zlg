@@ -6,14 +6,27 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QPoint, QSize, QTimer
 from PySide6.QtGui import QPainter, QColor, QFont, QPen, QBrush, QPixmap, QCursor, QImage, QPainterPath
-from cloud_sync import FIREBASE_API_KEY
+from api_client import api_client
 
 def get_asset_path(rel_path):
     if hasattr(sys, '_MEIPASS'):
         return os.path.join(sys._MEIPASS, rel_path)
     return os.path.abspath(rel_path)
 
-LOGO_SHIELD_PATH = get_asset_path(os.path.join("resources", "logo.png"))
+def find_logo_path():
+    candidates = [
+        get_asset_path(os.path.join("resources", "logo.png")),
+        get_asset_path("11.png"),
+        get_asset_path(os.path.join("dist", "11.png")),
+        get_asset_path("app_icon.png"),
+        os.path.abspath(r"c:\Users\gokay\Desktop\aSc\ChenKi_v2\dist\11.png")
+    ]
+    for c in candidates:
+        if c and os.path.exists(c):
+            return c
+    return get_asset_path(os.path.join("resources", "logo.png"))
+
+LOGO_SHIELD_PATH = find_logo_path()
 TEACHER_CHAR_PATH = get_asset_path("ChatGPT Image 16 Ağu 2026 10_31_17.png")
 
 
@@ -368,53 +381,23 @@ class LoginDialog(QDialog):
         QTimer.singleShot(50, lambda: self._do_firebase_auth(email, password))
         
     def _do_firebase_auth(self, email, password):
-        url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={FIREBASE_API_KEY}"
-        payload = {"email": email, "password": password, "returnSecureToken": True}
+        # Artık VDS API kullanılıyor. İsim uyumluluk için aynı bırakıldı.
+        success, result = api_client.login(email, password)
         
-        try:
-            resp = requests.post(url, json=payload, timeout=6)
-            if resp.status_code == 200:
-                data = resp.json()
-                self.auth_data = {
-                    "email": email,
-                    "password": password,
-                    "idToken": data.get("idToken"),
-                    "uid": data.get("localId"),
-                    "expiresIn": data.get("expiresIn", 3600)
-                }
-                # Initial cloud pull from RTDB
-                try:
-                    from cloud_sync import pull_all_from_rtdb
-                    pull_all_from_rtdb(self.auth_data)
-                except Exception as ex:
-                    print(f"[Login] Initial cloud pull note: {ex}")
-                    
-                self.accept()
-                return
-            else:
-                err_msg = "Hatalı E-Posta veya Şifre!"
-                try:
-                    err_json = resp.json()
-                    raw_err = err_json.get("error", {}).get("message", "")
-                    if "EMAIL_NOT_FOUND" in raw_err or "INVALID_PASSWORD" in raw_err or "INVALID_LOGIN_CREDENTIALS" in raw_err:
-                        err_msg = "E-posta veya şifre hatalı."
-                    elif "USER_DISABLED" in raw_err:
-                        err_msg = "Bu kullanıcı hesabı devre dışı bırakılmış."
-                    elif "TOO_MANY_ATTEMPTS_TRY_LATER" in raw_err:
-                        err_msg = "Çok fazla başarısız deneme yapıldı. Lütfen biraz bekleyin."
-                except Exception:
-                    pass
-                self.lbl_error.setText(err_msg)
-                self.lbl_error.show()
-                self.btn_login.setText("Giriş Yap")
-                self.btn_login.setEnabled(True)
-                return
-        except Exception as ex:
-            self.lbl_error.setText("Sunucuya bağlanılamadı. İnternet bağlantınızı kontrol edin veya 'Çevrimdışı Devam Et' seçeneğini kullanın.")
+        if success:
+            self.auth_data = result
+            # Initial cloud pull from RTDB
+            try:
+                api_client.pull_all_from_rtdb()
+            except Exception as ex:
+                print(f"[Login] Initial cloud pull note: {ex}")
+                
+            self.accept()
+        else:
+            self.lbl_error.setText(str(result))
             self.lbl_error.show()
             self.btn_login.setText("Giriş Yap")
             self.btn_login.setEnabled(True)
-            return
 
     def _open_license_web(self):
         import webbrowser
