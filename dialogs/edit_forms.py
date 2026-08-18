@@ -697,7 +697,7 @@ class LessonAssignmentDialog(QDialog):
         l1.addStretch(1)
         self.scroll_layout.addWidget(row1)
         
-        # 2. Atanacak Dersler Kartı (Dinamik Çoklu Input Mimarisi)
+        # 2. Atanacak Dersler Kartı
         row2 = self._create_row_frame()
         self.l2_main = QVBoxLayout(row2)
         self.l2_main.setContentsMargins(14, 12, 14, 12)

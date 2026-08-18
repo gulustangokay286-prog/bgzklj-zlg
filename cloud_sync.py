@@ -1,6 +1,6 @@
 """
 cloud_sync.py — VDS Backend Senkronizasyon Motoru
-Yerel öncelikli (Local-First) mimari: Tüm .roz dosyaları ve kurumlar özel VDS API üzerinden 0 maliyetle senkronize edilir.
+Tüm .roz dosyaları ve kurumlar özel VDS API üzerinden senkronize edilir.
 Çoklu bilgisayar desteği, anlık veri çekme (pull) ve arka plan kuyruklu yükleme (push).
 """
 import os
