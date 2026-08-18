@@ -20,10 +20,20 @@ import database
 import version_store
 
 def global_exception_handler(exc_type, exc_value, exc_traceback):
-    from PySide6.QtWidgets import QMessageBox
+    if issubclass(exc_type, (KeyboardInterrupt, SystemExit)):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
     error_msg = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-    print(error_msg)
-    QMessageBox.critical(None, "Kritik Hata", f"Uygulama çöktü:\n\n{error_msg}")
+    print("[UNCAUGHT_EXCEPTION]", error_msg)
+    try:
+        from PySide6.QtWidgets import QMessageBox, QApplication
+        app = QApplication.instance()
+        if app:
+            app.processEvents()
+            parent = app.activeWindow()
+            QMessageBox.critical(parent, "Kritik Hata", f"Uygulamada bir hata oluştu:\n\n{error_msg[:600]}")
+    except Exception as e:
+        print("[EXCEPTHOOK_FAIL]", e)
 
 sys.excepthook = global_exception_handler
 

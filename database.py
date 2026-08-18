@@ -99,45 +99,74 @@ def init_db():
     conn.close()
 
 def get_connection():
-    return sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0, check_same_thread=False)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+    except Exception:
+        pass
+    return conn
+
+def safe_int(val, default=0):
+    try:
+        if val is None or val == "":
+            return default
+        if isinstance(val, (int, float)):
+            return int(val)
+        if isinstance(val, str):
+            digits = "".join(c for c in val if c.isdigit() or c == '-')
+            return int(digits) if digits and digits != '-' else default
+        return int(val)
+    except Exception:
+        return default
 
 def fetch_all(table_name):
-    conn = get_connection()
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute(f"SELECT * FROM {table_name}")
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
+    try:
+        conn = get_connection()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(f"SELECT * FROM {table_name}")
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+    except Exception as e:
+        print(f"[SQLITE_FETCH_ERR] {e}")
+        return []
 
 def insert_record(table_name, data_dict):
-    conn = get_connection()
-    cursor = conn.cursor()
-    columns = ', '.join(data_dict.keys())
-    placeholders = ', '.join(['?' for _ in data_dict])
-    sql = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
-    cursor.execute(sql, tuple(data_dict.values()))
-    last_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    return last_id
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        columns = ', '.join(data_dict.keys())
+        placeholders = ', '.join(['?' for _ in data_dict])
+        sql = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
+        cursor.execute(sql, tuple(data_dict.values()))
+        last_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return last_id
+    except Exception as e:
+        print(f"[SQLITE_INSERT_ERR] {e}")
+        return None
 
 def update_record(table_name, record_id, data_dict):
-    conn = get_connection()
-    cursor = conn.cursor()
-    set_clause = ', '.join([f"{k} = ?" for k in data_dict.keys()])
-    sql = f"UPDATE {table_name} SET {set_clause} WHERE id = ?"
-    values = list(data_dict.values()) + [record_id]
-    cursor.execute(sql, tuple(values))
-    conn.commit()
-    conn.close()
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        set_clause = ', '.join([f"{k} = ?" for k in data_dict.keys()])
+        sql = f"UPDATE {table_name} SET {set_clause} WHERE id = ?"
+        values = list(data_dict.values()) + [record_id]
+        cursor.execute(sql, tuple(values))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[SQLITE_UPDATE_ERR] {e}")
 
 def sync_data_store_to_sqlite(data_store: dict):
-    """Syncs the entire JSON data_store into local SQLite tables."""
+    """Syncs the entire JSON data_store into local SQLite tables safely."""
     if not isinstance(data_store, dict):
         return
     try:
-        init_db()
         conn = get_connection()
         cursor = conn.cursor()
         
@@ -156,12 +185,12 @@ def sync_data_store_to_sqlite(data_store: dict):
                 cursor.execute(
                     "INSERT INTO teachers (name, short_name, gender, color, max_hours_day, max_hours_week, constraints_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (
-                        t.get("ad", t.get("name", "")),
-                        t.get("kisa", t.get("short_name", "")),
-                        t.get("cinsiyet", t.get("gender", "")),
-                        t.get("renk", t.get("color", "")),
-                        int(t.get("max_gunluk", t.get("max_hours_day", 8)) or 8),
-                        int(t.get("max_haftalik", t.get("max_hours_week", 40)) or 40),
+                        str(t.get("ad", t.get("name", ""))),
+                        str(t.get("kisa", t.get("short_name", ""))),
+                        str(t.get("cinsiyet", t.get("gender", ""))),
+                        str(t.get("renk", t.get("color", ""))),
+                        safe_int(t.get("max_gunluk", t.get("max_hours_day", 8)), 8),
+                        safe_int(t.get("max_haftalik", t.get("max_hours_week", 40)), 40),
                         json.dumps(t.get("kisitlamalar", t.get("timeoff", [])), ensure_ascii=False)
                     )
                 )
@@ -172,10 +201,10 @@ def sync_data_store_to_sqlite(data_store: dict):
                 cursor.execute(
                     "INSERT INTO subjects (name, short_name, color, difficulty) VALUES (?, ?, ?, ?)",
                     (
-                        s.get("ad", s.get("name", "")),
-                        s.get("kisa", s.get("short_name", "")),
-                        s.get("renk", s.get("color", "")),
-                        int(s.get("zorluk", s.get("difficulty", 1)) or 1)
+                        str(s.get("ad", s.get("name", ""))),
+                        str(s.get("kisa", s.get("short_name", ""))),
+                        str(s.get("renk", s.get("color", ""))),
+                        safe_int(s.get("zorluk", s.get("difficulty", 1)), 1)
                     )
                 )
                 
@@ -185,8 +214,8 @@ def sync_data_store_to_sqlite(data_store: dict):
                 cursor.execute(
                     "INSERT INTO classes (name, capacity, grade_level) VALUES (?, ?, ?)",
                     (
-                        c.get("ad", c.get("name", "")),
-                        int(c.get("kapasite", c.get("capacity", 30)) or 30),
+                        str(c.get("ad", c.get("name", ""))),
+                        safe_int(c.get("kapasite", c.get("capacity", 30)), 30),
                         str(c.get("seviye", c.get("grade_level", "")))
                     )
                 )
@@ -197,9 +226,9 @@ def sync_data_store_to_sqlite(data_store: dict):
                 cursor.execute(
                     "INSERT INTO rooms (name, short_name, capacity, building) VALUES (?, ?, ?, ?)",
                     (
-                        r.get("ad", r.get("name", "")),
-                        r.get("kisa", r.get("short_name", "")),
-                        int(r.get("kapasite", r.get("capacity", 30)) or 30),
+                        str(r.get("ad", r.get("name", ""))),
+                        str(r.get("kisa", r.get("short_name", ""))),
+                        safe_int(r.get("kapasite", r.get("capacity", 30)), 30),
                         str(r.get("bina", r.get("building", "")))
                     )
                 )
@@ -213,7 +242,7 @@ def sync_data_store_to_sqlite(data_store: dict):
                     "INSERT INTO lessons (subject_id, duration, locked, teacher_ids_json, class_ids_json) VALUES (?, ?, ?, ?, ?)",
                     (
                         1,
-                        int(a.get("duration", 1) or 1),
+                        safe_int(a.get("duration", 1), 1),
                         1 if a.get("locked") else 0,
                         json.dumps(t_list, ensure_ascii=False),
                         json.dumps(c_list, ensure_ascii=False)
@@ -226,9 +255,9 @@ def sync_data_store_to_sqlite(data_store: dict):
                 cursor.execute(
                     "INSERT INTO grid_placements (lesson_id, day_index, period_index, room_id) VALUES (?, ?, ?, ?)",
                     (
-                        int(p.get("lesson_id", 1) or 1),
-                        int(p.get("day", p.get("col", 0)) or 0),
-                        int(p.get("period", p.get("row", 0)) or 0),
+                        safe_int(p.get("lesson_id", 1), 1),
+                        safe_int(p.get("day", p.get("col", 0)), 0),
+                        safe_int(p.get("period", p.get("row", 0)), 0),
                         1
                     )
                 )
@@ -249,13 +278,13 @@ def sync_data_store_to_sqlite(data_store: dict):
 
 
 def trigger_save_db(widget, data_store=None):
-    """Walks up the Qt parent hierarchy or top-level windows to find MainWindow/AppShell and call save_db(). Syncs to SQLite and ROZ."""
+    """Walks up the Qt parent hierarchy or top-level windows to find MainWindow/AppShell and call save_db()."""
     saved = False
     curr = widget
     while curr is not None:
         if hasattr(curr, "save_db") and callable(getattr(curr, "save_db")):
             try:
-                curr.save_db()
+                curr.save_db(sync_from_grid=False)
                 if hasattr(curr, "_refresh_tree") and callable(getattr(curr, "_refresh_tree")):
                     curr._refresh_tree()
                 saved = True
@@ -274,19 +303,12 @@ def trigger_save_db(widget, data_store=None):
             if app:
                 for top in app.topLevelWidgets():
                     if hasattr(top, "save_db") and callable(getattr(top, "save_db")):
-                        top.save_db()
+                        top.save_db(sync_from_grid=False)
                         if hasattr(top, "_refresh_tree") and callable(getattr(top, "_refresh_tree")):
                             top._refresh_tree()
                         saved = True
                         break
         except Exception:
             pass
-
-    # Sync to SQLite
-    ds = data_store
-    if ds is None and curr is not None and hasattr(curr, "data_store"):
-        ds = getattr(curr, "data_store")
-    if ds:
-        sync_data_store_to_sqlite(ds)
         
     return saved
