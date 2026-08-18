@@ -3,7 +3,14 @@ import json
 import os
 
 BASE_URL = "http://213.142.159.36"
-TOKEN_FILE = "bgz_auth_token.json"
+
+def _get_token_file_path():
+    base_dir = os.path.join(os.path.expanduser("~"), ".chenki_akademi")
+    try:
+        os.makedirs(base_dir, exist_ok=True)
+    except Exception:
+        pass
+    return os.path.join(base_dir, "bgz_auth_token.json")
 
 class APIClient:
     def __init__(self):
@@ -11,18 +18,32 @@ class APIClient:
         self.token = self.load_token()
 
     def load_token(self):
-        if os.path.exists(TOKEN_FILE):
+        token_path = _get_token_file_path()
+        if os.path.exists(token_path):
             try:
-                with open(TOKEN_FILE, "r") as f:
+                with open(token_path, "r", encoding="utf-8") as f:
                     return json.load(f).get("access_token")
-            except:
+            except Exception:
                 pass
         return None
 
     def save_token(self, token_data):
-        with open(TOKEN_FILE, "w") as f:
-            json.dump(token_data, f)
-        self.token = token_data.get("access_token")
+        self.token = token_data.get("access_token") if isinstance(token_data, dict) else None
+        try:
+            token_path = _get_token_file_path()
+            with open(token_path, "w", encoding="utf-8") as f:
+                json.dump(token_data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[APIClient] save_token warning: {e}")
+
+    def delete_token(self):
+        self.token = None
+        try:
+            token_path = _get_token_file_path()
+            if os.path.exists(token_path):
+                os.remove(token_path)
+        except Exception:
+            pass
 
     def login(self, email, password):
         url = f"{self.base_url}/auth/login"

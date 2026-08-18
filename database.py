@@ -3,13 +3,12 @@ import os
 import json
 
 def get_base_dir():
-    import sys
-    if getattr(sys, 'frozen', False):
-        base = os.path.dirname(sys.executable)
-        if "Contents/MacOS" in base:
-            return os.path.abspath(os.path.join(base, "../../.."))
-        return base
-    return os.path.dirname(os.path.abspath(__file__))
+    base = os.path.join(os.path.expanduser("~"), ".chenki_akademi")
+    try:
+        os.makedirs(base, exist_ok=True)
+    except Exception:
+        pass
+    return base
 
 DB_PATH = os.path.join(get_base_dir(), "bgz_local_database.sqlite")
 
