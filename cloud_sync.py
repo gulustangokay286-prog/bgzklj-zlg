@@ -35,11 +35,31 @@ def push_institution_to_rtdb(slug: str, auth_data: dict = None) -> bool:
         return False
         
     meta = version_store.get_institution_meta(slug)
+    ver_dir = os.path.join(inst_dir, "versions")
+    versions_dict = {}
+    if os.path.isdir(ver_dir):
+        for fn in os.listdir(ver_dir):
+            if fn.endswith(".roz"):
+                v_path = os.path.join(ver_dir, fn)
+                try:
+                    with open(v_path, "r", encoding="utf-8") as f:
+                        v_data = json.load(f)
+                    v_key = re.sub(r'[\.\$#\[\]/]', '_', fn)
+                    versions_dict[v_key] = v_data
+                except Exception as e:
+                    print(f"Error reading version {fn}: {e}")
+                    
+    payload = {
+        "slug": slug,
+        "meta": meta,
+        "versions": versions_dict
+    }
     url = f"{api_client.base_url}/api/institutions"
     try:
-        resp = requests.post(url, json={"slug": slug, "meta": meta}, headers=api_client.get_headers(), timeout=10)
+        resp = requests.post(url, json=payload, headers=api_client.get_headers(), timeout=20)
         return resp.status_code in (200, 201)
-    except:
+    except Exception as e:
+        print(f"push_institution_to_rtdb error for {slug}: {e}")
         return False
 
 def push_all_to_rtdb(auth_data: dict = None) -> tuple:
@@ -50,19 +70,34 @@ def push_all_to_rtdb(auth_data: dict = None) -> tuple:
         return True, "Yüklenecek kurum bulunamadı.", 0
         
     pushed = 0
+    total_versions = 0
     for slug in os.listdir(base_dir):
         inst_dir = os.path.join(base_dir, slug)
         if os.path.isdir(inst_dir) and os.path.exists(os.path.join(inst_dir, "meta.json")):
+            ver_dir = os.path.join(inst_dir, "versions")
+            v_count = len([f for f in os.listdir(ver_dir) if f.endswith(".roz")]) if os.path.isdir(ver_dir) else 0
             if push_institution_to_rtdb(slug, auth_data):
                 pushed += 1
+                total_versions += v_count
                 
-    return True, f"{pushed} kurum VDS'e başarıyla yüklendi.", pushed
+    return True, f"{pushed} kurum ve {total_versions} versiyon VDS'e başarıyla yüklendi.", pushed
 
 def delete_version_from_rtdb(slug: str, filename: str, auth_data: dict = None) -> bool:
-    return True
+    v_key = re.sub(r'[\.\$#\[\]/]', '_', filename)
+    url = f"{api_client.base_url}/api/sync/{slug}/{v_key}"
+    try:
+        resp = requests.delete(url, headers=api_client.get_headers(), timeout=10)
+        return resp.status_code in (200, 204)
+    except Exception:
+        return False
 
 def delete_institution_from_rtdb(slug: str, auth_data: dict = None) -> bool:
-    return True
+    url = f"{api_client.base_url}/api/institutions/{slug}"
+    try:
+        resp = requests.delete(url, headers=api_client.get_headers(), timeout=10)
+        return resp.status_code in (200, 204)
+    except Exception:
+        return False
 
 
 # ── Background Local-First Cloud Worker ──────────────────────────────

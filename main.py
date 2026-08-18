@@ -142,7 +142,15 @@ class AppShell(QMainWindow):
         if self._editor:
             try:
                 if hasattr(self._editor, "save_db"):
-                    self._editor.save_db()
+                    self._editor.save_db(sync_from_grid=True)
+                    slug = getattr(self._editor, "institution_slug", None)
+                    ver_fn = getattr(self._editor, "version_filename", None)
+                    auth = getattr(self._editor, "auth_data", None)
+                    if slug and ver_fn:
+                        import version_store
+                        version_store.update_version_in_place(slug, ver_fn, self._editor.data_store)
+                        from cloud_sync import push_version_to_rtdb
+                        push_version_to_rtdb(slug, ver_fn, dict(self._editor.data_store), auth)
             except Exception as e:
                 print(f"[GO_HOME] Save error: {e}")
         
@@ -165,12 +173,20 @@ class AppShell(QMainWindow):
         if self._editor and hasattr(self._editor, "save_db"):
             try:
                 self._editor.save_db(sync_from_grid=True)
+                slug = getattr(self._editor, "institution_slug", None)
+                ver_fn = getattr(self._editor, "version_filename", None)
+                auth = getattr(self._editor, "auth_data", None)
+                if slug and ver_fn:
+                    import version_store
+                    version_store.update_version_in_place(slug, ver_fn, self._editor.data_store)
+                    from cloud_sync import push_version_to_rtdb
+                    push_version_to_rtdb(slug, ver_fn, dict(self._editor.data_store), auth)
             except Exception as e:
                 print(f"[CLOSE] Auto-save error: {e}")
                 
-        # 1-second graceful database and cloud sync flush as requested
+        # Graceful 1.5-second database and cloud sync flush as requested
         import time
-        t_end = time.time() + 1.0
+        t_end = time.time() + 1.5
         while time.time() < t_end:
             QApplication.processEvents()
             time.sleep(0.05)

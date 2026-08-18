@@ -1065,16 +1065,19 @@ class HomeDashboard(QWidget):
             
     def _start_initial_cloud_sync(self):
         import threading
-        from cloud_sync import pull_all_from_rtdb
+        from cloud_sync import push_all_to_rtdb, pull_all_from_rtdb
         from PySide6.QtCore import QTimer
         
         def _worker():
             try:
+                # 1. Push any local versions to VDS
+                push_all_to_rtdb(self.auth_data)
+                # 2. Pull all remote institutions and versions from VDS
                 ok, _, _ = pull_all_from_rtdb(self.auth_data)
                 if ok:
                     QTimer.singleShot(0, self._on_cloud_synced)
             except Exception as e:
-                print(f"[HomeDashboard] Cloud pull note: {e}")
+                print(f"[HomeDashboard] Cloud sync note: {e}")
                 
         threading.Thread(target=_worker, daemon=True).start()
         
@@ -1669,7 +1672,7 @@ class HomeDashboard(QWidget):
         self._refresh_institutions()
         if self._selected_slug:
             self._refresh_versions()
-        if pull_ok:
-            QMessageBox.information(self, "Bulut Senkronizasyonu", f"{pull_msg}\n{push_msg}\nTüm cihazlar başarıyla eşitlendi.")
+        if pull_ok or push_ok:
+            show_apple_info(self, "Bulut Senkronizasyonu", f"{push_msg}\n{pull_msg}\nTüm cihazlar ve geçmiş versiyonlar başarıyla eşitlendi.", is_success=True)
         else:
-            QMessageBox.warning(self, "Bulut Uyarısı", f"{pull_msg}\nLütfen internet bağlantınızı kontrol edin.")
+            show_apple_info(self, "Bulut Uyarısı", f"{pull_msg}\nLütfen internet bağlantınızı kontrol edin.", is_success=False)

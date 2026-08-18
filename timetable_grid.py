@@ -1406,7 +1406,7 @@ class DropTableWidget(QTableWidget):
                 win.mark_dirty()
                 
             if hasattr(win, "save_db"):
-                win.save_db(sync_from_grid=False)
+                win.save_db(sync_from_grid=True)
                 
             # ── 4. Refresh grid from updated memory (skip unplaced — we do our own deferred refresh) ──
             if hasattr(win, "_refresh_grid"):

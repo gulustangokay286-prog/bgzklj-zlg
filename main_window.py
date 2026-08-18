@@ -417,14 +417,28 @@ class MainWindow(QMainWindow):
                 print("Error stopping cloud_worker:", e)
 
     def closeEvent(self, event):
-        self.cleanup()
+        # 1. Auto-save in-memory and to disk with grid sync
         try:
-            self.save_db(sync_from_grid=False)
+            self.save_db(sync_from_grid=True)
             if hasattr(self, "institution_slug") and hasattr(self, "version_filename") and self.institution_slug and self.version_filename:
                 import version_store
                 version_store.update_version_in_place(self.institution_slug, self.version_filename, self.data_store)
         except Exception as e:
             print("Auto-save on exit error:", e)
+            
+        # 2. Flush to VDS synchronously before window destruction
+        try:
+            slug = getattr(self, "institution_slug", None)
+            ver_fn = getattr(self, "version_filename", None)
+            auth = getattr(self, "auth_data", None)
+            if slug and ver_fn:
+                from cloud_sync import push_version_to_rtdb
+                push_version_to_rtdb(slug, ver_fn, dict(self.data_store), auth)
+        except Exception as e:
+            print("VDS flush on close error:", e)
+            
+        # 3. Clean up cloud worker
+        self.cleanup()
         super().closeEvent(event)
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -907,6 +921,7 @@ class MainWindow(QMainWindow):
         mode = getattr(self._grid, "current_view_mode", "classes")
         placed = self._grid.get_placed_lessons()
         if not placed:
+            self.data_store["grid_placements"] = []
             return
             
         import re
@@ -1169,7 +1184,7 @@ class MainWindow(QMainWindow):
 
 
 
-    def save_db(self, path=None, sync_from_grid=False):
+    def save_db(self, path=None, sync_from_grid=True):
         if getattr(self, "_is_loading", False):
             return
             
@@ -1177,7 +1192,13 @@ class MainWindow(QMainWindow):
         if sync_from_grid:
             self._sync_grid_to_store()
             
+        slug = getattr(self, "institution_slug", None)
+        ver_fn = getattr(self, "version_filename", None)
+        
         save_path = path or getattr(self, "current_roz_path", None) or self.db_path
+        if not save_path and slug and ver_fn:
+            import version_store
+            save_path = os.path.join(version_store._base_dir(), slug, "versions", ver_fn)
         if not save_path:
             save_path = os.path.join(os.path.expanduser("~"), ".chenki_akademi", "bgz_database.json")
             
@@ -1190,6 +1211,11 @@ class MainWindow(QMainWindow):
             with open(self.current_roz_path, "w", encoding="utf-8") as f:
                 json.dump(self.data_store, f, ensure_ascii=False, indent=4)
                 
+            # If opened from an institution version, also update version in version_store
+            if slug and ver_fn:
+                import version_store
+                version_store.update_version_in_place(slug, ver_fn, self.data_store)
+                
             fname = os.path.basename(self.current_roz_path)
             self.statusBar().showMessage(f"💾 Tüm değişiklikler '{fname}' dosyasına anlık kaydedildi.")
             
@@ -1200,12 +1226,10 @@ class MainWindow(QMainWindow):
             except Exception as ex_db:
                 print(f"[SAVE_DB] SQLite sync error: {ex_db}")
 
-            # 2. Firebase RTDB Senkronizasyonu
+            # 2. VDS Senkronizasyonu
             import threading
             from cloud_sync import push_version_to_rtdb, push_institution_to_rtdb
             
-            slug = getattr(self, "institution_slug", None)
-            ver_fn = getattr(self, "version_filename", None)
             auth = getattr(self, "auth_data", None)
             
             if slug and ver_fn:
@@ -2422,9 +2446,14 @@ class MainWindow(QMainWindow):
             if hasattr(self, "_grid"):
                 self._grid.clear_grid()
             self.save_db(sync_from_grid=False)
+            slug = getattr(self, "institution_slug", None)
+            ver_fn = getattr(self, "version_filename", None)
+            if slug and ver_fn:
+                import version_store
+                version_store.update_version_in_place(slug, ver_fn, self.data_store)
             self._refresh_grid()
             self._refresh_tree()
-            self.statusBar().showMessage("🧹 Tüm çizelge dersleri başarıyla sıfırlandı.")
+            self.statusBar().showMessage("🧹 Tüm çizelge dersleri başarıyla sıfırlandı ve anlık kaydedildi.")
 
     def _open_extracted(self, dialog_id):
         from dialogs.extracted_dialog import open_extracted_dialog
