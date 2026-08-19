@@ -5,12 +5,18 @@ Full-screen, white background, precise left-to-right logo filling, thin loading 
 """
 import os
 import threading
+import sys
 import requests
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QLabel, 
                              QGraphicsOpacityEffect, QWidget)
 from PySide6.QtCore import (Qt, QTimer, Property, QPropertyAnimation, 
                           QEasingCurve, QRect, QParallelAnimationGroup)
 from PySide6.QtGui import QPainter, QColor, QFont, QPixmap
+
+def resource_path(relative_path):
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
 
 class LogoRevealWidget(QWidget):
     def __init__(self, logo_path, parent=None):
@@ -113,8 +119,8 @@ class HighTechSplashScreen(QDialog):
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignCenter)
         
-        # Requested logo path
-        logo_path = r"C:\Users\gokay\Desktop\aSc\11.png"
+        # Use PyInstaller compatible resource_path
+        logo_path = resource_path("11.png")
         self.logo_widget = LogoRevealWidget(logo_path, self)
         
         self.progress_bar = ThinProgressBar(self)
