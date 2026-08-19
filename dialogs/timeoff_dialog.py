@@ -22,6 +22,27 @@ class TimeoffDialog(QDialog):
         self.data_store = data_store if data_store is not None else {}
         
         name = self.entity_dict.get("ad", "İsimsiz")
+        
+        # Load cross-institution locks
+        self.cross_institution_locks = set()
+        try:
+            from version_store import load_global_kisitlamalar
+            global_k = load_global_kisitlamalar()
+            inst_slug = self.data_store.get("settings", {}).get("institution_slug", "varsayilan_kurum")
+            for slug, k_data in global_k.items():
+                if slug != inst_slug and isinstance(k_data, dict):
+                    other_toff = k_data.get(name)
+                    if other_toff and isinstance(other_toff, dict):
+                        for k, v in other_toff.items():
+                            if not v: # locked
+                                try:
+                                    parts = k.split(",")
+                                    if len(parts) == 2:
+                                        self.cross_institution_locks.add((int(parts[0]), int(parts[1])))
+                                except: pass
+        except Exception as e:
+            print("Cross-institution lock load error:", e)
+
         self.setWindowTitle(f"Zaman Tablosu (Kısıtlamalar) - {name} ({self.entity_type})")
         self.resize(740, 520)
         
@@ -166,22 +187,44 @@ class TimeoffDialog(QDialog):
         self.lbl_tercih.setText(f"? Tercih Edilmez ({c_tercih})")
 
 
-    def _update_item_visuals(self, item, state):
+    def _update_item_visuals(self, item, state, d_idx, p_idx):
         item.setTextAlignment(Qt.AlignCenter)
         font = QFont("Segoe UI", 11, QFont.Bold)
         item.setFont(font)
+        
+        is_cross_locked = (d_idx, p_idx) in getattr(self, "cross_institution_locks", set())
+        if is_cross_locked:
+            item.setToolTip("⚠️ Dikkat: Bu öğretmen bu saatte BAŞKA BİR KURUMDA (şubede) derse girmektedir veya kısıtlanmıştır!")
+        else:
+            item.setToolTip("")
+
+        base_text = ""
+        fg_color = ""
+        bg_color = ""
+
         if state == 2:
-            item.setText("✔")
-            item.setForeground(QBrush(QColor("#15803D"))) # Koyu Yeşil
-            item.setBackground(QBrush(QColor("#DCFCE7"))) # Açık Yeşil
+            base_text = "✔"
+            fg_color = "#15803D"
+            bg_color = "#DCFCE7"
         elif state == 0:
-            item.setText("✖")
-            item.setForeground(QBrush(QColor("#B91C1C"))) # Koyu Kırmızı
-            item.setBackground(QBrush(QColor("#FEE2E2"))) # Açık Kırmızı
+            base_text = "✖"
+            fg_color = "#B91C1C"
+            bg_color = "#FEE2E2"
         elif state == 1:
-            item.setText("?")
-            item.setForeground(QBrush(QColor("#A16207"))) # Koyu Sarı
-            item.setBackground(QBrush(QColor("#FEF9C3"))) # Açık Sarı
+            base_text = "?"
+            fg_color = "#A16207"
+            bg_color = "#FEF9C3"
+            
+        if is_cross_locked:
+            base_text += " 🔒"
+            if state != 0:
+                # If they leave it open locally but it's locked elsewhere, warn them heavily
+                bg_color = "#FFEDD5" # Orange
+                fg_color = "#C2410C"
+                
+        item.setText(base_text)
+        item.setForeground(QBrush(QColor(fg_color)))
+        item.setBackground(QBrush(QColor(bg_color)))
             
     def _on_cell_clicked(self, row, col):
         # row = p_idx (period), col = d_idx (day)
@@ -196,7 +239,7 @@ class TimeoffDialog(QDialog):
             
         self.timeoff_data[col][row] = new_state
         item = self.table.item(row, col)
-        self._update_item_visuals(item, new_state)
+        self._update_item_visuals(item, new_state, col, row)
         self._update_counters()
 
     def _toggle_column(self, col):
@@ -206,7 +249,7 @@ class TimeoffDialog(QDialog):
         for p in range(self.periods):
             self.timeoff_data[col][p] = new_st
             item = self.table.item(p, col)
-            if item: self._update_item_visuals(item, new_st)
+            if item: self._update_item_visuals(item, new_st, col if 'col' in locals() else d, p if 'p' in locals() else row)
         self._update_counters()
 
     def _toggle_row(self, row):
@@ -216,7 +259,7 @@ class TimeoffDialog(QDialog):
         for d in range(len(self.days)):
             self.timeoff_data[d][row] = new_st
             item = self.table.item(row, d)
-            if item: self._update_item_visuals(item, new_st)
+            if item: self._update_item_visuals(item, new_st, col if 'col' in locals() else d, p if 'p' in locals() else row)
         self._update_counters()
 
     def _make_all_open(self):
@@ -224,7 +267,7 @@ class TimeoffDialog(QDialog):
             for p in range(self.periods):
                 self.timeoff_data[d][p] = 2
                 item = self.table.item(p, d)
-                if item: self._update_item_visuals(item, 2)
+                if item: self._update_item_visuals(item, 2, d, p)
         self._update_counters()
 
     def _make_all_close(self):
@@ -232,7 +275,7 @@ class TimeoffDialog(QDialog):
             for p in range(self.periods):
                 self.timeoff_data[d][p] = 0
                 item = self.table.item(p, d)
-                if item: self._update_item_visuals(item, 0)
+                if item: self._update_item_visuals(item, 0, d, p)
         self._update_counters()
 
     def _save_data(self):

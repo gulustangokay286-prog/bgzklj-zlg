@@ -917,18 +917,23 @@ def load_global_kisitlamalar():
     if os.path.exists(path):
         try:
             with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                if data and any(k for k in data.keys() if " " in k or len(k) > 30):
+                    return {"varsayilan_kurum": data}
+                return data
         except Exception:
             pass
     return {}
 
-def save_global_kisitlamalar(kisitlamalar):
+def save_global_kisitlamalar(institution_slug, kisitlamalar):
     import json, os
     path = os.path.join(os.path.expanduser("~"), ".chenki_akademi", "global_kisitlamalar.json")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     try:
+        global_data = load_global_kisitlamalar()
+        global_data[institution_slug] = kisitlamalar
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(kisitlamalar, f, ensure_ascii=False, indent=2)
+            json.dump(global_data, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print("Error saving global_kisitlamalar:", e)
 

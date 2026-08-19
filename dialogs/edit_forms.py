@@ -353,8 +353,9 @@ class SearchableComboBox(QWidget):
         
         # Floating Popup List
         self.popup = QListWidget()
-        self.popup.setWindowFlags(Qt.ToolTip | Qt.FramelessWindowHint)
+        self.popup.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.popup.setFocusPolicy(Qt.NoFocus)
+        self.popup.setAttribute(Qt.WA_MacAlwaysShowToolWindow, True)
         self.popup.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self.popup.setStyleSheet("""
             QListWidget {
@@ -483,7 +484,11 @@ class SearchableComboBox(QWidget):
     def eventFilter(self, obj, event):
         from PySide6.QtCore import QTimer
         if obj == self.edit and event.type() == QEvent.FocusOut:
-            QTimer.singleShot(150, self.popup.hide)
+            def check_and_hide():
+                # Don't hide if mouse is over the popup (so clicking/scrolling works)
+                if not self.popup.underMouse():
+                    self.popup.hide()
+            QTimer.singleShot(200, check_and_hide)
             
         if obj == self.edit and event.type() == QEvent.KeyPress:
             if event.key() == Qt.Key_Down:

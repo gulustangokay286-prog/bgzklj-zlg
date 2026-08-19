@@ -223,7 +223,24 @@ class AutoSchedulerWorker(QThread):
         except Exception as e:
             print(f"[AUTO_SCHEDULER] Cross-institution busy load notice: {e}")
 
-        kisitlamalar_store = self.data_store.get("kisitlamalar", {})
+        kisitlamalar_store = dict(self.data_store.get("kisitlamalar", {}))
+        try:
+            from version_store import load_global_kisitlamalar
+            global_k = load_global_kisitlamalar()
+            inst_slug = self.institution_slug or "varsayilan_kurum"
+            for slug, k_data in global_k.items():
+                if slug != inst_slug and isinstance(k_data, dict):
+                    for entity_name, timeoff in k_data.items():
+                        if entity_name not in kisitlamalar_store:
+                            kisitlamalar_store[entity_name] = {}
+                        # Merge cross-institution constraints (if locked in other, lock here)
+                        if isinstance(timeoff, dict):
+                            for k, v in timeoff.items():
+                                if not v: # locked
+                                    kisitlamalar_store[entity_name][k] = False
+        except Exception as e:
+            print("AutoScheduler global constraints merge error:", e)
+
         t_objs = {format_tr_name(t["ad"]): t for t in self.data_store.get("ogretmenler", []) if t.get("ad")}
         t_toff_dict = {}
         for t in self.data_store.get("ogretmenler", []):
