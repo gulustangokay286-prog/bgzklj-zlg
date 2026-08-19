@@ -153,6 +153,86 @@ def draw_class_avatar_icon(painter, x, y):
     painter.drawRoundedRect(QRectF(x, y + 20, 22, 12), 4, 4)
     painter.restore()
 
+def _chunk_classes(classes_list, max_len=36, max_count=4):
+    chunks = []
+    current_chunk = []
+    current_len = 0
+    for c in classes_list:
+        c_str = str(c).strip()
+        add_len = len(c_str) + (2 if current_chunk else 0)
+        if current_chunk and (current_len + add_len > max_len or len(current_chunk) >= max_count):
+            chunks.append(current_chunk)
+            current_chunk = [c_str]
+            current_len = len(c_str)
+        else:
+            current_chunk.append(c_str)
+            current_len += add_len
+    if current_chunk:
+        chunks.append(current_chunk)
+    return chunks
+
+def _group_teacher_atamalar_by_subject(atamalar):
+    grouped = {}
+    for a in atamalar:
+        subj = str(a.get("subject", "")).strip()
+        if not subj:
+            continue
+        if subj not in grouped:
+            grouped[subj] = {
+                "subject": subj,
+                "classes": [],
+                "duration": 0,
+                "types": [],
+                "color": a.get("color"),
+                "is_combined": False
+            }
+        cls_str = str(a.get("class", "")).strip()
+        if a.get("is_combined") or "+" in cls_str:
+            grouped[subj]["is_combined"] = True
+            combs = a.get("combined_classes") or [c.strip() for c in cls_str.replace("&", "+").replace(",", "+").split("+") if c.strip()]
+            for cc in combs:
+                if cc and cc not in grouped[subj]["classes"]:
+                    grouped[subj]["classes"].append(cc)
+        else:
+            if cls_str and cls_str not in grouped[subj]["classes"]:
+                grouped[subj]["classes"].append(cls_str)
+                
+        dur_val = int(a.get("duration", 1)) if str(a.get("duration", 1)).isdigit() else 1
+        grouped[subj]["duration"] += dur_val
+        typ = str(a.get("type", "")).strip()
+        if typ and typ not in grouped[subj]["types"]:
+            grouped[subj]["types"].append(typ)
+            
+    res = []
+    for subj, g in grouped.items():
+        cls_chunks = _chunk_classes(g["classes"])
+        if not cls_chunks:
+            cls_chunks = [[]]
+            
+        for chunk_idx, c_chunk in enumerate(cls_chunks):
+            if chunk_idx == 0:
+                res.append({
+                    "subject": subj,
+                    "class": ", ".join(c_chunk) if c_chunk else "—",
+                    "duration": g["duration"],
+                    "type": ", ".join(g["types"]) if g["types"] else str(g["duration"]),
+                    "color": g["color"],
+                    "is_combined": g["is_combined"],
+                    "is_continuation": False
+                })
+            else:
+                res.append({
+                    "subject": f"{subj} (Devam)",
+                    "class": ", ".join(c_chunk),
+                    "duration": "—",
+                    "type": "—",
+                    "color": g["color"],
+                    "is_combined": g["is_combined"],
+                    "is_continuation": True
+                })
+    return res
+
+
 class TimetablePrintPreview(QDialog):
     def __init__(self, data_store=None, placed_lessons=None, filters=None, parent=None):
         super().__init__(parent)
@@ -265,24 +345,45 @@ class TimetablePrintPreview(QDialog):
         self.target_combo.blockSignals(True)
         self.target_combo.clear()
         
-        is_teacher_filter = bool(self.filters.get("teachers") or self.filters.get("entity_type") == "teacher" or "Öğretmen" in mode)
+        is_teacher_mode = bool(
+            self.filters.get("teachers") or 
+            self.filters.get("entity_type") in ["teacher", "teachers_all"] or 
+            "Öğretmen" in mode
+        )
         
-        if "Tüm Sınıflar" in mode or "Tüm Öğretmenler" in mode or "Ders Yükü" in mode or ("Çarşaf Liste" in mode and not self.filters.get("classes") and not self.filters.get("teachers")) or "Tablo Olarak" in mode:
+        if mode == "Sınıf Dersleri & Atama Listesi (Liste Formatı)":
+            self.target_combo.setEnabled(True)
+            if is_teacher_mode:
+                self.target_combo.addItem("Tüm Öğretmenler (Çoklu Sayfa)")
+                for t in self.filtered_teachers:
+                    if t.get("ad"): self.target_combo.addItem(t.get("ad", ""))
+            else:
+                self.target_combo.addItem("Tüm Sınıflar (Çoklu Sayfa)")
+                for c in self.filtered_classes:
+                    if c.get("ad"): self.target_combo.addItem(c.get("ad", ""))
+        elif "Tüm Sınıflar" in mode or "Tüm Öğretmenler" in mode or "Ders Yükü" in mode or ("Çarşaf Liste" in mode and not self.filters.get("classes") and not self.filters.get("teachers")) or "Tablo Olarak" in mode:
             self.target_combo.addItem("Tümü (Çoklu Sayfa)")
             self.target_combo.setEnabled(False)
-        elif is_teacher_filter:
+        elif is_teacher_mode:
             self.target_combo.setEnabled(True)
+            self.target_combo.addItem("Tüm Öğretmenler (Çoklu Sayfa)")
             for t in self.filtered_teachers:
-                self.target_combo.addItem(t.get("ad", ""))
+                if t.get("ad"): self.target_combo.addItem(t.get("ad", ""))
         else:
             self.target_combo.setEnabled(True)
+            self.target_combo.addItem("Tüm Sınıflar (Çoklu Sayfa)")
             for c in self.filtered_classes:
-                self.target_combo.addItem(c.get("ad", ""))
+                if c.get("ad"): self.target_combo.addItem(c.get("ad", ""))
                 
         # If filters specified selected_items or default_selection, select it
         sel = self.filters.get("selected_items") or ([self.filters.get("default_selection")] if self.filters.get("default_selection") else [])
         if sel and len(sel) > 0 and sel[0]:
             idx = self.target_combo.findText(sel[0])
+            if idx >= 0:
+                self.target_combo.setCurrentIndex(idx)
+        else:
+            # Default to 'Tüm' if no specific selection
+            idx = self.target_combo.findText("Tüm Öğretmenler (Çoklu Sayfa)" if is_teacher_mode else "Tüm Sınıflar (Çoklu Sayfa)")
             if idx >= 0:
                 self.target_combo.setCurrentIndex(idx)
                 
@@ -311,6 +412,7 @@ class TimetablePrintPreview(QDialog):
         if not path:
             return
         try:
+            from PySide6.QtGui import QPageSize, QPageLayout
             printer = QPrinter(QPrinter.HighResolution)
             printer.setOutputFormat(QPrinter.PdfFormat)
             printer.setOutputFileName(path)
@@ -327,26 +429,39 @@ class TimetablePrintPreview(QDialog):
             QMessageBox.critical(self, "Hata", f"PDF oluşturulamadı:\n{e}")
 
     def _do_print(self):
-        from PySide6.QtPrintSupport import QPrintDialog
-        printer = QPrinter(QPrinter.HighResolution)
-        mode = self.mode_combo.currentText()
-        is_portrait = ("Sınıf Dersleri" in mode)
-        printer.setPageOrientation(QPageLayout.Orientation.Portrait if is_portrait else QPageLayout.Orientation.Landscape)
-        printer.setPageSize(QPageSize(QPageSize.A4))
-        printer.setFullPage(True)
-        
-        dlg = QPrintDialog(printer, self)
-        if dlg.exec() == QPrintDialog.Accepted:
-            self._paint(printer)
+        try:
+            from PySide6.QtPrintSupport import QPrintDialog
+            printer = QPrinter(QPrinter.HighResolution)
+            mode = self.mode_combo.currentText()
+            is_portrait = ("Sınıf Dersleri" in mode)
+            printer.setPageOrientation(QPageLayout.Orientation.Portrait if is_portrait else QPageLayout.Orientation.Landscape)
+            printer.setPageSize(QPageSize(QPageSize.A4))
+            printer.setFullPage(True)
+            
+            dlg = QPrintDialog(printer, self)
+            if dlg.exec() == QPrintDialog.Accepted:
+                self._paint(printer)
+                QMessageBox.information(self, "Yazdırıldı", "Yazdırma işlemi yazıcıya başarıyla iletildi.")
+        except Exception as e:
+            reply = QMessageBox.question(
+                self, "Yazıcı Uyarısı",
+                f"Sistem yazıcısına ulaşılamadı:\n{e}\n\nDoğrudan PDF olarak kaydetmek ister misiniz?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply == QMessageBox.Yes:
+                self._export_pdf()
 
     def direct_print(self):
-        printer = QPrinter(QPrinter.HighResolution)
-        mode = self.mode_combo.currentText()
-        is_portrait = ("Sınıf Dersleri" in mode)
-        printer.setPageOrientation(QPageLayout.Orientation.Portrait if is_portrait else QPageLayout.Orientation.Landscape)
-        printer.setPageSize(QPageSize(QPageSize.A4))
-        printer.setFullPage(True)
-        self._paint(printer)
+        try:
+            printer = QPrinter(QPrinter.HighResolution)
+            mode = self.mode_combo.currentText()
+            is_portrait = ("Sınıf Dersleri" in mode)
+            printer.setPageOrientation(QPageLayout.Orientation.Portrait if is_portrait else QPageLayout.Orientation.Landscape)
+            printer.setPageSize(QPageSize(QPageSize.A4))
+            printer.setFullPage(True)
+            self._paint(printer)
+        except Exception as e:
+            self._export_pdf()
 
     def _paint(self, printer):
         painter = QPainter(printer)
@@ -377,7 +492,7 @@ class TimetablePrintPreview(QDialog):
         elif mode == "Öğretmen Haftalık Ders Programı (Tekil Çizelge - Tek Sayfa)":
             self._render_weekly_grid(painter, VW, VH, is_teacher=True)
         elif mode == "Sınıf Dersleri & Atama Listesi (Liste Formatı)":
-            self._render_class_lessons_list(painter, VW, VH)
+            self._render_class_lessons_list(painter, printer, VW, VH)
         elif mode == "Tüm Öğretmenlerin Ders Yükü Listesi":
             self._render_teacher_summary_list(painter, VW, VH)
         else:
@@ -441,15 +556,26 @@ class TimetablePrintPreview(QDialog):
                     other_name = t_name
                     
             if match:
+                is_comb = bool(item.get("is_combined") or ("+" in str(c_name)) or ("," in str(c_name)))
                 for off in range(dur):
-                    res[(d_idx, p_idx + off)] = {
-                        "subject_name": s_name,
-                        "teacher_name": t_name or other_name,
-                        "class_name": c_name or other_name,
-                        "color": scolor,
-                        "is_start": (off == 0),
-                        "duration": dur
-                    }
+                    slot = (d_idx, p_idx + off)
+                    if is_teacher and slot in res:
+                        old_entry = res[slot]
+                        old_c = old_entry.get("class_name", "")
+                        if c_name and c_name not in old_c:
+                            merged_c = f"{old_c} + {c_name}"
+                            old_entry["class_name"] = merged_c
+                            old_entry["is_combined"] = True
+                    else:
+                        res[slot] = {
+                            "subject_name": s_name,
+                            "teacher_name": t_name or other_name,
+                            "class_name": c_name or other_name,
+                            "color": scolor,
+                            "is_start": (off == 0),
+                            "duration": dur,
+                            "is_combined": is_comb
+                        }
         self._placements_cache[cache_key] = res
         return res
 
@@ -622,59 +748,329 @@ class TimetablePrintPreview(QDialog):
                         if not is_teacher:
                             display_other = format_teacher_display_name(other_name, self.data_store)
                         else:
-                            if "," in other_name or "&" in other_name:
-                                parts = [c.split("(")[0].strip() for c in other_name.replace("&", ",").split(",") if c.strip()]
+                            if "," in other_name or "&" in other_name or "+" in other_name:
+                                parts = [c.split("(")[0].strip() for c in other_name.replace("&", ",").replace("+", ",").split(",") if c.strip()]
                                 if len(parts) <= 2:
                                     display_other = "+".join(parts)
                                 else:
-                                    display_other = f"{parts[0]}+{len(parts)-1}"
+                                    display_other = f"{parts[0]}+{parts[1]}"
                             else:
                                 display_other = other_name.strip()
                             
                         painter.setFont(make_font(15 if is_single_page else 7.5, False))
                         painter.setPen(QPen(QColor("#111111"), 1))
                         painter.drawText(QRectF(cx + 2, ry + row_h * 0.5, block_w - 4, row_h * 0.46), Qt.AlignCenter | Qt.AlignVCenter, display_other)
+                        
+                    is_comb_lesson = bool(lesson.get("is_combined") or ("+" in str(lesson.get("class_name", ""))) or ("," in str(lesson.get("class_name", ""))))
+                    if is_comb_lesson:
+                        painter.save()
+                        badge_sz = 22 if is_single_page else 14
+                        comb_rect = QRectF(cx + block_w - badge_sz - 3, ry + 3, badge_sz, badge_sz)
+                        painter.setBrush(QBrush(QColor("#DBEAFE")))
+                        painter.setPen(QPen(QColor("#2563EB"), 1))
+                        painter.drawRoundedRect(comb_rect, 2.5, 2.5)
+                        painter.setFont(make_font(14 if is_single_page else 8.5, True))
+                        painter.setPen(QPen(QColor("#1E40AF"), 1))
+                        painter.drawText(comb_rect, Qt.AlignCenter, "📎")
+                        painter.restore()
                     
                     p_idx += dur
                 else:
                     painter.drawRect(QRectF(cx, ry, col_w, row_h))
                     p_idx += 1
 
-    def _render_class_lessons_list(self, painter, VW, VH):
+    def _render_class_lessons_list(self, painter, printer, VW, VH):
         """Sınıfın Dersleri / Öğretmen Atama Listesi Formatı (Fotoğraftaki Birebir aSc Dikey Formu)"""
         target_name = self.target_combo.currentText().strip()
         all_teachers = [t.get("ad", "").strip() for t in self.data_store.get("ogretmenler", []) if t.get("ad")]
+        all_classes = [c.get("ad", "").strip() for c in (self.filtered_classes or self.data_store.get("siniflar", [])) if c.get("ad")]
         
-        is_teacher_report = bool(target_name in all_teachers or self.filters.get("teachers") or self.filters.get("entity_type") == "teacher")
-        
-        atamalar = self.data_store.get("atamalar", [])
+        # Determine whether this is a teacher report
+        if target_name in all_teachers or target_name == "Tüm Öğretmenler (Çoklu Sayfa)":
+            is_teacher_report = True
+        elif target_name in all_classes or target_name == "Tüm Sınıflar (Çoklu Sayfa)":
+            is_teacher_report = False
+        else:
+            is_teacher_report = bool(self.filters.get("teachers") or self.filters.get("entity_type") in ["teacher", "teachers_all"])
         
         if is_teacher_report:
-            selected_teacher = target_name if target_name in all_teachers else (self.filters.get("teachers", [None])[0] or (all_teachers[0] if all_teachers else "Öğretmen"))
-            atamalar = [a for a in atamalar if a.get("teacher") == selected_teacher or format_tr_name(a.get("teacher", "")) == format_tr_name(selected_teacher)]
+            if target_name and target_name not in ["Tümü (Çoklu Sayfa)", "Tüm Öğretmenler (Çoklu Sayfa)", "Tüm Öğretmenler", ""]:
+                entities = [target_name]
+            elif self.filters.get("teachers"):
+                entities = self.filters["teachers"]
+            else:
+                entities = all_teachers
+        else:
+            if target_name and target_name not in ["Tümü (Çoklu Sayfa)", "Tüm Sınıflar (Çoklu Sayfa)", "Tüm Sınıflar", ""]:
+                entities = [target_name]
+            elif self.filters.get("classes"):
+                entities = self.filters["classes"]
+            else:
+                entities = all_classes
+                
+        if not entities:
+            entities = ["Öğretmen"] if is_teacher_report else ["9A"]
+            
+        if len(entities) == 1:
+            self._draw_single_class_lessons_table(painter, entities[0], is_teacher_report, VW, VH)
+        else:
+            self._draw_continuous_master_lessons_list(painter, printer, entities, is_teacher_report, VW, VH)
+
+    def _draw_continuous_master_lessons_list(self, painter, printer, entities, is_teacher_report, VW, VH):
+        tbl_x = 25
+        tbl_w = VW - 50
+        raw_atamalar = self.data_store.get("atamalar", [])
+        school_name = self.data_store.get("okul_adi") or self.data_store.get("settings", {}).get("school_name", "Özel Öğretim Kurumu")
+        
+        page_num = 1
+        
+        def draw_page_header():
+            # Top Banner Header
+            painter.setPen(QPen(QColor("#94A3B8"), 1))
+            painter.setBrush(QBrush(QColor("#0F172A")))
+            painter.drawRoundedRect(QRectF(tbl_x, 18, tbl_w, 32), 4, 4)
+            
+            painter.setFont(make_font(10.5, True))
+            painter.setPen(QPen(QColor("#FFFFFF"), 1))
+            title_txt = "TOPLU ÖĞRETMEN DERS & BRANŞ ATAMA LİSTESİ" if is_teacher_report else "TOPLU SINIF DERS & ÖĞRETMEN ATAMA LİSTESİ"
+            painter.drawText(QRectF(tbl_x + 14, 18, 500, 32), Qt.AlignLeft | Qt.AlignVCenter, title_txt)
+            
+            painter.setFont(make_font(8.5, False))
+            painter.setPen(QPen(QColor("#94A3B8"), 1))
+            painter.drawText(QRectF(tbl_x + tbl_w - 260, 18, 248, 32), Qt.AlignRight | Qt.AlignVCenter, f"{school_name.upper()} | Sayfa {page_num}")
+            
+        def draw_page_footer():
+            painter.setFont(make_font(8, False))
+            painter.setPen(QPen(QColor("#94A3B8"), 1))
+            painter.drawText(QRectF(tbl_x, VH - 30, tbl_w / 2, 20), Qt.AlignLeft, "BGZ Ders Planlama Sistemi 2026 - 2027")
+            painter.drawText(QRectF(tbl_x + tbl_w / 2, VH - 30, tbl_w / 2, 20), Qt.AlignRight, f"Sayfa {page_num}")
+
+        draw_page_header()
+        cur_y = 58
+        
+        cols = [
+            ("Ders", 180),
+            ("Sınıf" if is_teacher_report else "Öğretmen", 230),
+            ("Branş / Not" if is_teacher_report else "Sınıf", 75),
+            ("Toplam Saat", 65),
+            ("Dağılım / Tip", 70),
+            ("Derslik", 60),
+            ("Dönem", 50)
+        ]
+        
+        grand_total_lessons = 0
+        grand_total_hours = 0
+        
+        for ent_name in entities:
+            if is_teacher_report:
+                raw_teacher_atamalar = [a for a in raw_atamalar if a.get("teacher") == ent_name or format_tr_name(a.get("teacher", "")) == format_tr_name(ent_name)]
+                t_obj = next((t for t in self.data_store.get("ogretmenler", []) if t.get("ad") == ent_name or format_tr_name(t.get("ad", "")) == format_tr_name(ent_name)), {})
+                t_brans = t_obj.get("brans") or t_obj.get("branch") or "Öğretmen"
+                ent_sub = f"{t_brans.upper()} ÖĞRETMENİ"
+                atamalar = _group_teacher_atamalar_by_subject(raw_teacher_atamalar)
+                tot_h = sum(int(a.get("duration", 1)) for a in atamalar if str(a.get("duration", 1)).isdigit())
+            else:
+                atamalar = [a for a in raw_atamalar if matches_class(a.get("class", ""), ent_name) or (a.get("is_combined") and any(matches_class(cc, ent_name) for cc in a.get("combined_classes", [])))]
+                ent_sub = f"{ent_name.upper()} SINIF PROGRAMI"
+                t_brans = "Öğretmen"
+                tot_h = sum(int(a.get("duration", 1)) for a in atamalar if str(a.get("duration", 1)).isdigit())
+                
+            grand_total_lessons += len(atamalar)
+            grand_total_hours += tot_h
+            
+            needed_h = 32 + 22 + max(1, len(atamalar)) * 22 + 10
+            if cur_y + min(needed_h, 76) > VH - 45:
+                draw_page_footer()
+                if printer:
+                    printer.newPage()
+                    painter.fillRect(QRectF(0, 0, VW, VH), Qt.white)
+                page_num += 1
+                draw_page_header()
+                cur_y = 58
+                
+            # 1. Teacher / Class Header Strip
+            painter.setPen(QPen(QColor("#CBD5E1"), 1))
+            painter.setBrush(QBrush(QColor("#F1F5F9")))
+            painter.drawRoundedRect(QRectF(tbl_x, cur_y, tbl_w, 26), 3, 3)
+            
+            # Name
+            painter.setFont(make_font(10, True))
+            painter.setPen(QPen(QColor("#0F172A"), 1))
+            painter.drawText(QRectF(tbl_x + 10, cur_y, 250, 26), Qt.AlignLeft | Qt.AlignVCenter, ent_name.upper())
+            
+            # Subtitle / Branch
+            painter.setFont(make_font(8.5, False))
+            painter.setPen(QPen(QColor("#475569"), 1))
+            painter.drawText(QRectF(tbl_x + 265, cur_y, 230, 26), Qt.AlignLeft | Qt.AlignVCenter, ent_sub)
+            
+            # Total Hours Badge
+            painter.setFont(make_font(9, True))
+            painter.setPen(QPen(QColor("#1D4ED8"), 1))
+            painter.drawText(QRectF(tbl_x + tbl_w - 210, cur_y, 200, 26), Qt.AlignRight | Qt.AlignVCenter, f"Ders: {len(atamalar)} | Toplam: {tot_h} Saat")
+            
+            cur_y += 27
+            
+            # 2. Table Column Headers
+            header_h = 20
+            painter.setBrush(QBrush(QColor("#E2E8F0")))
+            painter.setPen(QPen(QColor("#94A3B8"), 1))
+            painter.drawRect(QRectF(tbl_x, cur_y, tbl_w, header_h))
+            
+            painter.setFont(make_font(8, True))
+            painter.setPen(QPen(QColor("#1E293B"), 1))
+            c_x = tbl_x
+            for col_idx, (col_name, col_width) in enumerate(cols):
+                align = Qt.AlignLeft | Qt.AlignVCenter if col_idx < 2 else Qt.AlignCenter
+                pad = 8 if col_idx < 2 else 0
+                painter.drawText(QRectF(c_x + pad, cur_y, col_width - pad, header_h), align, col_name)
+                c_x += col_width
+                if col_idx < len(cols) - 1:
+                    painter.drawLine(c_x, cur_y, c_x, cur_y + header_h)
+            cur_y += header_h
+            
+            # 3. Lesson Rows
+            row_h = 22
+            if not atamalar:
+                painter.setBrush(QBrush(QColor("#FFFFFF")))
+                painter.setPen(QPen(QColor("#CBD5E1"), 1))
+                painter.drawRect(QRectF(tbl_x, cur_y, tbl_w, row_h))
+                painter.setFont(make_font(8, False))
+                painter.setPen(QPen(QColor("#94A3B8"), 1))
+                painter.drawText(QRectF(tbl_x + 8, cur_y, tbl_w - 16, row_h), Qt.AlignLeft | Qt.AlignVCenter, "— Atanmış ders bulunmuyor —")
+                cur_y += row_h
+            else:
+                for idx, item in enumerate(atamalar):
+                    if cur_y + row_h > VH - 45:
+                        draw_page_footer()
+                        if printer:
+                            printer.newPage()
+                            painter.fillRect(QRectF(0, 0, VW, VH), Qt.white)
+                        page_num += 1
+                        draw_page_header()
+                        cur_y = 58
+                        
+                    bg_color = QColor("#F8FAFC") if idx % 2 == 1 else QColor("#FFFFFF")
+                    painter.setBrush(QBrush(bg_color))
+                    painter.setPen(QPen(QColor("#CBD5E1"), 1))
+                    painter.drawRect(QRectF(tbl_x, cur_y, tbl_w, row_h))
+                    
+                    c_x = tbl_x
+                    subj_name = item.get("subject", "")
+                    teacher_name = item.get("teacher", "—")
+                    cls_name = item.get("class", "—")
+                    dur = str(item.get("duration", 1))
+                    typ = str(item.get("type", dur)).strip()
+                    is_comb_item = bool(item.get("is_combined") or ("+" in str(cls_name)) or (item.get("combined_classes") and len(item.get("combined_classes")) > 1))
+                    
+                    # Col 0: Subject (Clean subtle badge + Name)
+                    col_w0 = cols[0][1]
+                    badge_text = get_subject_badge(subj_name, self.data_store)
+                    badge_w = 44
+                    badge_rect = QRectF(c_x + 6, cur_y + 3, badge_w, row_h - 6)
+                    
+                    painter.setBrush(QBrush(QColor("#F1F5F9")))
+                    painter.setPen(QPen(QColor("#94A3B8"), 0.8))
+                    painter.drawRoundedRect(badge_rect, 2, 2)
+                    
+                    painter.setFont(make_font(7, True))
+                    painter.setPen(QPen(QColor("#334155"), 1))
+                    painter.drawText(badge_rect, Qt.AlignCenter, badge_text)
+                    
+                    painter.setFont(make_font(8, True))
+                    painter.setPen(QPen(QColor("#0F172A"), 1))
+                    painter.drawText(QRectF(c_x + 54, cur_y, col_w0 - 56, row_h), Qt.AlignLeft | Qt.AlignVCenter, subj_name.upper())
+                    c_x += col_w0
+                    painter.setPen(QPen(QColor("#CBD5E1"), 1))
+                    painter.drawLine(c_x, cur_y, c_x, cur_y + row_h)
+                    
+                    # Col 1: Class / Teacher
+                    col_w1 = cols[1][1]
+                    painter.setFont(make_font(8, False))
+                    if is_teacher_report:
+                        if is_comb_item:
+                            painter.setPen(QPen(QColor("#16A34A"), 1))
+                            comb_lbl = f"{cls_name.upper()} (Birleşik)" if "Birleşik" not in cls_name else cls_name.upper()
+                            painter.drawText(QRectF(c_x + 6, cur_y, col_w1 - 10, row_h), Qt.AlignLeft | Qt.AlignVCenter, comb_lbl)
+                        else:
+                            painter.setPen(QPen(QColor("#1E293B"), 1))
+                            painter.drawText(QRectF(c_x + 6, cur_y, col_w1 - 10, row_h), Qt.AlignLeft | Qt.AlignVCenter, cls_name.upper())
+                    else:
+                        painter.setPen(QPen(QColor("#1E293B"), 1))
+                        painter.drawText(QRectF(c_x + 6, cur_y, col_w1 - 10, row_h), Qt.AlignLeft | Qt.AlignVCenter, teacher_name.upper())
+                    c_x += col_w1
+                    painter.setPen(QPen(QColor("#CBD5E1"), 1))
+                    painter.drawLine(c_x, cur_y, c_x, cur_y + row_h)
+                    
+                    # Col 2: Branch
+                    col_w2 = cols[2][1]
+                    painter.setFont(make_font(8, False))
+                    painter.setPen(QPen(QColor("#64748B"), 1))
+                    painter.drawText(QRectF(c_x, cur_y, col_w2, row_h), Qt.AlignCenter, t_brans if is_teacher_report else cls_name.upper())
+                    c_x += col_w2
+                    painter.setPen(QPen(QColor("#CBD5E1"), 1))
+                    painter.drawLine(c_x, cur_y, c_x, cur_y + row_h)
+                    
+                    # Col 3: Total Hours
+                    col_w3 = cols[3][1]
+                    painter.setFont(make_font(8.5, True))
+                    painter.setPen(QPen(QColor("#0F172A"), 1))
+                    painter.drawText(QRectF(c_x, cur_y, col_w3, row_h), Qt.AlignCenter, dur)
+                    c_x += col_w3
+                    painter.setPen(QPen(QColor("#CBD5E1"), 1))
+                    painter.drawLine(c_x, cur_y, c_x, cur_y + row_h)
+                    
+                    # Col 4: Distribution / Type
+                    col_w4 = cols[4][1]
+                    painter.setFont(make_font(8, False))
+                    painter.setPen(QPen(QColor("#64748B"), 1))
+                    painter.drawText(QRectF(c_x, cur_y, col_w4, row_h), Qt.AlignCenter, typ if typ else dur)
+                    c_x += col_w4
+                    painter.setPen(QPen(QColor("#CBD5E1"), 1))
+                    painter.drawLine(c_x, cur_y, c_x, cur_y + row_h)
+                    
+                    # Col 5: Room
+                    col_w5 = cols[5][1]
+                    painter.drawText(QRectF(c_x, cur_y, col_w5, row_h), Qt.AlignCenter, "Tümü")
+                    c_x += col_w5
+                    painter.setPen(QPen(QColor("#CBD5E1"), 1))
+                    painter.drawLine(c_x, cur_y, c_x, cur_y + row_h)
+                    
+                    # Col 6: Term
+                    col_w6 = cols[6][1]
+                    painter.drawText(QRectF(c_x, cur_y, col_w6, row_h), Qt.AlignCenter, "Her iki...")
+                    
+                    cur_y += row_h
+                    
+            cur_y += 8
+            
+        draw_page_footer()
+
+    def _draw_single_class_lessons_table(self, painter, target_entity, is_teacher_report, VW, VH):
+        raw_atamalar = self.data_store.get("atamalar", [])
+        
+        if is_teacher_report:
+            selected_teacher = target_entity
+            raw_t_atamalar = [a for a in raw_atamalar if a.get("teacher") == selected_teacher or format_tr_name(a.get("teacher", "")) == format_tr_name(selected_teacher)]
+            atamalar = _group_teacher_atamalar_by_subject(raw_t_atamalar)
             title_name = selected_teacher.upper()
-            t_obj = next((t for t in self.data_store.get("ogretmenler", []) if t.get("ad") == selected_teacher), {})
-            clean_sub = t_obj.get("brans") or t_obj.get("branch") or "Öğretmen"
+            t_obj = next((t for t in self.data_store.get("ogretmenler", []) if t.get("ad") == selected_teacher or format_tr_name(t.get("ad", "")) == format_tr_name(selected_teacher)), {})
+            t_brans = t_obj.get("brans") or t_obj.get("branch") or "Öğretmen"
+            clean_sub = f"{t_brans.upper()} ÖĞRETMENİ" if t_brans else "BRANŞ ÖĞRETMENİ"
             panel_title = "Öğretmenin Girdiği Sınıflar & Dersler"
         else:
-            selected_class = target_name
-            if not selected_class or selected_class == "Tümü (Çoklu Sayfa)":
-                if self.filtered_classes:
-                    selected_class = self.filtered_classes[0].get("ad", "11SAY")
-                else:
-                    selected_class = "11SAY"
-            atamalar = [a for a in atamalar if matches_class(a.get("class"), selected_class)]
+            selected_class = target_entity
+            atamalar = [a for a in raw_atamalar if matches_class(a.get("class", ""), selected_class) or (a.get("is_combined") and any(matches_class(cc, selected_class) for cc in a.get("combined_classes", [])))]
             title_name = selected_class.upper()
-            clean_sub = selected_class.replace(" ", "").replace("/", "").replace("-", "").upper()
-            panel_title = "Sınıfın Dersleri"
+            clean_sub = f"{selected_class.upper()} SINIF DERS PROGRAMI"
+            panel_title = "Sınıfın Dersleri & Atamaları"
             
         if not atamalar and self.data_store.get("dersler"):
             atamalar = []
             for d in self.data_store.get("dersler", []):
                 atamalar.append({
                     "subject": d.get("ad", "Ders"),
-                    "teacher": selected_teacher if is_teacher_report else "Atanmadı",
-                    "class": "—" if is_teacher_report else selected_class,
+                    "teacher": target_entity if is_teacher_report else "Atanmadı",
+                    "class": "—" if is_teacher_report else target_entity,
                     "duration": d.get("saat", 2),
                     "length": 1,
                     "color": d.get("renk")
@@ -692,6 +1088,11 @@ class TimetablePrintPreview(QDialog):
         painter.setFont(make_font(10, True))
         painter.drawText(QRectF(tbl_x + 8, 20, 20, 24), Qt.AlignCenter, "👨‍🏫" if is_teacher_report else "🗂️")
         painter.drawText(QRectF(tbl_x + 30, 20, 300, 24), Qt.AlignLeft | Qt.AlignVCenter, panel_title)
+        
+        # Top right "TÜM ÖĞRETMENLER" / "TÜM SINIFLAR" header indicator
+        painter.setFont(make_font(9, True))
+        painter.setPen(QPen(QColor("#475569"), 1))
+        painter.drawText(QRectF(tbl_x + tbl_w - 220, 20, 210, 24), Qt.AlignRight | Qt.AlignVCenter, "TÜM ÖĞRETMENLER" if is_teacher_report else "TÜM SINIFLAR")
         
         # Header Panel
         painter.setBrush(QBrush(QColor("#FFFFFF")))
@@ -715,8 +1116,8 @@ class TimetablePrintPreview(QDialog):
         
         cols = [
             ("Ders", 200),
-            ("Öğretmen" if not is_teacher_report else "Sınıf", 190),
-            ("Sınıf" if not is_teacher_report else "Branş / Not", 75),
+            ("Sınıf" if is_teacher_report else "Öğretmen", 190),
+            ("Branş / Not" if is_teacher_report else "Sınıf", 75),
             ("Toplam", 75),
             ("Uzunluk", 70),
             ("Derslikler", 70),
@@ -747,6 +1148,7 @@ class TimetablePrintPreview(QDialog):
             if cur_y + row_h > VH - 40:
                 break
                 
+            # Alternating clean zebra striping
             bg_color = QColor("#F8FAFC") if idx % 2 == 1 else QColor("#FFFFFF")
             painter.setBrush(QBrush(bg_color))
             painter.setPen(QPen(QColor("#CBD5E1"), 1))
@@ -757,48 +1159,63 @@ class TimetablePrintPreview(QDialog):
             teacher_name = item.get("teacher", "—")
             cls_name = item.get("class", "—")
             dur = str(item.get("duration", 1))
+            is_comb_item = bool(item.get("is_combined") or ("+" in str(cls_name)) or (item.get("combined_classes") and len(item.get("combined_classes")) > 1))
             
             # --- Col 0: Ders ---
             col_w0 = cols[0][1]
             badge_text = get_subject_badge(subj_name, self.data_store)
-            
             badge_w = 56
             badge_rect = QRectF(cur_x + 6, cur_y + 3, badge_w, row_h - 6)
-            painter.setBrush(QBrush(QColor("#FFFFFF")))
-            painter.setPen(QPen(QColor("#94A3B8"), 1))
+            
+            from dialogs.color_picker_dialog import resolve_subject_color
+            scolor_hex = item.get("color") or resolve_subject_color(subj_name, self.data_store)
+            fill_c = scolor_hex if isinstance(scolor_hex, QColor) else QColor(str(scolor_hex or "#E2E8F0"))
+            if not fill_c.isValid(): fill_c = QColor("#E2E8F0")
+            
+            painter.setBrush(QBrush(fill_c))
+            painter.setPen(QPen(QColor("#64748B"), 0.8))
             painter.drawRoundedRect(badge_rect, 3, 3)
             
             painter.setFont(make_font(8.5, True))
-            painter.setPen(QPen(QColor("#1E293B"), 1))
+            painter.setPen(QPen(QColor("#0F172A"), 1))
             painter.drawText(badge_rect, Qt.AlignCenter, badge_text)
             
+            # Subject Full Name
             painter.setFont(make_font(8.5, True))
             painter.setPen(QPen(QColor("#0F172A"), 1))
-            painter.drawText(QRectF(cur_x + 68, cur_y, col_w0 - 70, row_h), Qt.AlignLeft | Qt.AlignVCenter, subj_name.upper())
+            painter.drawText(QRectF(cur_x + 68, cur_y, col_w0 - 72, row_h), Qt.AlignLeft | Qt.AlignVCenter, subj_name.upper())
             
             cur_x += col_w0
             painter.setPen(QPen(QColor("#CBD5E1"), 1))
             painter.drawLine(cur_x, cur_y, cur_x, cur_y + row_h)
             
-            # --- Col 1: Öğretmen or Sınıf ---
+            # --- Col 1: Sınıf (Öğretmen Raporu) / Öğretmen (Sınıf Raporu) ---
             col_w1 = cols[1][1]
-            if is_teacher_report:
-                val1 = cls_name
-            else:
-                val1 = format_teacher_display_name(teacher_name, self.data_store)
             painter.setFont(make_font(9, False))
-            painter.setPen(QPen(QColor("#1E293B"), 1))
-            painter.drawText(QRectF(cur_x + 8, cur_y, col_w1 - 10, row_h), Qt.AlignLeft | Qt.AlignVCenter, val1)
+            if is_teacher_report:
+                if is_comb_item:
+                    painter.setPen(QPen(QColor("#16A34A"), 1)) # Green for combined
+                    comb_lbl = f"{cls_name.upper()} (🔗 Birleşik)" if "Birleşik" not in cls_name else cls_name.upper()
+                    painter.drawText(QRectF(cur_x + 8, cur_y, col_w1 - 12, row_h), Qt.AlignLeft | Qt.AlignVCenter, comb_lbl)
+                else:
+                    painter.setPen(QPen(QColor("#1E293B"), 1))
+                    painter.drawText(QRectF(cur_x + 8, cur_y, col_w1 - 12, row_h), Qt.AlignLeft | Qt.AlignVCenter, cls_name.upper())
+            else:
+                painter.setPen(QPen(QColor("#1E293B"), 1))
+                t_display = format_teacher_display_name(teacher_name, self.data_store)
+                painter.drawText(QRectF(cur_x + 8, cur_y, col_w1 - 12, row_h), Qt.AlignLeft | Qt.AlignVCenter, t_display)
             cur_x += col_w1
             painter.setPen(QPen(QColor("#CBD5E1"), 1))
             painter.drawLine(cur_x, cur_y, cur_x, cur_y + row_h)
             
-            # --- Col 2: Sınıf or Branş ---
+            # --- Col 2: Branş / Not (Öğretmen Raporu) / Sınıf (Sınıf Raporu) ---
             col_w2 = cols[2][1]
-            val2 = cls_name.replace(" ", "").replace("/", "").replace("-", "").upper() if not is_teacher_report else clean_sub
             painter.setFont(make_font(9, False))
-            painter.setPen(QPen(QColor("#94A3B8"), 1))
-            painter.drawText(QRectF(cur_x, cur_y, col_w2, row_h), Qt.AlignCenter, val2)
+            painter.setPen(QPen(QColor("#64748B"), 1))
+            if is_teacher_report:
+                painter.drawText(QRectF(cur_x, cur_y, col_w2, row_h), Qt.AlignCenter, t_brans if t_brans else "Öğretmen")
+            else:
+                painter.drawText(QRectF(cur_x, cur_y, col_w2, row_h), Qt.AlignCenter, cls_name.upper())
             cur_x += col_w2
             painter.setPen(QPen(QColor("#CBD5E1"), 1))
             painter.drawLine(cur_x, cur_y, cur_x, cur_y + row_h)
@@ -842,9 +1259,10 @@ class TimetablePrintPreview(QDialog):
             cur_y += row_h
             
         # Summary footer
+        total_hours = sum(int(a.get("duration", 1)) for a in atamalar if str(a.get("duration", 1)).isdigit())
         painter.setFont(make_font(8.5, False))
         painter.setPen(QPen(QColor("#64748B"), 1))
-        painter.drawText(QRectF(tbl_x, VH - 35, 400, 20), Qt.AlignLeft, f"Toplam Atanan Ders Sayısı: {len(atamalar)}")
+        painter.drawText(QRectF(tbl_x, VH - 35, 450, 20), Qt.AlignLeft, f"Toplam Atanan Ders Sayısı: {len(atamalar)} | Toplam Ders Saati: {total_hours} Saat")
         painter.drawText(QRectF(VW - tbl_x - 300, VH - 35, 300, 20), Qt.AlignRight, "BGZ Ders Planlama Sistemi 2026 - 2027")
 
     def _render_weekly_grid(self, painter, VW, VH, is_teacher=False):
@@ -1134,10 +1552,8 @@ class TimetablePrintPreview(QDialog):
                                 parts = [c.split("(")[0].strip().replace(" ", "").upper() for c in raw_c.replace("&", ",").replace("+", ",").split(",") if c.strip()]
                                 if len(parts) == 1:
                                     cell_text = parts[0]
-                                elif len(parts) == 2:
+                                elif len(parts) >= 2:
                                     cell_text = f"{parts[0]}+{parts[1]}"
-                                else:
-                                    cell_text = f"{parts[0]}+{len(parts)-1}"
                             else:
                                 cell_text = raw_c.split("(")[0].strip().replace(" ", "").upper()
                             if not cell_text:

@@ -115,11 +115,13 @@ class BellAndBreakTimesDialog(QDialog):
             
             # 2. Start Time
             tm_s = QTimeEdit()
+            tm_s.wheelEvent = lambda event: event.ignore()
             tm_s.setDisplayFormat("HH:mm")
             self.table.setCellWidget(i, 1, tm_s)
             
             # 3. End Time
             tm_e = QTimeEdit()
+            tm_e.wheelEvent = lambda event: event.ignore()
             tm_e.setDisplayFormat("HH:mm")
             self.table.setCellWidget(i, 2, tm_e)
             
@@ -131,6 +133,7 @@ class BellAndBreakTimesDialog(QDialog):
             
             # 5. Break Duration
             sp_b = QSpinBox()
+            sp_b.wheelEvent = lambda event: event.ignore()
             sp_b.setRange(0, 120)
             sp_b.setValue(10 if i < self.periods - 1 else 0)
             sp_b.setSuffix(" dk")

@@ -942,7 +942,10 @@ class MasterDataDialog(QDialog):
 
                 if old_name and new_name and old_name != new_name:
                     key_map = {0: "subject", 1: "class", 3: "teacher"}
-                    if idx in key_map:
+                    if idx == 3:
+                        from version_store import rename_teacher_in_data_store
+                        rename_teacher_in_data_store(self.data_store, old_name, new_name)
+                    elif idx in key_map:
                         attr = key_map[idx]
                         for a in self.data_store.get("atamalar", []):
                             if a.get(attr) == old_name:
@@ -958,10 +961,6 @@ class MasterDataDialog(QDialog):
                                 if p.get("class_name") == old_name or p.get("class") == old_name:
                                     p["class_name"] = new_name
                                     p["class"] = new_name
-                            elif idx == 3:
-                                if p.get("teacher_name") == old_name or p.get("teacher") == old_name:
-                                    p["teacher_name"] = new_name
-                                    p["teacher"] = new_name
                         for p in self.data_store.get("auto_schedule_results", []):
                             if idx == 0:
                                 if p.get("subject_name") == old_name or p.get("subject") == old_name:
@@ -971,10 +970,6 @@ class MasterDataDialog(QDialog):
                                 if p.get("class_name") == old_name or p.get("class") == old_name:
                                     p["class_name"] = new_name
                                     p["class"] = new_name
-                            elif idx == 3:
-                                if p.get("teacher_name") == old_name or p.get("teacher") == old_name:
-                                    p["teacher_name"] = new_name
-                                    p["teacher"] = new_name
 
                 if idx == 0 and new_color and new_color != old_color:
                     target_subj = new_name or old_name

@@ -109,8 +109,8 @@ def test_combined_lessons_full_workflow():
     
     # Test Card formatting
     card = DraggableLessonCard(1, "Beden Eğitimi", "#10B981", duration=2, teacher="Sultan Yılmaz", class_name="10A, 10B")
-    assert "🔗" in card.text(), "Combined card must show 🔗 link icon"
-    assert "10A+10B" in card.text() or "10A" in card.text(), "Combined card must show class list"
+    assert card.is_comb is True, "Combined card is_comb flag must be True"
+    assert "10A, 10B" in card.toolTip(), "Combined card tooltip must show class list"
     
     # Test Info panel formatting on cell click
     info_dict = {

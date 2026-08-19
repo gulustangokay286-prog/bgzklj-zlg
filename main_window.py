@@ -940,6 +940,7 @@ class MainWindow(QMainWindow):
             teacher_names = ["Öğretmen 1"]
 
         new_global = []
+        seen_comb = set()
         for (r, c), info in placed.items():
             p = dict(info)
             s_name = p.get("subject_name") or p.get("subject", "")
@@ -961,12 +962,21 @@ class MainWindow(QMainWindow):
                 comb_cls = p.get("combined_classes") or [sc.strip().split("(")[0].strip() for sc in c_name.replace("&", "+").replace(",", "+").split("+") if sc.strip()]
                 p["is_combined"] = True
                 p["combined_classes"] = comb_cls
-                p["class_name"] = " + ".join(comb_cls)
-                p["class"] = " + ".join(comb_cls)
+                normalized_c_name = " + ".join(comb_cls)
+                p["class_name"] = normalized_c_name
+                p["class"] = normalized_c_name
                 if mode == "teachers" and r < len(teacher_names):
                     p["teacher_name"] = teacher_names[r]
                     p["teacher"] = teacher_names[r]
                 p["color"] = get_subject_color(s_name, self.data_store)
+                
+                t_name = p.get("teacher_name") or p.get("teacher") or ""
+                bid = p.get("block_id") or ""
+                dedup_key = (day, period, normalized_c_name, s_name, t_name, bid)
+                if dedup_key in seen_comb:
+                    continue
+                seen_comb.add(dedup_key)
+                
                 new_global.append(p)
             elif mode == "teachers":
                 if r < len(teacher_names):
@@ -1054,7 +1064,9 @@ class MainWindow(QMainWindow):
                                 matrix_idx = matching_row * len(days_list) + col
                                 t_matrix[matrix_idx][p_idx] = {
                                     "subject_name": s_name, "class_name": c_name, "teacher_name": t_name,
-                                    "color": color, "locked": is_locked, "is_manual": is_man
+                                    "color": color, "locked": is_locked, "is_manual": is_man,
+                                    "is_combined": bool(item.get("is_combined")),
+                                    "block_id": item.get("block_id")
                                 }
                                 
                 for r_idx, t_name in enumerate(teacher_names):
@@ -1074,15 +1086,29 @@ class MainWindow(QMainWindow):
                             is_man = cell_info["is_manual"]
                             
                             span = 1
+                            cell_bid = cell_info.get("block_id")
                             while p + span < periods:
                                 next_info = t_matrix[matrix_idx][p + span]
-                                if next_info and next_info.get("subject_name") == s_name and next_info.get("class_name") == c_name:
+                                if not next_info or not next_info.get("subject_name"):
+                                    break
+                                next_bid = next_info.get("block_id")
+                                # block_id varsa: sadece aynı block_id birleşir
+                                if cell_bid and next_bid:
+                                    if cell_bid == next_bid:
+                                        span += 1
+                                    else:
+                                        break
+                                # Legacy (block_id yok): tüm özellikler eşleşmeli
+                                elif (next_info.get("subject_name") == s_name
+                                        and next_info.get("class_name") == c_name
+                                        and next_info.get("teacher_name") == cell_info["teacher_name"]
+                                        and next_info.get("is_combined") == cell_info.get("is_combined")):
                                     span += 1
                                 else:
                                     break
                                     
                             actual_col = d_idx * periods + p
-                            self._grid.set_cell(r_idx, actual_col, s_name, color, t_name, span, c_name, display_mode="teachers", locked=is_locked, is_manual=is_man)
+                            self._grid.set_cell(r_idx, actual_col, s_name, color, t_name, span, c_name, display_mode="teachers", locked=is_locked, is_manual=is_man, is_combined=cell_info.get("is_combined", False), combined_classes=cell_info.get("combined_classes", []))
                             p += span
             else:
                 import re
@@ -1114,12 +1140,20 @@ class MainWindow(QMainWindow):
                     
                     from auto_scheduler import matches_class
                     if item.get("is_combined") and item.get("combined_classes"):
-                        target_classes = [str(c).strip().split("(")[0].strip() for c in item["combined_classes"] if str(c).strip()]
+                        clean_c_name = c_name.strip().split("(")[0].strip()
+                        # If the item's class_name is exactly one of the combined_classes,
+                        # it means this is a discrete entry. Just draw it for that class!
+                        target_list = [str(c).strip().split("(")[0].strip() for c in item["combined_classes"] if str(c).strip()]
+                        if clean_c_name in target_list:
+                            target_classes = [clean_c_name]
+                        else:
+                            target_classes = target_list
                     elif "," in c_name or "&" in c_name or "+" in c_name:
                         target_classes = [c.strip().split("(")[0].strip() for c in c_name.replace("&", "+").replace(",", "+").split("+") if c.strip()]
                     else:
                         target_classes = [c_name]
                         
+                    is_item_comb = bool(item.get("is_combined") or (len(target_classes) > 1) or ("+" in c_name) or ("," in c_name) or ("&" in c_name))
                     for tc in target_classes:
                         if tc in class_match_cache:
                             matching_row = class_match_cache[tc]
@@ -1141,8 +1175,9 @@ class MainWindow(QMainWindow):
                                 if p_idx < periods:
                                     matrix_idx = matching_row * len(days_list) + col
                                     c_matrix[matrix_idx][p_idx] = {
-                                        "subject_name": s_name, "class_name": c_name if (len(target_classes) > 1) else tc, "teacher_name": t_name,
-                                        "color": color, "locked": is_locked, "is_manual": is_man, "is_combined": (len(target_classes) > 1)
+                                        "subject_name": s_name, "class_name": c_name if (len(target_classes) > 1 or is_item_comb) else tc, "teacher_name": t_name,
+                                        "color": color, "locked": is_locked, "is_manual": is_man, "is_combined": is_item_comb,
+                                        "block_id": item.get("block_id")
                                     }
                                     
                 for r_idx, c_name in enumerate(class_names):
@@ -1161,17 +1196,32 @@ class MainWindow(QMainWindow):
                             color = cell_info["color"]
                             is_locked = cell_info["locked"]
                             is_man = cell_info["is_manual"]
+                            is_comb_cell = cell_info.get("is_combined", False)
                             
                             span = 1
+                            cell_bid = cell_info.get("block_id")
                             while p + span < periods:
                                 next_info = c_matrix[matrix_idx][p + span]
-                                if next_info and next_info.get("subject_name") == s_name and next_info.get("class_name") == tc:
+                                if not next_info or not next_info.get("subject_name"):
+                                    break
+                                next_bid = next_info.get("block_id")
+                                # block_id varsa: sadece aynı block_id birleşir
+                                if cell_bid and next_bid:
+                                    if cell_bid == next_bid:
+                                        span += 1
+                                    else:
+                                        break
+                                # Legacy (block_id yok): tüm özellikler + is_combined eşleşmeli
+                                elif (next_info.get("subject_name") == s_name
+                                        and next_info.get("class_name") == tc
+                                        and next_info.get("teacher_name") == t_name
+                                        and next_info.get("is_combined") == cell_info.get("is_combined")):
                                     span += 1
                                 else:
                                     break
                                     
                             actual_col = d_idx * periods + p
-                            self._grid.set_cell(r_idx, actual_col, s_name, color, t_name, span, tc, display_mode="classes", locked=is_locked, is_manual=is_man)
+                            self._grid.set_cell(r_idx, actual_col, s_name, color, t_name, span, tc, display_mode="classes", locked=is_locked, is_manual=is_man, is_combined=is_comb_cell, combined_classes=cell_info.get("combined_classes", []))
                             p += span
         finally:
             if hasattr(self._grid, "table"):
@@ -1312,12 +1362,33 @@ class MainWindow(QMainWindow):
         icon_d = make_clean_vector_icon("ders", is_exp_d)
         icon_r = make_clean_vector_icon("derslik", is_exp_r)
         
+        # Calculate class workloads
+        class_loads = {}
+        from auto_scheduler import matches_class
+        for c in s_list:
+            c_name = c.get("ad", "")
+            c_atamalar = []
+            seen_k = set()
+            for a in self.data_store.get("atamalar", []):
+                if matches_class(a.get("class", ""), c_name):
+                    s = format_tr_name(a.get("subject", ""))
+                    t = format_tr_name(a.get("teacher", ""))
+                    cls_str = format_tr_name(a.get("class", ""))
+                    k = (s, t, cls_str)
+                    if k not in seen_k:
+                        seen_k.add(k)
+                        c_atamalar.append(a)
+            tot = sum(int(a.get("duration", 0)) for a in c_atamalar)
+            class_loads[c_name] = tot
+            
         root_s = QTreeWidgetItem(self._tree, [f"Sınıflar ({len(s_list)})"])
         root_s.setIcon(0, icon_s)
         root_s.setData(0, Qt.UserRole + 10, "sinif")
         for c in s_list:
-            item = QTreeWidgetItem(root_s, [f"{c.get('ad', '')}"])
-            item.setData(0, Qt.UserRole, c.get("ad", ""))
+            c_name = c.get('ad', '')
+            c_hrs = class_loads.get(c_name, 0)
+            item = QTreeWidgetItem(root_s, [f"{c_name} ({c_hrs} Saat)"])
+            item.setData(0, Qt.UserRole, c_name)
             
         root_t = QTreeWidgetItem(self._tree, [f"Öğretmenler ({len(t_list)})"])
         root_t.setIcon(0, icon_t)
@@ -1420,22 +1491,9 @@ class MainWindow(QMainWindow):
             elif c_name:
                 target_classes.add(c_name.strip().upper())
                 
-            # Breakdown block distribution (e.g. 2+2 -> [2, 2], 1+1+1 -> [1, 1, 1], 2+1 -> [2, 1])
-            parts = []
-            if "+" in type_str:
-                for p in type_str.split("+"):
-                    p_clean = p.strip()
-                    if p_clean.isdigit() and int(p_clean) > 0:
-                        parts.append(int(p_clean))
-            elif type_str.isdigit() and int(type_str) > 0:
-                parts = [int(type_str)]
-            
-            if not parts:
-                rem = dur
-                while rem > 0:
-                    b = 2 if rem >= 2 else 1
-                    parts.append(b)
-                    rem -= b
+            # Breakdown block distribution (e.g. 2+2 -> [2, 2], 2+3 -> [2, 1, 1, 1], 2+1 -> [2, 1])
+            from auto_scheduler import parse_distribution_parts
+            parts = parse_distribution_parts(type_str, dur)
                     
             s_fmt = format_tr_name(s_name)
             t_fmt = format_tr_name(t_name)
@@ -1634,14 +1692,60 @@ class MainWindow(QMainWindow):
         teachers = self.data_store.get("ogretmenler", [])
         teacher_names = sorted([t.get("ad", "").strip() for t in teachers if t.get("ad")])
 
+        card_cls = (lesson_info.get("class_name") or lesson_info.get("class") or lesson_info.get("sinif") or "").strip()
+        card_teacher = format_tr_name(lesson_info.get("teacher_name") or lesson_info.get("teacher") or "")
+
         if display_mode == "teachers":
             if row < len(teacher_names):
-                teacher = teacher_names[row]
+                target_row_teacher = teacher_names[row]
+                if card_teacher and card_teacher != target_row_teacher:
+                    QMessageBox.warning(
+                        self, "Hatalı Öğretmen Satırı",
+                        f"⛔ Bu ders <b>{card_teacher}</b> öğretmenine aittir.<br><br>"
+                        f"<b>{target_row_teacher}</b> öğretmeninin satırına yerleştirilemez!"
+                    )
+                    return
+                teacher = target_row_teacher
+            elif card_teacher:
+                teacher = card_teacher
         else:
-            if is_comb and combined_classes:
-                cls_name = " + ".join(combined_classes)
-            elif row < len(class_names):
-                cls_name = class_names[row]
+            if row < len(class_names):
+                target_row_cls = class_names[row]
+                if is_comb and combined_classes:
+                    comb_match = any(
+                        matches_class(target_row_cls, tc) or matches_class(tc, target_row_cls) or target_row_cls == tc
+                        for tc in combined_classes
+                    )
+                    if not comb_match:
+                        QMessageBox.warning(
+                            self, "Hatalı Sınıf Satırı",
+                            f"⛔ Bu birleşik ders (<b>{' + '.join(combined_classes)}</b>) sınıflarına aittir.<br><br>"
+                            f"<b>{target_row_cls}</b> sınıfının satırına yerleştirilemez!"
+                        )
+                        return
+                    cls_name = " + ".join(combined_classes)
+                else:
+                    if card_cls:
+                        cls_match = (
+                            matches_class(card_cls, target_row_cls) or
+                            matches_class(target_row_cls, card_cls) or
+                            card_cls == target_row_cls
+                        )
+                        if not cls_match:
+                            QMessageBox.warning(
+                                self, "Hatalı Sınıf Satırı",
+                                f"⛔ Bu ders <b>{card_cls}</b> sınıfına aittir.<br><br>"
+                                f"<b>{target_row_cls}</b> sınıfının satırına yerleştirilemez!"
+                            )
+                            return
+                        cls_name = target_row_cls
+                    else:
+                        cls_name = target_row_cls
+            else:
+                if is_comb and combined_classes:
+                    cls_name = " + ".join(combined_classes)
+                elif card_cls:
+                    cls_name = card_cls
         
         # Öğretmen yoksa otomatik olarak branşından müsait bir hoca bul ve ata
         if not teacher:
@@ -1849,6 +1953,10 @@ class MainWindow(QMainWindow):
             ]
             
         # Yeni yerleşimi ekle (her saat bloğu için)
+        # block_id: aynı yerleştirme operasyonundan gelen tüm saatler aynı ID'yi paylaşır
+        import uuid as _uuid
+        _block_id = str(_uuid.uuid4())[:12]
+        
         for ext in range(duration):
             target_p = period_idx + ext
             self.data_store.setdefault("grid_placements", [])
@@ -1862,19 +1970,24 @@ class MainWindow(QMainWindow):
                      (is_comb and any(matches_class(p.get("class_name") or p.get("class", ""), tc) for tc in combined_classes)))
                 )
             ]
-            self.data_store["grid_placements"].append({
-                "day": day_idx, "period": target_p,
-                "row": target_p, "col": day_idx,
-                "class_name": cls_name, "class": cls_name,
-                "teacher_name": teacher, "teacher": teacher,
-                "subject_name": subject_name, "subject": subject_name,
-                "duration": 1,
-                "locked": bool(lesson_info.get("locked", True)),
-                "is_manual": True,
-                "color": color,
-                "is_combined": is_comb,
-                "combined_classes": list(combined_classes) if combined_classes else []
-            })
+            
+            target_class_names = combined_classes if (is_comb and combined_classes) else [cls_name]
+            
+            for t_cls in target_class_names:
+                self.data_store["grid_placements"].append({
+                    "day": day_idx, "period": target_p,
+                    "row": target_p, "col": day_idx,
+                    "class_name": t_cls, "class": t_cls,
+                    "teacher_name": teacher, "teacher": teacher,
+                    "subject_name": subject_name, "subject": subject_name,
+                    "duration": 1,
+                    "locked": bool(lesson_info.get("locked", True)),
+                    "is_manual": True,
+                    "color": color,
+                    "is_combined": is_comb,
+                    "combined_classes": list(combined_classes) if combined_classes else [],
+                    "block_id": _block_id
+                })
             
         if "auto_schedule_results" in self.data_store:
             self.data_store["auto_schedule_results"] = list(self.data_store.get("grid_placements", []))
@@ -2115,7 +2228,7 @@ class MainWindow(QMainWindow):
         import copy
         if not hasattr(self, "_history_stack"): self._history_stack = []
         if not hasattr(self, "_redo_stack"): self._redo_stack = []
-        if len(self._history_stack) > 50:
+        if len(self._history_stack) > 200:
             self._history_stack.pop(0)
         self._history_stack.append(copy.deepcopy(self.data_store))
         self._redo_stack.clear()
@@ -2137,6 +2250,12 @@ class MainWindow(QMainWindow):
                         json.dump(self.data_store, f, ensure_ascii=False, indent=4)
                 except Exception as e:
                     print("Undo Save Error:", e)
+            if hasattr(self, "institution_slug") and hasattr(self, "version_filename") and self.institution_slug and self.version_filename:
+                try:
+                    import version_store
+                    version_store.update_version_in_place(self.institution_slug, self.version_filename, self.data_store)
+                except Exception as e:
+                    print("Undo version store update error:", e)
             self._is_loading = False
             
             settings = self.data_store.get("settings", {})
@@ -2145,7 +2264,9 @@ class MainWindow(QMainWindow):
                 self._grid.set_periods(periods)
             self._refresh_tree()
             self._refresh_grid()
-            self.statusBar().showMessage("↺ İşlem başarıyla geri alındı (Rollback).")
+            self._restore_grid_placements()
+            self._refresh_unplaced_lessons()
+            self.statusBar().showMessage("↺ İşlem başarıyla geri alındı (Undo / Ctrl+Z).")
         else:
             self.statusBar().showMessage("⚠️ Geri alınacak başka işlem yok.")
 
@@ -2166,6 +2287,12 @@ class MainWindow(QMainWindow):
                         json.dump(self.data_store, f, ensure_ascii=False, indent=4)
                 except Exception as e:
                     print("Redo Save Error:", e)
+            if hasattr(self, "institution_slug") and hasattr(self, "version_filename") and self.institution_slug and self.version_filename:
+                try:
+                    import version_store
+                    version_store.update_version_in_place(self.institution_slug, self.version_filename, self.data_store)
+                except Exception as e:
+                    print("Redo version store update error:", e)
             self._is_loading = False
             
             settings = self.data_store.get("settings", {})
@@ -2174,9 +2301,25 @@ class MainWindow(QMainWindow):
                 self._grid.set_periods(periods)
             self._refresh_tree()
             self._refresh_grid()
-            self.statusBar().showMessage("↻ İşlem başarıyla tekrar uygulandı (Redo).")
+            self._restore_grid_placements()
+            self._refresh_unplaced_lessons()
+            self.statusBar().showMessage("↻ İşlem başarıyla tekrar uygulandı (Redo / Ctrl+Y).")
         else:
             self.statusBar().showMessage("⚠️ Yinelenecek başka işlem yok.")
+
+    def keyPressEvent(self, event):
+        if event.modifiers() == Qt.ControlModifier:
+            if event.key() == Qt.Key_Z:
+                self._act_undo()
+                return
+            elif event.key() == Qt.Key_Y:
+                self._act_redo()
+                return
+        elif event.modifiers() == (Qt.ControlModifier | Qt.ShiftModifier):
+            if event.key() == Qt.Key_Z:
+                self._act_redo()
+                return
+        super().keyPressEvent(event)
 
     def _open_subjects(self):
         self._push_undo_state()
@@ -2261,9 +2404,9 @@ class MainWindow(QMainWindow):
                 
         d = ClassComprehensiveAssignmentDialog(class_name=selected_class, data_store=self.data_store, parent=self)
         if d.exec():
-            self.save_db()
+            self.save_db(sync_from_grid=False)
             self._refresh_tree()
-            self._restore_grid_placements()
+            self._refresh_grid()
             self._refresh_unplaced_lessons()
 
     def _show_tree_context_menu(self, pos):

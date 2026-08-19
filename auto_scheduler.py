@@ -21,13 +21,30 @@ def matches_class(asgn_class_str: str, target_cn: str) -> bool:
     norm_asgn = normalize_class_name(asgn_class_str)
     if norm_asgn == norm_target:
         return True
+        
+    target_has_paren = "(" in norm_target and ")" in norm_target
+    asgn_has_paren = "(" in norm_asgn and ")" in norm_asgn
+    
     clean_target = norm_target.split("(")[0].strip()
     clean_asgn = norm_asgn.split("(")[0].strip()
-    if clean_target and clean_asgn and clean_target == clean_asgn:
+    
+    # If both have different branch/group names in parentheses, e.g. "12A(SAY)" and "12A(EA)", they MUST NOT match!
+    if target_has_paren and asgn_has_paren:
+        if norm_asgn == norm_target:
+            return True
+    elif clean_target and clean_asgn and clean_target == clean_asgn:
         return True
+        
     for part in str(asgn_class_str).replace("&", ",").replace("+", ",").split(","):
         p_norm = normalize_class_name(part)
-        if p_norm == norm_target or (clean_target and p_norm.split("(")[0].strip() == clean_target):
+        if p_norm == norm_target:
+            return True
+        p_has_paren = "(" in p_norm and ")" in p_norm
+        p_clean = p_norm.split("(")[0].strip()
+        if target_has_paren and p_has_paren:
+            if p_norm == norm_target:
+                return True
+        elif clean_target and p_clean and p_clean == clean_target:
             return True
     return False
 
@@ -35,16 +52,58 @@ def format_tr_name(name_str: str) -> str:
     if not name_str: return ""
     return " ".join(w.capitalize() for w in str(name_str).strip().split())
 
+def parse_distribution_parts(type_str: str, total_duration: int = 0) -> list:
+    """
+    Parses aSc distribution strings into list of block durations (cards).
+    Rules:
+    - '2+3' -> [2, 1, 1, 1] (1 çiftli, 3 tekli)
+    - '3+2' -> [1, 1, 1, 2]
+    - '2+2' -> [2, 2]
+    - '2+1' -> [2, 1]
+    - '2+2+1' -> [2, 2, 1]
+    - '1+1' -> [1, 1]
+    - '3' (single number) -> [2, 1]
+    """
+    type_str = str(type_str or "").strip()
+    parts = []
+    
+    if "+" in type_str:
+        raw_parts = [p.strip() for p in type_str.split("+") if p.strip().isdigit()]
+        for p in raw_parts:
+            val = int(p)
+            if val == 3:
+                # 3 in composite distribution (e.g. 2+3, 1+3) represents 3 single hours (3 tekli saat)
+                parts.extend([1, 1, 1])
+            elif val > 0:
+                parts.append(val)
+    elif type_str.isdigit() and int(type_str) > 0:
+        val = int(type_str)
+        rem = val
+        while rem > 0:
+            b = 2 if rem >= 2 else 1
+            parts.append(b)
+            rem -= b
+            
+    if not parts and total_duration > 0:
+        rem = total_duration
+        while rem > 0:
+            b = 2 if rem >= 2 else 1
+            parts.append(b)
+            rem -= b
+            
+    return parts or ([total_duration] if total_duration > 0 else [2])
+
 class AutoSchedulerWorker(QThread):
     progress_updated = Signal(int, int) # placed_hours, total_hours
     finished_successfully = Signal(dict) # Returns results dict
     failed = Signal(str)
 
-    def __init__(self, data_store, target_class=None, parent=None, fill_empty=False):
+    def __init__(self, data_store, target_class=None, parent=None, fill_empty=False, institution_slug=None):
         super().__init__(parent)
         self.data_store = data_store
         self.target_class = target_class if target_class and str(target_class).strip() and "Tüm" not in str(target_class) else None
         self.fill_empty = fill_empty
+        self.institution_slug = institution_slug or (self.data_store.get("settings", {}).get("institution_slug", None) if isinstance(self.data_store, dict) else None)
         self._is_running = True
 
     def run(self):
@@ -302,6 +361,7 @@ class AutoSchedulerWorker(QThread):
                         empty_slots.append((d, p))
 
             # Manuel yerleşimleri son listeye ekle (ASLA SİLİNMEZ / DEĞİŞTİRİLMEZ)
+            import uuid as _uuid
             for m in existing_for_class:
                 already_in = any(
                     (p_chk.get("day") == m["day_idx"] and 
@@ -317,7 +377,8 @@ class AutoSchedulerWorker(QThread):
                         "teacher_name": m["teacher_name"], "teacher": m["teacher_name"],
                         "class_name": cn, "class": cn,
                         "duration": m["duration"],
-                        "locked": True, "is_manual": True
+                        "locked": True, "is_manual": True,
+                        "block_id": m.get("block_id") or str(_uuid.uuid4())[:12]
                     })
                     total_placed_hours += m["duration"]
 
@@ -335,19 +396,11 @@ class AutoSchedulerWorker(QThread):
                     t_name = format_tr_name(asgn.get("teacher") or asgn.get("ogretmen") or asgn.get("teacher_name") or "")
                     s_name = asgn.get("subject") or asgn.get("ders") or asgn.get("subject_name") or ""
                     
-                    is_comb = bool(asgn.get("is_combined") or "," in str(asgn.get("class", "")) or "&" in str(asgn.get("class", "")))
-                    if raw_type and "+" in raw_type:
-                        for p in raw_type.split("+"):
-                            if p.strip().isdigit():
-                                candidate_blocks.append({"subject": s_name, "teacher": t_name, "duration": int(p.strip()), "is_combined": is_comb})
-                    elif raw_type.isdigit():
-                        candidate_blocks.append({"subject": s_name, "teacher": t_name, "duration": int(raw_type), "is_combined": is_comb})
-                    else:
-                        h = int(asgn.get("duration") or asgn.get("saat") or asgn.get("toplam_saat") or 2)
-                        while h > 0:
-                            b_dur = 2 if h >= 2 else 1
-                            candidate_blocks.append({"subject": s_name, "teacher": t_name, "duration": b_dur, "is_combined": is_comb})
-                            h -= b_dur
+                    is_comb = bool(asgn.get("is_combined") or ("+" in str(asgn.get("class", "")) and len(str(asgn.get("class", "")).split("+")) > 1) or "," in str(asgn.get("class", "")) or "&" in str(asgn.get("class", "")))
+                    h_dur = int(asgn.get("duration") or asgn.get("saat") or asgn.get("toplam_saat") or 2)
+                    block_durs = parse_distribution_parts(raw_type, h_dur)
+                    for b_dur in block_durs:
+                        candidate_blocks.append({"subject": s_name, "teacher": t_name, "duration": b_dur, "is_combined": is_comb})
 
             # Manuel olarak önceden yerleştirilmiş ders saatlerini aday bloklardan tam saat bazında düş (mükerrerliği önle)
             manual_hours_by_st = {}
@@ -441,17 +494,21 @@ class AutoSchedulerWorker(QThread):
                 combined_targets = [cn]
                 if is_explicit_combined:
                     for a in assignments:
-                        if not a.get("is_combined"): continue
+                        if not (a.get("is_combined") or ("+" in str(a.get("class", "")) and len(str(a.get("class", "")).split("+")) > 1) or "," in str(a.get("class", "")) or "&" in str(a.get("class", ""))):
+                            continue
                         a_subj = a.get("subject") or a.get("ders") or ""
                         a_t = format_tr_name(a.get("teacher") or "")
-                        if a_subj == s_name and (t_name and a_t == t_name):
+                        if a_subj == s_name and (not t_name or a_t == t_name):
+                            if a.get("combined_classes"):
+                                combined_targets = [str(c).strip() for c in a["combined_classes"] if str(c).strip()]
+                                break
                             cls_str = a.get("class") or ""
-                            if "," in cls_str or "&" in cls_str:
-                                parts = [c.strip() for c in cls_str.replace("&", ",").split(",") if c.strip()]
-                                if any(matches_class(p_c, cn) for p_c in parts):
-                                    combined_targets = parts
-                                    break
+                            parts = [c.strip() for c in cls_str.replace("&", "+").replace(",", "+").split("+") if c.strip()]
+                            if len(parts) > 1 and any(matches_class(p_c, cn) for p_c in parts):
+                                combined_targets = parts
+                                break
 
+                _sol_block_id = str(_uuid.uuid4())[:12]
                 for target_cn in combined_targets:
                     if target_cn != cn:
                         target_class_manual.append({
@@ -461,7 +518,8 @@ class AutoSchedulerWorker(QThread):
                             "day_idx": d,
                             "period": p,
                             "duration": dur,
-                            "is_manual": True
+                            "is_manual": True,
+                            "block_id": _sol_block_id
                         })
                     already_in = any(
                         (p_chk.get("day") == d and 
@@ -476,18 +534,62 @@ class AutoSchedulerWorker(QThread):
                             "subject_name": s_name, "subject": s_name,
                             "teacher_name": t_name, "teacher": t_name,
                             "class_name": target_cn, "class": target_cn,
-                            "duration": dur
+                            "duration": dur,
+                            "block_id": _sol_block_id,
+                            "is_combined": is_explicit_combined,
+                            "combined_classes": list(combined_targets) if is_explicit_combined else []
                         })
 
             self.progress_updated.emit(total_placed_hours, total_target_hours)
 
         self.data_store["grid_placements"] = total_scheduled_placements
         self.progress_updated.emit(total_placed_hours, total_target_hours)
+        
+        # Detect any cross-institution overlaps
+        cross_conflicts = []
+        try:
+            for item in total_scheduled_placements:
+                t_name = item.get("teacher_name") or item.get("teacher") or ""
+                if not t_name:
+                    continue
+                norm_t = normalize_clean(t_name)
+                t_fmt = format_tr_name(t_name)
+                d = int(item.get("day_idx") if "day_idx" in item else item.get("day", 0))
+                p = int(item.get("period", 0))
+                dur = int(item.get("duration", 1))
+                for off in range(dur):
+                    slot_p = p + off
+                    k_match = None
+                    if (norm_t, d, slot_p) in cross_busy:
+                        k_match = cross_busy[(norm_t, d, slot_p)]
+                    elif (t_fmt, d, slot_p) in cross_busy:
+                        k_match = cross_busy[(t_fmt, d, slot_p)]
+                    elif (t_name, d, slot_p) in cross_busy:
+                        k_match = cross_busy[(t_name, d, slot_p)]
+                        
+                    if k_match:
+                        c_info = k_match
+                        cross_conflicts.append({
+                            "teacher": t_name,
+                            "day": days[d] if d < len(days) else f"{d+1}. Gün",
+                            "period": slot_p + 1,
+                            "day_idx": d,
+                            "period_idx": slot_p,
+                            "other_institution": c_info.get("institution_name", "Diğer Kurum"),
+                            "other_class": c_info.get("class_name", ""),
+                            "other_subject": c_info.get("subject_name", ""),
+                            "this_class": item.get("class_name") or item.get("class") or "",
+                            "this_subject": item.get("subject_name") or item.get("subject") or ""
+                        })
+        except Exception as ce:
+            print(f"[AUTO_SCHEDULER] Cross conflict scan notice: {ce}")
+
         self.finished_successfully.emit({
             "schedule": total_scheduled_placements,
             "placements": total_scheduled_placements,
             "placed_hours": total_placed_hours,
-            "total_hours": total_target_hours
+            "total_hours": total_target_hours,
+            "cross_conflicts": cross_conflicts
         })
 
     def _astar_solve(self, empty_slots, candidate_blocks, global_teacher_occupied, t_objs, c_timeoff=None, days_count=5, periods_count=8, manual_subj_map=None, manual_day_subj_hours=None, constraints=None, relations=None, class_name=None, t_toff_dict=None, fully_blocked_teachers=None, find_branch_fn=None):

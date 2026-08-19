@@ -6,10 +6,10 @@ Tek bir emoji barındırmaz, tamamı modern vektörel arayüz öğeleridir.
 import os, sys, json
 from datetime import datetime
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QFrame, QSplitter, QInputDialog, QMessageBox,
     QLineEdit, QDialog, QCheckBox, QGraphicsDropShadowEffect, QGraphicsBlurEffect,
-    QStackedLayout, QMenu
+    QStackedLayout, QMenu, QSizePolicy
 )
 from PySide6.QtCore import Qt, Signal, QSize, QRectF
 from PySide6.QtGui import (
@@ -38,64 +38,81 @@ FONT_FAMILY = '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text
 
 # ── 3D Institution Icon Painter ──────────────────────────────────────
 
-def make_3d_institution_icon(inst_name: str, color_hex: str = "#0071E3", size: int = 44) -> QPixmap:
-    """Draws a premium 3D isometric academy / campus building icon with depth, gradients and soft bevels."""
+def make_3d_institution_icon(inst_name: str, color_hex: str = "#0071E3", size: int = 40) -> QPixmap:
+    """Draws a mathematically centered, scalable 3D isometric academy icon."""
     pix = QPixmap(size, size)
     pix.fill(Qt.transparent)
     p = QPainter(pix)
     p.setRenderHint(QPainter.Antialiasing)
     
-    # 1. Base 3D Tile with gradient and bottom shadow
+    # 1. Base rounded rectangle tile
     grad_bg = QLinearGradient(0, 0, size, size)
     c_base = QColor(color_hex)
-    grad_bg.setColorAt(0.0, c_base.lighter(135))
+    grad_bg.setColorAt(0.0, c_base.lighter(130))
     grad_bg.setColorAt(0.7, c_base)
-    grad_bg.setColorAt(1.0, c_base.darker(120))
+    grad_bg.setColorAt(1.0, c_base.darker(115))
+    
+    pad = max(1.5, size * 0.04)
+    tile_rect = QRectF(pad, pad, size - 2 * pad, size - 2 * pad)
+    radius = size * 0.26
     
     p.setPen(Qt.NoPen)
     p.setBrush(QBrush(grad_bg))
-    p.drawRoundedRect(QRectF(2, 2, size - 4, size - 4), 11, 11)
+    p.drawRoundedRect(tile_rect, radius, radius)
     
-    # Top highlight bevel (glass edge)
-    p.setPen(QPen(QColor(255, 255, 255, 110), 1.2))
-    p.drawRoundedRect(QRectF(3, 3, size - 6, size - 6), 10, 10)
+    # Highlight bevel (subtle top glass edge)
+    p.setPen(QPen(QColor(255, 255, 255, 100), max(1.0, size * 0.025)))
+    p.drawRoundedRect(QRectF(pad + 0.5, pad + 0.5, size - 2 * pad - 1, size - 2 * pad - 1), radius - 1, radius - 1)
     
-    # 2. Isometric Pediment & Roof
-    mid_x = size / 2.0
+    # 2. Centered Classical Building (normalized scale)
+    cx = size / 2.0
+    cy = size / 2.0
     
-    # Roof Gable
-    roof_path = QPainterPath()
-    roof_path.moveTo(mid_x, 10.5)
-    roof_path.lineTo(size - 10, 16.5)
-    roof_path.lineTo(10, 16.5)
-    roof_path.closeSubpath()
+    w = size * 0.54  # building total width
+    h = size * 0.54  # building total height
+    top_y = cy - h * 0.48
+    
+    # A. Roof Triangle (Gable)
+    roof = QPainterPath()
+    roof.moveTo(cx, top_y)
+    roof.lineTo(cx + w * 0.5, top_y + h * 0.26)
+    roof.lineTo(cx - w * 0.5, top_y + h * 0.26)
+    roof.closeSubpath()
     
     p.setPen(Qt.NoPen)
-    p.setBrush(QColor(255, 255, 255, 250))
-    p.drawPath(roof_path)
+    p.setBrush(QColor(255, 255, 255, 255))
+    p.drawPath(roof)
     
-    # Architrave / Cornice
-    p.setBrush(QColor(255, 255, 255, 210))
-    p.drawRoundedRect(QRectF(9, 17, size - 18, 2.5), 1, 1)
-    
-    # 3. Classical 3D Columns (3 Pillars)
-    col_w = 3.2
-    col_h = 10.5
-    col_y = 20.0
-    
-    # Left pillar
-    p.setBrush(QColor(255, 255, 255, 240))
-    p.drawRoundedRect(QRectF(11.5, col_y, col_w, col_h), 1, 1)
-    # Center pillar
-    p.drawRoundedRect(QRectF(mid_x - col_w / 2.0, col_y, col_w, col_h), 1, 1)
-    # Right pillar
-    p.drawRoundedRect(QRectF(size - 11.5 - col_w, col_y, col_w, col_h), 1, 1)
-    
-    # 4. Base Steps / Foundation
+    # B. Architrave / Cornice Beam
+    beam_y = top_y + h * 0.28
+    beam_h = max(2.0, h * 0.08)
     p.setBrush(QColor(255, 255, 255, 220))
-    p.drawRoundedRect(QRectF(9.5, 31, size - 19, 2.2), 1, 1)
+    p.drawRoundedRect(QRectF(cx - w * 0.46, beam_y, w * 0.92, beam_h), 1, 1)
+    
+    # C. Columns (3 pillars evenly centered)
+    col_y = beam_y + beam_h + h * 0.04
+    col_h = h * 0.36
+    col_w = max(2.5, w * 0.16)
+    
+    left_x = cx - w * 0.38
+    center_x = cx - col_w / 2.0
+    right_x = cx + w * 0.38 - col_w
+    
+    p.setBrush(QColor(255, 255, 255, 245))
+    p.drawRoundedRect(QRectF(left_x, col_y, col_w, col_h), 1, 1)
+    p.drawRoundedRect(QRectF(center_x, col_y, col_w, col_h), 1, 1)
+    p.drawRoundedRect(QRectF(right_x, col_y, col_w, col_h), 1, 1)
+    
+    # D. Steps / Foundation
+    step1_y = col_y + col_h + h * 0.02
+    step1_h = max(2.0, h * 0.08)
+    p.setBrush(QColor(255, 255, 255, 225))
+    p.drawRoundedRect(QRectF(cx - w * 0.44, step1_y, w * 0.88, step1_h), 1, 1)
+    
+    step2_y = step1_y + step1_h + 1
+    step2_h = max(2.0, h * 0.08)
     p.setBrush(QColor(255, 255, 255, 250))
-    p.drawRoundedRect(QRectF(8, 33.5, size - 16, 2.5), 1, 1)
+    p.drawRoundedRect(QRectF(cx - w * 0.50, step2_y, w, step2_h), 1, 1)
     
     p.end()
     return pix
@@ -145,41 +162,50 @@ class AppleInfoDialog(QDialog):
     def __init__(self, title: str, message: str, is_success: bool = True, parent=None):
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.setFixedSize(400, 220)
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #FFFFFF;
-                border: 1px solid #E2E8F0;
-                border-radius: 14px;
-            }
-            QLabel {
-                background: transparent;
-                color: #0F172A;
-            }
-        """)
+        self.setFixedSize(400, 230)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setAttribute(Qt.WA_TranslucentBackground)
         
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(28, 24, 28, 24)
-        layout.setSpacing(12)
-        layout.setAlignment(Qt.AlignCenter)
+        layout.setContentsMargins(15, 15, 15, 15)
+        
+        container = QWidget(self)
+        container.setObjectName("infoCard")
+        container.setStyleSheet("""
+            #infoCard {
+                background: #FFFFFF;
+                border: 1px solid rgba(0, 0, 0, 0.08);
+                border-radius: 16px;
+            }
+        """)
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(30)
+        shadow.setColor(QColor(0, 0, 0, 45))
+        shadow.setOffset(0, 8)
+        container.setGraphicsEffect(shadow)
+        
+        c_lay = QVBoxLayout(container)
+        c_lay.setContentsMargins(24, 20, 24, 20)
+        c_lay.setSpacing(10)
+        c_lay.setAlignment(Qt.AlignCenter)
         
         icon_lbl = QLabel()
         icon_lbl.setAlignment(Qt.AlignCenter)
-        icon_lbl.setPixmap(make_dashboard_icon("check" if is_success else "info", color_hex="#10B981" if is_success else "#0071E3", size=40))
-        layout.addWidget(icon_lbl)
+        icon_lbl.setPixmap(make_dashboard_icon("check" if is_success else "info", color_hex="#0071E3" if is_success else "#FF3B30", size=36))
+        c_lay.addWidget(icon_lbl)
         
         t_lbl = QLabel(title)
         t_lbl.setFont(QFont("Segoe UI", 12, QFont.Bold))
-        t_lbl.setStyleSheet("color: #0F172A; font-weight: bold;")
+        t_lbl.setStyleSheet("color: #1D1D1F; font-weight: bold; background: transparent; border: none;")
         t_lbl.setAlignment(Qt.AlignCenter)
-        layout.addWidget(t_lbl)
+        c_lay.addWidget(t_lbl)
         
         msg_lbl = QLabel(message)
         msg_lbl.setFont(QFont("Segoe UI", 9.5))
-        msg_lbl.setStyleSheet("color: #475569;")
+        msg_lbl.setStyleSheet("color: #636366; background: transparent; border: none;")
         msg_lbl.setAlignment(Qt.AlignCenter)
         msg_lbl.setWordWrap(True)
-        layout.addWidget(msg_lbl)
+        c_lay.addWidget(msg_lbl)
         
         btn_ok = QPushButton("Tamam")
         btn_ok.setFixedSize(130, 34)
@@ -190,11 +216,11 @@ class AppleInfoDialog(QDialog):
                 color: #FFFFFF;
                 border: none;
                 border-radius: 8px;
-                font-weight: bold;
+                font-weight: 600;
                 font-size: 12px;
             }
             QPushButton:hover {
-                background: #0056B3;
+                background: #0062C4;
             }
         """)
         btn_ok.clicked.connect(self.accept)
@@ -203,11 +229,559 @@ class AppleInfoDialog(QDialog):
         h_lay.addStretch(1)
         h_lay.addWidget(btn_ok)
         h_lay.addStretch(1)
-        layout.addLayout(h_lay)
+        c_lay.addLayout(h_lay)
+        
+        layout.addWidget(container)
+
+class AppleConfirmDialog(QDialog):
+    def __init__(self, title: str, message: str, confirm_text: str = "Onayla", cancel_text: str = "Vazgeç", is_destructive: bool = False, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setFixedSize(430, 260)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(15, 15, 15, 15)
+        
+        container = QWidget(self)
+        container.setObjectName("confirmCard")
+        container.setStyleSheet("""
+            #confirmCard {
+                background: #FFFFFF;
+                border: 1px solid rgba(0, 0, 0, 0.08);
+                border-radius: 18px;
+            }
+        """)
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(35)
+        shadow.setColor(QColor(0, 0, 0, 50))
+        shadow.setOffset(0, 8)
+        container.setGraphicsEffect(shadow)
+        
+        c_lay = QVBoxLayout(container)
+        c_lay.setContentsMargins(28, 22, 28, 22)
+        c_lay.setSpacing(12)
+        c_lay.setAlignment(Qt.AlignCenter)
+        
+        icon_lbl = QLabel()
+        icon_lbl.setAlignment(Qt.AlignCenter)
+        icon_lbl.setPixmap(make_dashboard_icon("warning" if is_destructive else "info", color_hex="#FF3B30" if is_destructive else "#0071E3", size=38))
+        c_lay.addWidget(icon_lbl)
+        
+        t_lbl = QLabel(title)
+        t_lbl.setFont(QFont("Segoe UI", 12.5, QFont.Bold))
+        t_lbl.setStyleSheet("color: #1D1D1F; font-weight: bold; background: transparent; border: none;")
+        t_lbl.setAlignment(Qt.AlignCenter)
+        c_lay.addWidget(t_lbl)
+        
+        msg_lbl = QLabel(message)
+        msg_lbl.setFont(QFont("Segoe UI", 9.5))
+        msg_lbl.setStyleSheet("color: #636366; background: transparent; border: none;")
+        msg_lbl.setAlignment(Qt.AlignCenter)
+        msg_lbl.setWordWrap(True)
+        msg_lbl.setMinimumHeight(44)
+        c_lay.addWidget(msg_lbl)
+        
+        c_lay.addSpacing(4)
+        
+        btn_box = QHBoxLayout()
+        btn_box.setSpacing(12)
+        
+        btn_cancel = QPushButton(cancel_text)
+        btn_cancel.setFixedHeight(36)
+        btn_cancel.setCursor(Qt.PointingHandCursor)
+        btn_cancel.setStyleSheet("""
+            QPushButton {
+                background: #F2F2F7; color: #1D1D1F; border: 1px solid #E5E5EA;
+                border-radius: 8px; padding: 6px 20px; font-weight: 500; font-size: 12px;
+            }
+            QPushButton:hover { background: #E5E5EA; }
+        """)
+        btn_cancel.clicked.connect(self.reject)
+        btn_box.addWidget(btn_cancel)
+        
+        btn_ok = QPushButton(confirm_text)
+        btn_ok.setFixedHeight(36)
+        btn_ok.setCursor(Qt.PointingHandCursor)
+        bg_col = "#FF3B30" if is_destructive else "#0071E3"
+        hover_col = "#DC2626" if is_destructive else "#0062C4"
+        btn_ok.setStyleSheet(f"""
+            QPushButton {{
+                background: {bg_col}; color: #FFFFFF; border: none;
+                border-radius: 8px; padding: 6px 22px; font-weight: 600; font-size: 12px;
+            }}
+            QPushButton:hover {{ background: {hover_col}; }}
+        """)
+        btn_ok.clicked.connect(self.accept)
+        btn_box.addWidget(btn_ok)
+        
+        c_lay.addLayout(btn_box)
+        layout.addWidget(container)
+        btn_box.setSpacing(12)
+        
+        btn_cancel = QPushButton(cancel_text)
+        btn_cancel.setFixedHeight(34)
+        btn_cancel.setStyleSheet("""
+            QPushButton {
+                background: #F2F2F7; color: #1D1D1F; border: 1px solid #E5E5EA;
+                border-radius: 8px; padding: 6px 18px; font-weight: 500;
+            }
+            QPushButton:hover { background: #E5E5EA; }
+        """)
+        btn_cancel.clicked.connect(self.reject)
+        btn_box.addWidget(btn_cancel)
+        
+        btn_ok = QPushButton(confirm_text)
+        btn_ok.setFixedHeight(34)
+        bg_col = "#FF3B30" if is_destructive else "#0071E3"
+        hover_col = "#DC2626" if is_destructive else "#0062C4"
+        btn_ok.setStyleSheet(f"""
+            QPushButton {{
+                background: {bg_col}; color: #FFFFFF; border: none;
+                border-radius: 8px; padding: 6px 20px; font-weight: 600;
+            }}
+            QPushButton:hover {{ background: {hover_col}; }}
+        """)
+        btn_ok.clicked.connect(self.accept)
+        btn_box.addWidget(btn_ok)
+        
+        c_lay.addLayout(btn_box)
+        layout.addWidget(container)
+
+
+class AppleColorPickerDialog(QDialog):
+    def __init__(self, current_color="#0071E3", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Kurum Rengi Seç")
+        self.setFixedSize(360, 200)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        
+        self.selected_color = current_color
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(15, 15, 15, 15)
+        
+        container = QWidget(self)
+        container.setObjectName("colorCard")
+        container.setStyleSheet("""
+            #colorCard {
+                background: #FFFFFF;
+                border: 1px solid rgba(0, 0, 0, 0.08);
+                border-radius: 16px;
+            }
+        """)
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(30)
+        shadow.setColor(QColor(0, 0, 0, 45))
+        shadow.setOffset(0, 8)
+        container.setGraphicsEffect(shadow)
+        
+        c_lay = QVBoxLayout(container)
+        c_lay.setContentsMargins(24, 20, 24, 20)
+        c_lay.setSpacing(14)
+        
+        t_lbl = QLabel("Kurum Rengi Seç")
+        t_lbl.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        t_lbl.setStyleSheet("color: #1D1D1F; background: transparent; border: none;")
+        c_lay.addWidget(t_lbl)
+        
+        color_row = QHBoxLayout()
+        color_row.setSpacing(10)
+        self.color_btns = []
+        palette = [
+            ("#0071E3", "Mavi"),
+            ("#34C759", "Yeşil"),
+            ("#5856D6", "İndigo"),
+            ("#FF9500", "Turuncu"),
+            ("#FF3B30", "Kırmızı"),
+            ("#30B0C7", "Turkuaz"),
+            ("#AF52DE", "Mor"),
+        ]
+        for hex_code, label in palette:
+            btn = QPushButton()
+            btn.setFixedSize(30, 30)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setToolTip(label)
+            is_sel = (hex_code == self.selected_color)
+            btn.setStyleSheet(self._color_btn_style(hex_code, is_sel))
+            btn.clicked.connect(lambda _, c=hex_code: self._set_color(c))
+            color_row.addWidget(btn)
+            self.color_btns.append((btn, hex_code))
+        color_row.addStretch(1)
+        c_lay.addLayout(color_row)
+        
+        btn_box = QHBoxLayout()
+        btn_box.setSpacing(10)
+        
+        btn_cancel = QPushButton("Vazgeç")
+        btn_cancel.setFixedHeight(34)
+        btn_cancel.setStyleSheet("""
+            QPushButton {
+                background: #F2F2F7; color: #1D1D1F; border: 1px solid #E5E5EA;
+                border-radius: 8px; padding: 6px 16px; font-weight: 500;
+            }
+            QPushButton:hover { background: #E5E5EA; }
+        """)
+        btn_cancel.clicked.connect(self.reject)
+        btn_box.addWidget(btn_cancel)
+        
+        btn_ok = QPushButton("Kaydet")
+        btn_ok.setFixedHeight(34)
+        btn_ok.setStyleSheet("""
+            QPushButton {
+                background: #0071E3; color: #FFFFFF; border: none;
+                border-radius: 8px; padding: 6px 20px; font-weight: 600;
+            }
+            QPushButton:hover { background: #0062C4; }
+        """)
+        btn_ok.clicked.connect(self.accept)
+        btn_box.addWidget(btn_ok)
+        
+        c_lay.addLayout(btn_box)
+        layout.addWidget(container)
+        
+    def _color_btn_style(self, hex_code: str, is_selected: bool) -> str:
+        if is_selected:
+            return f"background: {hex_code}; border: 3px solid #1D1D1F; border-radius: 15px;"
+        else:
+            return f"background: {hex_code}; border: 2px solid #FFFFFF; border-radius: 15px;"
+            
+    def _set_color(self, hex_code: str):
+        self.selected_color = hex_code
+        for btn, c in self.color_btns:
+            btn.setStyleSheet(self._color_btn_style(c, c == hex_code))
+            
+    def get_color(self):
+        return self.selected_color
+
 
 def show_apple_info(parent, title: str, message: str, is_success: bool = True):
     dlg = AppleInfoDialog(title, message, is_success=is_success, parent=parent)
     dlg.exec()
+
+
+class AppleNewInstitutionDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Yeni Eğitim Kurumu Ekle")
+        self.setFixedSize(500, 480)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        
+        self.selected_color = "#0071E3"
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(15, 15, 15, 15)
+        
+        container = QWidget(self)
+        container.setObjectName("modalCard")
+        container.setStyleSheet("""
+            #modalCard {
+                background: #FFFFFF;
+                border: 1px solid rgba(0, 0, 0, 0.08);
+                border-radius: 20px;
+            }
+        """)
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(35)
+        shadow.setColor(QColor(0, 0, 0, 50))
+        shadow.setOffset(0, 10)
+        container.setGraphicsEffect(shadow)
+        
+        c_lay = QVBoxLayout(container)
+        c_lay.setContentsMargins(32, 28, 32, 28)
+        c_lay.setSpacing(14)
+        
+        # Header Row with 3D Icon & Title
+        hdr_row = QHBoxLayout()
+        hdr_row.setSpacing(16)
+        
+        self.icon_preview = QLabel()
+        self.icon_preview.setFixedSize(48, 48)
+        self._update_icon_preview()
+        hdr_row.addWidget(self.icon_preview)
+        
+        title_box = QVBoxLayout()
+        title_box.setSpacing(3)
+        
+        t_lbl = QLabel("Yeni Eğitim Kurumu Ekle")
+        t_lbl.setFont(QFont("Segoe UI", 13, QFont.Bold))
+        t_lbl.setStyleSheet("color: #1D1D1F; background: transparent; border: none;")
+        title_box.addWidget(t_lbl)
+        
+        sub_lbl = QLabel("Bağımsız ders çizelgeleri ve versiyon alanı tanımlayın.")
+        sub_lbl.setFont(QFont("Segoe UI", 9))
+        sub_lbl.setStyleSheet("color: #86868B; background: transparent; border: none;")
+        title_box.addWidget(sub_lbl)
+        
+        hdr_row.addLayout(title_box, 1)
+        c_lay.addLayout(hdr_row)
+        
+        # Divider
+        div = QFrame()
+        div.setFixedHeight(1)
+        div.setStyleSheet("background: #E5E5EA; border: none;")
+        c_lay.addWidget(div)
+        
+        # Field 1: Name
+        name_title = QLabel("KURUM ADI *")
+        name_title.setFont(QFont("Segoe UI", 8, QFont.Bold))
+        name_title.setStyleSheet("color: #86868B; letter-spacing: 0.5px; background: transparent; border: none;")
+        c_lay.addWidget(name_title)
+        
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("Örn: Boğaziçi Eğitim Kurumları, Birey Kurs...")
+        self.name_edit.setFixedHeight(38)
+        self.name_edit.setStyleSheet("""
+            QLineEdit {
+                background: #F8FAFC;
+                border: 1.5px solid #CBD5E1;
+                border-radius: 8px;
+                padding: 4px 12px;
+                font-size: 13px;
+                color: #0F172A;
+            }
+            QLineEdit:focus {
+                border: 1.5px solid #0071E3;
+                background: #FFFFFF;
+            }
+        """)
+        self.name_edit.textChanged.connect(self._on_name_changed)
+        c_lay.addWidget(self.name_edit)
+        
+        # Field 2: Color Picker
+        color_title = QLabel("TEMA RENGİ")
+        color_title.setFont(QFont("Segoe UI", 8, QFont.Bold))
+        color_title.setStyleSheet("color: #86868B; letter-spacing: 0.5px; background: transparent; border: none;")
+        c_lay.addWidget(color_title)
+        
+        color_row = QHBoxLayout()
+        color_row.setSpacing(10)
+        self.color_btns = []
+        palette = [
+            ("#0071E3", "Mavi"),
+            ("#34C759", "Yeşil"),
+            ("#5856D6", "İndigo"),
+            ("#FF9500", "Turuncu"),
+            ("#FF3B30", "Kırmızı"),
+            ("#30B0C7", "Turkuaz"),
+            ("#AF52DE", "Mor"),
+        ]
+        for hex_code, label in palette:
+            btn = QPushButton()
+            btn.setFixedSize(28, 28)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setToolTip(label)
+            is_sel = (hex_code == self.selected_color)
+            btn.setStyleSheet(self._color_btn_style(hex_code, is_sel))
+            btn.clicked.connect(lambda _, c=hex_code: self._set_color(c))
+            color_row.addWidget(btn)
+            self.color_btns.append((btn, hex_code))
+        color_row.addStretch(1)
+        c_lay.addLayout(color_row)
+        
+        # Field 3: Password (Optional)
+        pwd_title = QLabel("GÜVENLİK / ERİŞİM ŞİFRESİ (İSTEĞE BAĞLI)")
+        pwd_title.setFont(QFont("Segoe UI", 8, QFont.Bold))
+        pwd_title.setStyleSheet("color: #86868B; letter-spacing: 0.5px; background: transparent; border: none;")
+        c_lay.addWidget(pwd_title)
+        
+        self.pwd_edit = QLineEdit()
+        self.pwd_edit.setEchoMode(QLineEdit.Password)
+        self.pwd_edit.setPlaceholderText("Şifresiz bırakmak için boş geçin...")
+        self.pwd_edit.setFixedHeight(38)
+        self.pwd_edit.setStyleSheet("""
+            QLineEdit {
+                background: #F8FAFC;
+                border: 1.5px solid #CBD5E1;
+                border-radius: 8px;
+                padding: 4px 12px;
+                font-size: 13px;
+                color: #0F172A;
+            }
+            QLineEdit:focus {
+                border: 1.5px solid #0071E3;
+                background: #FFFFFF;
+            }
+        """)
+        c_lay.addWidget(self.pwd_edit)
+        
+        # Bottom Buttons
+        btn_box = QHBoxLayout()
+        btn_box.setSpacing(12)
+        
+        btn_cancel = QPushButton("Vazgeç")
+        btn_cancel.setFixedHeight(38)
+        btn_cancel.setFont(QFont("Segoe UI", 9.5))
+        btn_cancel.setCursor(Qt.PointingHandCursor)
+        btn_cancel.setStyleSheet("""
+            QPushButton {
+                background: #F2F2F7; color: #1D1D1F; border: 1px solid #E5E5EA;
+                border-radius: 8px; padding: 6px 20px; font-weight: 500;
+            }
+            QPushButton:hover { background: #E5E5EA; }
+        """)
+        btn_cancel.clicked.connect(self.reject)
+        btn_box.addWidget(btn_cancel)
+        
+        self.btn_create = QPushButton("+ Kurumu Oluştur")
+        self.btn_create.setFixedHeight(38)
+        self.btn_create.setFont(QFont("Segoe UI", 9.5, QFont.Bold))
+        self.btn_create.setCursor(Qt.PointingHandCursor)
+        self.btn_create.setStyleSheet("""
+            QPushButton {
+                background: #0071E3; color: #FFFFFF; border: none;
+                border-radius: 8px; padding: 6px 26px; font-weight: 600;
+            }
+            QPushButton:hover { background: #0062C4; }
+        """)
+        self.btn_create.clicked.connect(self._validate_and_accept)
+        btn_box.addWidget(self.btn_create)
+        
+        c_lay.addLayout(btn_box)
+        layout.addWidget(container)
+        
+        self.name_edit.returnPressed.connect(self._validate_and_accept)
+        self.pwd_edit.returnPressed.connect(self._validate_and_accept)
+        
+    def _color_btn_style(self, hex_code: str, is_selected: bool) -> str:
+        if is_selected:
+            return f"background: {hex_code}; border: 3px solid #1D1D1F; border-radius: 14px;"
+        else:
+            return f"background: {hex_code}; border: 2px solid #FFFFFF; border-radius: 14px;"
+            
+    def _set_color(self, hex_code: str):
+        self.selected_color = hex_code
+        for btn, c in self.color_btns:
+            btn.setStyleSheet(self._color_btn_style(c, c == hex_code))
+        self._update_icon_preview()
+        
+    def _on_name_changed(self, text):
+        self._update_icon_preview()
+        
+    def _update_icon_preview(self):
+        text = self.name_edit.text() if hasattr(self, "name_edit") else ""
+        name = text.strip() or "Kurum"
+        pix = make_3d_institution_icon(name, self.selected_color, 48)
+        self.icon_preview.setPixmap(pix)
+        
+    def _validate_and_accept(self):
+        if not self.name_edit.text().strip():
+            self.name_edit.setStyleSheet("""
+                QLineEdit {
+                    background: #FEF2F2;
+                    border: 1.5px solid #EF4444;
+                    border-radius: 8px;
+                    padding: 4px 12px;
+                    font-size: 13px;
+                    color: #0F172A;
+                }
+            """)
+            self.name_edit.setFocus()
+            return
+        self.accept()
+        
+    def get_data(self):
+        return {
+            "name": self.name_edit.text().strip(),
+            "color": self.selected_color,
+            "password": self.pwd_edit.text().strip(),
+        }
+
+
+class AppleInputDialog(QDialog):
+    def __init__(self, title: str, label: str, default_text: str = "", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setFixedSize(380, 200)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(15, 15, 15, 15)
+        
+        container = QWidget(self)
+        container.setObjectName("inputCard")
+        container.setStyleSheet("""
+            #inputCard {
+                background: #FFFFFF;
+                border: 1px solid rgba(0, 0, 0, 0.08);
+                border-radius: 16px;
+            }
+        """)
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(30)
+        shadow.setColor(QColor(0, 0, 0, 45))
+        shadow.setOffset(0, 8)
+        container.setGraphicsEffect(shadow)
+        
+        c_lay = QVBoxLayout(container)
+        c_lay.setContentsMargins(24, 20, 24, 20)
+        c_lay.setSpacing(12)
+        
+        t_lbl = QLabel(title)
+        t_lbl.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        t_lbl.setStyleSheet("color: #1D1D1F; background: transparent; border: none;")
+        c_lay.addWidget(t_lbl)
+        
+        msg_lbl = QLabel(label)
+        msg_lbl.setFont(QFont("Segoe UI", 9.5))
+        msg_lbl.setStyleSheet("color: #86868B; background: transparent; border: none;")
+        c_lay.addWidget(msg_lbl)
+        
+        self.edit = QLineEdit(default_text)
+        self.edit.setFixedHeight(36)
+        self.edit.setStyleSheet("""
+            QLineEdit {
+                background: #F8FAFC;
+                border: 1.5px solid #CBD5E1;
+                border-radius: 8px;
+                padding: 4px 12px;
+                font-size: 13px;
+                color: #0F172A;
+            }
+            QLineEdit:focus {
+                border: 1.5px solid #0071E3;
+                background: #FFFFFF;
+            }
+        """)
+        c_lay.addWidget(self.edit)
+        
+        btn_box = QHBoxLayout()
+        btn_box.setSpacing(10)
+        
+        btn_cancel = QPushButton("Vazgeç")
+        btn_cancel.setFixedHeight(34)
+        btn_cancel.setStyleSheet("""
+            QPushButton {
+                background: #F2F2F7; color: #1D1D1F; border: 1px solid #E5E5EA;
+                border-radius: 8px; padding: 6px 16px; font-weight: 500;
+            }
+            QPushButton:hover { background: #E5E5EA; }
+        """)
+        btn_cancel.clicked.connect(self.reject)
+        btn_box.addWidget(btn_cancel)
+        
+        btn_ok = QPushButton("Tamam")
+        btn_ok.setFixedHeight(34)
+        btn_ok.setStyleSheet("""
+            QPushButton {
+                background: #0071E3; color: #FFFFFF; border: none;
+                border-radius: 8px; padding: 6px 20px; font-weight: 600;
+            }
+            QPushButton:hover { background: #0062C4; }
+        """)
+        btn_ok.clicked.connect(self.accept)
+        btn_box.addWidget(btn_ok)
+        
+        c_lay.addLayout(btn_box)
+        layout.addWidget(container)
+        self.edit.returnPressed.connect(self.accept)
+        
+    def text_value(self):
+        return self.edit.text().strip()
 
 
 class PasswordPromptDialog(QDialog):
@@ -540,6 +1114,30 @@ class CrossImportDialog(QDialog):
         }
 
 
+# ── Elided Label (Auto Truncate with Ellipsis) ───────────────────────
+
+class ElidedLabel(QLabel):
+    def __init__(self, text="", parent=None):
+        super().__init__(text, parent)
+        self._full_text = text
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.setToolTip(text)
+        
+    def setText(self, text):
+        self._full_text = text
+        self.setToolTip(text)
+        super().setText(text)
+        self.update()
+        
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        metrics = self.fontMetrics()
+        elided = metrics.elidedText(self._full_text, Qt.ElideRight, max(10, self.width()))
+        p.setPen(self.palette().color(self.foregroundRole()))
+        p.drawText(self.rect(), self.alignment() if self.alignment() else (Qt.AlignLeft | Qt.AlignVCenter), elided)
+
+
 # ── Apple Institution List Item ──────────────────────────────────────
 
 class AppleInstitutionCard(QFrame):
@@ -556,76 +1154,70 @@ class AppleInstitutionCard(QFrame):
         self.is_master_admin = is_master_admin
         
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedHeight(68)
+        self.setFixedHeight(58)
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._context_menu)
         self._update_style()
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 8)
-        layout.setSpacing(12)
+        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setSpacing(10)
         
         # 3D Institution Icon
         icon_lbl = QLabel()
-        icon_lbl.setPixmap(make_3d_institution_icon(self.inst_name, self.inst_color, 44))
-        icon_lbl.setFixedSize(44, 44)
+        icon_lbl.setPixmap(make_3d_institution_icon(self.inst_name, self.inst_color, 36))
+        icon_lbl.setFixedSize(36, 36)
         layout.addWidget(icon_lbl)
         
         # Text Info
         t_layout = QVBoxLayout()
-        t_layout.setSpacing(2)
-        t_layout.setContentsMargins(0, 2, 0, 2)
+        t_layout.setSpacing(1)
+        t_layout.setContentsMargins(0, 1, 0, 1)
         
         name_row = QHBoxLayout()
         name_row.setSpacing(6)
         
-        name_lbl = QLabel(self.inst_name)
-        name_lbl.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        name_lbl = ElidedLabel(self.inst_name)
+        name_lbl.setFont(QFont("Segoe UI", 9.5, QFont.Bold))
         name_lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; background: transparent; border: none;")
-        name_lbl.setMaximumWidth(160)
-        name_lbl.setToolTip(self.inst_name)
-        name_row.addWidget(name_lbl)
+        name_row.addWidget(name_lbl, 1)
         
         if self.has_password:
-            lock_badge = QLabel("Korumalı")
+            lock_badge = QLabel("Kilitli")
             lock_badge.setFont(QFont("Segoe UI", 7, QFont.Bold))
-            lock_badge.setStyleSheet(f"background: #FEE2E2; color: {APPLE_RED}; padding: 1px 5px; border-radius: 4px; border: none;")
+            lock_badge.setStyleSheet("background: #F2F2F7; color: #8E8E93; padding: 1px 5px; border-radius: 4px; border: none;")
             name_row.addWidget(lock_badge)
             
-        name_row.addStretch(1)
         t_layout.addLayout(name_row)
         
         v_count = inst_data.get("version_count", 0)
-        sub_lbl = QLabel(f"{v_count} versiyon")
+        upd = inst_data.get("last_updated_str", "")
+        if upd:
+            sub_lbl = QLabel(f"{v_count} versiyon • {upd}")
+        else:
+            sub_lbl = QLabel(f"{v_count} versiyon")
         sub_lbl.setFont(QFont("Segoe UI", 8))
         sub_lbl.setStyleSheet(f"color: {TEXT_SECONDARY}; background: transparent; border: none;")
         t_layout.addWidget(sub_lbl)
         
         layout.addLayout(t_layout, 1)
-        
-        # Selection Indicator
-        if self._selected:
-            dot = QLabel("●")
-            dot.setFont(QFont("Segoe UI", 10))
-            dot.setStyleSheet(f"color: {APPLE_BLUE}; background: transparent; border: none;")
-            layout.addWidget(dot)
     
     def _update_style(self):
         if self._selected:
             self.setStyleSheet(f"""
                 AppleInstitutionCard {{
-                    background: #EBF5FF;
+                    background: #F0F6FF;
                     border: 1.5px solid {APPLE_BLUE};
-                    border-radius: 12px;
+                    border-radius: 10px;
                 }}
-                AppleInstitutionCard:hover {{ background: #E1F0FF; }}
+                AppleInstitutionCard:hover {{ background: #E6F0FE; }}
             """)
         else:
             self.setStyleSheet(f"""
                 AppleInstitutionCard {{
                     background: #FFFFFF;
                     border: 1px solid {BORDER_HAIRLINE};
-                    border-radius: 12px;
+                    border-radius: 10px;
                 }}
                 AppleInstitutionCard:hover {{
                     background: #F8FAFC;
@@ -672,18 +1264,20 @@ class AppleInstitutionCard(QFrame):
         
         action = menu.exec_(self.mapToGlobal(pos))
         if action == act_rename:
-            new_name, ok = QInputDialog.getText(self, "Kurum Adı", "Yeni kurum adı:", text=self.inst_name)
-            if ok and new_name.strip():
-                version_store.rename_institution(self.slug, new_name.strip())
+            dlg = AppleInputDialog("Kurum Adı", "Yeni kurum adı:", default_text=self.inst_name, parent=self)
+            if dlg.exec() == QDialog.Accepted and dlg.text_value():
+                new_name = dlg.text_value()
+                from save_dialog import run_apple_save_sequence
+                run_apple_save_sequence(self, duration_seconds=0.25, title="Güncelleniyor", message=f"Kurum adı '{new_name}' olarak kaydediliyor...")
+                version_store.rename_institution(self.slug, new_name)
                 self._notify_parent_refresh()
         elif action == act_color:
-            new_color, ok = QInputDialog.getItem(
-                self, "Renk Seç", "Kurum rengi:",
-                version_store.INSTITUTION_COLORS, 0, False
-            )
-            if ok and new_color:
-                version_store.set_institution_color(self.slug, new_color)
-                self._notify_parent_refresh()
+            dlg = AppleColorPickerDialog(current_color=self.inst_color, parent=self)
+            if dlg.exec() == QDialog.Accepted:
+                new_color = dlg.get_color()
+                if new_color:
+                    version_store.set_institution_color(self.slug, new_color)
+                    self._notify_parent_refresh()
         elif act_pwd and action == act_pwd:
             dlg = SetPasswordDialog(self.inst_name, has_current=self.has_password, parent=self)
             if dlg.exec() == QDialog.Accepted:
@@ -696,23 +1290,27 @@ class AppleInstitutionCard(QFrame):
             show_apple_info(self, "Bilgi", "Kurum şifresi kaldırıldı.", is_success=True)
             self._notify_parent_refresh()
         elif action == act_delete:
-            ret = QMessageBox.warning(
-                self, "Kurumu Sil",
-                f"'{self.inst_name}' kurumunu ve tüm versiyonlarını silmek istediğinize emin misiniz?",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            dlg = AppleConfirmDialog(
+                title="Kurumu Sil",
+                message=f"'{self.inst_name}' kurumunu ve tüm versiyonlarını silmek istediğinize emin misiniz? Bu işlem geri alınamaz.",
+                confirm_text="Kurumu Sil",
+                cancel_text="Vazgeç",
+                is_destructive=True,
+                parent=self
             )
-            if ret == QMessageBox.Yes:
+            if dlg.exec() == QDialog.Accepted:
+                from save_dialog import run_apple_save_sequence
+                run_apple_save_sequence(self, duration_seconds=0.25, title="Kurum Siliniyor", message=f"'{self.inst_name}' sistemden kaldırılıyor...")
                 version_store.delete_institution(self.slug)
-                self._notify_parent_refresh()
+                self._notify_parent_refresh(deleted_slug=self.slug)
                 
-    def _notify_parent_refresh(self):
+    def _notify_parent_refresh(self, deleted_slug=None):
         p = self.parent()
         while p:
             if hasattr(p, "_refresh_institutions"):
+                if deleted_slug and getattr(p, "_selected_slug", None) == deleted_slug:
+                    p._selected_slug = None
                 p._refresh_institutions()
-                if p._selected_slug == self.slug:
-                    p._unlocked_slugs.discard(self.slug)
-                    p._refresh_versions()
                 break
             p = p.parent() if hasattr(p, "parent") and callable(p.parent) else None
 
@@ -738,6 +1336,19 @@ def make_dashboard_icon(name: str, color_hex: str = "#0071E3", size: int = 18) -
         path.lineTo(size * 0.45, size * 0.68)
         path.lineTo(size * 0.73, size * 0.34)
         p.drawPath(path)
+    elif name == "warning":
+        # Apple Warning Triangle
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(c))
+        path = QPainterPath()
+        path.moveTo(size / 2.0, 2)
+        path.lineTo(size - 2, size - 3)
+        path.lineTo(2, size - 3)
+        path.closeSubpath()
+        p.drawPath(path)
+        p.setPen(QPen(Qt.white, 2.0, Qt.SolidLine, Qt.RoundCap))
+        p.drawLine(int(size / 2.0), int(size * 0.38), int(size / 2.0), int(size * 0.60))
+        p.drawPoint(int(size / 2.0), int(size * 0.76))
     elif name in ("history", "archive"):
         # Clock / Archive circle
         p.setPen(QPen(c, 1.8))
@@ -855,14 +1466,14 @@ class CollapsibleVersionGroup(QFrame):
         if badge_text:
             badge = QLabel(badge_text)
             badge.setFont(QFont("Segoe UI", 8, QFont.Bold))
-            badge.setStyleSheet(f"background: {color_hex}15; color: {color_hex}; padding: 2px 7px; border-radius: 5px;")
+            badge.setStyleSheet("background: #F2F2F7; color: #636366; padding: 2px 8px; border-radius: 5px;")
             hdr_lay.addWidget(badge)
             
         hdr_lay.addStretch(1)
         
         # Chevron icon
         self.chevron_lbl = QLabel()
-        self.chevron_lbl.setPixmap(make_dashboard_icon("chevron_right" if is_collapsed else "chevron_down", "#64748B", 14))
+        self.chevron_lbl.setPixmap(make_dashboard_icon("chevron_right" if is_collapsed else "chevron_down", "#86868B", 14))
         hdr_lay.addWidget(self.chevron_lbl)
         
         self.main_lay.addWidget(self.header)
@@ -998,27 +1609,70 @@ class AppleVersionRow(QFrame):
         btn_open.clicked.connect(lambda: self.action_requested.emit("open", self.slug, self.filename))
         layout.addWidget(btn_open)
         
+        # Delete / Remove Button
+        btn_del = QPushButton("Sil")
+        btn_del.setFont(QFont("Segoe UI", 8, QFont.Bold))
+        btn_del.setCursor(Qt.PointingHandCursor)
+        btn_del.setToolTip("Versiyonu Sil")
+        btn_del.setStyleSheet("""
+            QPushButton {
+                background: transparent; color: #EF4444; border: 1px solid #FECACA;
+                border-radius: 5px; padding: 4px 8px;
+            }
+            QPushButton:hover { background: #FEF2F2; color: #DC2626; border-color: #EF4444; }
+        """)
+        btn_del.clicked.connect(lambda: self.action_requested.emit("delete", self.slug, self.filename))
+        layout.addWidget(btn_del)
+        
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._context_menu)
+        
+    def _context_menu(self, pos):
+        menu = QMenu(self)
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background: #FFFFFF; border: 1px solid {BORDER_HAIRLINE};
+                border-radius: 8px; padding: 4px; font-size: 12px; font-family: {FONT_FAMILY};
+            }}
+            QMenu::item {{ padding: 6px 18px; border-radius: 4px; }}
+            QMenu::item:selected {{ background: #EBF5FF; color: {APPLE_BLUE}; }}
+        """)
+        act_open = menu.addAction("Çizelgeyi Aç")
+        act_active = None
+        if not self._is_active:
+            act_active = menu.addAction("Aktif Çizelge Yap")
+        menu.addSeparator()
+        act_del = menu.addAction("Versiyonu Sil")
+        
+        action = menu.exec_(self.mapToGlobal(pos))
+        if action == act_open:
+            self.action_requested.emit("open", self.slug, self.filename)
+        elif act_active and action == act_active:
+            self.action_requested.emit("set_active", self.slug, self.filename)
+        elif action == act_del:
+            self.action_requested.emit("delete", self.slug, self.filename)
+        
     def _update_style(self):
         if self._is_active:
             self.setStyleSheet(f"""
                 AppleVersionRow {{
-                    background: #FAFDFA; border: 1px solid #B7E4C7; border-radius: 8px;
+                    background: #F0F6FF; border: 1.5px solid {APPLE_BLUE}; border-radius: 8px;
                 }}
-                AppleVersionRow:hover {{ background: #F0FBF4; }}
+                AppleVersionRow:hover {{ background: #E6F0FE; }}
             """)
         elif self._is_selected:
             self.setStyleSheet(f"""
                 AppleVersionRow {{
-                    background: #EBF5FF; border: 1px solid #B8DCFF; border-radius: 8px;
+                    background: #F2F2F7; border: 1px solid #D1D1D6; border-radius: 8px;
                 }}
-                AppleVersionRow:hover {{ background: #E1F0FF; }}
+                AppleVersionRow:hover {{ background: #E5E5EA; }}
             """)
         else:
             self.setStyleSheet(f"""
                 AppleVersionRow {{
                     background: #FFFFFF; border: 1px solid {BORDER_HAIRLINE}; border-radius: 8px;
                 }}
-                AppleVersionRow:hover {{ background: #F8FAFC; border: 1px solid #CBD5E1; }}
+                AppleVersionRow:hover {{ background: #F8FAFC; border: 1px solid #D1D5DB; }}
             """)
             
     def set_selected(self, sel):
@@ -1089,6 +1743,15 @@ class HomeDashboard(QWidget):
     def _build_ui(self):
         self.setStyleSheet(f"""
             HomeDashboard {{ background: {BG_CANVAS}; font-family: {FONT_FAMILY}; }}
+            QToolTip {{
+                background-color: #1D1D1F;
+                color: #FFFFFF;
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 6px;
+                padding: 5px 9px;
+                font-size: 11px;
+                font-family: {FONT_FAMILY};
+            }}
         """)
         
         root = QVBoxLayout(self)
@@ -1104,8 +1767,8 @@ class HomeDashboard(QWidget):
         top_layout.setContentsMargins(20, 0, 20, 0)
         top_layout.setSpacing(14)
         
-        brand_lbl = QLabel("Chenki  <span style='color: #86868B; font-weight: normal;'>Planlama Hub</span>")
-        brand_lbl.setFont(QFont("Segoe UI", 13, QFont.Bold))
+        brand_lbl = QLabel("Anasayfa")
+        brand_lbl.setFont(QFont("Segoe UI", 14, QFont.Bold))
         brand_lbl.setStyleSheet(f"color: {TEXT_PRIMARY};")
         top_layout.addWidget(brand_lbl)
         
@@ -1137,7 +1800,7 @@ class HomeDashboard(QWidget):
             admin_badge = QLabel("Ana Yönetici")
             admin_badge.setFixedHeight(22)
             admin_badge.setFont(QFont("Segoe UI", 8, QFont.Bold))
-            admin_badge.setStyleSheet(f"background: #FDF4FF; color: {APPLE_PURPLE}; padding: 2px 8px; border-radius: 5px; border: 1px solid #F0ABFC;")
+            admin_badge.setStyleSheet("background: #F2F2F7; color: #1D1D1F; padding: 2px 8px; border-radius: 5px; border: 1px solid #E5E5EA;")
             top_layout.addWidget(admin_badge)
             
         btn_cloud_sync = QPushButton("Bulut Eşitle")
@@ -1145,10 +1808,10 @@ class HomeDashboard(QWidget):
         btn_cloud_sync.setCursor(Qt.PointingHandCursor)
         btn_cloud_sync.setStyleSheet(f"""
             QPushButton {{
-                background: #E8E8ED; color: {APPLE_BLUE}; border: none;
+                background: #F2F2F7; color: {APPLE_BLUE}; border: 1px solid {BORDER_HAIRLINE};
                 border-radius: 8px; padding: 6px 14px;
             }}
-            QPushButton:hover {{ background: #D8D8DC; }}
+            QPushButton:hover {{ background: #E5E5EA; }}
         """)
         btn_cloud_sync.clicked.connect(self._manual_cloud_sync)
         top_layout.addWidget(btn_cloud_sync)
@@ -1158,10 +1821,10 @@ class HomeDashboard(QWidget):
         btn_import.setCursor(Qt.PointingHandCursor)
         btn_import.setStyleSheet(f"""
             QPushButton {{
-                background: #E8E8ED; color: {TEXT_PRIMARY}; border: none;
+                background: #F2F2F7; color: {TEXT_PRIMARY}; border: 1px solid {BORDER_HAIRLINE};
                 border-radius: 8px; padding: 6px 14px;
             }}
-            QPushButton:hover {{ background: #D8D8DC; }}
+            QPushButton:hover {{ background: #E5E5EA; }}
         """)
         btn_import.clicked.connect(self._on_cross_import_clicked)
         top_layout.addWidget(btn_import)
@@ -1184,31 +1847,30 @@ class HomeDashboard(QWidget):
         btn_logout.setFont(QFont("Segoe UI", 8.5, QFont.Bold))
         btn_logout.setFixedHeight(30)
         btn_logout.setCursor(Qt.PointingHandCursor)
-        btn_logout.setStyleSheet(f"""
-            QPushButton {{
-                background: #FEE2E2; color: #DC2626; border: 1px solid #FECACA;
+        btn_logout.setStyleSheet("""
+            QPushButton {
+                background: #F2F2F7; color: #FF3B30; border: 1px solid #E5E5EA;
                 border-radius: 6px; padding: 4px 12px;
-            }}
-            QPushButton:hover {{ background: #FCA5A5; color: #991B1B; }}
+            }
+            QPushButton:hover { background: #FEE2E2; }
         """)
         btn_logout.clicked.connect(self._on_logout_clicked)
         top_layout.addWidget(btn_logout)
         
         root.addWidget(top_bar)
         
-        # ── 2. Splitter Body ─────────────────────────────────────────
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.setStyleSheet(f"""
-            QSplitter::handle {{ background: {BORDER_HAIRLINE}; width: 1px; }}
-        """)
+        # ── 2. Main Body ─────────────────────────────────────────
+        main_hbox = QHBoxLayout()
+        main_hbox.setContentsMargins(0, 0, 0, 0)
+        main_hbox.setSpacing(0)
         
         # Left Sidebar (Institutions)
         left_panel = QFrame()
-        left_panel.setFixedWidth(280)
+        left_panel.setFixedWidth(270)
         left_panel.setStyleSheet(f"background: {BG_SIDEBAR}; border-right: 1px solid {BORDER_HAIRLINE};")
         left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(14, 16, 14, 16)
-        left_layout.setSpacing(10)
+        left_layout.setContentsMargins(12, 14, 12, 14)
+        left_layout.setSpacing(8)
         
         left_hdr = QHBoxLayout()
         left_title = QLabel("KURUMLAR")
@@ -1220,6 +1882,7 @@ class HomeDashboard(QWidget):
         
         scroll_inst = QScrollArea()
         scroll_inst.setWidgetResizable(True)
+        scroll_inst.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll_inst.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         
         self.inst_list_widget = QWidget()
@@ -1231,9 +1894,10 @@ class HomeDashboard(QWidget):
         
         scroll_inst.setWidget(self.inst_list_widget)
         left_layout.addWidget(scroll_inst, 1)
-        splitter.addWidget(left_panel)
         
-        # Right Main Panel (Versions)
+        main_hbox.addWidget(left_panel)
+        
+        # Right Area
         right_panel = QFrame()
         right_panel.setStyleSheet(f"background: {BG_CANVAS};")
         self.right_panel_layout = QVBoxLayout(right_panel)
@@ -1251,6 +1915,11 @@ class HomeDashboard(QWidget):
         self.ver_count_lbl.setFont(QFont("Segoe UI", 10))
         self.ver_count_lbl.setStyleSheet(f"color: {TEXT_SECONDARY};")
         right_hdr.addWidget(self.ver_count_lbl)
+        
+        self.last_update_badge = QLabel("")
+        self.last_update_badge.setFont(QFont("Segoe UI", 8.5))
+        self.last_update_badge.setStyleSheet("background: #F2F2F7; color: #636366; padding: 3px 10px; border-radius: 6px; font-weight: 500; border: 1px solid #E5E5EA;")
+        right_hdr.addWidget(self.last_update_badge)
         right_hdr.addStretch(1)
         
         self.btn_new_empty = QPushButton("+ Yeni Boş Çizelge")
@@ -1295,30 +1964,31 @@ class HomeDashboard(QWidget):
         
         # Password Protection Overlay Widget (Ultra-clean modern card)
         self.password_overlay_widget = QWidget()
-        self.password_overlay_widget.setStyleSheet("background: #F8FAFC;")
+        self.password_overlay_widget.setStyleSheet("background: transparent;")
         overlay_layout = QVBoxLayout(self.password_overlay_widget)
         overlay_layout.setAlignment(Qt.AlignCenter)
         overlay_layout.setContentsMargins(0, 0, 0, 0)
         
         # Modal Floating Card (Centered)
         self.pwd_card = QFrame()
-        self.pwd_card.setFixedSize(400, 300)
+        self.pwd_card.setObjectName("pwdCard")
+        self.pwd_card.setFixedSize(480, 360)
         self.pwd_card.setStyleSheet("""
-            QFrame {
+            QFrame#pwdCard {
                 background: #FFFFFF;
                 border: 1px solid rgba(0, 0, 0, 0.08);
-                border-radius: 16px;
+                border-radius: 20px;
             }
         """)
         card_shadow = QGraphicsDropShadowEffect()
-        card_shadow.setBlurRadius(30)
+        card_shadow.setBlurRadius(40)
         card_shadow.setColor(QColor(0, 0, 0, 40))
-        card_shadow.setOffset(0, 8)
+        card_shadow.setOffset(0, 10)
         self.pwd_card.setGraphicsEffect(card_shadow)
         
         c_layout = QVBoxLayout(self.pwd_card)
-        c_layout.setContentsMargins(28, 26, 28, 26)
-        c_layout.setSpacing(12)
+        c_layout.setContentsMargins(40, 30, 40, 30)
+        c_layout.setSpacing(16)
         c_layout.setAlignment(Qt.AlignCenter)
         
         lock_lbl = QLabel()
@@ -1384,13 +2054,12 @@ class HomeDashboard(QWidget):
         self.password_overlay_widget.hide()
         self.right_panel_stack.addWidget(self.password_overlay_widget)
         
-        splitter.addWidget(right_panel)
-        splitter.setSizes([280, 820])
-        root.addWidget(splitter, 1)
+        main_hbox.addWidget(right_panel, 1) # right panel gets stretch
+        root.addLayout(main_hbox, 1)
 
     def _on_logout_clicked(self):
-        r = QMessageBox.question(self, "Çıkış Onayı", "Oturumunuzu kapatmak istediğinize emin misiniz?", QMessageBox.Yes | QMessageBox.No)
-        if r == QMessageBox.Yes:
+        dlg = AppleConfirmDialog("Çıkış Yap", "Oturumunuzu kapatmak istediğinize emin misiniz?", confirm_text="Çıkış Yap", cancel_text="Vazgeç", is_destructive=True, parent=self)
+        if dlg.exec() == QDialog.Accepted:
             self.logout_requested.emit()
         
     def _on_submit_password_overlay(self):
@@ -1421,8 +2090,27 @@ class HomeDashboard(QWidget):
             self.pwd_card_input.setFocus()
         
     def _on_search_changed(self, text):
-        self._search_query = text.strip().lower()
-        self._refresh_institutions()
+        query = text.strip().lower()
+        self._search_query = query
+        
+        first_visible = None
+        for i in range(self.inst_list_layout.count() - 1):
+            w = self.inst_list_layout.itemAt(i).widget()
+            if isinstance(w, AppleInstitutionCard):
+                matches = (not query) or (query in w.inst_name.lower())
+                w.setVisible(matches)
+                if matches and not first_visible:
+                    first_visible = w.slug
+                    
+        # Filter current version rows if loaded
+        for row in self.findChildren(AppleVersionRow):
+            if query:
+                num_str = str(row.version_info.get("number", ""))
+                note_str = row.version_info.get("note", "").lower()
+                fn_str = row.filename.lower()
+                row.setVisible(query in num_str or query in note_str or query in fn_str)
+            else:
+                row.setVisible(True)
         
     def _refresh_institutions(self):
         while self.inst_list_layout.count() > 1:
@@ -1491,7 +2179,7 @@ class HomeDashboard(QWidget):
         if badge_text:
             badge = QLabel(badge_text)
             badge.setFont(QFont("Segoe UI", 8, QFont.Bold))
-            badge.setStyleSheet(f"background: {color_hex}15; color: {color_hex}; padding: 2px 7px; border-radius: 5px;")
+            badge.setStyleSheet("background: #EBF5FF; color: #0071E3; padding: 2px 8px; border-radius: 5px;")
             hdr.addWidget(badge)
             
         lay.addLayout(hdr)
@@ -1512,15 +2200,27 @@ class HomeDashboard(QWidget):
         self.right_title.setText(f"{inst_name}")
         self.pwd_card_title.setText(f"{inst_name}")
         
-        while self.ver_list_layout.count() > 1:
+        # Completely and cleanly clear all existing items from layout without creating floating windows
+        while self.ver_list_layout.count() > 0:
             item = self.ver_list_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            w = item.widget()
+            if w:
+                w.hide()
+                w.deleteLater()
                 
         versions = version_store.list_versions(self._selected_slug, source_filter="all")
         active_ver = version_store.get_active_version(self._selected_slug)
         
         self.ver_count_lbl.setText(f"•  {len(versions)} versiyon")
+        
+        last_upd = meta.get("last_updated_str")
+        if not last_upd and versions:
+            last_upd = f"{versions[0]['date_str']} {versions[0]['time_str']}"
+        if last_upd:
+            self.last_update_badge.setText(f"Son Güncelleme: {last_upd}")
+            self.last_update_badge.show()
+        else:
+            self.last_update_badge.hide()
         
         if not versions:
             empty_box = QFrame()
@@ -1535,7 +2235,7 @@ class HomeDashboard(QWidget):
             el_txt.setAlignment(Qt.AlignCenter)
             el.addWidget(el_txt)
             
-            self.ver_list_layout.insertWidget(0, empty_box)
+            self.ver_list_layout.addWidget(empty_box)
         else:
             # 1. Separate Active and Older Versions
             active_list = []
@@ -1549,25 +2249,27 @@ class HomeDashboard(QWidget):
                     
             # 1. Active Timetable Card at top
             if active_list:
-                card, lay = self._create_version_group_card("Aktif ve Yayındaki Çizelge", "active", "Yayında", APPLE_GREEN)
+                card, lay = self._create_version_group_card("Aktif Çizelge", "active", "Yayında", APPLE_BLUE)
                 for v in active_list:
                     row = AppleVersionRow(self._selected_slug, v, is_active=True)
                     row.selected.connect(self._on_version_selected)
                     row.double_clicked.connect(self._on_version_double_clicked)
                     row.action_requested.connect(self._on_version_action)
                     lay.addWidget(row)
-                self.ver_list_layout.insertWidget(self.ver_list_layout.count() - 1, card)
+                self.ver_list_layout.addWidget(card)
                 
             # 2. Collapsible Older Versions Group with Chevron
             if older_list:
-                hist_group = CollapsibleVersionGroup("Eski Sürümler & Geçmiş Kayıtlar", "history", f"{len(older_list)} Versiyon", APPLE_PURPLE, is_collapsed=False)
+                hist_group = CollapsibleVersionGroup("Eski Sürümler", "history", f"{len(older_list)} Versiyon", "#86868B", is_collapsed=True)
                 for v in older_list:
                     row = AppleVersionRow(self._selected_slug, v, is_active=False)
                     row.selected.connect(self._on_version_selected)
                     row.double_clicked.connect(self._on_version_double_clicked)
                     row.action_requested.connect(self._on_version_action)
                     hist_group.content_lay.addWidget(row)
-                self.ver_list_layout.insertWidget(self.ver_list_layout.count() - 1, hist_group)
+                self.ver_list_layout.addWidget(hist_group)
+                
+        self.ver_list_layout.addStretch(1)
                 
         # Password Protection with Full Coverage Modal in Stack
         is_locked = version_store.has_institution_password(self._selected_slug) and (self._selected_slug not in self._unlocked_slugs)
@@ -1592,7 +2294,9 @@ class HomeDashboard(QWidget):
             self.btn_new_empty.setEnabled(False)
             self.right_panel_stack.setCurrentWidget(self.password_overlay_widget)
             self.password_overlay_widget.show()
-            self.pwd_card_input.setFocus()
+            # Retain focus if search input is being used
+            if not self.search_input.hasFocus():
+                self.pwd_card_input.setFocus()
         else:
             self.btn_new_empty.setEnabled(True)
             self.right_panel_stack.setCurrentWidget(self.right_content_widget)
@@ -1610,30 +2314,57 @@ class HomeDashboard(QWidget):
         if action == "open":
             self.open_timetable.emit(slug, filename)
         elif action == "set_active":
+            from save_dialog import run_apple_save_sequence
+            run_apple_save_sequence(self, duration_seconds=1.0, title="Aktif Çizelge Güncelleniyor", message="Seçilen versiyon yayına alınıyor...")
             version_store.set_active_version(slug, filename)
             self._refresh_versions()
             self._refresh_institutions()
         elif action == "delete":
-            ret = QMessageBox.warning(
-                self, "Versiyonu Sil",
-                f"'{filename}' versiyonunu silmek istediğinize emin misiniz?",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            import re
+            m = re.match(r"v(\d+)_", filename)
+            v_label = f"Versiyon {int(m.group(1))}" if m else filename
+            dlg = AppleConfirmDialog(
+                title="Versiyonu Sil",
+                message=f"'{v_label}' kalıcı olarak silinecek ve bulut veritabanından kaldırılacaktır. Devam etmek istiyor musunuz?",
+                confirm_text="Versiyonu Sil",
+                cancel_text="Vazgeç",
+                is_destructive=True,
+                parent=self
             )
-            if ret == QMessageBox.Yes:
+            if dlg.exec() == QDialog.Accepted:
+                from save_dialog import run_apple_save_sequence
+                run_apple_save_sequence(self, duration_seconds=0.25, title="Versiyon Siliniyor", message=f"'{v_label}' yerel sistemden ve buluttan siliniyor...")
                 version_store.delete_version(slug, filename)
+                from cloud_sync import delete_version_from_rtdb
+                delete_version_from_rtdb(slug, filename, self.auth_data)
                 self._refresh_versions()
                 self._refresh_institutions()
                 
     def _on_new_institution_clicked(self):
-        name, ok = QInputDialog.getText(self, "Yeni Kurum", "Kurum adını girin:")
-        if ok and name.strip():
-            inst = version_store.create_institution(name.strip())
+        dlg = AppleNewInstitutionDialog(parent=self)
+        if dlg.exec() == QDialog.Accepted:
+            data = dlg.get_data()
+            name = data["name"]
+            color = data["color"]
+            pwd = data["password"]
+            
+            from save_dialog import run_apple_save_sequence
+            run_apple_save_sequence(self, duration_seconds=0.25, title="Kurum Oluşturuluyor", message=f"'{name}' sisteme ve buluta kaydediliyor...")
+            
+            inst = version_store.create_institution(name, color=color, password=pwd)
             self._selected_slug = inst["slug"]
+            
+            if self.auth_data and not self.auth_data.get("is_offline"):
+                from cloud_sync import push_all_to_rtdb
+                push_all_to_rtdb(self.auth_data)
+                
             self._refresh_institutions()
             
     def _on_new_empty_clicked(self):
         if not self._selected_slug:
             return
+        from save_dialog import run_apple_save_sequence
+        run_apple_save_sequence(self, duration_seconds=0.25, title="Yeni Çizelge Hazırlanıyor", message="Boş çalışma alanı oluşturuluyor...")
         self.new_empty_timetable.emit(self._selected_slug)
         
     def _on_cross_import_clicked(self):
@@ -1648,6 +2379,9 @@ class HomeDashboard(QWidget):
             if not src_slug:
                 return
                 
+            from save_dialog import run_apple_save_sequence
+            run_apple_save_sequence(self, duration_seconds=1.2, title="Veriler Aktarılıyor", message="Tanımlar kopyalanıyor ve buluta eşitleniyor...")
+            
             ok, msg, _ = version_store.import_master_data_from_institution(
                 target_slug=self._selected_slug,
                 source_slug=src_slug,
@@ -1659,20 +2393,72 @@ class HomeDashboard(QWidget):
             )
             
             if ok:
-                QMessageBox.information(self, "Aktarım Başarılı", msg)
+                show_apple_info(self, "Aktarım Başarılı", msg, is_success=True)
                 self._refresh_versions()
                 self._refresh_institutions()
             else:
-                QMessageBox.critical(self, "Hata", msg)
+                show_apple_info(self, "Hata", msg, is_success=False)
 
     def _manual_cloud_sync(self):
+        from save_dialog import AppleSaveDialog
         from cloud_sync import push_all_to_rtdb, pull_all_from_rtdb
-        push_ok, push_msg, _ = push_all_to_rtdb(self.auth_data)
-        pull_ok, pull_msg, count = pull_all_from_rtdb(self.auth_data)
+        import threading
+        import time
+        
+        dlg = AppleSaveDialog(
+            title="Bulut Senkronizasyonu",
+            message="Merkezi veritabanı ile eşitleniyor...",
+            parent=self
+        )
+        dlg.show()
+        QApplication.processEvents()
+        
+        results = {}
+        
+        def _sync_worker():
+            try:
+                push_ok, push_msg, _ = push_all_to_rtdb(self.auth_data)
+                pull_ok, pull_msg, count = pull_all_from_rtdb(self.auth_data)
+                results["push_ok"] = push_ok
+                results["push_msg"] = push_msg
+                results["pull_ok"] = pull_ok
+                results["pull_msg"] = pull_msg
+            except Exception as e:
+                results["push_ok"] = False
+                results["pull_ok"] = False
+                results["pull_msg"] = f"Bağlantı hatası: {e}"
+            finally:
+                results["done"] = True
+            
+        t = threading.Thread(target=_sync_worker, daemon=True)
+        t.start()
+        
+        t_start = time.time()
+        while not results.get("done"):
+            QApplication.processEvents()
+            time.sleep(0.03)
+            if time.time() - t_start > 15:
+                break
+                
+        elapsed = time.time() - t_start
+        if elapsed < 1.2:
+            time.sleep(1.2 - elapsed)
+            QApplication.processEvents()
+            
+        dlg.close()
+        dlg.deleteLater()
+        QApplication.processEvents()
+        
         self._refresh_institutions()
         if self._selected_slug:
             self._refresh_versions()
+            
+        push_ok = results.get("push_ok", False)
+        pull_ok = results.get("pull_ok", False)
+        push_msg = results.get("push_msg", "")
+        pull_msg = results.get("pull_msg", "")
+        
         if pull_ok or push_ok:
             show_apple_info(self, "Bulut Senkronizasyonu", f"{push_msg}\n{pull_msg}\nTüm cihazlar ve geçmiş versiyonlar başarıyla eşitlendi.", is_success=True)
         else:
-            show_apple_info(self, "Bulut Uyarısı", f"{pull_msg}\nLütfen internet bağlantınızı kontrol edin.", is_success=False)
+            show_apple_info(self, "Bulut Uyarısı", f"{pull_msg or 'Bağlantı kurulamadı.'}\nLütfen internet bağlantınızı kontrol edin.", is_success=False)

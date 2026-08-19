@@ -25,7 +25,10 @@ def pull_all_from_rtdb(auth_data: dict = None) -> tuple:
     return api_client.pull_all_from_rtdb(auth_data)
 
 def push_version_to_rtdb(slug: str, filename: str, roz_data: dict, auth_data: dict = None) -> bool:
-    return api_client.push_version_to_rtdb(slug, filename, roz_data, auth_data)
+    try:
+        return api_client.push_version_to_rtdb(slug, filename, roz_data, auth_data)
+    except Exception:
+        return False
 
 def push_institution_to_rtdb(slug: str, auth_data: dict = None) -> bool:
     """Pushes an entire local institution (meta + all versions) to API."""
@@ -80,7 +83,7 @@ def push_all_to_rtdb(auth_data: dict = None) -> tuple:
                 pushed += 1
                 total_versions += v_count
                 
-    return True, f"{pushed} kurum ve {total_versions} versiyon VDS'e başarıyla yüklendi.", pushed
+    return True, f"{pushed} kurum ve {total_versions} versiyon merkezi buluta başarıyla yüklendi.", pushed
 
 def delete_version_from_rtdb(slug: str, filename: str, auth_data: dict = None) -> bool:
     v_key = re.sub(r'[\.\$#\[\]/]', '_', filename)

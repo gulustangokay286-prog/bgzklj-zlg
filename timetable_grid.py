@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QMimeData, Signal, QByteArray, QRect, QRectF
 from PySide6.QtGui import QFont, QColor, QBrush, QDrag, QPainter, QPixmap, QAction, QPen, QLinearGradient, QIcon, QPainterPath
+from auto_scheduler import matches_class
 
 def make_context_icon(symbol: str, color1: str, color2: str) -> QIcon:
     pix = QPixmap(24, 24)
@@ -394,42 +395,40 @@ class DraggableLessonCard(QLabel):
                 t_short = parts[0]
                 
         self.is_comb = bool("," in class_name or "&" in class_name or "+" in class_name)
+        if self.is_comb:
+            comb_parts = [c.split("(")[0].strip() for c in class_name.replace("&", "+").replace(",", "+").split("+") if c.strip()]
+            clean_cls_display = "+".join(comb_parts) if comb_parts else class_name.replace(" ", "")
+        else:
+            clean_cls_display = class_name.split("(")[0].strip() if class_name else ""
         
         # Dimensions: 1 hour = compact square (32x28), 2 hours = 2x wide (64x28), 3 hours = 3x (96x28)
         if duration == 1:
-            card_width = 32
+            card_width = max(38, min(64, 8 * len(clean_cls_display) + 8)) if (self.is_comb and display_mode == "teachers") else 32
             card_height = 28
             if display_mode == "teachers":
-                c_clean = class_name.replace(" ", "").upper()
-                display_text = f"<b>{c_clean[:4]}</b>"
+                display_text = f"<b>{clean_cls_display}</b>"
             else:
                 display_text = f"<b>{abbr[:4]}</b>"
         elif duration == 2:
-            card_width = 64
+            card_width = max(64, min(92, 7 * len(clean_cls_display) + 26)) if (self.is_comb and display_mode == "teachers") else 64
             card_height = 28
             if display_mode == "teachers":
-                c_clean = class_name.replace(" ", "").upper()
-                display_text = f"<b>{c_clean[:4]}</b> <span style='font-size:7.5px;'>{abbr[:4]}</span>"
+                display_text = f"<b>{clean_cls_display}</b> <span style='font-size:7.5px;'>{abbr[:4]}</span>"
             else:
-                display_text = f"<b>{abbr[:4]}</b>"
-                if t_short:
-                    display_text += f" <span style='font-size:7.5px; opacity:0.9;'>{t_short}</span>"
+                display_text = f"<b>{abbr}</b>"
         else:
-            card_width = 32 * duration + 2 * (duration - 1)
+            base_w = 32 * duration + 2 * (duration - 1)
+            card_width = max(base_w, min(120, 7 * len(clean_cls_display) + 32)) if (self.is_comb and display_mode == "teachers") else base_w
             card_height = 28
             if display_mode == "teachers":
-                c_clean = class_name.replace(" ", "").upper()
-                display_text = f"<b>{c_clean[:5]}</b> <span style='font-size:7.5px;'>{abbr[:4]}</span> {duration}h"
+                display_text = f"<b>{clean_cls_display}</b> <span style='font-size:7.5px;'>{abbr[:4]}</span> {duration}h"
             else:
-                display_text = f"<b>{abbr[:4]}</b>"
-                if t_short:
-                    display_text += f" <span style='font-size:7.5px; opacity:0.9;'>{t_short}</span>"
-                display_text += f" <span style='font-size:7.5px;'>{duration}h</span>"
+                display_text = f"<b>{abbr}</b> <span style='font-size:7.5px;'>{duration}h</span>"
             
         self.setText(display_text)
         self.setAlignment(Qt.AlignCenter)
         self.setFixedSize(card_width, card_height)
-        self.setToolTip(f"📚 {self.subject_name}\n🎓 Sınıf: {self.class_name}\n👨‍🏫 Öğretmen: {self.teacher}\n⏱️ Süre: {self.duration} Saat")
+        self.setToolTip(f"📚 {self.subject_name}{' (🔗 Birleşik Ders)' if self.is_comb else ''}\n🎓 Sınıf: {self.class_name}\n👨‍🏫 Öğretmen: {self.teacher}\n⏱️ Süre: {self.duration} Saat")
         
         c = QColor(color)
         if c.isValid():
@@ -470,13 +469,13 @@ class DraggableLessonCard(QLabel):
         if getattr(self, "is_comb", False):
             p = QPainter(self)
             p.setRenderHint(QPainter.Antialiasing)
-            badge_r = QRectF(1, 1, 9.5, 9.5)
+            badge_r = QRectF(1, 1, 14.5, 14.5)
             p.setBrush(QBrush(QColor("#EFF6FF")))
             p.setPen(QPen(QColor("#3B82F6"), 1))
             p.drawRoundedRect(badge_r, 2, 2)
-            p.setFont(QFont("Segoe UI", 6, QFont.Bold))
+            p.setFont(QFont("Segoe UI", 9, QFont.Bold))
             p.setPen(QColor("#1D4ED8"))
-            p.drawText(badge_r, Qt.AlignCenter, "🔗")
+            p.drawText(badge_r, Qt.AlignCenter, "📎")
             p.end()
         
     def enterEvent(self, event):
@@ -822,21 +821,8 @@ class UnplacedLessonsDock(QWidget):
             type_str = str(a.get("type", "")).strip()
             color = resolve_subject_color(s_name, data_store)
             
-            parts = []
-            if "+" in type_str:
-                for p in type_str.split("+"):
-                    p_clean = p.strip()
-                    if p_clean.isdigit() and int(p_clean) > 0:
-                        parts.append(int(p_clean))
-            elif type_str.isdigit() and int(type_str) > 0:
-                parts = [int(type_str)]
-                
-            if not parts:
-                rem = dur
-                while rem > 0:
-                    b = 2 if rem >= 2 else 1
-                    parts.append(b)
-                    rem -= b
+            from auto_scheduler import parse_distribution_parts
+            parts = parse_distribution_parts(type_str, dur)
                     
             s_fmt = format_tr_name(s_name)
             t_fmt = format_tr_name(t_name)
@@ -1001,6 +987,29 @@ class TimetableCellDelegate(QStyledItemDelegate):
                 painter.setFont(QFont("Segoe UI", 6.5, QFont.Bold))
                 painter.setPen(QColor("#78350F"))
                 painter.drawText(lock_bg, Qt.AlignCenter, "🔒")
+                
+            # Combined lesson paperclip badge: prominent top-right corner badge (📎 ataç)
+            c_name_check = str((info.get("class_name") or info.get("class") or "")) if info else ""
+            is_comb = bool(info and (info.get("is_combined") or ("+" in c_name_check) or ("," in c_name_check) or ("&" in c_name_check)))
+            if not is_comb and info and data_store:
+                s_chk = info.get("subject_name") or info.get("subject") or clean_str
+                c_chk = c_name_check
+                if s_chk:
+                    for a in data_store.get("atamalar", []):
+                        if (a.get("is_combined") or ("+" in str(a.get("class", "")))) and a.get("subject") == s_chk:
+                            if not c_chk or any(matches_class(cc, c_chk) for cc in a.get("combined_classes", [])) or matches_class(a.get("class", ""), c_chk):
+                                is_comb = True
+                                break
+                                
+            if is_comb:
+                comb_bg = QRectF(rect.right() - 17, rect.top() + 1, 16, 16)
+                painter.setBrush(QBrush(QColor("#DBEAFE")))  # Soft light blue background
+                painter.setPen(QPen(QColor("#2563EB"), 1.2)) # Crisp blue border
+                painter.drawRoundedRect(comb_bg, 3, 3)
+                
+                painter.setFont(QFont("Segoe UI Emoji", 9, QFont.Bold))
+                painter.setPen(QColor("#1E40AF"))
+                painter.drawText(comb_bg, Qt.AlignCenter, "📎")
             
         painter.restore()
 
@@ -1263,6 +1272,12 @@ class DropTableWidget(QTableWidget):
 
         # ── Capture target_entity BEFORE any grid mutation ──
         win = self.window()
+        if not hasattr(win, "data_store") and hasattr(win, "parent") and hasattr(win.parent(), "data_store"):
+            win = win.parent()
+            
+        if hasattr(win, "_push_undo_state"):
+            win._push_undo_state()
+            
         view_mode = getattr(grid, "current_view_mode", "classes")
         v_item = self.verticalHeaderItem(orig_r)
         row_header_name = v_item.text().strip() if v_item else ""
@@ -1298,11 +1313,13 @@ class DropTableWidget(QTableWidget):
         _log(f"[DELETE] view={view_mode} row={orig_r} col={orig_c} dur={orig_dur} info={'YES' if info else 'NONE'}")
         
         # ── 1. Clear grid cells visually ──
-        self.setSpan(orig_r, orig_c, 1, 1)
+        if self.rowSpan(orig_r, orig_c) > 1 or self.columnSpan(orig_r, orig_c) > 1:
+            self.setSpan(orig_r, orig_c, 1, 1)
         for off in range(orig_dur):
             tc = orig_c + off
             if tc < self.columnCount():
-                self.setSpan(orig_r, tc, 1, 1)
+                if self.rowSpan(orig_r, tc) > 1 or self.columnSpan(orig_r, tc) > 1:
+                    self.setSpan(orig_r, tc, 1, 1)
                 self.removeCellWidget(orig_r, tc)
                 self.takeItem(orig_r, tc)
                 self.setItem(orig_r, tc, None)
@@ -1316,7 +1333,8 @@ class DropTableWidget(QTableWidget):
                     if is_comb:
                         if any(matches_class(pl_c, tc) or matches_class(tc, pl_c) or pl_c == tc for tc in target_classes) or pl_c == c_name:
                             grid._placed_lessons.pop((r_k, c_k), None)
-                            self.setSpan(r_k, c_k, 1, 1)
+                            if self.rowSpan(r_k, c_k) > 1 or self.columnSpan(r_k, c_k) > 1:
+                                self.setSpan(r_k, c_k, 1, 1)
                             self.removeCellWidget(r_k, c_k)
                             self.takeItem(r_k, c_k)
                             self.setItem(r_k, c_k, None)
@@ -1419,6 +1437,25 @@ class DropTableWidget(QTableWidget):
                 win._refresh_tree()
 
     def keyPressEvent(self, event):
+        win = self.window()
+        if not hasattr(win, "_act_undo") and hasattr(win, "parent") and hasattr(win.parent(), "_act_undo"):
+            win = win.parent()
+            
+        if event.modifiers() == Qt.ControlModifier:
+            if event.key() == Qt.Key_Z:
+                if hasattr(win, "_act_undo"):
+                    win._act_undo()
+                    return
+            elif event.key() == Qt.Key_Y:
+                if hasattr(win, "_act_redo"):
+                    win._act_redo()
+                    return
+        elif event.modifiers() == (Qt.ControlModifier | Qt.ShiftModifier):
+            if event.key() == Qt.Key_Z:
+                if hasattr(win, "_act_redo"):
+                    win._act_redo()
+                    return
+                    
         if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
             r = self.currentRow()
             c = self.currentColumn()
@@ -1472,6 +1509,11 @@ class DropTableWidget(QTableWidget):
                 self.cell_right_clicked.emit(orig_r, orig_c)
             elif action in (act_lock, act_unlock):
                 new_lock_state = (action == act_lock)
+                win = self.window()
+                if not hasattr(win, "data_store") and hasattr(win, "parent") and hasattr(win.parent(), "data_store"):
+                    win = win.parent()
+                if hasattr(win, "_push_undo_state"):
+                    win._push_undo_state()
                 if hasattr(grid, "_placed_lessons") and (orig_r, orig_c) in grid._placed_lessons:
                     info = grid._placed_lessons[(orig_r, orig_c)]
                     s_name = info.get("subject_name", "")
@@ -1584,7 +1626,8 @@ class DropTableWidget(QTableWidget):
                         if orig_item and hasattr(self.parent(), "set_cell"):
                             txt = orig_item.text()
                             bg = orig_item.background().color().name()
-                            self.setSpan(orig_r, orig_c, 1, 1)
+                            if self.rowSpan(orig_r, orig_c) > 1 or self.columnSpan(orig_r, orig_c) > 1:
+                                self.setSpan(orig_r, orig_c, 1, 1)
                             for r_off in range(orig_dur):
                                 tr = orig_r + r_off
                                 if tr < self.rowCount():
@@ -1628,7 +1671,8 @@ class DropTableWidget(QTableWidget):
                         
         # 2. Clear displaced lessons from grid
         for d_orig_r, d_orig_c, d_dur, _ in displaced:
-            self.setSpan(d_orig_r, d_orig_c, 1, 1)
+            if self.rowSpan(d_orig_r, d_orig_c) > 1 or self.columnSpan(d_orig_r, d_orig_c) > 1:
+                self.setSpan(d_orig_r, d_orig_c, 1, 1)
             for r_off in range(d_dur):
                 tr = d_orig_r + r_off
                 if tr < self.rowCount():
@@ -1636,7 +1680,8 @@ class DropTableWidget(QTableWidget):
             grid._placed_lessons.pop((d_orig_r, d_orig_c), None)
 
         # 3. Clear old span of target lesson and apply new span
-        self.setSpan(orig_r, orig_c, 1, 1)
+        if self.rowSpan(orig_r, orig_c) > 1 or self.columnSpan(orig_r, orig_c) > 1:
+            self.setSpan(orig_r, orig_c, 1, 1)
         if max_possible_span > 1:
             self.setSpan(orig_r, orig_c, max_possible_span, 1)
             
@@ -1994,9 +2039,18 @@ class TimetableGrid(QWidget):
             lock_prefix = "🔒 " if is_locked else ""
             self.info_subject_lbl.setText(f"{lock_prefix}{subj}")
             is_comb = bool(info.get("is_combined") or (cls and ("," in cls or "&" in cls or "+" in cls)))
+            full_comb_cls = cls
+            if not is_comb and data_store and subj:
+                for a in data_store.get("atamalar", []):
+                    if (a.get("is_combined") or ("+" in str(a.get("class", "")))) and a.get("subject") == subj:
+                        if not cls or any(matches_class(cc, cls) for cc in a.get("combined_classes", [])) or matches_class(a.get("class", ""), cls):
+                            is_comb = True
+                            full_comb_cls = a.get("class", "") or " + ".join(a.get("combined_classes", []))
+                            break
+                            
             if is_comb:
-                clean_cls = cls.replace("&", ", ").replace("+", ", ").strip()
-                self.info_class_lbl.setText(f"🔗 Ortak: {clean_cls.upper()}")
+                clean_cls = full_comb_cls.replace("&", ", ").replace("+", ", ").strip()
+                self.info_class_lbl.setText(f"📎 Ortak: {clean_cls.upper()}")
             else:
                 self.info_class_lbl.setText(cls.upper() if cls else "")
             
@@ -2025,8 +2079,9 @@ class TimetableGrid(QWidget):
             self.table.setRowCount(self._periods)
             self.table.setVerticalHeaderLabels([f"{i+1}" for i in range(self._periods)])
 
-    def set_cell(self, row, col, subject_name, color, teacher_name="", duration=1, class_name="", display_mode="classes", locked=False, is_manual=False):
+    def set_cell(self, row, col, subject_name, color, teacher_name="", duration=1, class_name="", display_mode="classes", locked=False, is_manual=False, is_combined=False, combined_classes=None):
         class_name = str(class_name).replace("(ea)", "(EA)").replace("(say)", "(SAY)").replace("(soz)", "(SÖZ)").replace("(dil)", "(DİL)")
+        is_comb_bool = bool(is_combined or ("+" in class_name) or ("," in class_name) or ("&" in class_name) or (combined_classes and len(combined_classes) > 1))
         if display_mode == "teachers":
             if "," in class_name or "&" in class_name or "+" in class_name:
                 display_text = "+".join([c.strip().split("(")[0].strip() for c in class_name.replace("&", ",").replace("+", ",").split(",") if c.strip()])
@@ -2055,7 +2110,7 @@ class TimetableGrid(QWidget):
         # Merge columns if duration > 1 (Whole school view spans horizontally)
         if duration > 1:
             self.table.setSpan(row, col, 1, duration)
-        else:
+        elif self.table.rowSpan(row, col) > 1 or self.table.columnSpan(row, col) > 1:
             self.table.setSpan(row, col, 1, 1)
         
         # Track placed lesson with day/period for lock matching
@@ -2063,10 +2118,15 @@ class TimetableGrid(QWidget):
         day_idx = col // periods if periods > 0 else 0
         period_idx = col % periods if periods > 0 else 0
         info_dict = {
-            "subject_name": subject_name, "color": color,
-            "teacher_name": teacher_name, "class_name": class_name, "duration": duration,
+            "subject_name": subject_name,
+            "teacher_name": teacher_name,
+            "class_name": class_name,
+            "duration": duration,
+            "color": color,
             "locked": bool(locked),
             "is_manual": bool(is_manual),
+            "is_combined": is_comb_bool,
+            "combined_classes": combined_classes or [],
             "day_idx": day_idx, "period": period_idx,
             "origin_row": row, "origin_col": col
         }

@@ -88,6 +88,21 @@ class AppShell(QMainWindow):
     
     def _open_timetable(self, slug, version_filename):
         """Load a version and switch to the timetable editor."""
+        meta = version_store.get_institution_meta(slug)
+        inst_name = meta.get("name", slug)
+        
+        import re
+        m = re.match(r"v(\d+)_", version_filename)
+        v_label = f"Versiyon {int(m.group(1))}" if m else "Çizelge"
+        
+        from save_dialog import run_apple_save_sequence
+        run_apple_save_sequence(
+            self,
+            duration_seconds=0.2,
+            title=f"{v_label} Açılıyor",
+            message=f"{inst_name}\nÇalışma alanı ve ders yerleşimleri yükleniyor..."
+        )
+        
         data = version_store.load_version(slug, version_filename)
         if not data:
             from PySide6.QtWidgets import QMessageBox
@@ -102,10 +117,6 @@ class AppShell(QMainWindow):
             self._stack.removeWidget(self._editor)
             self._editor.deleteLater()
             self._editor = None
-        
-        # Create new editor with the loaded data
-        meta = version_store.get_institution_meta(slug)
-        inst_name = meta.get("name", slug)
         
         # Save version data to a temp path for MainWindow to load
         temp_roz = os.path.join(
@@ -148,6 +159,8 @@ class AppShell(QMainWindow):
     
     def _go_home(self):
         """Switch back to the dashboard."""
+        from save_dialog import run_apple_save_sequence
+        
         # Save current work before going home
         if self._editor:
             try:
@@ -163,6 +176,8 @@ class AppShell(QMainWindow):
                         push_version_to_rtdb(slug, ver_fn, dict(self._editor.data_store), auth)
             except Exception as e:
                 print(f"[GO_HOME] Save error: {e}")
+        
+        run_apple_save_sequence(self, duration_seconds=0.2, title="Kaydediliyor", message="Değişiklikler yerel veritabanına ve buluta eşitleniyor...")
         
         # Switch to dashboard FIRST
         self._dashboard._refresh_institutions()
@@ -180,6 +195,8 @@ class AppShell(QMainWindow):
 
     def closeEvent(self, event):
         """Save active editor and flush database & cloud sync before closing the application."""
+        from save_dialog import run_apple_save_sequence
+        
         if self._editor and hasattr(self._editor, "save_db"):
             try:
                 self._editor.save_db(sync_from_grid=True)
@@ -194,13 +211,7 @@ class AppShell(QMainWindow):
             except Exception as e:
                 print(f"[CLOSE] Auto-save error: {e}")
                 
-        # Graceful 1.5-second database and cloud sync flush as requested
-        import time
-        t_end = time.time() + 1.5
-        while time.time() < t_end:
-            QApplication.processEvents()
-            time.sleep(0.05)
-            
+        run_apple_save_sequence(self, duration_seconds=1.6, title="Uygulama Kapatılıyor", message="Tüm veriler ve çizelgeler güvenle kaydedildi.")
         super().closeEvent(event)
 
     @property
@@ -267,33 +278,52 @@ def main():
 
     font = QFont("Segoe UI", 9)
     app.setFont(font)
+    
+    app.setStyleSheet("""
+        QToolTip {
+            background-color: #1D1D1F;
+            color: #FFFFFF;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 6px;
+            padding: 5px 9px;
+            font-size: 11px;
+            font-family: Segoe UI, -apple-system, sans-serif;
+        }
+        QMessageBox {
+            background-color: #F8F9FA;
+            color: #111111;
+        }
+        QMessageBox QLabel {
+            color: #111111;
+        }
+        QMessageBox QPushButton {
+            background-color: #E2E8F0;
+            color: #111111;
+            border: 1px solid #CBD5E1;
+            border-radius: 4px;
+            padding: 5px 15px;
+            min-width: 60px;
+        }
+        QMessageBox QPushButton:hover {
+            background-color: #CBD5E1;
+        }
+    """)
 
     logo_path = icon_path if os.path.exists(icon_path) else get_asset_path("ChatGPT Image 5 Tem 2026 01_04_30.png")
 
-    # Splash
-    if os.path.exists(logo_path):
-        pix = QPixmap(logo_path).scaled(320, 180, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+    from splash_screen import HighTechSplashScreen
+    splash = HighTechSplashScreen()
+    splash.exec()
+
+    # The splash screen validates the token in the background.
+    from api_client import api_client
+    if splash.is_valid_token or api_client.token:
+        auth_data = splash.auth_data or ({"access_token": api_client.token} if api_client.token else None)
     else:
-        pix = QPixmap(320, 120)
-        pix.fill(QColor("#1E6DB5"))
-        p = QPainter(pix)
-        p.setPen(QColor("#FFFFFF"))
-        p.setFont(QFont("Segoe UI", 14, QFont.Bold))
-        p.drawText(pix.rect(), Qt.AlignCenter, "BGZ Ders Planlama")
-        p.end()
-
-    splash = QSplashScreen(pix)
-    splash.show()
-    app.processEvents()
-
-    # Login
-    QTimer.singleShot(800, splash.close)
-
-    login = LoginDialog(logo_path if os.path.exists(logo_path) else None)
-    if login.exec() != LoginDialog.Accepted:
-        sys.exit(0)
-        
-    auth_data = getattr(login, "auth_data", None)
+        login = LoginDialog(logo_path if os.path.exists(logo_path) else None)
+        if login.exec() != LoginDialog.Accepted:
+            sys.exit(0)
+        auth_data = getattr(login, "auth_data", None)
 
     # App Shell (Dashboard + Editor)
     shell = AppShell(

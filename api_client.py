@@ -70,11 +70,13 @@ class APIClient:
     def pull_all_from_rtdb(self, auth_data=None):
         """Replacement for Firebase pull_all_from_rtdb"""
         url = f"{self.base_url}/api/institutions"
-        resp = requests.get(url, headers=self.get_headers(), timeout=15)
-        if resp.status_code != 200:
-            return False, f"Buluttan veri çekilemedi (HTTP {resp.status_code})", 0
-            
-        data = resp.json()
+        try:
+            resp = requests.get(url, headers=self.get_headers(), timeout=15)
+            if resp.status_code != 200:
+                return False, f"Buluttan veri çekilemedi (HTTP {resp.status_code})", 0
+            data = resp.json()
+        except Exception as e:
+            return False, f"Sunucuya erişilemedi ({e})", 0
         if not data or not isinstance(data, dict):
             return True, "Bulutta kayıtlı kurum bulunamadı.", 0
             
@@ -110,16 +112,19 @@ class APIClient:
                     json.dump(roz_content, f, ensure_ascii=False, indent=2)
                 synced_count += 1
                 
-        return True, f"VDS Senkronizasyonu tamamlandı ({len(data)} kurum, {synced_count} versiyon).", synced_count
+        return True, f"Merkezi veritabanı senkronizasyonu tamamlandı ({len(data)} kurum, {synced_count} versiyon).", synced_count
 
     def push_version_to_rtdb(self, slug, filename, roz_data, auth_data=None):
         """Replacement for Firebase push_version_to_rtdb"""
-        import re
-        v_key = re.sub(r'[\.\$#\[\]/]', '_', filename)
-        url = f"{self.base_url}/api/sync/{slug}/{v_key}"
-        resp = requests.put(url, json=roz_data, headers=self.get_headers(), timeout=15)
-        if resp.status_code in (200, 201):
-            return True
+        try:
+            import re
+            v_key = re.sub(r'[\.\$#\[\]/]', '_', filename)
+            url = f"{self.base_url}/api/sync/{slug}/{v_key}"
+            resp = requests.put(url, json=roz_data, headers=self.get_headers(), timeout=4)
+            if resp.status_code in (200, 201):
+                return True
+        except Exception:
+            pass
         return False
 
 # Singleton instance

@@ -44,6 +44,210 @@ def normalize_teacher_name(name: str) -> str:
     s = re.sub(r"\s+", " ", s)
     return s.strip()
 
+def _matches_teacher(t1: str, t2: str) -> bool:
+    """Smart fuzzy/normalized teacher name matcher."""
+    if not t1 or not t2:
+        return False
+    n1 = normalize_teacher_name(t1)
+    n2 = normalize_teacher_name(t2)
+    if n1 == n2:
+        return True
+    # Strip non-alphanumeric
+    c1 = "".join(c for c in n1 if c.isalnum())
+    c2 = "".join(c for c in n2 if c.isalnum())
+    if c1 == c2:
+        return True
+    # Handle single name / middle name variations (e.g. Şeyma Aker vs Şeyma Nur Aker)
+    p1 = [p for p in n1.split() if len(p) > 1]
+    p2 = [p for p in n2.split() if len(p) > 1]
+    if len(p1) >= 2 and len(p2) >= 2:
+        # If first and last words match
+        if p1[0] == p2[0] and p1[-1] == p2[-1]:
+            return True
+    return False
+
+def rename_teacher_in_data_store(data_store: dict, old_name: str, new_name: str) -> bool:
+    """
+    Atomically cascades teacher renaming across the entire data_store and institution version files.
+    """
+    if not old_name or not new_name or old_name.strip() == new_name.strip():
+        return False
+        
+    old_clean = old_name.strip()
+    new_clean = new_name.strip()
+    old_norm = normalize_teacher_name(old_clean)
+    
+    # 1. Update in ogretmenler list
+    for t in data_store.get("ogretmenler", []):
+        if normalize_teacher_name(t.get("ad", "")) == old_norm or t.get("ad", "").strip() == old_clean:
+            t["ad"] = new_clean
+            
+    # 2. Update in atamalar list
+    for a in data_store.get("atamalar", []):
+        raw_t = a.get("teacher") or a.get("ogretmen") or a.get("teacher_name") or ""
+        parts = [p.strip() for p in raw_t.split(",") if p.strip()]
+        new_parts = []
+        for p in parts:
+            if normalize_teacher_name(p) == old_norm or p == old_clean:
+                new_parts.append(new_clean)
+            else:
+                new_parts.append(p)
+        if new_parts:
+            a["teacher"] = ", ".join(new_parts)
+            if "teacher_name" in a:
+                a["teacher_name"] = ", ".join(new_parts)
+                
+    # 3. Update in grid_placements list
+    for p in data_store.get("grid_placements", []):
+        t_name = p.get("teacher_name") or p.get("teacher") or ""
+        if normalize_teacher_name(t_name) == old_norm or t_name.strip() == old_clean:
+            p["teacher_name"] = new_clean
+            p["teacher"] = new_clean
+            
+    # 4. Update in siniflar (sinif_ogretmeni / rehberlik)
+    for s in data_store.get("siniflar", []):
+        so = s.get("sinif_ogretmeni", "")
+        if normalize_teacher_name(so) == old_norm or so.strip() == old_clean:
+            s["sinif_ogretmeni"] = new_clean
+            
+    # 5. Update in yerlesim
+    yerlesim = data_store.get("yerlesim", {})
+    if isinstance(yerlesim, dict):
+        for k, v in yerlesim.items():
+            if isinstance(v, dict):
+                t_val = v.get("teacher_name") or v.get("teacher") or ""
+                if normalize_teacher_name(t_val) == old_norm or t_val.strip() == old_clean:
+                    v["teacher_name"] = new_clean
+                    v["teacher"] = new_clean
+                    
+    # 6. Update in kisitlamalar
+    kisit = data_store.get("kisitlamalar", {})
+    if isinstance(kisit, dict):
+        if old_clean in kisit:
+            kisit[new_clean] = kisit.pop(old_clean)
+        if old_norm in kisit:
+            kisit[new_clean] = kisit.pop(old_norm)
+            
+    return True
+
+def sanitize_atamalar(atamalar: list) -> list:
+    """
+    Sanitizes, validates, and strictly deduplicates lesson assignments (atamalar).
+    Guarantees:
+    - No duplicate (subject, teacher, class) entries.
+    - Cleans comma-separated duplicates in teacher strings (e.g. 'Beyza Bulut, Beyza Bulut' -> 'Beyza Bulut').
+    - Standardizes duration and type fields.
+    """
+    if not atamalar or not isinstance(atamalar, list):
+        return []
+        
+    seen = {}
+    for a in atamalar:
+        if not isinstance(a, dict):
+            continue
+            
+        subj = str(a.get("subject") or a.get("ders") or a.get("subject_name") or "").strip()
+        if not subj:
+            continue
+            
+        raw_t = str(a.get("teacher") or a.get("ogretmen") or a.get("teacher_name") or "").strip()
+        # Deduplicate comma-separated teacher strings e.g. "Beyza Bulut, Beyza Bulut"
+        t_parts = [p.strip() for p in raw_t.split(",") if p.strip()]
+        unique_t_parts = []
+        for p in t_parts:
+            if p not in unique_t_parts:
+                unique_t_parts.append(p)
+        teacher = ", ".join(unique_t_parts)
+        
+        cls_name = str(a.get("class") or a.get("sinif") or a.get("class_name") or "").strip()
+        
+        # Calculate duration and type
+        raw_type = str(a.get("type", "")).strip()
+        if raw_type == "0" or raw_type == "None":
+            raw_type = ""
+            
+        parts = [int(p.strip()) for p in raw_type.split("+") if p.strip().isdigit()]
+        if parts:
+            dur = sum(parts)
+        elif raw_type.isdigit():
+            dur = int(raw_type)
+        else:
+            dur_val = a.get("duration") if a.get("duration") is not None else a.get("saat")
+            dur = int(dur_val) if (dur_val is not None and str(dur_val).isdigit()) else 0
+            if dur > 0 and not raw_type:
+                raw_type = str(dur)
+        
+        key = (subj.upper(), teacher.upper(), cls_name.upper())
+        clean_entry = dict(a)
+        clean_entry["subject"] = subj
+        clean_entry["teacher"] = teacher
+        clean_entry["class"] = cls_name
+        clean_entry["duration"] = dur
+        clean_entry["type"] = raw_type
+        
+        seen[key] = clean_entry
+        
+    return list(seen.values())
+
+def get_cross_institution_teacher_busy_slots(exclude_slug: str = None) -> dict:
+    """
+    Returns a dictionary of busy slots for teachers across all other institutions.
+    Key: (normalized_teacher_name, day_idx, period_idx)
+    Value: dict with conflict details
+    """
+    busy_slots = {}
+    institutions = list_institutions()
+    
+    for inst in institutions:
+        inst_slug = inst["slug"]
+        if exclude_slug and inst_slug == exclude_slug:
+            continue
+            
+        active_ver = inst.get("active_version")
+        if not active_ver:
+            vers = list_versions(inst_slug, source_filter="all")
+            if vers:
+                active_ver = vers[0]["filename"]
+                
+        if not active_ver:
+            continue
+            
+        data = load_version(inst_slug, active_ver)
+        if not data:
+            continue
+            
+        grid = data.get("grid_placements", [])
+        inst_name = inst.get("name", inst_slug)
+        
+        for item in grid:
+            t_name = (item.get("teacher_name") or item.get("teacher") or item.get("ogretmen") or "").strip()
+            if not t_name:
+                continue
+            norm_t = normalize_teacher_name(t_name)
+            day = int(item.get("day", item.get("col", 0)))
+            period = int(item.get("period", item.get("row", 0)))
+            dur = int(item.get("duration", 1))
+            c_name = item.get("class_name") or item.get("class") or ""
+            s_name = item.get("subject_name") or item.get("subject") or ""
+            
+            for off in range(dur):
+                slot_p = period + off
+                slot_info = {
+                    "institution_slug": inst_slug,
+                    "institution_name": inst_name,
+                    "teacher_name": t_name,
+                    "class_name": c_name,
+                    "subject_name": s_name,
+                    "version_filename": active_ver,
+                    "day": day,
+                    "period": slot_p
+                }
+                busy_slots[(norm_t, day, slot_p)] = slot_info
+                clean_k = "".join(c for c in norm_t.lower() if c.isalnum())
+                busy_slots[(clean_k, day, slot_p)] = slot_info
+                
+    return busy_slots
+
 # ── Password & Security ──────────────────────────────────────────────
 
 def _hash_password(password: str) -> str:
@@ -96,8 +300,25 @@ INSTITUTION_COLORS = [
     "#5856D6", "#00C7BE", "#32ADE6", "#A2845E", "#64D2FF",
 ]
 
+def touch_institution_timestamp(slug: str) -> str:
+    """Updates last_modified and last_updated_str in meta.json to current datetime. Returns formatted string."""
+    meta_path = os.path.join(_base_dir(), slug, "meta.json")
+    now = datetime.now()
+    upd_str = now.strftime("%d %b %H:%M")
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            meta["last_modified"] = now.isoformat()
+            meta["last_updated_str"] = upd_str
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+    return upd_str
+
 def list_institutions():
-    """Returns list of dicts: {slug, name, created, color, version_count, path, has_password, active_version}"""
+    """Returns list of dicts: {slug, name, created, color, version_count, path, has_password, active_version, last_updated_str}"""
     base = _ensure_base()
     result = []
     for entry in sorted(os.listdir(base)):
@@ -113,6 +334,15 @@ def list_institutions():
             ver_count = 0
             if os.path.isdir(ver_dir):
                 ver_count = len([v for v in os.listdir(ver_dir) if v.endswith(".roz")])
+                
+            last_upd_str = meta.get("last_updated_str")
+            if not last_upd_str:
+                vers = list_versions(entry, source_filter="all")
+                if vers:
+                    last_upd_str = f"{vers[0]['date_str']} {vers[0]['time_str']}"
+                else:
+                    last_upd_str = meta.get("created", "")
+                    
             result.append({
                 "slug": entry,
                 "name": meta.get("name", entry),
@@ -121,6 +351,7 @@ def list_institutions():
                 "version_count": ver_count,
                 "has_password": bool(meta.get("has_password", False) and meta.get("password_hash")),
                 "active_version": meta.get("active_version", ""),
+                "last_updated_str": last_upd_str or "",
                 "path": inst_dir,
             })
     return result
@@ -250,6 +481,9 @@ def save_version(slug: str, data_store: dict, source: str = "manual", note: str 
     
     # Embed version metadata into the data_store copy
     save_data = dict(data_store)
+    if "atamalar" in save_data:
+        save_data["atamalar"] = sanitize_atamalar(save_data["atamalar"])
+        
     save_data["_version_meta"] = {
         "version_number": num,
         "timestamp": now.isoformat(),
@@ -261,8 +495,9 @@ def save_version(slug: str, data_store: dict, source: str = "manual", note: str 
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(save_data, f, ensure_ascii=False, indent=2)
     
-    # Auto-set as active
+    # Auto-set as active and update institution timestamp
     set_active_version(slug, filename)
+    touch_institution_timestamp(slug)
     
     # Push to RTDB in background thread
     try:
@@ -283,9 +518,14 @@ def update_version_in_place(slug: str, filename: str, data_store: dict) -> bool:
     os.makedirs(ver_dir, exist_ok=True)
     
     save_data = dict(data_store)
+    if "atamalar" in save_data:
+        save_data["atamalar"] = sanitize_atamalar(save_data["atamalar"])
+        
     try:
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(save_data, f, ensure_ascii=False, indent=2)
+            
+        touch_institution_timestamp(slug)
             
         # Push to RTDB in background thread
         try:
@@ -340,12 +580,13 @@ def list_versions(slug: str, source_filter: str = "all") -> list:
             with open(filepath, "r", encoding="utf-8") as fh:
                 d = json.load(fh)
                 note = d.get("_version_meta", {}).get("note", "")
-                atamalar = d.get("atamalar", [])
-                for a in atamalar:
-                    total_hours += int(a.get("duration", 1))
+                
+                # Compute stats
                 placements = d.get("grid_placements", [])
-                for p in placements:
-                    placed_hours += int(p.get("duration", 1))
+                placed_hours = sum(p.get("duration", 1) for p in placements)
+                
+                atamalar = d.get("atamalar", [])
+                total_hours = sum(a.get("duration", 2) for a in atamalar)
                 unplaced_hours = max(0, total_hours - placed_hours)
         except Exception:
             pass
@@ -375,11 +616,13 @@ def load_version(slug: str, version_filename: str) -> dict:
     if os.path.exists(filepath):
         try:
             with open(filepath, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                if isinstance(data, dict) and "atamalar" in data:
+                    data["atamalar"] = sanitize_atamalar(data["atamalar"])
+                return data
         except Exception as e:
             print(f"Error loading version {version_filename}: {e}")
             return {}
-    return {}
 
 def delete_version(slug: str, version_filename: str):
     filepath = os.path.join(_versions_dir(slug), version_filename)

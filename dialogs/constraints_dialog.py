@@ -155,6 +155,7 @@ class ConstraintsDialog(QDialog):
             self.tbl_subj_pref.setItem(row, 0, QTableWidgetItem(subj))
             
             cb_win = QComboBox()
+            cb_win.wheelEvent = lambda event: event.ignore()
             cb_win.addItems(["Fark Etmez (Esnek)", "Sabah Saatleri (1-4. Saatler)", "Öğleden Sonra Saatleri"])
             saved_pref = saved_windows.get(subj, "any")
             if saved_pref == "morning":

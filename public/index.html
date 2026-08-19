@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chenki Akademi - Ders Planlama Web</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="background-blobs">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+    </div>
+    
+    <div class="glass-container">
+        <header>
+            <div class="logo-container">
+                <div class="logo-icon">📅</div>
+                <h1>Chenki Akademi</h1>
+            </div>
+            <p class="subtitle">Otomatik Ders Planlama Sistemi (Web Sürümü)</p>
+        </header>
+
+        <main>
+            <div class="card">
+                <h2>Hoş Geldiniz</h2>
+                <p>Masaüstü uygulamamızın gücü artık tarayıcınızda. Veritabanı ve öğretmen kayıtlarınız Vercel Serverless üzerinden işlenmektedir.</p>
+                
+                <div class="api-status">
+                    <span class="status-indicator loading" id="status-dot"></span>
+                    <span id="api-message">API Durumu Kontrol Ediliyor...</span>
+                </div>
+
+                <div class="action-buttons">
+                    <button class="primary-btn" id="generate-btn" disabled>Ders Programı Oluştur</button>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
