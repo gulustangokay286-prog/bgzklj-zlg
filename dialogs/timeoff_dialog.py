@@ -248,8 +248,9 @@ class TimeoffDialog(QDialog):
                     st = self.timeoff_data[d][p]
                     self.data_store["kisitlamalar"][ent_name][f"{d},{p}"] = (st > 0)
         try:
-            from version_store import trigger_save_db
+            from version_store import trigger_save_db, save_global_kisitlamalar
             trigger_save_db(self, self.data_store)
+            save_global_kisitlamalar(self.data_store["kisitlamalar"])
         except Exception as e:
             print(f"[TIMEOFF_SAVE_ERR] {e}")
         self.accept()

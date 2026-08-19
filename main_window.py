@@ -879,6 +879,16 @@ class MainWindow(QMainWindow):
                 for t in self.data_store.get("ogretmenler", []):
                     if t.get("ad"): t["ad"] = format_tr_name(t["ad"])
 
+                # Load global kisitlamalar and override local
+                from version_store import load_global_kisitlamalar
+                global_k = load_global_kisitlamalar()
+                if global_k:
+                    if "kisitlamalar" not in self.data_store:
+                        self.data_store["kisitlamalar"] = {}
+                    # Update local with global
+                    for k, v in global_k.items():
+                        self.data_store["kisitlamalar"][k] = v
+
                 self.statusBar().showMessage(f"Veriler yüklendi: {load_path}")
             except Exception as e:
                 print("DB Load Error:", e)

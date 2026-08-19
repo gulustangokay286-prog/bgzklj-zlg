@@ -909,3 +909,26 @@ _TR_MONTHS = {
 
 def _turkish_month(dt: datetime) -> str:
     return f"{_TR_MONTHS.get(dt.month, dt.strftime('%B'))} {dt.year}"
+
+
+def load_global_kisitlamalar():
+    import json, os
+    path = os.path.join(os.path.expanduser("~"), ".chenki_akademi", "global_kisitlamalar.json")
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def save_global_kisitlamalar(kisitlamalar):
+    import json, os
+    path = os.path.join(os.path.expanduser("~"), ".chenki_akademi", "global_kisitlamalar.json")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(kisitlamalar, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print("Error saving global_kisitlamalar:", e)
+
