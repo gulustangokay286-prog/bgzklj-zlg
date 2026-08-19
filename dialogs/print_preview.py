@@ -1445,9 +1445,9 @@ class TimetablePrintPreview(QDialog):
             items = sorted(self.filtered_classes if self.filtered_classes else self.data_store.get("siniflar", []), key=natural_sort_key)
             
         # Filter by combo box selection if not "Tümü"
-        sel_items = self.filters.get("selected_items", [])
-        if sel_items and "Tümü" not in sel_items[0]:
-            items = [item for item in items if item.get("ad", "") in sel_items]
+        current_sel = self.target_combo.currentText().strip()
+        if current_sel and "Tümü" not in current_sel and "Tüm " not in current_sel:
+            items = [item for item in items if item.get("ad", "") == current_sel]
             
         if not items:
             items = [{"ad": "Örnek 1"}]
