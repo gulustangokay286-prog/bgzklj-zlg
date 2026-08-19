@@ -525,27 +525,42 @@ def save_version(slug: str, data_store: dict, source: str = "manual", note: str 
     set_active_version(slug, filename)
     touch_institution_timestamp(slug)
     
-    # Push to RTDB in background thread
+    # Push to RTDB and create rolling backup in background thread
     try:
         import threading
         from cloud_sync import push_version_to_rtdb
+        import database
         threading.Thread(target=push_version_to_rtdb, args=(slug, filename, save_data), daemon=True).start()
+        threading.Thread(target=database.create_database_backup, args=(slug, "auto_save"), daemon=True).start()
     except Exception:
         pass
         
     return filename
 
 def update_version_in_place(slug: str, filename: str, data_store: dict) -> bool:
-    """Overwrites an existing version file with updated data and pushes to cloud."""
+    """Overwrites an existing version file with updated data and pushes to cloud with conflict backup."""
     if not slug or not filename or not data_store:
         return False
     ver_dir = _versions_dir(slug)
     filepath = os.path.join(ver_dir, filename)
     os.makedirs(ver_dir, exist_ok=True)
     
+    # Safe backup of existing file before overwrite to prevent data loss
+    if os.path.exists(filepath):
+        try:
+            bak_path = filepath + ".bak"
+            shutil.copy2(filepath, bak_path)
+        except Exception:
+            pass
+            
     save_data = dict(data_store)
     if "atamalar" in save_data:
         save_data["atamalar"] = sanitize_atamalar(save_data["atamalar"])
+        
+    now = datetime.now()
+    if "_version_meta" not in save_data:
+        save_data["_version_meta"] = {}
+    save_data["_version_meta"]["last_modified"] = now.isoformat()
         
     try:
         with open(filepath, "w", encoding="utf-8") as f:
@@ -553,11 +568,13 @@ def update_version_in_place(slug: str, filename: str, data_store: dict) -> bool:
             
         touch_institution_timestamp(slug)
             
-        # Push to RTDB in background thread
+        # Push to RTDB and trigger backup in background thread
         try:
             import threading
             from cloud_sync import push_version_to_rtdb
+            import database
             threading.Thread(target=push_version_to_rtdb, args=(slug, filename, save_data), daemon=True).start()
+            threading.Thread(target=database.create_database_backup, args=(slug, "in_place_update"), daemon=True).start()
         except Exception:
             pass
         return True

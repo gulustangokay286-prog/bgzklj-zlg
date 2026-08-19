@@ -312,3 +312,110 @@ def trigger_save_db(widget, data_store=None):
             pass
         
     return saved
+
+
+import zipfile
+from datetime import datetime
+import shutil
+
+def get_backup_dir():
+    b_dir = os.path.join(get_base_dir(), "backups")
+    os.makedirs(b_dir, exist_ok=True)
+    return b_dir
+
+def create_database_backup(slug=None, note="auto"):
+    """
+    Creates a full compressed ZIP backup snapshot of all institutions,
+    version files (.roz), metadata, and SQLite database.
+    Rotates automatically to keep the last 50 snapshots.
+    """
+    b_dir = get_backup_dir()
+    now_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    tag = slug if slug else "all_institutions"
+    zip_name = f"backup_{tag}_{now_str}_{note}.zip"
+    zip_path = os.path.join(b_dir, zip_name)
+    
+    try:
+        import version_store
+        inst_base = version_store._ensure_base()
+        
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+            # 1. Backup institutions & versions
+            if os.path.exists(inst_base):
+                for root, _, files in os.walk(inst_base):
+                    for f in files:
+                        if f.endswith((".roz", ".json", ".sqlite", ".bak")):
+                            full_p = os.path.join(root, f)
+                            rel_p = os.path.relpath(full_p, inst_base)
+                            zipf.write(full_p, arcname=os.path.join("institutions", rel_p))
+                            
+            # 2. Backup SQLite database
+            if os.path.exists(DB_PATH):
+                zipf.write(DB_PATH, arcname="bgz_local_database.sqlite")
+                
+        # Auto-rotate: keep latest 50 backups
+        all_backups = sorted([
+            os.path.join(b_dir, f) for f in os.listdir(b_dir) if f.startswith("backup_") and f.endswith(".zip")
+        ], key=os.path.getmtime)
+        
+        while len(all_backups) > 50:
+            oldest = all_backups.pop(0)
+            try:
+                os.remove(oldest)
+            except Exception:
+                pass
+                
+        return zip_path
+    except Exception as e:
+        print(f"[BACKUP_ERROR] Failed to create database backup: {e}")
+        return ""
+
+def restore_database_backup(backup_zip_path: str) -> bool:
+    """
+    Restores institutions, versions and SQLite database from a backup ZIP archive safely.
+    """
+    if not os.path.exists(backup_zip_path):
+        return False
+    try:
+        import version_store
+        inst_base = version_store._ensure_base()
+        
+        # Pre-restore safety backup
+        create_database_backup(note="pre_restore_snapshot")
+        
+        with zipfile.ZipFile(backup_zip_path, "r") as zipf:
+            for member in zipf.namelist():
+                if member.startswith("institutions/"):
+                    rel = member[len("institutions/"):]
+                    target = os.path.join(inst_base, rel)
+                    os.makedirs(os.path.dirname(target), exist_ok=True)
+                    with zipf.open(member) as src, open(target, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                elif member == "bgz_local_database.sqlite":
+                    with zipf.open(member) as src, open(DB_PATH, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                        
+        return True
+    except Exception as e:
+        print(f"[RESTORE_ERROR] Failed to restore database backup: {e}")
+        return False
+
+def list_database_backups() -> list:
+    """Lists all available backup files with timestamps, sizes, and notes."""
+    b_dir = get_backup_dir()
+    backups = []
+    if not os.path.exists(b_dir):
+        return []
+        
+    for f in sorted(os.listdir(b_dir), key=lambda x: os.path.getmtime(os.path.join(b_dir, x)), reverse=True):
+        if f.startswith("backup_") and f.endswith(".zip"):
+            fp = os.path.join(b_dir, f)
+            sz = os.path.getsize(fp)
+            mtime = datetime.fromtimestamp(os.path.getmtime(fp)).strftime("%Y-%m-%d %H:%M:%S")
+            backups.append({
+                "filename": f,
+                "path": fp,
+                "size_kb": round(sz / 1024, 1),
+                "created": mtime
+            })
+    return backups
