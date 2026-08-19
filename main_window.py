@@ -1447,6 +1447,9 @@ class MainWindow(QMainWindow):
         if target_entity is None:
             if hasattr(self._grid, "table"):
                 cur_r = self._grid.table.currentRow()
+                if cur_r < 0 and hasattr(self._grid, "_current_selected_pos") and self._grid._current_selected_pos:
+                    cur_r = self._grid._current_selected_pos[0]
+                
                 if cur_r >= 0:
                     if display_mode == "classes" and hasattr(self._grid, "class_list") and cur_r < len(self._grid.class_list):
                         target_entity = self._grid.class_list[cur_r]
@@ -1635,9 +1638,10 @@ class MainWindow(QMainWindow):
             if deficit > 0:
                 import random
                 import uuid
-                base_atamalar = list(scoped_atamalar)
+                rng = random.Random(target_entity)
+                base_atamalar = sorted(list(scoped_atamalar), key=lambda x: str(x.get("subject", "")))
                 while deficit > 0:
-                    chosen = random.choice(base_atamalar)
+                    chosen = rng.choice(base_atamalar)
                     c_name = chosen.get("class", "")
                     t_name = chosen.get("teacher", "")
                     s_name = chosen.get("subject", "")
