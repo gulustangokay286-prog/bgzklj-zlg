@@ -359,9 +359,18 @@ class TimetablePrintPreview(QDialog):
                 self.target_combo.addItem("Tüm Sınıflar (Çoklu Sayfa)")
                 for c in self.filtered_classes:
                     if c.get("ad"): self.target_combo.addItem(c.get("ad", ""))
-        elif "Tüm Sınıflar" in mode or "Tüm Öğretmenler" in mode or "Ders Yükü" in mode or ("Çarşaf Liste" in mode and not self.filters.get("classes") and not self.filters.get("teachers")) or "Tablo Olarak" in mode:
+        elif "Tüm Sınıflar" in mode or "Tüm Öğretmenler" in mode or "Ders Yükü" in mode or "Tablo Olarak" in mode:
             self.target_combo.addItem("Tümü (Çoklu Sayfa)")
             self.target_combo.setEnabled(False)
+        elif "Çarşaf Liste" in mode:
+            self.target_combo.setEnabled(True)
+            self.target_combo.addItem("Tümü (Çoklu Sayfa)")
+            if is_teacher_mode:
+                for t in self.filtered_teachers:
+                    if t.get("ad"): self.target_combo.addItem(t.get("ad", ""))
+            else:
+                for c in self.filtered_classes:
+                    if c.get("ad"): self.target_combo.addItem(c.get("ad", ""))
         elif is_teacher_mode:
             self.target_combo.setEnabled(True)
             self.target_combo.addItem("Tüm Öğretmenler (Çoklu Sayfa)")
@@ -1435,6 +1444,11 @@ class TimetablePrintPreview(QDialog):
         else:
             items = sorted(self.filtered_classes if self.filtered_classes else self.data_store.get("siniflar", []), key=natural_sort_key)
             
+        # Filter by combo box selection if not "Tümü"
+        sel_items = self.filters.get("selected_items", [])
+        if sel_items and "Tümü" not in sel_items[0]:
+            items = [item for item in items if item.get("ad", "") in sel_items]
+            
         if not items:
             items = [{"ad": "Örnek 1"}]
             
@@ -1523,7 +1537,8 @@ class TimetablePrintPreview(QDialog):
                 if is_teacher and item.get("kisa"):
                     display_name = item.get("kisa")
                 elif not is_teacher:
-                    display_name = target_name.replace("(ea)", "(EA)").replace("(say)", "(SAY)").replace("(soz)", "(SÖZ)").replace("(dil)", "(DİL)")
+                    import re
+                    display_name = re.sub(r'\s*\([^)]*\)\s*$', '', target_name).strip()
                 else:
                     display_name = target_name
                     
@@ -1616,14 +1631,18 @@ class TimetablePrintPreview(QDialog):
 
                             font_sz = 10.0
                             painter.setFont(make_font(font_sz, True))
-                            while painter.fontMetrics().horizontalAdvance(cell_text) > (block_w - 2) and font_sz > 7.0:
+                            # Add newlines instead of + if it's too long
+                            if "+" in cell_text and painter.fontMetrics().horizontalAdvance(cell_text) > (block_w - 2):
+                                cell_text = cell_text.replace("+", "\n")
+                            
+                            while painter.fontMetrics().horizontalAdvance(cell_text) > (block_w - 2) and font_sz > 4.5:
                                 font_sz -= 0.5
                                 painter.setFont(make_font(font_sz, True))
                             painter.setPen(QPen(QColor("#0F172A"), 1))
                             
                             painter.save()
                             painter.setClipRect(QRectF(px + 1, cur_y + 1, block_w - 2, row_h - 2))
-                            painter.drawText(QRectF(px + 1, cur_y + 1, block_w - 2, row_h - 2), Qt.AlignCenter, cell_text)
+                            painter.drawText(QRectF(px + 1, cur_y + 1, block_w - 2, row_h - 2), Qt.AlignCenter | Qt.TextWordWrap, cell_text)
                             painter.restore()
                             
                         p_offset += span
