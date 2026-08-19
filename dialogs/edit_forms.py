@@ -1041,6 +1041,14 @@ class LessonAssignmentDialog(QDialog):
         row_data["lbl_badge"].setText("Atanan Sınıflar: " + ", ".join(badge_parts))
 
     def _on_tip_changed(self, row_data):
+        new_tip = row_data["cb_tip"].currentText().strip()
+        configs = row_data.get("class_configs", {})
+        for c in list(configs.keys()):
+            configs[c]["type"] = new_tip
+            if "+" in new_tip:
+                configs[c]["duration"] = sum(int(x) for x in new_tip.split("+") if x.strip().isdigit())
+            elif new_tip.isdigit():
+                configs[c]["duration"] = int(new_tip)
         self._update_row_badge(row_data)
         self._update_ozet()
 
@@ -1374,12 +1382,12 @@ class LessonAssignmentDialog(QDialog):
                     duration = int(type_val) if type_val.isdigit() else 2
                     
                 assignments.append({
-                    "teacher": teacher_name,
-                    "subject": subj,
-                    "class": comb_str,
-                    "duration": duration,
-                    "type": type_val,
-                    "color": get_subject_color(subj),
+                    "ogretmen": teacher_name,
+                    "ders": subj,
+                    "sinif": comb_str,
+                    "ders_sayisi": duration,
+                    "dagilim": type_val,
+                    "renk": get_subject_color(subj),
                     "is_combined": True,
                     "combined_classes": list(comb_classes)
                 })
@@ -1398,12 +1406,12 @@ class LessonAssignmentDialog(QDialog):
                         duration = int(type_val) if type_val.isdigit() else 2
                         
                     assignments.append({
-                        "teacher": teacher_name,
-                        "subject": subj,
-                        "class": c_name,
-                        "duration": duration,
-                        "type": type_val,
-                        "color": get_subject_color(subj),
+                        "ogretmen": teacher_name,
+                        "ders": subj,
+                        "sinif": c_name,
+                        "ders_sayisi": duration,
+                        "dagilim": type_val,
+                        "renk": get_subject_color(subj),
                         "is_combined": False,
                         "combined_classes": []
                     })
@@ -1434,7 +1442,7 @@ class LessonAssignmentDialog(QDialog):
             # Remove old assignments for this teacher
             self.data_store["atamalar"] = [
                 a for a in self.data_store["atamalar"]
-                if format_tr_name(a.get("teacher", "")) != teacher_name
+                if format_tr_name(a.get("ogretmen") or a.get("teacher", "")) != teacher_name
             ]
             
             # Add new assignments
@@ -1442,7 +1450,7 @@ class LessonAssignmentDialog(QDialog):
             
             # Clean up grid placements, auto_schedule_results, and yerlesim for removed assignments
             active_tuples = {
-                (format_tr_name(a.get("subject", "")), format_tr_name(a.get("class", "")), teacher_name)
+                (format_tr_name(a.get("ders") or a.get("subject", "")), format_tr_name(a.get("sinif") or a.get("class", "")), teacher_name)
                 for a in new_data
             }
             
