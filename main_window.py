@@ -1502,6 +1502,19 @@ class MainWindow(QMainWindow):
         else:
             scoped_atamalar = atamalar
             
+        def matches_subject(s1, s2):
+            if not s1 or not s2: return False
+            if s1 == s2: return True
+            f1 = format_tr_name(s1).replace(" ", "")
+            f2 = format_tr_name(s2).replace(" ", "")
+            if f1 == f2: return True
+            n1 = normalize_clean(s1).replace(" ", "")
+            n2 = normalize_clean(s2).replace(" ", "")
+            if n1 == n2: return True
+            if (len(f1) >= 3 and len(f2) >= 3) and (f1.startswith(f2) or f2.startswith(f1) or n1.startswith(n2) or n2.startswith(n1)):
+                return True
+            return False
+
         unplaced = []
         for idx, atama in enumerate(scoped_atamalar):
             s_name = (atama.get("subject") or atama.get("ders") or "Ders").strip()
@@ -1536,14 +1549,17 @@ class MainWindow(QMainWindow):
                     if p_item["remaining"] <= 0:
                         continue
                     p_s = p_item["subject"]
-                    s_match = (format_tr_name(p_s) == s_fmt or normalize_clean(p_s) == normalize_clean(s_name) or p_s == s_name)
+                    s_match = matches_subject(p_s, s_name)
                     if not s_match:
                         continue
-                    if t_name and p_item["teacher"]:
-                        p_t = p_item["teacher"]
-                        t_match = (format_tr_name(p_t) == t_fmt or normalize_clean(p_t) == normalize_clean(t_name) or p_t == t_name or _matches_teacher(p_t, t_name))
-                        if not t_match:
-                            continue
+                    
+                    # If in teacher view or teacher-scoped filter, require teacher match
+                    if display_mode == "teachers" or (not target_entity and t_name):
+                        if t_name and p_item["teacher"]:
+                            p_t = p_item["teacher"]
+                            t_match = (format_tr_name(p_t) == t_fmt or normalize_clean(p_t) == normalize_clean(t_name) or p_t == t_name or _matches_teacher(p_t, t_name))
+                            if not t_match:
+                                continue
                             
                     # Class match
                     if target_classes:

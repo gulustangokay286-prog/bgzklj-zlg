@@ -1863,10 +1863,8 @@ class TimetableGrid(QWidget):
             }
         """)
 
-        # Connect click, cell change, and hover for info panel & unplaced dock instant update
+        # Connect explicit click and header click for info panel & unplaced dock update
         self.table.cellClicked.connect(self._on_cell_clicked)
-        self.table.currentCellChanged.connect(lambda r, c, pr, pc: self._on_cell_clicked(r, c))
-        self.table.cellEntered.connect(self._on_cell_clicked)
         self.table.verticalHeader().sectionClicked.connect(self._on_vertical_header_clicked)
         
         layout.addWidget(self.table, stretch=1)
