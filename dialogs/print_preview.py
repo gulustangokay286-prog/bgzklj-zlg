@@ -62,34 +62,32 @@ def get_subject_badge(subj_name, data_store=None):
     base_up = base_name.translate(tr_map).upper()
     
     STANDARDS = [
-        ("MATEMATİK", "MATE"), ("MATEMATIK", "MATE"), ("MATE", "MATE"), ("MAT", "MATE"),
-        ("GEOMETRİ", "GEOM"), ("GEOMETRI", "GEOM"), ("GEOM", "GEOM"), ("GEO", "GEOM"),
-        ("COĞRAFYA", "COĞRAF"), ("COGRAFYA", "COĞRAF"), ("COĞRAF", "COĞRAF"), ("COĞ", "COĞRAF"), ("COG", "COĞRAF"),
+        ("MATEMATİK", "MAT"), ("MATEMATIK", "MAT"), ("MATE", "MAT"), ("MAT", "MAT"),
+        ("GEOMETRİ", "GEOMETRİ"), ("GEOMETRI", "GEOMETRİ"), ("GEOM", "GEOMETRİ"), ("GEO", "GEOMETRİ"),
+        ("COĞRAFYA", "COĞRAFYA"), ("COGRAFYA", "COĞRAFYA"), ("COĞRAF", "COĞRAFYA"), ("COĞ", "COĞRAFYA"), ("COG", "COĞRAFYA"),
         ("BEDEN EĞİTİMİ VE SPOR", "BEDEN"), ("BEDEN EĞİTİMİ", "BEDEN"), ("BEDEN", "BEDEN"), ("BED", "BEDEN"),
         ("FİZİK", "FİZİK"), ("FIZIK", "FİZİK"), ("FİZ", "FİZİK"), ("FIZ", "FİZİK"),
         ("KİMYA", "KİMYA"), ("KIMYA", "KİMYA"), ("KİM", "KİMYA"), ("KIM", "KİMYA"),
         ("BİYOLOJİ", "BİYO"), ("BIYOLOJI", "BİYO"), ("BİYO", "BİYO"), ("BIYO", "BİYO"), ("BİY", "BİYO"), ("BIY", "BİYO"),
-        ("TÜRK DİLİ VE EDEBİYATI", "TDE"), ("EDEBİYAT", "EDEB"), ("EDEBIYAT", "EDEB"), ("TÜRKÇE", "TÜR"), ("TURKCE", "TÜR"), ("TRK", "TÜR"),
+        ("TÜRK DİLİ VE EDEBİYATI", "EDEBİYAT"), ("EDEBİYAT", "EDEBİYAT"), ("EDEBIYAT", "EDEBİYAT"), ("TÜRKÇE", "TÜRKÇE"), ("TURKCE", "TÜRKÇE"), ("TRK", "TÜRKÇE"),
         ("TARİH", "TARİH"), ("TARIH", "TARİH"), ("TAR", "TARİH"),
         ("DİN KÜLTÜRÜ VE AHLAK BİLGİSİ", "DİN"), ("DİN KÜLTÜRÜ", "DİN"), ("DİN", "DİN"), ("DIN", "DİN"),
-        ("FELSEFE", "FELS"), ("FELS", "FELS"), ("FEL", "FELS"),
-        ("İNGİLİZCE", "İNG"), ("INGILIZCE", "İNG"), ("İNG", "İNG"), ("ING", "İNG"),
-        ("ALMANCA", "ALM"), ("ALM", "ALM"),
+        ("FELSEFE", "FELSEFE"), ("FELS", "FELSEFE"), ("FEL", "FELSEFE"),
+        ("İNGİLİZCE", "İNGİLİZCE"), ("INGILIZCE", "İNGİLİZCE"), ("İNG", "İNGİLİZCE"), ("ING", "İNGİLİZCE"),
+        ("ALMANCA", "ALMANCA"), ("ALM", "ALMANCA"),
         ("GÖRSEL SANATLAR", "GÖRSEL"), ("GÖRSEL", "GÖRSEL"), ("RESİM", "GÖRSEL"), ("GÖR", "GÖRSEL"), ("GOR", "GÖRSEL"),
         ("MÜZİK", "MÜZİK"), ("MUZIK", "MÜZİK"), ("MÜZ", "MÜZİK"), ("MUZ", "MÜZİK"),
-        ("REHBERLİK", "REHBER"), ("REHBERLIK", "REHBER"), ("REH", "REHBER"),
-        ("PARAGRAF", "PARAG"), ("PRG", "PARAG")
+        ("REHBERLİK", "REHBERLİK"), ("REHBERLIK", "REHBERLİK"), ("REH", "REHBERLİK"),
+        ("PARAGRAF", "PARAGRAF"), ("PRG", "PARAGRAF"), ("PAR", "PARAGRAF")
     ]
     
     for k, v in STANDARDS:
         if base_up == k or base_up.startswith(k):
-            res = f"{v}{num_str}".strip()
-            return res[:6]
+            return f"{v}{num_str}".strip()
             
     # Fallback to alphanumeric prefix
     clean_alpha = "".join(c for c in base_up if c.isalnum())
-    res = f"{clean_alpha[:4]}{num_str}".strip()
-    return res[:6]
+    return f"{clean_alpha[:5]}{num_str}".strip()
 
 def format_teacher_display_name(t_name, data_store=None):
     if not t_name or t_name in ["—", "Atanmadı", "❌ Atama Yok"]:
@@ -739,9 +737,15 @@ class TimetablePrintPreview(QDialog):
                     
                     # Line 1: Subject Short Code in Bold (e.g. BİYO 1, BED, GÖR, MAT)
                     short_subj = get_subject_badge(sname, self.data_store)
-                    painter.setFont(make_font(20 if is_single_page else 10, True))
+                    
+                    # Dynamically shrink font if it's a single hour block and subject name is long
+                    subj_font_sz = 20 if is_single_page else 10
+                    if dur == 1 and len(short_subj) >= 6:
+                        subj_font_sz = 15 if is_single_page else 8
+                        
+                    painter.setFont(make_font(subj_font_sz, True))
                     painter.setPen(QPen(QColor("#000000"), 1))
-                    painter.drawText(QRectF(cx + 2, ry + 2, block_w - 4, row_h * 0.52), Qt.AlignCenter | Qt.AlignVCenter, short_subj)
+                    painter.drawText(QRectF(cx + 1, ry + 2, block_w - 2, row_h * 0.52), Qt.AlignCenter | Qt.AlignVCenter, short_subj)
                     
                     # Line 2: Teacher / Class Name
                     if other_name:
@@ -756,10 +760,15 @@ class TimetablePrintPreview(QDialog):
                                     display_other = f"{parts[0]}+{parts[1]}"
                             else:
                                 display_other = other_name.strip()
+                        
+                        # Dynamically shrink font if it's a single hour block (so 11C+11D fits)
+                        other_font_sz = 15 if is_single_page else 7
+                        if dur == 1 and len(display_other) > 6:
+                            other_font_sz = 12 if is_single_page else 6
                             
-                        painter.setFont(make_font(15 if is_single_page else 7.5, False))
+                        painter.setFont(make_font(other_font_sz, False))
                         painter.setPen(QPen(QColor("#111111"), 1))
-                        painter.drawText(QRectF(cx + 2, ry + row_h * 0.5, block_w - 4, row_h * 0.46), Qt.AlignCenter | Qt.AlignVCenter, display_other)
+                        painter.drawText(QRectF(cx + 1, ry + row_h * 0.5, block_w - 2, row_h * 0.46), Qt.AlignCenter | Qt.AlignVCenter, display_other)
                         
                     is_comb_lesson = bool(lesson.get("is_combined") or ("+" in str(lesson.get("class_name", ""))) or ("," in str(lesson.get("class_name", ""))))
                     if is_comb_lesson:
