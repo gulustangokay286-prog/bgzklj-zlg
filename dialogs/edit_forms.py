@@ -4075,14 +4075,20 @@ class ClassComprehensiveAssignmentDialog(QDialog):
                 lay.setSpacing(2)
                 lay.setAlignment(Qt.AlignCenter)
                 lay.addWidget(cb)
-                if subtext:
-                    lbl = QLabel(subtext)
-                    lbl.setAlignment(Qt.AlignCenter)
-                    if is_active:
-                        lbl.setStyleSheet("color: #2563EB; font-weight: bold; font-size: 11px;")
-                    else:
-                        lbl.setStyleSheet("color: #94A3B8; font-style: italic; font-size: 10.5px;")
-                    lay.addWidget(lbl)
+                
+                lbl = QLabel(subtext if subtext else "")
+                lbl.setAlignment(Qt.AlignCenter)
+                if is_active:
+                    lbl.setStyleSheet("color: #2563EB; font-weight: bold; font-size: 11px;")
+                    # Dynamically update the label instantly when typing or selecting!
+                    def _update_lbl(txt):
+                        lbl.setText(_calc_hours_subtext(txt))
+                    if isinstance(cb, QComboBox):
+                        cb.currentTextChanged.connect(_update_lbl)
+                else:
+                    lbl.setStyleSheet("color: #94A3B8; font-style: italic; font-size: 10.5px;")
+                
+                lay.addWidget(lbl)
                 return w
 
             # 2. Sütun 2: {self.class_name} Saati (Separate Hour)
@@ -4170,12 +4176,14 @@ class ClassComprehensiveAssignmentDialog(QDialog):
             
             if assigned_list:
                 btn_edit = QPushButton("Düzenle")
+                btn_edit.setAutoDefault(False)
                 btn_edit.setFixedSize(68, 24)
                 btn_edit.setStyleSheet("background: #EFF6FF; color: #1D4ED8; border: 1px solid #93C5FD; border-radius: 4px; font-size: 10px; font-weight: bold; min-height: 0; max-height: 24px; padding: 0 4px;")
                 btn_edit.clicked.connect(lambda chk=False, s=subj: self._edit_subject_assignment(s))
                 cell_lay.addWidget(btn_edit)
                 
                 btn_remove = QPushButton("Kaldır")
+                btn_remove.setAutoDefault(False)
                 btn_remove.setToolTip("Bu dersin atamasını kaldır")
                 btn_remove.setFixedSize(52, 24)
                 btn_remove.setStyleSheet("background: #FEF2F2; color: #DC2626; border: 1px solid #FECACA; border-radius: 4px; font-size: 10px; font-weight: bold; min-height: 0; max-height: 24px; padding: 0 4px;")
@@ -4183,12 +4191,14 @@ class ClassComprehensiveAssignmentDialog(QDialog):
                 cell_lay.addWidget(btn_remove)
             else:
                 btn_add = QPushButton("+ Ata")
+                btn_add.setAutoDefault(False)
                 btn_add.setFixedSize(52, 24)
                 btn_add.setStyleSheet("background: #F8FAFC; color: #2563EB; border: 1px solid #CBD5E1; border-radius: 4px; font-size: 10px; font-weight: bold; min-height: 0; max-height: 24px; padding: 0 6px;")
                 btn_add.clicked.connect(lambda chk=False, s=subj: self._edit_subject_assignment(s))
                 cell_lay.addWidget(btn_add)
                 
                 btn_remove = QPushButton("Kaldır")
+                btn_remove.setAutoDefault(False)
                 btn_remove.setToolTip("Bu dersin atamasını kaldır")
                 btn_remove.setFixedSize(52, 24)
                 btn_remove.setStyleSheet("background: #F1F5F9; color: #94A3B8; border: 1px solid #E2E8F0; border-radius: 4px; font-size: 10px; font-weight: bold; min-height: 0; max-height: 24px; padding: 0 4px;")
