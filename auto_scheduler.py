@@ -96,7 +96,6 @@ class AutoSchedulerWorker(QThread):
         self._is_running = True
 
     def run(self):
-        HARD_SUBJECTS = {"MATEMATİK", "FİZİK", "KİMYA", "BİYOLOJİ", "GEOMETRİ", "MAT", "FİZ", "KİM", "BİYO", "GEO"}
         settings = self.data_store.get("settings", {})
         days = settings.get("days")
         if not days:
@@ -259,23 +258,21 @@ class AutoSchedulerWorker(QThread):
                 t_toff_dict[normalize_clean(t_ad)] = toff
                 t_toff_dict[format_tr_name(t_ad)] = toff
                 t_toff_dict[t_ad] = toff
-                
-        # Build cards across target classes
+
+        # Sadece GERÇEK ders kartlarını oluştur (Asla sahte Etüt üretme)
         all_cards = []
         card_id = 0
+        cards_by_class = defaultdict(list)
         total_target_hours = 0
         total_placed_hours = 0
         total_scheduled_placements = list(other_classes_placements)
 
-        # Pre-populate manual locked lessons
-        manual_by_class = defaultdict(dict) # cn -> (d, p) -> manual_item
+        # Manuel kilitli dersleri ekle
         for m in target_class_manual:
             cn = m["class_name"]
             d = m["day_idx"]
             p = m["period"]
             dur = m["duration"]
-            for off in range(dur):
-                manual_by_class[cn][(d, p + off)] = m
             total_scheduled_placements.append({
                 "period": p, "day": d, "row": p, "col": d,
                 "subject_name": m["subject_name"], "subject": m["subject_name"],
@@ -288,7 +285,6 @@ class AutoSchedulerWorker(QThread):
 
         for cn in classes_to_schedule:
             asgns = [a for a in assignments if matches_class(a.get("class") or a.get("sinif") or a.get("class_name") or "", cn)]
-            c_blocks = []
             
             for asgn in asgns:
                 raw_type = str(asgn.get("dagilim") or asgn.get("type") or "").strip()
@@ -298,220 +294,209 @@ class AutoSchedulerWorker(QThread):
                 h_dur = int(asgn.get("ders_sayisi") or asgn.get("duration") or asgn.get("saat") or asgn.get("toplam_saat") or 2)
                 block_durs = parse_distribution_parts(raw_type, h_dur)
                 for b_dur in block_durs:
-                    c_blocks.append({
+                    card = {
                         "id": card_id, "class": cn, "subject": s_name, "teacher": t_name,
                         "duration": b_dur, "is_combined": is_comb
-                    })
+                    }
+                    cards_by_class[cn].append(card)
+                    all_cards.append(card)
                     card_id += 1
 
-            # Reduce manual hours
-            occupied_count = len(manual_by_class[cn])
-            assigned_h = sum(b["duration"] for b in c_blocks) + occupied_count
-            total_target_hours += (days_count * periods_count) if self.fill_empty else assigned_h
+            total_target_hours += sum(c["duration"] for c in cards_by_class[cn])
 
-            if self.fill_empty:
-                deficit = (days_count * periods_count) - (sum(b["duration"] for b in c_blocks) + occupied_count)
-                while deficit > 0:
-                    b_sz = 2 if deficit >= 2 else 1
-                    c_blocks.append({
-                        "id": card_id, "class": cn, "subject": "Etüt / Serbest Çalışma",
-                        "teacher": "", "duration": b_sz, "is_combined": False
-                    })
-                    card_id += 1
-                    deficit -= b_sz
-
-            all_cards.extend(c_blocks)
-
-        # Group cards by class and schedule with Min-Conflicts
-        placed_cards_map = {c["id"]: c for c in all_cards}
-        class_grid = {cn: {} for cn in classes_to_schedule} # cn -> (d, p) -> cid
-        card_placement = {} # cid -> (d, p)
-
-        # Populate manual slots in class_grid
-        for cn in classes_to_schedule:
-            for (d, p), m_item in manual_by_class[cn].items():
-                class_grid[cn][(d, p)] = -1 # marked as occupied
-
-        # Initial Greedy Construction
-        cards_by_class = defaultdict(list)
-        for c in all_cards:
-            cards_by_class[c["class"]].append(c)
-
-        for cn in classes_to_schedule:
-            c_cards = cards_by_class[cn]
-            c_cards.sort(key=lambda x: (-x["duration"], x["subject"]))
-            day_load = [0] * days_count
-            unplaced = []
-
-            for c in c_cards:
-                dur = c["duration"]
-                s = c["subject"]
-                t = c["teacher"]
-                cid = c["id"]
-
-                best_slot = None
-                best_cost = 999999
-
-                for d in range(days_count):
-                    for p in range(periods_count - dur + 1):
-                        if any((d, p + off) in class_grid[cn] for off in range(dur)):
-                            continue
-                        cost = day_load[d] * 10
-                        # Teacher conflict penalty
-                        if t:
-                            for other_cn in classes_to_schedule:
-                                if other_cn == cn: continue
-                                for off in range(dur):
-                                    occ_id = class_grid[other_cn].get((d, p + off))
-                                    if occ_id is not None and occ_id != -1:
-                                        occ_card = placed_cards_map.get(occ_id)
-                                        if occ_card and occ_card["teacher"] == t:
-                                            cost += 1000
-                            # Global teacher occupied
-                            for off in range(dur):
-                                if (t, d, p + off) in global_teacher_occupied:
-                                    cost += 2000
-                                t_toff = t_toff_dict.get(normalize_clean(t)) or t_toff_dict.get(format_tr_name(t))
-                                if t_toff and d < len(t_toff) and (p + off) < len(t_toff[d]) and t_toff[d][p + off] == 0:
-                                    cost += 3000
-
-                        # Same day subject penalty
-                        same_day_s = sum(1 for (gd, gp), gcid in class_grid[cn].items() if gd == d and gcid != -1 and placed_cards_map.get(gcid, {}).get("subject") == s)
-                        cost += same_day_s * 250
-                        
-                        if cost < best_cost:
-                            best_cost = cost
-                            best_slot = (d, p)
-
-                if best_slot:
-                    d, p = best_slot
-                    for off in range(dur):
-                        class_grid[cn][(d, p + off)] = cid
-                    card_placement[cid] = (d, p)
-                    day_load[d] += dur
-                else:
-                    unplaced.append(c)
-
-            # Fit unplaced by splitting
-            for c in unplaced:
-                dur = c["duration"]
-                cid = c["id"]
-                free_cells = [(d, p) for d in range(days_count) for p in range(periods_count) if (d, p) not in class_grid[cn]]
-                if len(free_cells) >= dur:
-                    for off in range(dur):
-                        d, p = free_cells[off]
-                        sub_cid = cid if off == 0 else card_id
-                        if off > 0:
-                            card_id += 1
-                            sub_card = dict(c)
-                            sub_card["id"] = sub_cid
-                            sub_card["duration"] = 1
-                            placed_cards_map[sub_cid] = sub_card
-                        else:
-                            c["duration"] = 1
-                        class_grid[cn][(d, p)] = sub_cid
-                        card_placement[sub_cid] = (d, p)
-
-        # Min-Conflicts Local Search Repair
-        def get_conflicts():
-            t_slots = defaultdict(list)
-            for cid, (d, p) in card_placement.items():
-                card = placed_cards_map.get(cid)
-                if not card or not card["teacher"]: continue
-                dur = card["duration"]
-                t = card["teacher"]
-                for off in range(dur):
-                    t_slots[(t, d, p + off)].append(cid)
-                    if (t, d, p + off) in global_teacher_occupied:
-                        t_slots[(t, d, p + off)].append(-999) # penalty
-                    t_toff = t_toff_dict.get(normalize_clean(t)) or t_toff_dict.get(format_tr_name(t))
-                    if t_toff and d < len(t_toff) and (p + off) < len(t_toff[d]) and t_toff[d][p + off] == 0:
-                        t_slots[(t, d, p + off)].append(-999)
-            conf_count = sum(len(cids) - 1 for cids in t_slots.values() if len(cids) > 1)
-            return conf_count, t_slots
-
-        conf_count, t_slots = get_conflicts()
-
-        for it in range(2500):
+        # Sıfır Boşluklu (Penceresiz) ve Çakışmasız Çizelge Motoru
+        best_placements = []
+        min_collisions = 999999
+        
+        for restart in range(4):
             if not self._is_running:
                 return
-            if conf_count == 0:
-                break
-            conf_slots = [s for s, cids in t_slots.items() if len(cids) > 1]
-            if not conf_slots: break
-            slot = random.choice(conf_slots)
-            valid_cids = [x for x in t_slots[slot] if x != -999]
-            if not valid_cids: continue
-            cid = random.choice(valid_cids)
-            card = placed_cards_map.get(cid)
-            if not card: continue
-            cn = card["class"]
-            dur = card["duration"]
-            if cid not in card_placement: continue
-            orig_d, orig_p = card_placement[cid]
-
-            # Pick random target slot in same class
-            target_d = random.randint(0, days_count - 1)
-            target_p = random.randint(0, periods_count - dur)
-            if target_d == orig_d and target_p == orig_p: continue
-
-            target_cids = list(set(class_grid[cn].get((target_d, target_p + off)) for off in range(dur) if (target_d, target_p + off) in class_grid[cn]))
-            target_cids = [x for x in target_cids if x is not None and x != cid and x != -1]
-
-            if len(target_cids) <= 1:
-                other_cid = target_cids[0] if target_cids else None
-                other_card = placed_cards_map.get(other_cid) if other_cid is not None else None
-                if other_card is None or other_card["duration"] == dur:
-                    for off in range(dur):
-                        class_grid[cn].pop((orig_d, orig_p + off), None)
-                        if other_cid is not None:
-                            class_grid[cn].pop((target_d, target_p + off), None)
-                    for off in range(dur):
-                        class_grid[cn][(target_d, target_p + off)] = cid
-                        if other_cid is not None:
-                            class_grid[cn][(orig_d, orig_p + off)] = other_cid
-                    card_placement[cid] = (target_d, target_p)
-                    if other_cid is not None:
-                        card_placement[other_cid] = (orig_d, orig_p)
-                    new_conf, new_slots = get_conflicts()
-                    if new_conf < conf_count or (new_conf == conf_count and random.random() < 0.08):
-                        conf_count = new_conf
-                        t_slots = new_slots
+                
+            class_day_blocks = {cn: [[] for _ in range(days_count)] for cn in cards_by_class}
+            cards_map = {c["id"]: dict(c) for c_list in cards_by_class.values() for c in c_list}
+            
+            # Günlük kapasiteleri sınıfın gerçek haftalık saatine göre tam dengeli böl
+            for cn, c_cards in cards_by_class.items():
+                total_h = sum(c["duration"] for c in c_cards)
+                base_d = total_h // days_count
+                rem_d = total_h % days_count
+                daily_caps = [base_d + (1 if d < rem_d else 0) for d in range(days_count)]
+                
+                shuffled_cards = list(c_cards)
+                if restart > 0:
+                    random.shuffle(shuffled_cards)
+                shuffled_cards.sort(key=lambda x: -x["duration"])
+                
+                day_sums = [0] * days_count
+                day_cards = [[] for _ in range(days_count)]
+                
+                for c in shuffled_cards:
+                    dur = c["duration"]
+                    s = c["subject"]
+                    cid = c["id"]
+                    
+                    best_d = None
+                    best_pen = 999999
+                    
+                    days_order = list(range(days_count))
+                    if restart > 0:
+                        random.shuffle(days_order)
+                        
+                    for d in days_order:
+                        if day_sums[d] + dur <= daily_caps[d]:
+                            subj_count = sum(1 for xid in day_cards[d] if cards_map[xid]["subject"] == s)
+                            pen = (subj_count * 100) + day_sums[d]
+                            if pen < best_pen:
+                                best_pen = pen
+                                best_d = d
+                                
+                    if best_d is not None:
+                        day_cards[best_d].append(cid)
+                        day_sums[best_d] += dur
                     else:
-                        # Revert
-                        for off in range(dur):
-                            class_grid[cn].pop((target_d, target_p + off), None)
-                            if other_cid is not None:
-                                class_grid[cn].pop((orig_d, orig_p + off), None)
-                        for off in range(dur):
-                            class_grid[cn][(orig_d, orig_p + off)] = cid
-                            if other_cid is not None:
-                                class_grid[cn][(target_d, target_p + off)] = other_cid
-                        card_placement[cid] = (orig_d, orig_p)
-                        if other_cid is not None:
-                            card_placement[other_cid] = (target_d, target_p)
+                        rem_dur = dur
+                        while rem_dur > 0:
+                            placed_one = False
+                            for d in range(days_count):
+                                if day_sums[d] < daily_caps[d]:
+                                    sub_id = cid if rem_dur == dur else card_id
+                                    if sub_id != cid:
+                                        card_id += 1
+                                        sub_card = dict(c)
+                                        sub_card["id"] = sub_id
+                                        sub_card["duration"] = 1
+                                        cards_map[sub_id] = sub_card
+                                    else:
+                                        cards_map[sub_id]["duration"] = 1
+                                    day_cards[d].append(sub_id)
+                                    day_sums[d] += 1
+                                    rem_dur -= 1
+                                    placed_one = True
+                                    break
+                            if not placed_one:
+                                break
+                                
+                class_day_blocks[cn] = day_cards
 
-        # Assemble final scheduled placements
-        for cid, (d, p) in card_placement.items():
-            card = placed_cards_map.get(cid)
-            if not card: continue
-            dur = card["duration"]
-            cn = card["class"]
-            s_name = card["subject"]
-            t_name = card["teacher"]
-            is_comb = card.get("is_combined", False)
-            total_placed_hours += dur
+            def evaluate_schedule():
+                t_slots = defaultdict(list)
+                card_locs = {}
+                for cn, d_list in class_day_blocks.items():
+                    for d in range(days_count):
+                        cur_p = 0
+                        for cid in d_list[d]:
+                            card = cards_map[cid]
+                            dur = card["duration"]
+                            t = card["teacher"]
+                            card_locs[cid] = (cn, d, cur_p)
+                            if t:
+                                for off in range(dur):
+                                    t_slots[(t, d, cur_p + off)].append(cid)
+                                    if (t, d, cur_p + off) in global_teacher_occupied:
+                                        t_slots[(t, d, cur_p + off)].append(-999)
+                                    t_toff = t_toff_dict.get(normalize_clean(t)) or t_toff_dict.get(format_tr_name(t))
+                                    if t_toff and d < len(t_toff) and (cur_p + off) < len(t_toff[d]) and t_toff[d][cur_p + off] == 0:
+                                        t_slots[(t, d, cur_p + off)].append(-999)
+                            cur_p += dur
+                conf_count = sum(len(cids) - 1 for cids in t_slots.values() if len(cids) > 1)
+                return conf_count, t_slots, card_locs
 
-            total_scheduled_placements.append({
-                "period": p, "day": d, "row": p, "col": d,
-                "subject_name": s_name, "subject": s_name,
-                "teacher_name": t_name, "teacher": t_name,
-                "class_name": cn, "class": cn,
-                "duration": dur, "is_combined": is_comb,
-                "block_id": str(_uuid.uuid4())[:12]
-            })
+            conf_count, t_slots, card_locs = evaluate_schedule()
 
-        # Emit progress
+            for it in range(3500):
+                if not self._is_running:
+                    return
+                if conf_count == 0:
+                    break
+                    
+                conf_slots = [slot for slot, cids in t_slots.items() if len(cids) > 1]
+                if not conf_slots: break
+                slot = random.choice(conf_slots)
+                valid_cids = [x for x in t_slots[slot] if x != -999]
+                if not valid_cids: continue
+                cid = random.choice(valid_cids)
+                card = cards_map[cid]
+                cn, orig_d, orig_p = card_locs[cid]
+                
+                move_type = random.choice(["reorder_day", "swap_same_dur", "swap_same_dur", "rotate_day"])
+                
+                if move_type == "reorder_day":
+                    d_cards = class_day_blocks[cn][orig_d]
+                    if len(d_cards) >= 2:
+                        idx1 = d_cards.index(cid)
+                        idx2 = random.randint(0, len(d_cards) - 1)
+                        if idx1 != idx2:
+                            d_cards[idx1], d_cards[idx2] = d_cards[idx2], d_cards[idx1]
+                            new_conf, new_slots, new_locs = evaluate_schedule()
+                            if new_conf < conf_count or (new_conf == conf_count and random.random() < 0.08):
+                                conf_count = new_conf
+                                t_slots = new_slots
+                                card_locs = new_locs
+                            else:
+                                d_cards[idx1], d_cards[idx2] = d_cards[idx2], d_cards[idx1]
+                                
+                elif move_type == "swap_same_dur":
+                    target_d = random.randint(0, days_count - 1)
+                    if target_d != orig_d:
+                        target_cards = class_day_blocks[cn][target_d]
+                        same_dur_cids = [x for x in target_cards if cards_map[x]["duration"] == card["duration"]]
+                        if same_dur_cids:
+                            other_cid = random.choice(same_dur_cids)
+                            idx1 = class_day_blocks[cn][orig_d].index(cid)
+                            idx2 = target_cards.index(other_cid)
+                            
+                            class_day_blocks[cn][orig_d][idx1] = other_cid
+                            class_day_blocks[cn][target_d][idx2] = cid
+                            
+                            new_conf, new_slots, new_locs = evaluate_schedule()
+                            if new_conf < conf_count or (new_conf == conf_count and random.random() < 0.08):
+                                conf_count = new_conf
+                                t_slots = new_slots
+                                card_locs = new_locs
+                            else:
+                                class_day_blocks[cn][orig_d][idx1] = cid
+                                class_day_blocks[cn][target_d][idx2] = other_cid
+
+                elif move_type == "rotate_day":
+                    d_cards = class_day_blocks[cn][orig_d]
+                    if len(d_cards) >= 3:
+                        rot = random.choice([1, -1])
+                        class_day_blocks[cn][orig_d] = d_cards[rot:] + d_cards[:rot]
+                        new_conf, new_slots, new_locs = evaluate_schedule()
+                        if new_conf < conf_count or (new_conf == conf_count and random.random() < 0.08):
+                            conf_count = new_conf
+                            t_slots = new_slots
+                            card_locs = new_locs
+                        else:
+                            class_day_blocks[cn][orig_d] = d_cards
+
+            restart_placements = []
+            for cn, d_list in class_day_blocks.items():
+                for d in range(days_count):
+                    cur_p = 0
+                    for cid in d_list[d]:
+                        card = cards_map[cid]
+                        dur = card["duration"]
+                        restart_placements.append({
+                            "class_name": cn, "class": cn,
+                            "subject_name": card["subject"], "subject": card["subject"],
+                            "teacher_name": card["teacher"], "teacher": card["teacher"],
+                            "day": d, "day_idx": d, "period": cur_p, "row": cur_p, "col": d,
+                            "duration": dur, "is_combined": card.get("is_combined", False),
+                            "block_id": str(_uuid.uuid4())[:12]
+                        })
+                        cur_p += dur
+
+            if conf_count < min_collisions:
+                min_collisions = conf_count
+                best_placements = restart_placements
+                
+            if min_collisions == 0:
+                break
+
+        total_placed_hours += sum(p["duration"] for p in best_placements)
+        total_scheduled_placements.extend(best_placements)
+
         self.progress_updated.emit(total_placed_hours, total_target_hours)
 
         # Cross conflict scan
