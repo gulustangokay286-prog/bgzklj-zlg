@@ -776,15 +776,24 @@ def get_cross_institution_teacher_busy_slots(exclude_slug: str = None) -> dict:
             
             for ext in range(dur):
                 slot_key = (t_norm, day, period + ext)
-                busy_slots[slot_key] = {
-                    "institution_name": inst["name"],
-                    "institution_slug": slug,
-                    "teacher_name": t_raw,
-                    "subject": subj,
-                    "class": cls,
-                    "day": day,
-                    "period": period + ext
-                }
+                if slot_key in busy_slots:
+                    prev = busy_slots[slot_key]
+                    prev_inst = prev.get("institution_name", "")
+                    if inst["name"] not in prev_inst:
+                        prev["institution_name"] = f"{prev_inst}, {inst['name']}"
+                    prev_cls = prev.get("class", "")
+                    if cls and cls not in prev_cls:
+                        prev["class"] = f"{prev_cls} / {cls}" if prev_cls else cls
+                else:
+                    busy_slots[slot_key] = {
+                        "institution_name": inst["name"],
+                        "institution_slug": slug,
+                        "teacher_name": t_raw,
+                        "subject": subj,
+                        "class": cls,
+                        "day": day,
+                        "period": period + ext
+                    }
                 
     return busy_slots
 
