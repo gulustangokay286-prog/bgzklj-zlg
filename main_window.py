@@ -430,7 +430,17 @@ class MainWindow(QMainWindow):
         """Clean up background workers and resources before deletion."""
         if hasattr(self, 'cloud_worker') and self.cloud_worker:
             try:
+                self.cloud_worker.sync_status_changed.disconnect()
+            except Exception:
+                pass
+            try:
+                self.cloud_worker.remote_data_updated.disconnect()
+            except Exception:
+                pass
+            try:
                 self.cloud_worker.stop()
+                self.cloud_worker.setParent(None)
+                self.cloud_worker.finished.connect(self.cloud_worker.deleteLater)
             except Exception as e:
                 print("Error stopping cloud_worker:", e)
 
