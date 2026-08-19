@@ -166,40 +166,50 @@ class AppShell(QMainWindow):
         self._open_timetable(slug, vf)
     
     def _go_home(self):
-        """Switch back to the dashboard."""
-        from save_dialog import run_apple_save_sequence
+        """Switch back to the dashboard smoothly and safely without crash."""
+        editor = self._editor
+        self._editor = None
         
-        # Save current work before going home
-        if self._editor:
+        # 1. Save current work before going home
+        if editor:
             try:
-                if hasattr(self._editor, "save_db"):
-                    self._editor.save_db(sync_from_grid=True)
-                    slug = getattr(self._editor, "institution_slug", None)
-                    ver_fn = getattr(self._editor, "version_filename", None)
-                    auth = getattr(self._editor, "auth_data", None)
-                    if slug and ver_fn:
-                        import version_store
-                        version_store.update_version_in_place(slug, ver_fn, self._editor.data_store)
-                        from cloud_sync import push_version_to_rtdb
-                        push_version_to_rtdb(slug, ver_fn, dict(self._editor.data_store), auth)
+                if hasattr(editor, "save_db"):
+                    editor.save_db(sync_from_grid=True)
+                slug = getattr(editor, "institution_slug", None)
+                ver_fn = getattr(editor, "version_filename", None)
+                auth = getattr(editor, "auth_data", None)
+                if slug and ver_fn:
+                    import version_store
+                    version_store.update_version_in_place(slug, ver_fn, editor.data_store)
+                    from cloud_sync import push_version_to_rtdb
+                    push_version_to_rtdb(slug, ver_fn, dict(editor.data_store), auth)
             except Exception as e:
                 print(f"[GO_HOME] Save error: {e}")
-        
-        run_apple_save_sequence(self, duration_seconds=0.2, title="Kaydediliyor", message="Değişiklikler yerel veritabanına ve buluta eşitleniyor...")
-        
-        # Switch to dashboard FIRST
-        self._dashboard._refresh_institutions()
+                
+            # 2. Cleanup background workers safely
+            try:
+                if hasattr(editor, "cleanup"):
+                    editor.cleanup()
+            except Exception as ce:
+                print(f"[GO_HOME] Cleanup error: {ce}")
+
+        # 3. Switch to dashboard
         self._stack.setCurrentWidget(self._dashboard)
         self.setWindowTitle("BGZ Ders Planlama — Kurum & Çizelge Yönetimi")
-        
-        # Safely clean up and destroy editor
-        if self._editor:
-            editor = self._editor
-            self._editor = None
-            if hasattr(editor, "cleanup"):
-                editor.cleanup()
-            self._stack.removeWidget(editor)
-            editor.deleteLater()
+        try:
+            self._dashboard._refresh_institutions()
+            if hasattr(self._dashboard, "_selected_slug") and self._dashboard._selected_slug:
+                self._dashboard._refresh_versions()
+        except Exception as re_err:
+            print(f"[GO_HOME] Dashboard refresh error: {re_err}")
+
+        # 4. Remove and delete editor safely
+        if editor:
+            try:
+                self._stack.removeWidget(editor)
+                editor.deleteLater()
+            except Exception:
+                pass
 
     def closeEvent(self, event):
         """Save active editor and flush database & cloud sync before closing the application."""

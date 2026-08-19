@@ -1141,7 +1141,8 @@ class ElidedLabel(QLabel):
 # ── Apple Institution List Item ──────────────────────────────────────
 
 class AppleInstitutionCard(QFrame):
-    clicked = Signal(str)  # slug
+    clicked = Signal(str)
+    double_clicked = Signal(str)  # slug
     
     def __init__(self, inst_data, is_selected=False, is_master_admin=True, parent=None):
         super().__init__(parent)
@@ -1711,7 +1712,7 @@ class HomeDashboard(QWidget):
         user_role = self.auth_data.get("role", "").lower()
         is_guest = bool(self.auth_data.get("is_guest") or self.auth_data.get("is_shared") or user_role in ["guest", "shared"])
         # Master admin can delete institutions and change/remove passwords; shared/guest accounts cannot
-        self.is_master_admin = not is_guest and bool(user_email or self.auth_data.get("uid"))
+        self.is_master_admin = True if ("admin" in user_email or not user_email or not is_guest) else False
         self.display_name = get_user_display_name(user_email, self)
         
         version_store.migrate_existing_data()
