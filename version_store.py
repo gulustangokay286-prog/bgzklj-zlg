@@ -971,7 +971,7 @@ def load_global_kisitlamalar():
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if data and any(k for k in data.keys() if " " in k or len(k) > 30):
-                    return {"varsayilan_kurum": data}
+                    return {"bogazici_egitim_kurumlari": data}
                 return data
         except Exception:
             pass

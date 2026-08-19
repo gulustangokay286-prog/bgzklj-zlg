@@ -346,7 +346,7 @@ class MainWindow(QMainWindow):
         if not slug or slug == getattr(self, "institution_slug", None):
             try:
                 import version_store
-                inst_slug = getattr(self, "institution_slug", "varsayilan_kurum")
+                inst_slug = getattr(self, "institution_slug", "bogazici_egitim_kurumlari")
                 latest_data = version_store.load_latest_version(inst_slug)
                 if latest_data:
                     if latest_data.get("grid_placements") != self.data_store.get("grid_placements") or latest_data.get("atamalar") != self.data_store.get("atamalar"):
@@ -910,7 +910,7 @@ class MainWindow(QMainWindow):
                 # Load global kisitlamalar and override local
                 from version_store import load_global_kisitlamalar
                 global_k = load_global_kisitlamalar()
-                inst_slug = self.data_store.get("settings", {}).get("institution_slug", "varsayilan_kurum")
+                inst_slug = self.data_store.get("settings", {}).get("institution_slug", "bogazici_egitim_kurumlari")
                 
                 if "kisitlamalar" not in self.data_store:
                     self.data_store["kisitlamalar"] = {}

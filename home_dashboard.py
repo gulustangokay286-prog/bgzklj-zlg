@@ -1735,14 +1735,12 @@ class HomeDashboard(QWidget):
             
     def _start_initial_cloud_sync(self):
         import threading
-        from cloud_sync import push_all_to_rtdb, pull_all_from_rtdb
+        from cloud_sync import pull_all_from_rtdb
         from PySide6.QtCore import QTimer
         
         def _worker():
             try:
-                # 1. Push any local versions to VDS
-                push_all_to_rtdb(self.auth_data)
-                # 2. Pull all remote institutions and versions from VDS
+                # Pull all remote institutions and versions from VDS as source of truth
                 ok, _, _ = pull_all_from_rtdb(self.auth_data)
                 if ok:
                     QTimer.singleShot(0, self._on_cloud_synced)
@@ -2372,8 +2370,8 @@ class HomeDashboard(QWidget):
             self._selected_slug = inst["slug"]
             
             if self.auth_data and not self.auth_data.get("is_offline"):
-                from cloud_sync import push_all_to_rtdb
-                push_all_to_rtdb(self.auth_data)
+                from cloud_sync import push_institution_to_rtdb
+                push_institution_to_rtdb(inst["slug"], self.auth_data)
                 
             self._refresh_institutions()
             
@@ -2434,8 +2432,10 @@ class HomeDashboard(QWidget):
         
         def _sync_worker():
             try:
-                push_ok, push_msg, _ = push_all_to_rtdb(self.auth_data)
+                # Pull remote changes and purge deleted institutions first
                 pull_ok, pull_msg, count = pull_all_from_rtdb(self.auth_data)
+                # Then push local creations
+                push_ok, push_msg, _ = push_all_to_rtdb(self.auth_data)
                 results["push_ok"] = push_ok
                 results["push_msg"] = push_msg
                 results["pull_ok"] = pull_ok

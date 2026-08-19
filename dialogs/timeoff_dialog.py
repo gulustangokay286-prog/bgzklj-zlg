@@ -29,7 +29,7 @@ class TimeoffDialog(QDialog):
         try:
             from version_store import load_global_kisitlamalar, get_cross_institution_teacher_busy_slots, normalize_teacher_name
             global_k = load_global_kisitlamalar()
-            inst_slug = self.data_store.get("settings", {}).get("institution_slug", "varsayilan_kurum")
+            inst_slug = self.data_store.get("settings", {}).get("institution_slug", "bogazici_egitim_kurumlari")
             for slug, k_data in global_k.items():
                 if slug != inst_slug and isinstance(k_data, dict):
                     other_toff = k_data.get(name)

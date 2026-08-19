@@ -33,17 +33,18 @@ def push_institution_to_rtdb(slug: str, auth_data: dict = None) -> bool:
     ver_dir = os.path.join(inst_dir, "versions")
     versions_dict = {}
     if os.path.isdir(ver_dir):
-        for fn in os.listdir(ver_dir):
-            if fn.endswith(".roz"):
-                v_path = os.path.join(ver_dir, fn)
-                try:
-                    with open(v_path, "r", encoding="utf-8") as f:
-                        v_data = json.load(f)
-                    v_key = re.sub(r'[\.\$#\[\]/]', '_', fn)
-                    versions_dict[v_key] = v_data
-                except Exception as e:
-                    print(f"Error reading version {fn}: {e}")
-                    
+        all_files = sorted([f for f in os.listdir(ver_dir) if f.endswith(".roz")], reverse=True)
+        # Include top 12 most recent versions in root payload for high performance
+        for fn in all_files[:12]:
+            v_path = os.path.join(ver_dir, fn)
+            try:
+                with open(v_path, "r", encoding="utf-8") as f:
+                    v_data = json.load(f)
+                v_key = re.sub(r'[\.\$#\[\]/]', '_', fn)
+                versions_dict[v_key] = v_data
+            except Exception as e:
+                print(f"Error reading version {fn}: {e}")
+                
     payload = {
         "slug": slug,
         "meta": meta,
@@ -51,8 +52,8 @@ def push_institution_to_rtdb(slug: str, auth_data: dict = None) -> bool:
     }
     url = f"{api_client.base_url}/api/institutions"
     try:
-        resp = requests.post(url, json=payload, headers=api_client.get_headers(), timeout=20)
-        return resp.status_code in (200, 201)
+        resp = api_client._request_with_retry("POST", url, json=payload, timeout=12)
+        return resp is not None and resp.status_code in (200, 201)
     except Exception as e:
         print(f"push_institution_to_rtdb error for {slug}: {e}")
         return False
@@ -77,13 +78,7 @@ def push_all_to_rtdb(auth_data: dict = None) -> tuple:
     return True, f"{pushed} kurum ve {total_versions} versiyon merkezi buluta başarıyla yüklendi.", pushed
 
 def delete_version_from_rtdb(slug: str, filename: str, auth_data: dict = None) -> bool:
-    v_key = re.sub(r'[\.\$#\[\]/]', '_', filename)
-    url = f"{api_client.base_url}/api/sync/{slug}/{v_key}"
-    try:
-        resp = requests.delete(url, headers=api_client.get_headers(), timeout=10)
-        return resp.status_code in (200, 204)
-    except Exception:
-        return False
+    return api_client.delete_version_from_rtdb(slug, filename, auth_data)
 
 def delete_institution_from_rtdb(slug: str, auth_data: dict = None) -> bool:
     return api_client.delete_institution_from_rtdb(slug, auth_data)
