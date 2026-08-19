@@ -770,8 +770,8 @@ class AutoSchedulerWorker(QThread):
                                         t_blocked = True; break
                 
                 if t_blocked:
-                    # Kısıtlanan veya ataması yapılmamış öğretmenin yerine aynı branştan müsait bir öğretmen bul!
-                    if find_branch_fn:
+                    # Kısıtlanan veya ataması yapılmamış öğretmenin yerine sadece öğretmen atanmamışsa branş hocası bul
+                    if not t and find_branch_fn:
                         sub_t = find_branch_fn(s, t, d, p, dur, current_teacher_occ)
                         if sub_t:
                             actual_t = sub_t

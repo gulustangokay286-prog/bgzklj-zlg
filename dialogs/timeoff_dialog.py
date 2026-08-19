@@ -236,4 +236,20 @@ class TimeoffDialog(QDialog):
         self._update_counters()
 
     def _save_data(self):
+        self.entity_dict["timeoff"] = self.timeoff_data
+        if "kisitlamalar" not in self.data_store:
+            self.data_store["kisitlamalar"] = {}
+        ent_name = self.entity_dict.get("ad", "")
+        if ent_name:
+            if ent_name not in self.data_store["kisitlamalar"]:
+                self.data_store["kisitlamalar"][ent_name] = {}
+            for d in range(len(self.days)):
+                for p in range(self.periods):
+                    st = self.timeoff_data[d][p]
+                    self.data_store["kisitlamalar"][ent_name][f"{d},{p}"] = (st > 0)
+        try:
+            from version_store import trigger_save_db
+            trigger_save_db(self, self.data_store)
+        except Exception as e:
+            print(f"[TIMEOFF_SAVE_ERR] {e}")
         self.accept()

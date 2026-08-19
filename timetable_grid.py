@@ -724,7 +724,7 @@ class UnplacedLessonsDock(QWidget):
                 print("Dock drop error:", e)
             event.acceptProposedAction()
 
-    def load_unplaced(self, lessons_data, has_assignments=True, display_mode="classes"):
+    def load_unplaced(self, lessons_data, has_assignments=True, display_mode="classes", target_entity=""):
         self.container.setUpdatesEnabled(False)
         try:
             # clear existing
@@ -754,12 +754,20 @@ class UnplacedLessonsDock(QWidget):
                 
                 if not has_assignments:
                     icon_lbl.setPixmap(make_grid_action_icon("alert_triangle", 18).pixmap(18, 18))
-                    text_lbl.setText("Henüz hiç ders ataması yapılmadı. Lütfen 'Ders Atama' bölümünden ders tanımlayın.")
+                    if target_entity:
+                        ent_desc = "sınıfına" if display_mode == "classes" else "öğretmenine"
+                        text_lbl.setText(f"{target_entity} {ent_desc} henüz hiç ders atanmadı. Lütfen 'Ders Atama' bölümünden tanımlayın.")
+                    else:
+                        text_lbl.setText("Henüz hiç ders ataması yapılmadı. Lütfen 'Ders Atama' bölümünden ders tanımlayın.")
                     text_lbl.setFont(QFont("Segoe UI", 8.5, QFont.Bold))
                     text_lbl.setStyleSheet("color: #B45309; background: transparent; border: none;")
                 else:
                     icon_lbl.setPixmap(make_grid_action_icon("check_circle", 18).pixmap(18, 18))
-                    text_lbl.setText("🎉 Tüm dersler başarıyla programa yerleştirildi!")
+                    if target_entity:
+                        ent_desc = "sınıfının" if display_mode == "classes" else "öğretmeninin"
+                        text_lbl.setText(f"🎉 {target_entity} {ent_desc} tüm dersleri başarıyla programa yerleştirildi!")
+                    else:
+                        text_lbl.setText("🎉 Tüm dersler başarıyla programa yerleştirildi!")
                     text_lbl.setFont(QFont("Segoe UI", 8.5, QFont.Bold))
                     text_lbl.setStyleSheet("color: #15803D; background: transparent; border: none;")
                     
@@ -1859,6 +1867,7 @@ class TimetableGrid(QWidget):
         self.table.cellClicked.connect(self._on_cell_clicked)
         self.table.currentCellChanged.connect(lambda r, c, pr, pc: self._on_cell_clicked(r, c))
         self.table.cellEntered.connect(self._on_cell_clicked)
+        self.table.verticalHeader().sectionClicked.connect(self._on_vertical_header_clicked)
         
         layout.addWidget(self.table, stretch=1)
         
@@ -2003,8 +2012,14 @@ class TimetableGrid(QWidget):
         if hasattr(win, "statusBar") and win.statusBar():
             win.statusBar().showMessage("🔓 Tüm derslerin kilitleri başarıyla açıldı.", 3000)
 
+    def _on_vertical_header_clicked(self, logicalIndex):
+        if logicalIndex < 0:
+            return
+        self.table.selectRow(logicalIndex)
+        self._on_cell_clicked(logicalIndex, 0)
+
     def _on_cell_clicked(self, row, col):
-        """Show lesson info in the bottom-left panel when a cell is clicked (aSc-style)."""
+        """Show lesson info in the bottom-left panel when a cell is clicked (aSc-style) and filter unplaced dock."""
         orig_r, orig_c, orig_dur, info = self.table._get_lesson_origin(row, col) if hasattr(self.table, "_get_lesson_origin") else (row, col, 1, None)
         if not info:
             info = self._placed_lessons.get((row, col))
@@ -2019,6 +2034,19 @@ class TimetableGrid(QWidget):
         self._current_selected_pos = (row, col)
         
         self.update_info_panel(info)
+        
+        # Filter unplaced dock by the selected class or teacher row
+        entity_name = ""
+        if self.current_view_mode == "classes":
+            if hasattr(self, "class_list") and 0 <= row < len(self.class_list):
+                entity_name = self.class_list[row]
+        else:
+            if hasattr(self, "teacher_list") and 0 <= row < len(self.teacher_list):
+                entity_name = self.teacher_list[row]
+                
+        win = self.window()
+        if hasattr(win, "_refresh_unplaced_lessons"):
+            win._refresh_unplaced_lessons(target_entity=entity_name)
 
     def update_info_panel(self, info):
         if info:

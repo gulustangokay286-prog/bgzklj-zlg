@@ -1428,9 +1428,24 @@ class MainWindow(QMainWindow):
         grid_placements = self.data_store.get("grid_placements", [])
         
         from auto_scheduler import matches_class, format_tr_name, normalize_clean
+        from version_store import _matches_teacher
         from dialogs.color_picker_dialog import resolve_subject_color
         
         display_mode = getattr(self._grid, "current_view_mode", "classes")
+        
+        # If target_entity is None, infer from active selection in grid table or left tree
+        if target_entity is None:
+            if hasattr(self._grid, "table"):
+                cur_r = self._grid.table.currentRow()
+                if cur_r >= 0:
+                    if display_mode == "classes" and hasattr(self._grid, "class_list") and cur_r < len(self._grid.class_list):
+                        target_entity = self._grid.class_list[cur_r]
+                    elif display_mode == "teachers" and hasattr(self._grid, "teacher_list") and cur_r < len(self._grid.teacher_list):
+                        target_entity = self._grid.teacher_list[cur_r]
+            if target_entity is None and hasattr(self, "_tree"):
+                cur_item = self._tree.currentItem()
+                if cur_item and cur_item.parent():
+                    target_entity = cur_item.data(0, Qt.UserRole)
         
         # 1. Build a placed slot pool deduplicated by (day, period, teacher, subject)
         # Prevents combined classes (e.g. 10A + 10B) from double-counting placed hours!
@@ -1468,7 +1483,24 @@ class MainWindow(QMainWindow):
                         placed_slots[slot_key]["classes"].add(str(sc).strip().upper())
                         
         placed_pool = list(placed_slots.values())
-        scoped_atamalar = atamalar
+        
+        # Scope assignments based on target_entity (selected class or selected teacher)
+        if target_entity:
+            if display_mode == "classes":
+                scoped_atamalar = [
+                    a for a in atamalar
+                    if matches_class(a.get("class", ""), target_entity) or 
+                       (a.get("is_combined") and any(matches_class(cc, target_entity) for cc in a.get("combined_classes", []))) or
+                       ("+" in str(a.get("class", "")) and any(matches_class(p, target_entity) for p in str(a.get("class", "")).replace("&", "+").replace(",", "+").split("+") if p.strip()))
+                ]
+            else: # teachers
+                scoped_atamalar = [
+                    a for a in atamalar
+                    if _matches_teacher(a.get("teacher", ""), target_entity) or 
+                       format_tr_name(a.get("teacher", "")) == format_tr_name(target_entity)
+                ]
+        else:
+            scoped_atamalar = atamalar
             
         unplaced = []
         for idx, atama in enumerate(scoped_atamalar):
@@ -1509,7 +1541,7 @@ class MainWindow(QMainWindow):
                         continue
                     if t_name and p_item["teacher"]:
                         p_t = p_item["teacher"]
-                        t_match = (format_tr_name(p_t) == t_fmt or normalize_clean(p_t) == normalize_clean(t_name) or p_t == t_name)
+                        t_match = (format_tr_name(p_t) == t_fmt or normalize_clean(p_t) == normalize_clean(t_name) or p_t == t_name or _matches_teacher(p_t, t_name))
                         if not t_match:
                             continue
                             
@@ -1541,8 +1573,13 @@ class MainWindow(QMainWindow):
                         "combined_classes": list(target_classes) if is_comb else []
                     })
                     
-        has_assignments = bool(scoped_atamalar if target_entity else atamalar)
-        self._grid.unplaced_dock.load_unplaced(unplaced, has_assignments=has_assignments, display_mode=display_mode)
+        has_assignments = bool(scoped_atamalar) if target_entity else bool(atamalar)
+        self._grid.unplaced_dock.load_unplaced(
+            unplaced, 
+            has_assignments=has_assignments, 
+            display_mode=display_mode, 
+            target_entity=target_entity or ""
+        )
 
     def _remove_placement_by_data(self, p_item):
         if not p_item or not isinstance(self.data_store.get("grid_placements"), list):
