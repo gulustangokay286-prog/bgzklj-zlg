@@ -188,7 +188,7 @@ class AutoSchedulerWorker(QThread):
         total_target_hours = len(classes_to_schedule) * total_class_capacity
         total_placed_hours = 0
 
-        # Her sınıf için 40 saatin tamamını %100 dolduracak şekilde infinite duplicate cycle uygula
+        # Her sınıf için 2+2, 2+1, 2+2+1, 1+1 dağılımında %100 eksiksiz yerleşim
         for cn in classes_to_schedule:
             if not self._is_running:
                 break
@@ -204,20 +204,30 @@ class AutoSchedulerWorker(QThread):
                 h_dur = int(asgn.get("ders_sayisi") or asgn.get("duration") or asgn.get("saat") or asgn.get("toplam_saat") or 2)
                 block_durs = parse_distribution_parts(raw_type, h_dur)
                 for b_dur in block_durs:
-                    c_blocks.append({
-                        "class": cn, "subject": s_name, "teacher": t_name,
-                        "duration": b_dur, "is_combined": is_comb
-                    })
+                    if b_dur > 2:
+                        rem = b_dur
+                        while rem > 0:
+                            sub_b = 2 if rem >= 2 else 1
+                            c_blocks.append({
+                                "class": cn, "subject": s_name, "teacher": t_name,
+                                "duration": sub_b, "is_combined": is_comb
+                            })
+                            rem -= sub_b
+                    else:
+                        c_blocks.append({
+                            "class": cn, "subject": s_name, "teacher": t_name,
+                            "duration": b_dur, "is_combined": is_comb
+                        })
 
-            # Boşta kalan saatleri sınıfın gerçek derslerini duplicate / cycle ederek %100 doldur
+            # Tüm ders ve öğretmenleri adil şekilde cycle ederek 40 saate tamamla
             total_h = sum(b["duration"] for b in c_blocks)
             if total_h < total_class_capacity and c_blocks:
+                unique_subjects = list({b["subject"]: b for b in c_blocks}.values())
                 cycle_idx = 0
                 while total_h < total_class_capacity:
-                    tmpl = c_blocks[cycle_idx % len(c_blocks)]
+                    tmpl = unique_subjects[cycle_idx % len(unique_subjects)]
                     rem = total_class_capacity - total_h
-                    dur = min(tmpl["duration"], rem)
-                    if dur <= 0: break
+                    dur = 2 if rem >= 2 else 1
                     c_blocks.append({
                         "class": cn, "subject": tmpl["subject"], "teacher": tmpl["teacher"],
                         "duration": dur, "is_combined": tmpl.get("is_combined", False)
@@ -225,51 +235,67 @@ class AutoSchedulerWorker(QThread):
                     total_h += dur
                     cycle_idx += 1
 
-            # Günlere dengeli şekilde 8 saat 8 saat aralıksız doldur
-            cur_d = 0
-            cur_p = 0
+            # Günlere 2+2, 2+1, 1+1 kuralıyla dengeli dağıt (Asla 4 saat tek blok olmasın)
+            day_blocks = [[] for _ in range(days_count)]
+            day_loads = [0] * days_count
+            c_blocks.sort(key=lambda x: (-x["duration"], x["subject"]))
+
             for b in c_blocks:
                 dur = b["duration"]
-                if cur_p + dur > periods_count:
-                    room = periods_count - cur_p
-                    if room > 0:
-                        total_scheduled_placements.append({
-                            "class_name": cn, "class": cn,
-                            "subject_name": b["subject"], "subject": b["subject"],
-                            "teacher_name": b["teacher"], "teacher": b["teacher"],
-                            "day": cur_d, "day_idx": cur_d, "period": cur_p, "row": cur_p, "col": cur_d,
-                            "duration": room, "is_combined": b.get("is_combined", False),
-                            "block_id": str(_uuid.uuid4())[:12]
-                        })
-                        total_placed_hours += room
-                    cur_d = min(days_count - 1, cur_d + 1)
-                    cur_p = 0
-                    dur_left = dur - room
-                    if dur_left > 0 and cur_d < days_count:
-                        total_scheduled_placements.append({
-                            "class_name": cn, "class": cn,
-                            "subject_name": b["subject"], "subject": b["subject"],
-                            "teacher_name": b["teacher"], "teacher": b["teacher"],
-                            "day": cur_d, "day_idx": cur_d, "period": cur_p, "row": cur_p, "col": cur_d,
-                            "duration": dur_left, "is_combined": b.get("is_combined", False),
-                            "block_id": str(_uuid.uuid4())[:12]
-                        })
-                        total_placed_hours += dur_left
-                        cur_p += dur_left
+                s = b["subject"]
+                
+                best_d = None
+                best_penalty = 999999
+                
+                for d in range(days_count):
+                    if day_loads[d] + dur <= periods_count:
+                        s_day_h = sum(x["duration"] for x in day_blocks[d] if x["subject"] == s)
+                        if s_day_h + dur <= 2:
+                            pen = (s_day_h * 500) + day_loads[d]
+                            if pen < best_penalty:
+                                best_penalty = pen
+                                best_d = d
+                                
+                if best_d is None:
+                    for d in range(days_count):
+                        if day_loads[d] + dur <= periods_count:
+                            s_day_h = sum(x["duration"] for x in day_blocks[d] if x["subject"] == s)
+                            pen = (s_day_h * 1000) + day_loads[d]
+                            if pen < best_penalty:
+                                best_penalty = pen
+                                best_d = d
+                                
+                if best_d is not None:
+                    day_blocks[best_d].append(b)
+                    day_loads[best_d] += dur
                 else:
+                    rem = dur
+                    while rem > 0:
+                        for d in range(days_count):
+                            if day_loads[d] < periods_count:
+                                day_blocks[d].append({
+                                    "class": cn, "subject": s, "teacher": b["teacher"],
+                                    "duration": 1, "is_combined": b.get("is_combined", False)
+                                })
+                                day_loads[d] += 1
+                                rem -= 1
+                                break
+
+            # Her günü 1. dersten 8. derse kesintisiz diz
+            for d in range(days_count):
+                cur_p = 0
+                for b in day_blocks[d]:
+                    dur = b["duration"]
                     total_scheduled_placements.append({
                         "class_name": cn, "class": cn,
                         "subject_name": b["subject"], "subject": b["subject"],
                         "teacher_name": b["teacher"], "teacher": b["teacher"],
-                        "day": cur_d, "day_idx": cur_d, "period": cur_p, "row": cur_p, "col": cur_d,
+                        "day": d, "day_idx": d, "period": cur_p, "row": cur_p, "col": d,
                         "duration": dur, "is_combined": b.get("is_combined", False),
                         "block_id": str(_uuid.uuid4())[:12]
                     })
-                    total_placed_hours += dur
                     cur_p += dur
-                    if cur_p >= periods_count:
-                        cur_d += 1
-                        cur_p = 0
+                    total_placed_hours += dur
 
             self.iteration_updated.emit(1, 0, total_placed_hours)
             self.progress_updated.emit(total_placed_hours, total_target_hours)
