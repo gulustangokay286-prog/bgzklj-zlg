@@ -439,6 +439,21 @@ class AutoSchedulerWorker(QThread):
             class_assigned_hours = sum(b.get("duration", 1) for b in candidate_blocks)
             total_target_hours += (class_assigned_hours + len(occupied_slots))
 
+            # --- DUMMY BLOCK INJECTION ---
+            if candidate_blocks:
+                deficit = total_class_slots - (class_assigned_hours + len(occupied_slots))
+                if deficit > 0:
+                    import random
+                    base_blocks = list(candidate_blocks)
+                    while deficit > 0:
+                        chosen = dict(random.choice(base_blocks))
+                        chosen_dur = min(chosen.get("duration", 1), deficit)
+                        chosen["duration"] = chosen_dur
+                        candidate_blocks.append(chosen)
+                        deficit -= chosen_dur
+                        total_target_hours += chosen_dur
+            # -----------------------------
+
             if not candidate_blocks:
                 continue
 
