@@ -3978,24 +3978,6 @@ class ClassComprehensiveAssignmentDialog(QDialog):
             sep_list = [a for a in assigned_list if not a.get("is_combined") and "+" not in str(a.get("class", "")) and "," not in str(a.get("class", ""))]
             comb_list = [a for a in assigned_list if a.get("is_combined") or "+" in str(a.get("class", "")) or "," in str(a.get("class", ""))]
             
-            # If comb_list is empty for this class, check if any of the assigned teachers or this subject has a combined assignment in data_store!
-            subj_norm = format_tr_name(subj)
-            if not comb_list and teachers:
-                for t in teachers:
-                    t_norm = format_tr_name(t)
-                    for a in atamalar:
-                        if format_tr_name(a.get("subject", "")) == subj_norm and _matches_teacher(format_tr_name(a.get("teacher", "")), t_norm):
-                            if a.get("is_combined") or "+" in str(a.get("class", "")) or "," in str(a.get("class", "")):
-                                if a not in comb_list:
-                                    comb_list.append(a)
-            elif not teachers and not comb_list:
-                for a in atamalar:
-                    if format_tr_name(a.get("subject", "")) == subj_norm and (a.get("is_combined") or "+" in str(a.get("class", "")) or "," in str(a.get("class", ""))):
-                        if a.get("teacher") and a.get("teacher") not in teachers:
-                            teachers.append(a.get("teacher"))
-                        if a not in comb_list:
-                            comb_list.append(a)
-            
             comb_classes_info = []
             for a in comb_list:
                 if a.get("combined_classes"):
@@ -4387,15 +4369,65 @@ class ClassComprehensiveAssignmentDialog(QDialog):
 
     def _remove_subject_assignment(self, subject_name):
         v_scroll = self.table.verticalScrollBar().value()
+        subj_target = format_tr_name(subject_name)
+        cur_c = format_tr_name(self.class_name)
         
-        # Instantiate a headless dialog to cleanly reuse its robust deletion and cleanup logic
-        d = SubjectTeacherAssignmentDialog(
-            subject_name=subject_name,
-            data_store=self.data_store,
-            parent=self,
-            current_class=self.class_name
-        )
-        d._clear_assignments()
+        atamalar = self.data_store.get("atamalar", [])
+        new_atamalar = []
+        for a in atamalar:
+            s_name = format_tr_name(a.get("subject", ""))
+            if s_name != subj_target:
+                new_atamalar.append(a)
+                continue
+            
+            c_str = a.get("class", "")
+            # Check if this assignment applies to this class
+            if matches_class(c_str, self.class_name):
+                # Direct single class assignment -> remove completely
+                continue
+            elif a.get("is_combined") or "+" in c_str or "," in c_str or "&" in c_str:
+                # Combined assignment -> remove self.class_name from combined classes
+                comb = list(a.get("combined_classes", []))
+                if not comb and ("+" in c_str or "," in c_str or "&" in c_str):
+                    comb = [c.strip() for c in c_str.replace("&", "+").replace(",", "+").split("+") if c.strip()]
+                
+                comb = [c for c in comb if not matches_class(c, self.class_name)]
+                if len(comb) >= 2:
+                    a["combined_classes"] = comb
+                    a["class"] = " + ".join(comb)
+                    a["is_combined"] = True
+                    new_atamalar.append(a)
+                elif len(comb) == 1:
+                    a["combined_classes"] = []
+                    a["class"] = comb[0]
+                    a["is_combined"] = False
+                    new_atamalar.append(a)
+                else:
+                    # 0 classes remain -> drop assignment
+                    continue
+            else:
+                new_atamalar.append(a)
+                
+        self.data_store["atamalar"] = new_atamalar
+        
+        # Clean placements from grid_placements and yerlesim
+        grid_data = self.data_store.get("grid_placements", [])
+        if isinstance(grid_data, list):
+            self.data_store["grid_placements"] = [
+                p for p in grid_data
+                if not (format_tr_name(p.get("subject_name", p.get("subject", ""))) == subj_target and
+                        matches_class(p.get("class_name", p.get("class", "")), self.class_name))
+            ]
+        yerlesim = self.data_store.get("yerlesim", {})
+        if isinstance(yerlesim, dict):
+            for k in list(yerlesim.keys()):
+                info = yerlesim[k]
+                if isinstance(info, dict):
+                    if (format_tr_name(info.get("subject_name", info.get("subject", ""))) == subj_target and
+                        matches_class(info.get("class_name", info.get("class", "")), self.class_name)):
+                        yerlesim.pop(k, None)
+                        
+        trigger_save_db(self, self.data_store)
         
         # Live sync with main window
         win = self.window()
@@ -4409,8 +4441,10 @@ class ClassComprehensiveAssignmentDialog(QDialog):
         if win:
             if hasattr(win, "save_db"): win.save_db(sync_from_grid=False)
             if hasattr(win, "_refresh_tree"): win._refresh_tree()
-            if hasattr(win, "_grid") and hasattr(win._grid, "load_data"):
-                win._grid.load_data(win.data_store)
+            if hasattr(win, "_load_unplaced_lessons"): win._load_unplaced_lessons()
+            if hasattr(win, "_refresh_unplaced_lessons"): win._refresh_unplaced_lessons()
+            if hasattr(win, "_restore_grid_placements"): win._restore_grid_placements()
+            if hasattr(win, "_refresh_grid"): win._refresh_grid()
 
         self._load_data()
         self.table.verticalScrollBar().setValue(v_scroll)

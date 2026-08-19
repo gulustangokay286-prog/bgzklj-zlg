@@ -1,55 +1,55 @@
 {
-    "siniflar": [
-        {
-            "ad": "9A"
-        },
-        {
-            "ad": "10A"
-        }
-    ],
-    "ogretmenler": [
-        {
-            "ad": "Ali",
-            "kisa": "ALI"
-        },
-        {
-            "ad": "Veli",
-            "kisa": "VELI"
-        }
-    ],
-    "dersler": [
-        {
-            "ad": "Matematik",
-            "color": "#00ACC1"
-        },
-        {
-            "ad": "Fizik",
-            "color": "#43A047"
-        }
-    ],
-    "atamalar": [
-        {
-            "subject": "Matematik",
-            "teacher": "Ali",
-            "class": "9A",
-            "duration": 1
-        },
-        {
-            "subject": "Fizik",
-            "teacher": "Veli",
-            "class": "10A",
-            "duration": 1
-        }
-    ],
-    "grid_placements": [
-        {
-            "subject_name": "Fizik",
-            "color": "#43A047",
-            "teacher_name": "Veli",
-            "class_name": "10A",
-            "duration": 1,
-            "period": 1,
-            "day": 1
-        }
-    ]
+  "siniflar": [
+    {
+      "ad": "9A"
+    },
+    {
+      "ad": "10A"
+    }
+  ],
+  "ogretmenler": [
+    {
+      "ad": "Ali",
+      "kisa": "ALI"
+    },
+    {
+      "ad": "Veli",
+      "kisa": "VELI"
+    }
+  ],
+  "dersler": [
+    {
+      "ad": "Matematik",
+      "color": "#00ACC1"
+    },
+    {
+      "ad": "Fizik",
+      "color": "#43A047"
+    }
+  ],
+  "atamalar": [
+    {
+      "subject": "Matematik",
+      "teacher": "Ali",
+      "class": "9A",
+      "duration": 1
+    },
+    {
+      "subject": "Fizik",
+      "teacher": "Veli",
+      "class": "10A",
+      "duration": 1
+    }
+  ],
+  "grid_placements": [
+    {
+      "subject_name": "Fizik",
+      "color": "#43A047",
+      "teacher_name": "Veli",
+      "class_name": "10A",
+      "duration": 1,
+      "period": 1,
+      "day": 1
+    }
+  ]
 }

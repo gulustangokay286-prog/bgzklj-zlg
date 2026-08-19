@@ -1,40 +1,40 @@
 {
-    "okul_adi": "BGZ Test",
-    "siniflar": [
-        {
-            "ad": "10A"
-        }
-    ],
-    "ogretmenler": [
-        {
-            "ad": "Ali Kaya"
-        }
-    ],
-    "dersler": [
-        {
-            "ad": "Biyoloji"
-        }
-    ],
-    "atamalar": [
-        {
-            "class": "10A",
-            "subject": "Biyoloji",
-            "teacher": "Ali Kaya",
-            "duration": 2
-        }
-    ],
-    "grid_placements": [
-        {
-            "day": 0,
-            "period": 0,
-            "duration": 2,
-            "class": "10A",
-            "subject": "Biyoloji",
-            "teacher": "Ali Kaya"
-        }
-    ],
-    "settings": {
-        "periods": 8,
-        "day_count": 5
+  "okul_adi": "BGZ Test",
+  "siniflar": [
+    {
+      "ad": "10A"
     }
+  ],
+  "ogretmenler": [
+    {
+      "ad": "Ali Kaya"
+    }
+  ],
+  "dersler": [
+    {
+      "ad": "Biyoloji"
+    }
+  ],
+  "atamalar": [
+    {
+      "class": "10A",
+      "subject": "Biyoloji",
+      "teacher": "Ali Kaya",
+      "duration": 2
+    }
+  ],
+  "grid_placements": [
+    {
+      "day": 0,
+      "period": 0,
+      "duration": 2,
+      "class": "10A",
+      "subject": "Biyoloji",
+      "teacher": "Ali Kaya"
+    }
+  ],
+  "settings": {
+    "periods": 8,
+    "day_count": 5
+  }
 }

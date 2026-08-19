@@ -1051,22 +1051,30 @@ class MasterDataDialog(QDialog):
                 self.data_store[stores[idx]] = [d for d in data_list if format_tr_name(d.get("ad", "")) != del_fmt and d.get("kisa") != del_name]
                 
                 if idx == 3: # Teacher
+                    from version_store import _matches_teacher
                     self.data_store["atamalar"] = [
                         a for a in self.data_store.get("atamalar", [])
-                        if format_tr_name(a.get("teacher", "")) != del_fmt
+                        if not _matches_teacher(a.get("teacher", ""), del_name) and format_tr_name(a.get("teacher", "")) != del_fmt
                     ]
                     self.data_store["grid_placements"] = [
                         p for p in self.data_store.get("grid_placements", [])
-                        if format_tr_name(p.get("teacher_name") or p.get("teacher", "")) != del_fmt
+                        if not _matches_teacher(p.get("teacher_name") or p.get("teacher", ""), del_name) and format_tr_name(p.get("teacher_name") or p.get("teacher", "")) != del_fmt
                     ]
+                    # Clean yerlesim dict
+                    yerlesim = self.data_store.get("yerlesim", {})
+                    if isinstance(yerlesim, dict):
+                        for k in list(yerlesim.keys()):
+                            info = yerlesim[k]
+                            if isinstance(info, dict) and (_matches_teacher(info.get("teacher_name") or info.get("teacher", ""), del_name) or format_tr_name(info.get("teacher_name") or info.get("teacher", "")) == del_fmt):
+                                yerlesim.pop(k, None)
                     if "auto_schedule_results" in self.data_store:
                         self.data_store["auto_schedule_results"] = [
                             p for p in self.data_store.get("auto_schedule_results", [])
-                            if format_tr_name(p.get("teacher_name") or p.get("teacher", "")) != del_fmt
+                            if not _matches_teacher(p.get("teacher_name") or p.get("teacher", ""), del_name) and format_tr_name(p.get("teacher_name") or p.get("teacher", "")) != del_fmt
                         ]
                     # Clear class teacher references in siniflar
                     for s in self.data_store.get("siniflar", []):
-                        if format_tr_name(str(s.get("sinif_ogretmeni", ""))) == del_fmt:
+                        if format_tr_name(str(s.get("sinif_ogretmeni", ""))) == del_fmt or _matches_teacher(str(s.get("sinif_ogretmeni", "")), del_name):
                             s["sinif_ogretmeni"] = ""
                     # Remove teacher constraints
                     if "kisitlamalar" in self.data_store:
@@ -1082,6 +1090,12 @@ class MasterDataDialog(QDialog):
                         p for p in self.data_store.get("grid_placements", [])
                         if format_tr_name(p.get("subject_name") or p.get("subject", "")) != del_fmt
                     ]
+                    yerlesim = self.data_store.get("yerlesim", {})
+                    if isinstance(yerlesim, dict):
+                        for k in list(yerlesim.keys()):
+                            info = yerlesim[k]
+                            if isinstance(info, dict) and format_tr_name(info.get("subject_name") or info.get("subject", "")) == del_fmt:
+                                yerlesim.pop(k, None)
                     if "auto_schedule_results" in self.data_store:
                         self.data_store["auto_schedule_results"] = [
                             p for p in self.data_store.get("auto_schedule_results", [])
@@ -1099,6 +1113,13 @@ class MasterDataDialog(QDialog):
                         if not (matches_class(p.get("class_name") or p.get("class", ""), del_name) or
                                 (isinstance(p.get("combined_classes"), list) and del_name in p["combined_classes"]))
                     ]
+                    yerlesim = self.data_store.get("yerlesim", {})
+                    if isinstance(yerlesim, dict):
+                        for k in list(yerlesim.keys()):
+                            info = yerlesim[k]
+                            if isinstance(info, dict) and (matches_class(info.get("class_name") or info.get("class", ""), del_name) or
+                                                           (isinstance(info.get("combined_classes"), list) and del_name in info["combined_classes"])):
+                                yerlesim.pop(k, None)
                     if "auto_schedule_results" in self.data_store:
                         self.data_store["auto_schedule_results"] = [
                             p for p in self.data_store.get("auto_schedule_results", [])
@@ -1113,6 +1134,7 @@ class MasterDataDialog(QDialog):
                 self._load_existing_data()
                 trigger_save_db(self, self.data_store)
                 p = self.parent() or getattr(self, "main_window", None)
+                if p and hasattr(p, "save_db"): p.save_db(sync_from_grid=False)
                 if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
                 if p and hasattr(p, "_load_unplaced_lessons"): p._load_unplaced_lessons()
                 if p and hasattr(p, "_refresh_unplaced_lessons"): p._refresh_unplaced_lessons()

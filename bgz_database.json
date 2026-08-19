@@ -63,9 +63,6 @@
       "ad": "ŞEYMA AKER"
     },
     {
-      "ad": "MEHMET OĞUZ"
-    },
-    {
       "ad": "HÜSEYİN BİLİR"
     },
     {
@@ -481,15 +478,6 @@
       "type": "2"
     },
     {
-      "id": "c364f179-9fdd-4d31-b3c1-5c023082c43d",
-      "class": "11D (dil)",
-      "subject": "Türkçe",
-      "teacher": "MEHMET OĞUZ",
-      "assigned_color": "#0097A7",
-      "duration": 2,
-      "type": "2"
-    },
-    {
       "id": "ffc64dff-ea02-4398-8ab1-527e50125706",
       "class": "12 A(say)",
       "subject": "Türkçe",
@@ -521,60 +509,6 @@
       "class": "12 E(ea)",
       "subject": "Türkçe",
       "teacher": "ŞEYMA AKER",
-      "assigned_color": "#0097A7",
-      "duration": 1,
-      "type": "1"
-    },
-    {
-      "id": "075a216e-ac39-437e-b57f-3bccb081740d",
-      "class": "9A",
-      "subject": "Edebiyat",
-      "teacher": "MEHMET OĞUZ",
-      "assigned_color": "#0097A7",
-      "duration": 2,
-      "type": "2"
-    },
-    {
-      "id": "41a9414d-1077-4072-8186-0152dfd7cb00",
-      "class": "10A",
-      "subject": "Edebiyat",
-      "teacher": "MEHMET OĞUZ",
-      "assigned_color": "#0097A7",
-      "duration": 1,
-      "type": "1"
-    },
-    {
-      "id": "f64de2fa-0098-48e2-9b93-1400565a4add",
-      "class": "11C (ea)",
-      "subject": "Edebiyat",
-      "teacher": "MEHMET OĞUZ",
-      "assigned_color": "#0097A7",
-      "duration": 1,
-      "type": "1"
-    },
-    {
-      "id": "7ab24e6c-93ef-4d10-9657-5432d8aa87d9",
-      "class": "11E (ea)",
-      "subject": "Edebiyat",
-      "teacher": "MEHMET OĞUZ",
-      "assigned_color": "#0097A7",
-      "duration": 1,
-      "type": "1"
-    },
-    {
-      "id": "0f4aef8d-835b-458d-82c5-bd6d7474a865",
-      "class": "12 C(ea)",
-      "subject": "Edebiyat",
-      "teacher": "MEHMET OĞUZ",
-      "assigned_color": "#0097A7",
-      "duration": 1,
-      "type": "1"
-    },
-    {
-      "id": "f4465803-61d1-4560-8f54-49c30917341d",
-      "class": "12 E(ea)",
-      "subject": "Edebiyat",
-      "teacher": "MEHMET OĞUZ",
       "assigned_color": "#0097A7",
       "duration": 1,
       "type": "1"
@@ -1293,34 +1227,6 @@
     },
     {
       "period": 2,
-      "day": 2,
-      "row": 2,
-      "col": 2,
-      "subject_name": "Edebiyat",
-      "subject": "Edebiyat",
-      "teacher_name": "MEHMET OĞUZ",
-      "teacher": "MEHMET OĞUZ",
-      "class_name": "11C(EA)",
-      "class": "11C(EA)",
-      "duration": 2,
-      "locked": false
-    },
-    {
-      "period": 2,
-      "day": 3,
-      "row": 2,
-      "col": 3,
-      "subject_name": "Edebiyat",
-      "subject": "Edebiyat",
-      "teacher_name": "MEHMET OĞUZ",
-      "teacher": "MEHMET OĞUZ",
-      "class_name": "11C(EA)",
-      "class": "11C(EA)",
-      "duration": 2,
-      "locked": false
-    },
-    {
-      "period": 2,
       "day": 4,
       "row": 2,
       "col": 4,
@@ -1412,20 +1318,6 @@
       "subject": "Matematik 2",
       "teacher_name": "SULTAN YILMAZ",
       "teacher": "SULTAN YILMAZ",
-      "class_name": "11C(EA)",
-      "class": "11C(EA)",
-      "duration": 1,
-      "locked": false
-    },
-    {
-      "period": 7,
-      "day": 0,
-      "row": 7,
-      "col": 0,
-      "subject_name": "Edebiyat",
-      "subject": "Edebiyat",
-      "teacher_name": "MEHMET OĞUZ",
-      "teacher": "MEHMET OĞUZ",
       "class_name": "11C(EA)",
       "class": "11C(EA)",
       "duration": 1,
@@ -1726,20 +1618,6 @@
       "locked": false
     },
     {
-      "period": 7,
-      "day": 2,
-      "row": 7,
-      "col": 2,
-      "subject_name": "Edebiyat",
-      "subject": "Edebiyat",
-      "teacher_name": "MEHMET OĞUZ",
-      "teacher": "MEHMET OĞUZ",
-      "class_name": "10A",
-      "class": "10A",
-      "duration": 1,
-      "locked": false
-    },
-    {
       "period": 6,
       "day": 3,
       "row": 6,
@@ -1832,20 +1710,6 @@
       "subject": "Türkçe",
       "teacher_name": "ŞEYMA AKER",
       "teacher": "ŞEYMA AKER",
-      "class_name": "9A",
-      "class": "9A",
-      "duration": 2,
-      "locked": false
-    },
-    {
-      "period": 0,
-      "day": 3,
-      "row": 0,
-      "col": 3,
-      "subject_name": "Edebiyat",
-      "subject": "Edebiyat",
-      "teacher_name": "MEHMET OĞUZ",
-      "teacher": "MEHMET OĞUZ",
       "class_name": "9A",
       "class": "9A",
       "duration": 2,
@@ -2160,20 +2024,6 @@
       "locked": false
     },
     {
-      "period": 0,
-      "day": 4,
-      "row": 0,
-      "col": 4,
-      "subject_name": "Edebiyat",
-      "subject": "Edebiyat",
-      "teacher_name": "MEHMET OĞUZ",
-      "teacher": "MEHMET OĞUZ",
-      "class_name": "12E(EA)",
-      "class": "12E(EA)",
-      "duration": 2,
-      "locked": false
-    },
-    {
       "period": 2,
       "day": 0,
       "row": 2,
@@ -2258,20 +2108,6 @@
       "locked": false
     },
     {
-      "period": 4,
-      "day": 0,
-      "row": 4,
-      "col": 0,
-      "subject_name": "Edebiyat",
-      "subject": "Edebiyat",
-      "teacher_name": "MEHMET OĞUZ",
-      "teacher": "MEHMET OĞUZ",
-      "class_name": "12E(EA)",
-      "class": "12E(EA)",
-      "duration": 1,
-      "locked": false
-    },
-    {
       "period": 5,
       "day": 0,
       "row": 5,
@@ -2325,34 +2161,6 @@
       "class_name": "12E(EA)",
       "class": "12E(EA)",
       "duration": 1,
-      "locked": false
-    },
-    {
-      "period": 0,
-      "day": 0,
-      "row": 0,
-      "col": 0,
-      "subject_name": "Türkçe",
-      "subject": "Türkçe",
-      "teacher_name": "MEHMET OĞUZ",
-      "teacher": "MEHMET OĞUZ",
-      "class_name": "11D(DIL)",
-      "class": "11D(DIL)",
-      "duration": 2,
-      "locked": false
-    },
-    {
-      "period": 0,
-      "day": 1,
-      "row": 0,
-      "col": 1,
-      "subject_name": "Türkçe",
-      "subject": "Türkçe",
-      "teacher_name": "MEHMET OĞUZ",
-      "teacher": "MEHMET OĞUZ",
-      "class_name": "11D(DIL)",
-      "class": "11D(DIL)",
-      "duration": 2,
       "locked": false
     },
     {
@@ -2637,20 +2445,6 @@
     },
     {
       "period": 0,
-      "day": 2,
-      "row": 0,
-      "col": 2,
-      "subject_name": "Edebiyat",
-      "subject": "Edebiyat",
-      "teacher_name": "MEHMET OĞUZ",
-      "teacher": "MEHMET OĞUZ",
-      "class_name": "11E(EA)",
-      "class": "11E(EA)",
-      "duration": 2,
-      "locked": false
-    },
-    {
-      "period": 0,
       "day": 3,
       "row": 0,
       "col": 3,
@@ -2763,20 +2557,6 @@
     },
     {
       "period": 4,
-      "day": 1,
-      "row": 4,
-      "col": 1,
-      "subject_name": "Edebiyat",
-      "subject": "Edebiyat",
-      "teacher_name": "MEHMET OĞUZ",
-      "teacher": "MEHMET OĞUZ",
-      "class_name": "11E(EA)",
-      "class": "11E(EA)",
-      "duration": 2,
-      "locked": false
-    },
-    {
-      "period": 4,
       "day": 2,
       "row": 4,
       "col": 2,
@@ -2812,20 +2592,6 @@
       "subject": "Matematik 2",
       "teacher_name": "SULTAN YILMAZ",
       "teacher": "SULTAN YILMAZ",
-      "class_name": "11E(EA)",
-      "class": "11E(EA)",
-      "duration": 1,
-      "locked": false
-    },
-    {
-      "period": 5,
-      "day": 4,
-      "row": 5,
-      "col": 4,
-      "subject_name": "Edebiyat",
-      "subject": "Edebiyat",
-      "teacher_name": "MEHMET OĞUZ",
-      "teacher": "MEHMET OĞUZ",
       "class_name": "11E(EA)",
       "class": "11E(EA)",
       "duration": 1,
@@ -2959,20 +2725,6 @@
     },
     {
       "period": 2,
-      "day": 0,
-      "row": 2,
-      "col": 0,
-      "subject_name": "Edebiyat",
-      "subject": "Edebiyat",
-      "teacher_name": "MEHMET OĞUZ",
-      "teacher": "MEHMET OĞUZ",
-      "class_name": "12C(EA)",
-      "class": "12C(EA)",
-      "duration": 2,
-      "locked": false
-    },
-    {
-      "period": 2,
       "day": 1,
       "row": 2,
       "col": 1,
@@ -3092,20 +2844,6 @@
       "subject": "Türkçe",
       "teacher_name": "ŞEYMA AKER",
       "teacher": "ŞEYMA AKER",
-      "class_name": "12C(EA)",
-      "class": "12C(EA)",
-      "duration": 1,
-      "locked": false
-    },
-    {
-      "period": 5,
-      "day": 1,
-      "row": 5,
-      "col": 1,
-      "subject_name": "Edebiyat",
-      "subject": "Edebiyat",
-      "teacher_name": "MEHMET OĞUZ",
-      "teacher": "MEHMET OĞUZ",
       "class_name": "12C(EA)",
       "class": "12C(EA)",
       "duration": 1,
