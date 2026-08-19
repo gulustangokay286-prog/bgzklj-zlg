@@ -136,30 +136,35 @@ class AutoScheduleDialog(QDialog):
         super().__init__(parent)
         self.data_store = data_store
         self.target_class = target_class
-        self.setWindowTitle("Ders programı oluşturma")
-        self.resize(550, 420)
+        self.worker = None
+        self.setWindowTitle("Otomatik Ders Programı Oluşturucu (Infinite Engine)")
+        self.resize(580, 460)
         
         self.setStyleSheet("""
-            QDialog { background-color: #F0F0F0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 12px; }
-            QGroupBox { border: 1px solid #B0B0B0; margin-top: 2ex; font-weight: bold; }
-            QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 3px; }
-            QPushButton { padding: 6px 16px; border: 1px solid #ADADAD; background: #E1E1E1; border-radius: 3px; font-weight: bold; }
-            QPushButton:hover { background: #E5F1FB; border: 1px solid #0078D7; }
-            QPushButton#btn_start { padding: 10px 20px; font-size: 14px; background: #E1E1E1; }
-            QComboBox { border: 1px solid #ADADAD; padding: 3px; background: white; }
-            QProgressBar { border: 1px solid #B0B0B0; text-align: center; }
-            QProgressBar::chunk { background-color: #0078D7; }
+            QDialog { background-color: #F8FAFC; font-family: 'Segoe UI', sans-serif; font-size: 12px; }
+            QGroupBox { border: 1px solid #CBD5E1; border-radius: 8px; margin-top: 2ex; font-weight: bold; background: white; padding: 12px; }
+            QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 5px; color: #1E293B; }
+            QPushButton { padding: 8px 18px; border: 1px solid #CBD5E1; background: #FFFFFF; border-radius: 6px; font-weight: bold; color: #334155; }
+            QPushButton:hover { background: #F1F5F9; border: 1px solid #94A3B8; }
+            QPushButton#btn_start { padding: 10px 22px; font-size: 13px; background: #2563EB; color: white; border: none; }
+            QPushButton#btn_start:hover { background: #1D4ED8; }
+            QComboBox { border: 1px solid #CBD5E1; padding: 5px 8px; border-radius: 6px; background: white; min-height: 24px; }
+            QProgressBar { border: 1px solid #CBD5E1; border-radius: 6px; text-align: center; height: 18px; background: #E2E8F0; }
+            QProgressBar::chunk { background-color: #2563EB; border-radius: 5px; }
         """)
         
         self._build_ui()
         self._step = 0
-        
+
     def _build_ui(self):
         main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(12)
+        main_layout.setContentsMargins(16, 16, 16, 16)
         
         # Parameters Group
         grp_param = QGroupBox("Oluşturma Parametreleri")
         form_param = QFormLayout(grp_param)
+        form_param.setSpacing(10)
 
         self.cb_target_class = QComboBox()
         self.cb_target_class.addItem("🌐 Tüm Okul (Tüm Sınıflar & Öğretmenler - Tavsiye Edilen)", None)
@@ -184,33 +189,40 @@ class AutoScheduleDialog(QDialog):
         else:
             self.cb_target_class.setCurrentIndex(0)
             
-        self.cb_target_class.setStyleSheet("font-weight: bold; color: #0284C7; min-height: 26px;")
+        self.cb_target_class.setStyleSheet("font-weight: bold; color: #0284C7;")
         form_param.addRow("Planlanacak Kapsam:", self.cb_target_class)
         
         self.cb_complexity = QComboBox()
         self.cb_complexity.addItems([
-            "A* Search & Branch-Bound (En İyisi / Tavsiye edilen)",
-            "Normal",
-            "Büyük",
-            "Karmaşık"
+            "Infinite Engine (Sonsuz İterasyon & Min-Conflicts - Tavsiye Edilen)",
+            "Hızlı Sezgisel Arama (Fast Heuristic)",
+            "Katı Kural Kısıt Çözücü (Strict CSP)"
         ])
         form_param.addRow("Arama Algoritması:", self.cb_complexity)
         
-        self.chk_relax = QCheckBox("Sıkı koşulların gevşetilmesine izin ver")
-        self.chk_relax.setChecked(False)
-        form_param.addRow("", self.chk_relax)
+        self.chk_vds = QCheckBox("☁️ VDS Bulut Sunucu Desteği (213.142.159.36)")
+        self.chk_vds.setChecked(False)
+        self.chk_vds.setStyleSheet("font-weight: bold; color: #4F46E5;")
+        form_param.addRow("", self.chk_vds)
         
-        self.chk_fill_empty = QCheckBox("Tüm haftalık çizelgeyi derslerle %100 doldur (Sıfır Boşluk / Eksiksiz Planlama)")
-        self.chk_fill_empty.setChecked(True)
+        self.chk_zero_gap = QCheckBox("Sıfır Boşluklu Gün Düzeni (1. dersten itibaren penceressiz dizilim)")
+        self.chk_zero_gap.setChecked(True)
+        self.chk_zero_gap.setEnabled(False)
+        form_param.addRow("", self.chk_zero_gap)
+        
+        self.chk_fill_empty = QCheckBox("Boş kalan saatleri 'Etüt / Serbest Çalışma' ile doldur")
+        self.chk_fill_empty.setChecked(False)
         form_param.addRow("", self.chk_fill_empty)
         
         main_layout.addWidget(grp_param)
         
         # Progress area
-        grp_prog = QGroupBox("İlerleme")
+        grp_prog = QGroupBox("Canlı İlerleme & Tanılama")
         prog_layout = QVBoxLayout(grp_prog)
+        prog_layout.setSpacing(8)
         
         self.lbl_info = QLabel("Program oluşturmaya hazır. Kısıtlamalar ve mevcut kilitli dersler korunacaktır.")
+        self.lbl_info.setStyleSheet("color: #475569;")
         prog_layout.addWidget(self.lbl_info)
         
         self.progress = QProgressBar()
@@ -218,7 +230,8 @@ class AutoScheduleDialog(QDialog):
         self.progress.setValue(0)
         prog_layout.addWidget(self.progress)
         
-        self.lbl_stats = QLabel("Yerleştirilen ders saati: 0 / 0")
+        self.lbl_stats = QLabel("Yerleştirilen ders saati: 0 / 0 | İterasyon: 0 | Çakışma: 0")
+        self.lbl_stats.setStyleSheet("font-weight: bold; color: #1E293B;")
         prog_layout.addWidget(self.lbl_stats)
         
         main_layout.addWidget(grp_prog)
@@ -229,11 +242,10 @@ class AutoScheduleDialog(QDialog):
         btn_layout = QHBoxLayout()
         self.btn_start = QPushButton("Planlamayı Başlat")
         self.btn_start.setObjectName("btn_start")
-        self.btn_start.setStyleSheet("background-color: #2563EB; color: white; border: none; padding: 8px 18px; border-radius: 4px; font-weight: bold;")
         self.btn_start.clicked.connect(self._start_generation)
         
         self.btn_cancel = QPushButton("İptal")
-        self.btn_cancel.clicked.connect(self.reject)
+        self.btn_cancel.clicked.connect(self._on_cancel_or_stop)
         
         btn_layout.addStretch()
         btn_layout.addWidget(self.btn_start)
@@ -243,25 +255,48 @@ class AutoScheduleDialog(QDialog):
     def _start_generation(self):
         self.progress.setValue(0)
         self.btn_start.setEnabled(False)
-        self.btn_cancel.setText("Durdur")
-        self.lbl_info.setText("A* Search algoritması çalışıyor (Boşluksuz dolum)...")
-        self.lbl_stats.setText("Yerleştirilen ders saati: Hesaplanıyor...")
+        self.btn_cancel.setText("Durdur ve Kaydet")
+        self.lbl_info.setText("Infinite Engine çalışıyor (Canlı kısıt optimizasyonu)...")
+        self.lbl_info.setStyleSheet("color: #2563EB; font-weight: bold;")
+        self.lbl_stats.setText("Hesaplanıyor...")
         
         from auto_scheduler import AutoSchedulerWorker
         fill_empty = self.chk_fill_empty.isChecked()
         chosen_target = self.cb_target_class.currentData()
         inst_slug = getattr(self.parent(), "institution_slug", None)
-        self.worker = AutoSchedulerWorker(self.data_store, target_class=chosen_target, parent=self, fill_empty=fill_empty, institution_slug=inst_slug)
+        use_vds = self.chk_vds.isChecked()
+        
+        self.worker = AutoSchedulerWorker(
+            self.data_store, target_class=chosen_target, parent=self,
+            fill_empty=fill_empty, institution_slug=inst_slug, use_vds=use_vds,
+            infinite_mode=True
+        )
         self.worker.progress_updated.connect(self._on_progress)
+        self.worker.iteration_updated.connect(self._on_iteration)
         self.worker.finished_successfully.connect(self._on_finished)
         self.worker.failed.connect(self._on_failed)
         self.worker.start()
-        
+
+    def _on_cancel_or_stop(self):
+        if self.worker and self.worker.isRunning():
+            self.worker.stop()
+            self.lbl_info.setText("Durduruluyor, en iyi çözüm kaydediliyor...")
+        else:
+            self.reject()
+
+    def _on_iteration(self, iteration, conflicts, placed):
+        self.lbl_stats.setText(f"İterasyon: {iteration} • Çakışma: {conflicts} • Yerleşen: {placed} Saat")
+
     def _on_progress(self, placed, total):
-        pct = int((placed / max(1, total)) * 100)
+        pct = int((placed / max(1, total)) * 100) if total > 0 else 100
         self.progress.setValue(pct)
-        self.lbl_stats.setText(f"Yerleştirilen ders saati: {placed} / {total} Saat")
-        
+
+    def _on_failed(self, err_msg):
+        self.btn_start.setEnabled(True)
+        self.btn_cancel.setText("Kapat")
+        self.lbl_info.setText(f"Hata: {err_msg}")
+        self.lbl_info.setStyleSheet("color: #DC2626; font-weight: bold;")
+
     def _on_finished(self, result):
         self.progress.setValue(100)
         schedule = result.get("schedule", [])

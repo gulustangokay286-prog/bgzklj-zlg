@@ -84,18 +84,44 @@ def parse_distribution_parts(type_str: str, total_duration: int = 0) -> list:
 
 class AutoSchedulerWorker(QThread):
     progress_updated = Signal(int, int) # placed_hours, total_hours
+    iteration_updated = Signal(int, int, int) # iteration, conflict_count, placed_hours
     finished_successfully = Signal(dict) # Returns results dict
     failed = Signal(str)
 
-    def __init__(self, data_store, target_class=None, parent=None, fill_empty=False, institution_slug=None):
+    def __init__(self, data_store, target_class=None, parent=None, fill_empty=False, institution_slug=None, use_vds=False, infinite_mode=True):
         super().__init__(parent)
         self.data_store = data_store
         self.target_class = target_class if target_class and str(target_class).strip() and "Tüm" not in str(target_class) else None
         self.fill_empty = fill_empty
         self.institution_slug = institution_slug or (self.data_store.get("settings", {}).get("institution_slug", None) if isinstance(self.data_store, dict) else None)
+        self.use_vds = use_vds
+        self.infinite_mode = infinite_mode
         self._is_running = True
 
     def run(self):
+        # 1. VDS Bulut Sunucu Denemesi (Eğer seçildiyse)
+        if self.use_vds:
+            try:
+                import requests
+                from api_client import BASE_URL, APIClient
+                client = APIClient()
+                url = f"{BASE_URL}/api/solve_timetable"
+                payload = {
+                    "data_store": self.data_store,
+                    "target_class": self.target_class,
+                    "fill_empty": self.fill_empty,
+                    "institution_slug": self.institution_slug
+                }
+                resp = requests.post(url, json=payload, headers=client.get_headers(), timeout=8)
+                if resp.status_code == 200:
+                    res_json = resp.json()
+                    if res_json.get("success") and res_json.get("schedule"):
+                        self.finished_successfully.emit(res_json)
+                        return
+            except Exception as e:
+                print(f"[AUTO_SCHEDULER] VDS cloud solve fallback to local engine: {e}")
+
+        # 2. Infinite Mantık + Yerel Sıfır Boşluklu Çizelge Motoru
         settings = self.data_store.get("settings", {})
         days = settings.get("days")
         if not days:
@@ -304,13 +330,16 @@ class AutoSchedulerWorker(QThread):
 
             total_target_hours += sum(c["duration"] for c in cards_by_class[cn])
 
-        # Sıfır Boşluklu (Penceresiz) ve Çakışmasız Çizelge Motoru
+        # Sıfır Boşluklu (Penceresiz) ve Çakışmasız Infinite Iteration Motoru
         best_placements = []
         min_collisions = 999999
+        global_iteration = 0
         
-        for restart in range(4):
+        max_restarts = 10 if self.infinite_mode else 3
+
+        for restart in range(max_restarts):
             if not self._is_running:
-                return
+                break
                 
             class_day_blocks = {cn: [[] for _ in range(days_count)] for cn in cards_by_class}
             cards_map = {c["id"]: dict(c) for c_list in cards_by_class.values() for c in c_list}
@@ -405,7 +434,13 @@ class AutoSchedulerWorker(QThread):
 
             for it in range(3500):
                 if not self._is_running:
-                    return
+                    break
+                global_iteration += 1
+                if global_iteration % 50 == 0:
+                    placed_now = sum(cards_map[cid]["duration"] for cn, d_list in class_day_blocks.items() for d in range(days_count) for cid in d_list[d])
+                    self.iteration_updated.emit(global_iteration, conf_count, placed_now)
+                    self.progress_updated.emit(placed_now, total_target_hours)
+
                 if conf_count == 0:
                     break
                     
