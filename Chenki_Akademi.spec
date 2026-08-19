@@ -38,6 +38,8 @@ a = Analysis(
     binaries=[],
     datas=[
         ('dialogs', 'dialogs'),
+        ('11.png', '.'),
+        ('ChatGPT Image 16 Ağu 2026 10_31_17.png', '.'),
         ('app_icon.ico', '.'),
         ('app_icon.png', '.'),
         ('app_icon.icns', '.')

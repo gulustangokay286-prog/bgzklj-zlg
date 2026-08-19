@@ -15,19 +15,33 @@ def get_asset_path(rel_path):
 
 def find_logo_path():
     candidates = [
-        get_asset_path(os.path.join("resources", "logo.png")),
         get_asset_path("11.png"),
-        get_asset_path(os.path.join("dist", "11.png")),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "11.png"),
+        os.path.abspath("11.png"),
+        "/Users/fookay/ders program/11.png",
         get_asset_path("app_icon.png"),
-        os.path.abspath(r"c:\Users\gokay\Desktop\aSc\ChenKi_v2\dist\11.png")
+        get_asset_path(os.path.join("resources", "logo.png")),
+        get_asset_path(os.path.join("dist", "11.png")),
     ]
     for c in candidates:
         if c and os.path.exists(c):
             return c
-    return get_asset_path(os.path.join("resources", "logo.png"))
+    return get_asset_path("11.png")
+
+def find_teacher_char_path():
+    candidates = [
+        get_asset_path("ChatGPT Image 16 Ağu 2026 10_31_17.png"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "ChatGPT Image 16 Ağu 2026 10_31_17.png"),
+        os.path.abspath("ChatGPT Image 16 Ağu 2026 10_31_17.png"),
+        "/Users/fookay/ders program/ChatGPT Image 16 Ağu 2026 10_31_17.png"
+    ]
+    for c in candidates:
+        if c and os.path.exists(c):
+            return c
+    return get_asset_path("ChatGPT Image 16 Ağu 2026 10_31_17.png")
 
 LOGO_SHIELD_PATH = find_logo_path()
-TEACHER_CHAR_PATH = get_asset_path("ChatGPT Image 16 Ağu 2026 10_31_17.png")
+TEACHER_CHAR_PATH = find_teacher_char_path()
 
 
 def ensure_checkmark_assets():

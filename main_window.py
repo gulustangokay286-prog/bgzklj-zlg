@@ -441,7 +441,11 @@ class MainWindow(QMainWindow):
                 print("Error stopping cloud_worker:", e)
 
     def closeEvent(self, event):
-        # 1. Auto-save in-memory and to disk with grid sync
+        # 1. Show Apple UI Feedback with progress animation
+        from save_dialog import run_apple_save_sequence
+        run_apple_save_sequence(self, duration_seconds=1.0, title="Uygulama Kapatılıyor", message="Tüm veriler ve çizelgeler güvenle kaydedildi.")
+        
+        # 2. Auto-save in-memory and to disk with grid sync
         try:
             self.save_db(sync_from_grid=True)
             if hasattr(self, "institution_slug") and hasattr(self, "version_filename") and self.institution_slug and self.version_filename:
@@ -450,7 +454,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print("Auto-save on exit error:", e)
             
-        # 2. Flush to VDS synchronously before window destruction
+        # 3. Flush to VDS synchronously before window destruction
         try:
             slug = getattr(self, "institution_slug", None)
             ver_fn = getattr(self, "version_filename", None)
@@ -461,7 +465,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print("VDS flush on close error:", e)
             
-        # 3. Clean up cloud worker
+        # 4. Clean up cloud worker
         self.cleanup()
         super().closeEvent(event)
 

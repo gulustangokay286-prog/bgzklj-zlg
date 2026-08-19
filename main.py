@@ -215,6 +215,7 @@ class AppShell(QMainWindow):
     def closeEvent(self, event):
         """Save active editor and flush database & cloud sync before closing the application."""
         from save_dialog import run_apple_save_sequence
+        run_apple_save_sequence(self, duration_seconds=1.1, title="Uygulama Kapatılıyor", message="Tüm veriler ve çizelgeler güvenle kaydedildi.")
         
         if self._editor and hasattr(self._editor, "save_db"):
             try:
@@ -230,7 +231,6 @@ class AppShell(QMainWindow):
             except Exception as e:
                 print(f"[CLOSE] Auto-save error: {e}")
                 
-        run_apple_save_sequence(self, duration_seconds=1.6, title="Uygulama Kapatılıyor", message="Tüm veriler ve çizelgeler güvenle kaydedildi.")
         super().closeEvent(event)
 
     @property
@@ -328,7 +328,10 @@ def main():
         }
     """)
 
-    logo_path = icon_path if os.path.exists(icon_path) else get_asset_path("ChatGPT Image 5 Tem 2026 01_04_30.png")
+    logo_candidate = get_asset_path("11.png")
+    if not os.path.exists(logo_candidate):
+        logo_candidate = os.path.join(os.path.dirname(os.path.abspath(__file__)), "11.png")
+    logo_path = logo_candidate if os.path.exists(logo_candidate) else icon_path
 
     from splash_screen import HighTechSplashScreen
     splash = HighTechSplashScreen()
