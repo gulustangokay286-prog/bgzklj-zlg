@@ -364,6 +364,7 @@ def list_institutions():
                 else:
                     last_upd_str = meta.get("created", "")
                     
+            is_prim = bool(meta.get("is_primary", False))
             result.append({
                 "slug": entry,
                 "name": meta.get("name", entry),
@@ -373,14 +374,73 @@ def list_institutions():
                 "has_password": bool(meta.get("has_password", False) and meta.get("password_hash")),
                 "active_version": meta.get("active_version", ""),
                 "last_updated_str": last_upd_str or "",
+                "is_primary": is_prim,
                 "path": inst_dir,
             })
+    # If no primary is set, auto-designate bogazici_egitim_kurumlari or first institution
+    has_primary = any(x.get("is_primary") for x in result)
+    if not has_primary and result:
+        bogazici_found = False
+        for x in result:
+            if x["slug"] == "bogazici_egitim_kurumlari":
+                x["is_primary"] = True
+                set_primary_institution("bogazici_egitim_kurumlari")
+                bogazici_found = True
+                break
+        if not bogazici_found and result:
+            result[0]["is_primary"] = True
+            set_primary_institution(result[0]["slug"])
+            
     last_slug = get_last_active_institution_slug()
     result.sort(key=lambda x: (
-        0 if (last_slug and x["slug"] == last_slug) else 1,
+        0 if x.get("is_primary") else (1 if (last_slug and x["slug"] == last_slug) else 2),
         -(os.path.getmtime(x["path"]) if os.path.exists(x["path"]) else 0)
     ))
     return result
+
+def set_primary_institution(primary_slug: str):
+    """Marks the specified institution as the primary 'Ana Kurum', and unmarks all others."""
+    base = _ensure_base()
+    if not os.path.exists(base):
+        return
+    for entry in os.listdir(base):
+        meta_path = os.path.join(base, entry, "meta.json")
+        if os.path.isfile(meta_path):
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                meta["is_primary"] = (entry == primary_slug)
+                with open(meta_path, "w", encoding="utf-8") as f:
+                    json.dump(meta, f, ensure_ascii=False, indent=2)
+                try:
+                    import threading
+                    import cloud_sync
+                    threading.Thread(target=cloud_sync.push_institution_to_rtdb, args=(entry,), daemon=True).start()
+                except Exception:
+                    pass
+            except Exception as e:
+                print(f"Error setting primary institution for {entry}: {e}")
+
+def get_primary_institution_slug() -> str:
+    """Returns the slug of the primary 'Ana Kurum' institution."""
+    base = _ensure_base()
+    if not os.path.exists(base):
+        return "bogazici_egitim_kurumlari"
+    for entry in os.listdir(base):
+        meta_path = os.path.join(base, entry, "meta.json")
+        if os.path.isfile(meta_path):
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                if meta.get("is_primary"):
+                    return entry
+            except Exception:
+                pass
+    if os.path.exists(os.path.join(base, "bogazici_egitim_kurumlari")):
+        set_primary_institution("bogazici_egitim_kurumlari")
+        return "bogazici_egitim_kurumlari"
+    insts = [d for d in os.listdir(base) if os.path.isdir(os.path.join(base, d))]
+    return insts[0] if insts else "bogazici_egitim_kurumlari"
 
 def create_institution(name: str, color: str = None, password: str = "") -> dict:
     """Creates a new institution folder. Returns its metadata dict."""
