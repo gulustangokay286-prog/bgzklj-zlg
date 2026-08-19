@@ -291,143 +291,73 @@ class NoScrollComboBox(QComboBox):
 from PySide6.QtWidgets import QListWidget, QListWidgetItem
 from PySide6.QtCore import Signal, QPoint, QEvent
 
-class SearchableComboBox(QWidget):
+class SearchableComboBox(QComboBox):
     """
     Searchable ComboBox with complete Turkish & English character insensitive filtering.
-    Avoids Qt C++ QCompleter ASCII bugs by using custom Python-level Turkish normalization and floating popup.
+    Uses native QComboBox and QCompleter with dynamic QStringListModel for perfect macOS integration.
     """
     currentTextChanged = Signal(str)
     
     def __init__(self, items=None, parent=None):
         super().__init__(parent)
-        self._all_items = list(items or [])
+        self.setEditable(True)
+        self.setInsertPolicy(QComboBox.NoInsert)
+        self.setMaxVisibleItems(10)
         
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-        
-        lay.setAlignment(Qt.AlignVCenter)
-        
-        self.edit = QLineEdit(self)
-        self.edit.setFixedHeight(28)
-        self.edit.setPlaceholderText("Ders Ara veya Seç...")
-        self.edit.setStyleSheet("""
-            QLineEdit {
+        self.setStyleSheet("""
+            QComboBox {
                 border: 1px solid #CBD5E1;
-                border-right: none;
-                border-top-left-radius: 4px;
-                border-bottom-left-radius: 4px;
+                border-radius: 4px;
                 padding: 2px 8px;
                 background: #FFFFFF;
                 font-size: 13px;
                 font-weight: 600;
                 color: #0F172A;
+                min-height: 28px;
             }
-            QLineEdit:focus {
-                border-color: #2563EB;
-            }
-        """)
-        lay.addWidget(self.edit, 1)
-        
-        self.btn_drop = QPushButton("▼", self)
-        self.btn_drop.setFixedSize(28, 28)
-        self.btn_drop.setCursor(Qt.PointingHandCursor)
-        self.btn_drop.setStyleSheet("""
-            QPushButton {
-                border: 1px solid #CBD5E1;
-                border-left: none;
+            QComboBox::drop-down {
+                border-left: 1px solid #CBD5E1;
+                width: 28px;
+                background: #F8FAFC;
                 border-top-right-radius: 4px;
                 border-bottom-right-radius: 4px;
-                background: #F8FAFC;
-                color: #64748B;
-                font-size: 10px;
-                font-weight: bold;
-                padding: 0;
             }
-            QPushButton:hover {
-                background: #E2E8F0;
-                color: #1E293B;
+            QComboBox::down-arrow {
+                image: none;
             }
         """)
-        lay.addWidget(self.btn_drop)
+
+        # Our data source
+        self._all_items = list(items or [])
+        super().addItems(self._all_items)
+
+        # Setup completer
+        from PySide6.QtWidgets import QCompleter
+        from PySide6.QtCore import QStringListModel
+        self._model = QStringListModel(self._all_items, self)
+        self._completer = QCompleter(self._model, self)
+        self._completer.setCompletionMode(QCompleter.UnfilteredPopupCompletion)
+        self._completer.setCaseSensitivity(Qt.CaseInsensitive)
+        self.setCompleter(self._completer)
         
-        # Floating Popup List
-        self.popup = QListWidget()
-        self.popup.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
-        self.popup.setFocusPolicy(Qt.NoFocus)
-        self.popup.setAttribute(Qt.WA_MacAlwaysShowToolWindow, True)
-        self.popup.setAttribute(Qt.WA_ShowWithoutActivating, True)
-        self.popup.setStyleSheet("""
-            QListWidget {
-                border: 1px solid #94A3B8;
-                border-radius: 4px;
-                background: #FFFFFF;
-                font-size: 13px;
-                font-weight: 500;
-                color: #0F172A;
-                padding: 2px;
-            }
-            QListWidget::item {
-                padding: 6px 10px;
-                border-radius: 3px;
-            }
-            QListWidget::item:hover {
-                background: #EFF6FF;
-                color: #1D4ED8;
-            }
-            QListWidget::item:selected {
-                background: #2563EB;
-                color: #FFFFFF;
-            }
-        """)
+        # We handle text edited to dynamically update completer model (for Turkish support)
+        self.lineEdit().textEdited.connect(self._on_text_edited)
         
-        # Signals
-        self.edit.textEdited.connect(self._on_text_edited)
-        self.edit.returnPressed.connect(self._on_return_pressed)
-        self.btn_drop.clicked.connect(self._toggle_popup)
-        self.popup.itemClicked.connect(self._on_item_clicked)
-        
-        self.edit.installEventFilter(self)
-        
-    def addItems(self, items):
-        self._all_items = list(items)
-        
+        # Propagate currentTextChanged
+        self.lineEdit().textChanged.connect(self.currentTextChanged.emit)
+
     def setItems(self, items):
         self._all_items = list(items)
-        
-    def currentText(self):
-        return self.edit.text().strip()
-        
-    def setCurrentText(self, text):
-        self.edit.setText(text)
-        self.currentTextChanged.emit(text)
-        
-    def setCurrentIndex(self, idx):
-        if 0 <= idx < len(self._all_items):
-            self.setCurrentText(self._all_items[idx])
-        elif idx == -1:
-            self.edit.clear()
-            
-    def findText(self, text, flags=None):
-        t_norm = normalize_tr(text.strip())
-        for i, item in enumerate(self._all_items):
-            if normalize_tr(item) == t_norm:
-                return i
-        return -1
-        
-    def count(self):
-        return len(self._all_items)
-        
-    def itemText(self, idx):
-        return self._all_items[idx] if 0 <= idx < len(self._all_items) else ""
-        
-    def lineEdit(self):
-        return self.edit
-        
-    def setMinimumWidth(self, w):
-        super().setMinimumWidth(w)
-        self.edit.setMinimumWidth(max(0, w - 30))
-        
+        self.clear()
+        super().addItems(self._all_items)
+        self._model.setStringList(self._all_items)
+
+    def addItems(self, items):
+        super().addItems(items)
+        if hasattr(self, '_all_items'):
+            self._all_items.extend(list(items))
+            self._model.setStringList(self._all_items)
+
     def _filter_items(self, query):
         q_norm = normalize_tr(query.strip())
         if not q_norm:
@@ -435,80 +365,23 @@ class SearchableComboBox(QWidget):
         prefix = [s for s in self._all_items if normalize_tr(s).startswith(q_norm)]
         substr = [s for s in self._all_items if q_norm in normalize_tr(s) and s not in prefix]
         return prefix + substr
-        
+
     def _on_text_edited(self, text):
         matches = self._filter_items(text)
-        self._show_popup_with_items(matches)
+        self._model.setStringList(matches)
+        self._completer.complete()
+
+    def findText(self, text, flags=None):
+        t_norm = normalize_tr(text.strip())
+        for i, item in enumerate(self._all_items):
+            if normalize_tr(item) == t_norm:
+                return i
+        return -1
         
-    def _show_popup_with_items(self, items):
-        self.popup.clear()
-        if not items:
-            self.popup.hide()
-            return
-        for s in items:
-            self.popup.addItem(QListWidgetItem(s))
-        self.popup.setCurrentRow(0)
-        
-        # Position popup under lineEdit
-        if self.isVisible():
-            pos = self.edit.mapToGlobal(QPoint(0, self.edit.height()))
-            self.popup.setFixedWidth(max(self.width(), 260))
-            item_h = 28
-            h = min(240, max(40, len(items) * item_h + 8))
-            self.popup.setFixedHeight(h)
-            self.popup.move(pos)
-            self.popup.show()
-        
-    def _toggle_popup(self):
-        if self.popup.isVisible():
-            self.popup.hide()
-        else:
-            self._show_popup_with_items(self._filter_items(self.edit.text()))
-            
-    def _on_item_clicked(self, item):
-        self.setCurrentText(item.text())
-        self.popup.hide()
-        self.edit.setFocus()
-        
-    def _on_return_pressed(self):
-        if self.popup.isVisible() and self.popup.count() > 0:
-            cur = self.popup.currentItem() or self.popup.item(0)
-            if cur:
-                self.setCurrentText(cur.text())
-            self.popup.hide()
-        else:
-            matches = self._filter_items(self.edit.text())
-            if matches:
-                self.setCurrentText(matches[0])
-            
-    def eventFilter(self, obj, event):
-        from PySide6.QtCore import QTimer
-        if obj == self.edit and event.type() == QEvent.FocusOut:
-            def check_and_hide():
-                # Don't hide if mouse is over the popup (so clicking/scrolling works)
-                if not self.popup.underMouse():
-                    self.popup.hide()
-            QTimer.singleShot(200, check_and_hide)
-            
-        if obj == self.edit and event.type() == QEvent.KeyPress:
-            if event.key() == Qt.Key_Down:
-                if self.popup.isVisible():
-                    row = min(self.popup.count() - 1, self.popup.currentRow() + 1)
-                    self.popup.setCurrentRow(row)
-                    return True
-                else:
-                    self._toggle_popup()
-                    return True
-            elif event.key() == Qt.Key_Up:
-                if self.popup.isVisible():
-                    row = max(0, self.popup.currentRow() - 1)
-                    self.popup.setCurrentRow(row)
-                    return True
-            elif event.key() == Qt.Key_Escape:
-                if self.popup.isVisible():
-                    self.popup.hide()
-                    return True
-        return super().eventFilter(obj, event)
+    def setMinimumWidth(self, w):
+        super().setMinimumWidth(w)
+        if self.lineEdit():
+            self.lineEdit().setMinimumWidth(max(0, w - 30))
 
 
 class SubjectClassMultiSelectDialog(QDialog):
