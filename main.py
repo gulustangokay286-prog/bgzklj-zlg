@@ -191,7 +191,10 @@ class AppShell(QMainWindow):
             except Exception as ce:
                 print(f"[GO_HOME] Cleanup error: {ce}")
 
-        # 3. Switch to dashboard instantaneously
+        # 3. Show Apple Feedback and switch to dashboard
+        from save_dialog import run_apple_save_sequence
+        run_apple_save_sequence(self, duration_seconds=0.35, title="Kaydediliyor", message="Çizelge kaydedildi, anasayfaya dönülüyor...")
+        
         self._stack.setCurrentWidget(self._dashboard)
         self.setWindowTitle("BGZ Ders Planlama — Kurum & Çizelge Yönetimi")
         try:

@@ -1497,32 +1497,6 @@ class LessonAssignmentDialog(QDialog):
                         if p_tea == teacher_name and (p_sub, p_cls, p_tea) not in active_tuples:
                             yerlesim.pop(k, None)
 
-            trigger_save_db(self, self.data_store)
-            
-            # Refresh MainWindow and bottom dock if accessible
-            win = self.window()
-            if not win or (not hasattr(win, "_grid") and not hasattr(win, "_refresh_unplaced_lessons")):
-                p = self.parent()
-                while p:
-                    if hasattr(p, "_grid") or hasattr(p, "_refresh_unplaced_lessons"):
-                        win = p
-                        break
-                    p = p.parent()
-                    
-            if not win or (not hasattr(win, "_grid") and not hasattr(win, "_refresh_unplaced_lessons")):
-                from PySide6.QtWidgets import QApplication
-                for top in QApplication.topLevelWidgets():
-                    if hasattr(top, "_grid") or hasattr(top, "_refresh_unplaced_lessons"):
-                        win = top
-                        break
-                        
-            if win:
-                if hasattr(win, "save_db"): win.save_db(sync_from_grid=False)
-                if hasattr(win, "_refresh_grid"): win._refresh_grid()
-                if hasattr(win, "_refresh_tree"): win._refresh_tree()
-                if hasattr(win, "_load_unplaced_lessons"): win._load_unplaced_lessons()
-                if hasattr(win, "_refresh_unplaced_lessons"): win._refresh_unplaced_lessons()
-                
         super().accept()
 
 
@@ -4247,22 +4221,6 @@ class ClassComprehensiveAssignmentDialog(QDialog):
         self._load_data()
 
     def accept(self):
-        try:
-            trigger_save_db(self, self.data_store)
-            win = self.window()
-            if not win or not hasattr(win, "_grid"):
-                p = self.parent()
-                while p:
-                    if hasattr(p, "_grid"):
-                        win = p
-                        break
-                    p = p.parent()
-            if win:
-                if hasattr(win, "_refresh_tree"): win._refresh_tree()
-                if hasattr(win, "_refresh_grid"): win._refresh_grid()
-                if hasattr(win, "_refresh_unplaced_lessons"): win._refresh_unplaced_lessons()
-        except Exception as e:
-            print(f"[ACCEPT_SYNC_ERR] {e}")
         super().accept()
 
     def _remove_subject_assignment(self, subject_name):

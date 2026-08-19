@@ -47,14 +47,14 @@ class AppleSaveDialog(QDialog):
         container.setStyleSheet("""
             #saveCard {
                 background: #FFFFFF;
-                border: 1px solid rgba(0, 0, 0, 0.08);
+                border: 1px solid rgba(0, 0, 0, 0.12);
                 border-radius: 18px;
             }
         """)
         shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(35)
-        shadow.setColor(QColor(0, 0, 0, 50))
-        shadow.setOffset(0, 8)
+        shadow.setBlurRadius(40)
+        shadow.setColor(QColor(0, 0, 0, 70))
+        shadow.setOffset(0, 10)
         container.setGraphicsEffect(shadow)
         
         c_lay = QVBoxLayout(container)
@@ -80,9 +80,34 @@ class AppleSaveDialog(QDialog):
         c_lay.addWidget(self.msg_lbl)
         
         layout.addWidget(container)
+        
+        # Center over parent window or screen
+        if parent and hasattr(parent, "geometry") and parent.isVisible():
+            p_geo = parent.geometry()
+            self.move(p_geo.center().x() - 240, p_geo.center().y() - 95)
+        else:
+            screen = QApplication.primaryScreen()
+            if screen:
+                s_geo = screen.geometry()
+                self.move(s_geo.center().x() - 240, s_geo.center().y() - 95)
 
-def run_apple_save_sequence(parent, duration_seconds=0.0, title="Değişiklikler Kaydediliyor", message="Veritabanı ve bulut senkronizasyonu yapılıyor..."):
-    # Instant non-blocking execution (zero delay)
-    if hasattr(parent, "statusBar") and callable(parent.statusBar):
-        parent.statusBar().showMessage(f"💾 {title}: {message}", 2000)
-    return
+def run_apple_save_sequence(parent, duration_seconds=0.35, title="Değişiklikler Kaydediliyor", message="Veritabanı ve bulut senkronizasyonu yapılıyor..."):
+    """Sleek Apple-style micro-feedback modal card for loading, saving, opening and closing."""
+    try:
+        dur = max(0.25, min(float(duration_seconds or 0.35), 0.6))
+        dlg = AppleSaveDialog(title, message, parent=parent)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+        QApplication.processEvents()
+        
+        t_end = time.time() + dur
+        while time.time() < t_end:
+            QApplication.processEvents()
+            time.sleep(0.016)
+            
+        dlg.close()
+        dlg.deleteLater()
+        QApplication.processEvents()
+    except Exception as e:
+        print("[run_apple_save_sequence] note:", e)

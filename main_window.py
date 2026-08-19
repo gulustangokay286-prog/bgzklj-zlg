@@ -2321,7 +2321,9 @@ class MainWindow(QMainWindow):
     def _act_save(self):
         self.save_db(sync_from_grid=True)
         fname = os.path.basename(self.current_roz_path or self.db_path or "program.roz")
-        self.statusBar().showMessage(f"💾 '{fname}' başarıyla kaydedildi.")
+        from save_dialog import run_apple_save_sequence
+        run_apple_save_sequence(self, duration_seconds=0.35, title="Kaydediliyor", message=f"'{fname}' başarıyla yerel sisteme ve buluta kaydedildi.")
+        self.statusBar().showMessage(f"💾 '{fname}' başarıyla kaydedildi.", 3000)
 
     def _act_print(self):
         self._handle_print_preview(is_direct_print=True)
