@@ -1,0 +1,28 @@
+{
+    "siniflar": [
+        {
+            "ad": "9A "
+        }
+    ],
+    "ogretmenler": [
+        {
+            "ad": "Ali",
+            "kisa": "ALI"
+        }
+    ],
+    "dersler": [
+        {
+            "ad": "Matematik",
+            "color": "#00ACC1"
+        }
+    ],
+    "atamalar": [
+        {
+            "subject": "Matematik",
+            "teacher": "Ali",
+            "class": "9A ",
+            "duration": 2
+        }
+    ],
+    "grid_placements": []
+}

@@ -1,7 +1,6 @@
 """
-cloud_sync.py — VDS Backend Senkronizasyon Motoru
-Tüm .roz dosyaları ve kurumlar özel VDS API üzerinden senkronize edilir.
-Çoklu bilgisayar desteği, anlık veri çekme (pull) ve arka plan kuyruklu yükleme (push).
+cloud_sync.py — VDS Backend Gerçek Zamanlı (Realtime Live Event) Senkronizasyon Motoru
+Tüm .roz dosyaları ve kurumlar özel VDS API üzerinden çift yönlü anlık senkronize edilir.
 """
 import os
 import re
@@ -13,13 +12,7 @@ from PySide6.QtCore import QThread, Signal, QMutex, QMutexLocker
 from api_client import api_client
 
 def _sanitize_key(key: str) -> str:
-    """Sanitizes string keys for Firebase RTDB and JSON paths."""
     return re.sub(r'[\.\#\$\/\[\]]', '_', str(key))
-
-def _get_auth_params(auth_data: dict = None) -> dict:
-    return {}
-
-# ── Standalone API Sync Functions ───────────────────────────────────
 
 def pull_all_from_rtdb(auth_data: dict = None) -> tuple:
     return api_client.pull_all_from_rtdb(auth_data)
@@ -31,7 +24,6 @@ def push_version_to_rtdb(slug: str, filename: str, roz_data: dict, auth_data: di
         return False
 
 def push_institution_to_rtdb(slug: str, auth_data: dict = None) -> bool:
-    """Pushes an entire local institution (meta + all versions) to API."""
     import version_store
     inst_dir = os.path.join(version_store._ensure_base(), slug)
     if not os.path.isdir(inst_dir):
@@ -66,7 +58,6 @@ def push_institution_to_rtdb(slug: str, auth_data: dict = None) -> bool:
         return False
 
 def push_all_to_rtdb(auth_data: dict = None) -> tuple:
-    """Pushes all local institutions and their versions to API."""
     import version_store
     base_dir = version_store._ensure_base()
     if not os.path.exists(base_dir):
@@ -95,18 +86,15 @@ def delete_version_from_rtdb(slug: str, filename: str, auth_data: dict = None) -
         return False
 
 def delete_institution_from_rtdb(slug: str, auth_data: dict = None) -> bool:
-    url = f"{api_client.base_url}/api/institutions/{slug}"
-    try:
-        resp = requests.delete(url, headers=api_client.get_headers(), timeout=10)
-        return resp.status_code in (200, 204)
-    except Exception:
-        return False
+    return api_client.delete_institution_from_rtdb(slug, auth_data)
 
 
-# ── Background Local-First Cloud Worker ──────────────────────────────
+# ── Background Realtime Live Event Sync Worker ────────────────────────
 
 class CloudSyncWorker(QThread):
     sync_status_changed = Signal(str)
+    remote_data_updated = Signal(str, str) # slug, filename
+    institutions_list_changed = Signal()
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -114,7 +102,7 @@ class CloudSyncWorker(QThread):
         self._queue = deque()
         self._mutex = QMutex()
         self.auth_data = None
-        self._last_ping = 0
+        self._last_pull_time = 0
         
     def set_auth(self, auth_data):
         self.auth_data = auth_data
@@ -165,23 +153,27 @@ class CloudSyncWorker(QThread):
                     with QMutexLocker(self._mutex):
                         if len(self._queue) > 0:
                             self._queue.popleft()
-                    self.sync_status_changed.emit("Veritabanınız korunuyor: Senkronize")
+                    self.sync_status_changed.emit("Veritabanınız korunuyor: Canlı Senkronize (VDS Aktif)")
                 else:
                     self.sync_status_changed.emit("Veritabanınız korunuyor: Bağlantı bekleniyor...")
-                    self._sleep_interruptible(4)
+                    self._sleep_interruptible(3)
             else:
-                if self._last_ping + 15 < time.time():
+                # Live Poller: Pull remote changes every 4 seconds
+                now = time.time()
+                if self._last_pull_time + 4 < now:
                     try:
-                        # Dummy ping for connection check
-                        resp = requests.get(f"{api_client.base_url}", timeout=3)
-                        if resp.status_code in (200, 404):
-                            self.sync_status_changed.emit("Veritabanınız korunuyor: Senkronize")
+                        pull_ok, msg, new_count = api_client.pull_all_from_rtdb(self.auth_data)
+                        if pull_ok:
+                            self.sync_status_changed.emit("Veritabanınız korunuyor: Canlı Senkronize (VDS Aktif)")
+                            if new_count > 0:
+                                self.institutions_list_changed.emit()
+                                self.remote_data_updated.emit("", "")
                         else:
-                            self.sync_status_changed.emit("Veritabanınız korunuyor: Senkronize")
+                            self.sync_status_changed.emit("Veritabanı: Çevrimdışı (Yerel Mod)")
                     except Exception:
-                        self.sync_status_changed.emit("Veritabanı: Çevrimdışı (Yerel Kayıt)")
-                    self._last_ping = time.time()
-                self._sleep_interruptible(1)
+                        self.sync_status_changed.emit("Veritabanı: Çevrimdışı (Yerel Mod)")
+                    self._last_pull_time = now
+                self._sleep_interruptible(0.5)
 
     def stop(self):
         self._is_running = False

@@ -1721,6 +1721,16 @@ class HomeDashboard(QWidget):
         # Cross-PC Realtime Database Sync on startup
         if self.auth_data and not self.auth_data.get("is_offline"):
             self._start_initial_cloud_sync()
+        try:
+            from cloud_sync import CloudSyncWorker
+            self.cloud_worker = CloudSyncWorker(self)
+            if self.auth_data:
+                self.cloud_worker.set_auth(self.auth_data)
+            self.cloud_worker.institutions_list_changed.connect(self._on_cloud_synced)
+            self.cloud_worker.remote_data_updated.connect(lambda slug, fn: self._on_cloud_synced())
+            self.cloud_worker.start()
+        except Exception as cwe:
+            print(f"[HomeDashboard] Cloud worker init note: {cwe}")
             
     def _start_initial_cloud_sync(self):
         import threading

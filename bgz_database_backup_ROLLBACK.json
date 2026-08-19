@@ -1,0 +1,382 @@
+{
+    "dersler": [
+        {
+            "ad": "matematik",
+            "kisa": "MAT",
+            "renk": "#0097A7",
+            "color": "#0097A7"
+        },
+        {
+            "ad": "matematik 1",
+            "kisa": "MAT 1",
+            "renk": "#A1887F",
+            "color": "#A1887F"
+        },
+        {
+            "ad": "matematik 2",
+            "kisa": "MAT 2",
+            "renk": "#FFB300",
+            "color": "#FFB300"
+        },
+        {
+            "ad": "geometri",
+            "kisa": "GEO",
+            "renk": "#D81B60",
+            "color": "#D81B60"
+        },
+        {
+            "ad": "türkçe",
+            "kisa": "TRK",
+            "renk": "#00897B",
+            "color": "#00897B"
+        },
+        {
+            "ad": "edebiyat",
+            "kisa": "EDB",
+            "renk": "#00838F",
+            "color": "#00838F"
+        },
+        {
+            "ad": "paragraf",
+            "kisa": "PRG",
+            "renk": "#3949AB",
+            "color": "#3949AB"
+        },
+        {
+            "ad": "fizik",
+            "kisa": "FİZ",
+            "renk": "#D81B60",
+            "color": "#D81B60"
+        },
+        {
+            "ad": "fizik1",
+            "kisa": "FİZ 1",
+            "renk": "#FFB300",
+            "color": "#FFB300"
+        },
+        {
+            "ad": "fizik2",
+            "kisa": "FİZ 2",
+            "renk": "#D81B60",
+            "color": "#D81B60"
+        },
+        {
+            "ad": "biyoloji",
+            "kisa": "BİYO",
+            "renk": "#8E24AA",
+            "color": "#8E24AA"
+        },
+        {
+            "ad": "biyoloji1",
+            "kisa": "BİYO 1",
+            "renk": "#E53935",
+            "color": "#E53935"
+        },
+        {
+            "ad": "biyoloji2",
+            "kisa": "BİYO 2",
+            "renk": "#D81B60",
+            "color": "#D81B60"
+        },
+        {
+            "ad": "kimya",
+            "kisa": "KİM",
+            "renk": "#D81B60",
+            "color": "#D81B60"
+        },
+        {
+            "ad": "kimya1",
+            "kisa": "KİM 1",
+            "renk": "#FFB300",
+            "color": "#FFB300"
+        },
+        {
+            "ad": "kimya2",
+            "kisa": "KİM 2",
+            "renk": "#D81B60",
+            "color": "#D81B60"
+        },
+        {
+            "ad": "felsefe",
+            "kisa": "FEL",
+            "renk": "#F4511E",
+            "color": "#F4511E"
+        },
+        {
+            "ad": "din",
+            "kisa": "DİN",
+            "renk": "#1E88E5",
+            "color": "#1E88E5"
+        },
+        {
+            "ad": "görsel sanatlar",
+            "kisa": "GÖR",
+            "renk": "#C2185B",
+            "color": "#C2185B"
+        },
+        {
+            "ad": "beden",
+            "kisa": "BED",
+            "renk": "#00838F",
+            "color": "#00838F"
+        },
+        {
+            "ad": "Matematik",
+            "kisa": "MAT",
+            "color": "#00ACC1",
+            "renk": "#00ACC1"
+        },
+        {
+            "ad": "Geometri",
+            "kisa": "GEO",
+            "color": "#43A047",
+            "renk": "#43A047"
+        }
+    ],
+    "siniflar": [
+        {
+            "ad": "9/A",
+            "kisa": "9A",
+            "renk": "#2563EB",
+            "foto": true,
+            "sinif_ogretmeni": "Hüseyin Arman",
+            "sinif_tipi": "Hepsi",
+            "kapasite": "30",
+            "ders_bitimi": "15:30",
+            "numara": ""
+        },
+        {
+            "ad": "10/A",
+            "kisa": "10A",
+            "renk": "#059669",
+            "foto": true,
+            "sinif_ogretmeni": "Sultan Yılmaz",
+            "sinif_tipi": "Hepsi",
+            "kapasite": "30",
+            "ders_bitimi": "15:30",
+            "numara": ""
+        },
+        {
+            "ad": "11/A",
+            "kisa": "11A",
+            "renk": "#D97706",
+            "foto": true,
+            "sinif_ogretmeni": "Erman Gürbüz",
+            "sinif_tipi": "Hepsi",
+            "kapasite": "30",
+            "ders_bitimi": "15:30",
+            "numara": ""
+        },
+        {
+            "ad": "12 / A",
+            "kisa": "12A",
+            "renk": "#A30F37",
+            "foto": true,
+            "sinif_ogretmeni": "Mustafa Yalçın",
+            "sinif_tipi": "Hepsi",
+            "kapasite": "30",
+            "ders_bitimi": "15:30",
+            "numara": ""
+        },
+        {
+            "ad": "12 / B",
+            "kisa": "12B",
+            "renk": "#7C3AED",
+            "foto": true,
+            "sinif_ogretmeni": "Yasemin Özkaya",
+            "sinif_tipi": "Hepsi",
+            "kapasite": "30",
+            "ders_bitimi": "15:30",
+            "numara": ""
+        }
+    ],
+    "derslikler": [
+        {
+            "ad": "Derslik 1",
+            "kisa": "D1",
+            "renk": "#F39C12",
+            "kapasite": "35",
+            "numara": ""
+        }
+    ],
+    "ogretmenler": [
+        {
+            "ad": "Hüseyin Arman",
+            "kisa": "H. ARMAN",
+            "renk": "#27AE60",
+            "sinif_ogretmeni": "",
+            "numara": ""
+        },
+        {
+            "ad": "Erman Gürbüz",
+            "kisa": "E. GÜRBÜZ",
+            "renk": "#27AE60",
+            "sinif_ogretmeni": "",
+            "numara": ""
+        },
+        {
+            "ad": "Sultan Yılmaz",
+            "kisa": "S. YILMAZ",
+            "renk": "#27AE60",
+            "sinif_ogretmeni": "",
+            "numara": ""
+        },
+        {
+            "ad": "Mustafa Yalçın",
+            "kisa": "M. YALÇIN",
+            "renk": "#27AE60",
+            "sinif_ogretmeni": "",
+            "numara": ""
+        },
+        {
+            "ad": "Yasemin Özkaya",
+            "kisa": "Y. ÖZKAYA",
+            "renk": "#27AE60",
+            "sinif_ogretmeni": "",
+            "numara": ""
+        },
+        {
+            "ad": "Şeyma Aker",
+            "kisa": "Ş. AKER",
+            "renk": "#27AE60",
+            "sinif_ogretmeni": "",
+            "ek_dersler": "Geometri, Matematik 2",
+            "es_zamanli": false,
+            "numara": ""
+        },
+        {
+            "ad": "Mehmet Oğuz",
+            "kisa": "M. OĞUZ",
+            "renk": "#27AE60",
+            "sinif_ogretmeni": "",
+            "ek_dersler": "Geometri, Matematik 2",
+            "es_zamanli": false,
+            "numara": ""
+        },
+        {
+            "ad": "Yaman Öztürk",
+            "kisa": "Y. ÖZTÜRK",
+            "renk": "#27AE60",
+            "sinif_ogretmeni": "",
+            "ek_dersler": "Geometri, Matematik 2",
+            "es_zamanli": false,
+            "numara": ""
+        },
+        {
+            "ad": "Selim Kurtaran",
+            "kisa": "S. KURTARAN",
+            "renk": "#27AE60",
+            "sinif_ogretmeni": "",
+            "ek_dersler": "Geometri, Matematik 2",
+            "es_zamanli": false,
+            "numara": ""
+        },
+        {
+            "ad": "Nezaket Çelik",
+            "kisa": "N. ÇELİK",
+            "renk": "#27AE60",
+            "sinif_ogretmeni": "",
+            "ek_dersler": "Geometri, Matematik 2",
+            "es_zamanli": false,
+            "numara": ""
+        },
+        {
+            "ad": "Hüseyin Bilir",
+            "kisa": "H. BİLİR",
+            "renk": "#27AE60",
+            "sinif_ogretmeni": "",
+            "ek_dersler": "Geometri, Matematik 2",
+            "es_zamanli": false,
+            "numara": ""
+        }
+    ],
+    "atamalar": [
+        {"teacher": "Hüseyin Arman", "subject": "Matematik", "class": "9/A", "duration": 6, "type": "2+2+2", "color": "#00ACC1"},
+        {"teacher": "Sultan Yılmaz", "subject": "Biyoloji", "class": "9/A", "duration": 2, "type": "2", "color": "#8E24AA"},
+        {"teacher": "Mustafa Yalçın", "subject": "Fizik", "class": "9/A", "duration": 2, "type": "2", "color": "#D81B60"},
+        {"teacher": "Erman Gürbüz", "subject": "Kimya", "class": "9/A", "duration": 2, "type": "2", "color": "#FFB300"},
+        {"teacher": "Yasemin Özkaya", "subject": "Türkçe", "class": "9/A", "duration": 5, "type": "2+2+1", "color": "#00897B"},
+        {"teacher": "Şeyma Aker", "subject": "Geometri", "class": "9/A", "duration": 2, "type": "2", "color": "#43A047"},
+        {"teacher": "Mehmet Oğuz", "subject": "Tarih", "class": "9/A", "duration": 2, "type": "2", "color": "#795548"},
+        {"teacher": "Yaman Öztürk", "subject": "Coğrafya", "class": "9/A", "duration": 2, "type": "2", "color": "#388E3C"},
+        {"teacher": "Selim Kurtaran", "subject": "İngilizce", "class": "9/A", "duration": 4, "type": "2+2", "color": "#1976D2"},
+        {"teacher": "Nezaket Çelik", "subject": "Din", "class": "9/A", "duration": 2, "type": "2", "color": "#1E88E5"},
+        {"teacher": "Hüseyin Bilir", "subject": "Beden", "class": "9/A", "duration": 2, "type": "2", "color": "#00838F"},
+        
+        {"teacher": "Hüseyin Arman", "subject": "Matematik", "class": "10/A", "duration": 6, "type": "2+2+2", "color": "#00ACC1"},
+        {"teacher": "Sultan Yılmaz", "subject": "Biyoloji", "class": "10/A", "duration": 2, "type": "2", "color": "#8E24AA"},
+        {"teacher": "Mustafa Yalçın", "subject": "Fizik", "class": "10/A", "duration": 2, "type": "2", "color": "#D81B60"},
+        {"teacher": "Erman Gürbüz", "subject": "Kimya", "class": "10/A", "duration": 2, "type": "2", "color": "#FFB300"},
+        {"teacher": "Yasemin Özkaya", "subject": "Edebiyat", "class": "10/A", "duration": 5, "type": "2+2+1", "color": "#00838F"},
+        
+        {"teacher": "Hüseyin Arman", "subject": "Matematik", "class": "11/A", "duration": 6, "type": "2+2+2", "color": "#00ACC1"},
+        {"teacher": "Sultan Yılmaz", "subject": "Biyoloji", "class": "11/A", "duration": 4, "type": "2+2", "color": "#8E24AA"},
+        {"teacher": "Mustafa Yalçın", "subject": "Fizik", "class": "11/A", "duration": 4, "type": "2+2", "color": "#D81B60"},
+        {"teacher": "Erman Gürbüz", "subject": "Kimya", "class": "11/A", "duration": 4, "type": "2+2", "color": "#FFB300"},
+        
+        {"teacher": "Hüseyin Arman", "subject": "Matematik", "class": "12 / A", "duration": 6, "type": "2+2+2", "color": "#00ACC1"},
+        {"teacher": "Hüseyin Arman", "subject": "Geometri", "class": "12 / A", "duration": 2, "type": "2", "color": "#43A047"},
+        {"teacher": "Hüseyin Bilir", "subject": "Fizik", "class": "12 / A", "duration": 4, "type": "2+2", "color": "#D81B60"}
+    ],
+    "kisitlamalar": {
+        "12 / B": {
+            "0,0": false,
+            "1,0": false,
+            "2,0": false,
+            "3,0": true,
+            "4,0": true,
+            "0,1": false,
+            "1,1": false,
+            "2,1": false,
+            "3,1": true,
+            "4,1": true,
+            "0,2": false,
+            "1,2": false,
+            "2,2": false,
+            "3,2": true,
+            "4,2": true,
+            "0,3": false,
+            "1,3": false,
+            "2,3": false,
+            "3,3": true,
+            "4,3": true,
+            "0,4": false,
+            "1,4": false,
+            "2,4": false,
+            "3,4": true,
+            "4,4": true,
+            "0,5": false,
+            "1,5": false,
+            "2,5": false,
+            "3,5": true,
+            "4,5": true,
+            "0,6": false,
+            "1,6": false,
+            "2,6": false,
+            "3,6": true,
+            "4,6": true,
+            "0,7": false,
+            "1,7": false,
+            "2,7": false,
+            "3,7": true,
+            "4,7": true
+        }
+    },
+    "yerlesim": {
+        "0,0": {
+            "subject_name": "Matematik",
+            "color": "#00ACC1",
+            "teacher_name": "Hüseyin Arman",
+            "class_name": "",
+            "duration": 2
+        },
+        "2,0": {
+            "subject_name": "Geometri",
+            "color": "#43A047",
+            "teacher_name": "Hüseyin Arman",
+            "class_name": "",
+            "duration": 1
+        }
+    },
+    "grid_placements": []
+}

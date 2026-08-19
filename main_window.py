@@ -331,6 +331,7 @@ class MainWindow(QMainWindow):
             self.cloud_worker.set_auth(self.auth_data)
         self.cloud_worker.sync_status_changed.connect(self.cloud_status_lbl.setText)
         self.cloud_worker.start()
+        self.cloud_worker.remote_data_updated.connect(self._on_remote_data_updated)
 
         # Global Rollback / Undo / Redo Shortcuts
         from PySide6.QtGui import QKeySequence, QShortcut
@@ -339,6 +340,23 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence.Redo, self, self._act_redo)
         QShortcut(QKeySequence("Ctrl+Y"), self, self._act_redo)
         QShortcut(QKeySequence("Ctrl+Shift+Z"), self, self._act_redo)
+
+    
+    def _on_remote_data_updated(self, slug, filename):
+        if not slug or slug == getattr(self, "institution_slug", None):
+            try:
+                import version_store
+                inst_slug = getattr(self, "institution_slug", "varsayilan_kurum")
+                latest_data = version_store.load_latest_version(inst_slug)
+                if latest_data:
+                    if latest_data.get("grid_placements") != self.data_store.get("grid_placements") or latest_data.get("atamalar") != self.data_store.get("atamalar"):
+                        self.data_store.clear()
+                        self.data_store.update(latest_data)
+                        self._refresh_grid()
+                        self._refresh_tree()
+                        self.statusBar().showMessage("☁️ VDS'den canlı veri güncellendi", 4000)
+            except Exception as e:
+                print(f"[MainWindow] Live data update notice: {e}")
 
     def _download_cloud_data(self, show_message=False):
         if not hasattr(self, "auth_data") or not self.auth_data: return
