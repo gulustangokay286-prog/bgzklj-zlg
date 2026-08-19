@@ -1259,8 +1259,10 @@ class AppleInstitutionCard(QFrame):
             act_pwd = None
             act_rm_pwd = None
             
-        menu.addSeparator()
-        act_delete = menu.addAction("Kurumu Sil")
+        act_delete = None
+        if self.is_master_admin:
+            menu.addSeparator()
+            act_delete = menu.addAction("Kurumu Sil")
         
         action = menu.exec_(self.mapToGlobal(pos))
         if action == act_rename:
@@ -1706,7 +1708,10 @@ class HomeDashboard(QWidget):
         self._unlocked_slugs = set()
         
         user_email = self.auth_data.get("email", "").lower()
-        self.is_master_admin = bool(user_email or self.auth_data.get("uid"))
+        user_role = self.auth_data.get("role", "").lower()
+        is_guest = bool(self.auth_data.get("is_guest") or self.auth_data.get("is_shared") or user_role in ["guest", "shared"])
+        # Master admin can delete institutions and change/remove passwords; shared/guest accounts cannot
+        self.is_master_admin = not is_guest and bool(user_email or self.auth_data.get("uid"))
         self.display_name = get_user_display_name(user_email, self)
         
         version_store.migrate_existing_data()
@@ -2128,7 +2133,7 @@ class HomeDashboard(QWidget):
             
         for inst in filtered:
             is_sel = (inst["slug"] == self._selected_slug)
-            card = AppleInstitutionCard(inst, is_selected=is_sel)
+            card = AppleInstitutionCard(inst, is_selected=is_sel, is_master_admin=self.is_master_admin)
             card.clicked.connect(self._on_institution_selected)
             self.inst_list_layout.insertWidget(self.inst_list_layout.count() - 1, card)
             
@@ -2139,6 +2144,7 @@ class HomeDashboard(QWidget):
             
     def _on_institution_selected(self, slug):
         self._selected_slug = slug
+        version_store.set_last_active_institution_slug(slug)
         self._selected_version = None
         self._unlocked_slugs.discard(slug)
         

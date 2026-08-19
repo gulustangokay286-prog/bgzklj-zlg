@@ -1514,11 +1514,39 @@ class TeacherIndividualTimetableDialog(QDialog):
                         for off in range(dur):
                             fill_cell(r + off, d, s_name, c_name, col_hex)
 
+        # 4. Cross-Institution Busy Slots (Çapraz Kurum Dersleri)
+        cross_hours = 0
+        try:
+            import version_store
+            current_slug = self.data_store.get("settings", {}).get("institution_slug", None)
+            cross_busy = version_store.get_cross_institution_teacher_busy_slots(exclude_slug=current_slug)
+            for (t_norm, d, p_slot), conflict_info in cross_busy.items():
+                t_raw = conflict_info.get("teacher_name", "")
+                if is_teacher_match(t_raw or t_norm, self.teacher_name, teacher_objs):
+                    if (p_slot, d) not in placed_cells and 0 <= p_slot < periods and 0 <= d < len(days):
+                        cross_hours += 1
+                        c_inst = conflict_info.get("institution_name", "Diğer Kurum")
+                        c_cls = conflict_info.get("class", "")
+                        c_subj = conflict_info.get("subject", "Ders")
+                        
+                        item = QTableWidgetItem(f"{c_subj}\n({c_cls})\n🏢 {c_inst}")
+                        item.setTextAlignment(Qt.AlignCenter)
+                        item.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+                        item.setBackground(QBrush(QColor("#D97706"))) # Amber warning
+                        item.setForeground(QBrush(Qt.white))
+                        item.setToolTip(f"⚠️ Bu öğretmen {c_inst} kurumunda {c_cls} ({c_subj}) dersindedir!")
+                        table.setItem(p_slot, d, item)
+        except Exception as e:
+            print(f"[MasterDataDialog] Cross-institution scan notice: {e}")
+
         teacher_atamalar = [a for a in self.data_store.get("atamalar", []) if is_teacher_match(a.get("ogretmen") or a.get("teacher", ""), self.teacher_name, teacher_objs)]
         total_assigned_hours = sum(int(a.get("ders_sayisi") or a.get("duration", 1)) for a in teacher_atamalar if str(a.get("ders_sayisi") or a.get("duration", 1)).isdigit())
 
         # Summary footer bar
-        info_banner = QLabel(f"Toplam Tanımlı Ders: {total_assigned_hours} Saat  |  Haftalık Çizelgede Yerleşen: {placed_hours} Saat")
+        banner_txt = f"Toplam Tanımlı Ders: {total_assigned_hours} Saat  |  Bu Kurumda Yerleşen: {placed_hours} Saat"
+        if cross_hours > 0:
+            banner_txt += f"  |  🏢 Diğer Kurumlarda: {cross_hours} Saat"
+        info_banner = QLabel(banner_txt)
         info_banner.setStyleSheet("color: #1E293B; background: #E2E8F0; padding: 6px 12px; border-radius: 6px; font-weight: 600;")
         lay.addWidget(info_banner)
         lay.addWidget(table, 1)

@@ -23,10 +23,11 @@ class TimeoffDialog(QDialog):
         
         name = self.entity_dict.get("ad", "İsimsiz")
         
-        # Load cross-institution locks
+        # Load cross-institution locks & busy slots
         self.cross_institution_locks = set()
+        self.cross_institution_conflicts = {}
         try:
-            from version_store import load_global_kisitlamalar
+            from version_store import load_global_kisitlamalar, get_cross_institution_teacher_busy_slots, normalize_teacher_name
             global_k = load_global_kisitlamalar()
             inst_slug = self.data_store.get("settings", {}).get("institution_slug", "varsayilan_kurum")
             for slug, k_data in global_k.items():
@@ -40,6 +41,14 @@ class TimeoffDialog(QDialog):
                                     if len(parts) == 2:
                                         self.cross_institution_locks.add((int(parts[0]), int(parts[1])))
                                 except: pass
+            
+            # Load actual timetable busy slots from other branches/institutions
+            cross_busy = get_cross_institution_teacher_busy_slots(exclude_slug=inst_slug)
+            norm_name = normalize_teacher_name(name)
+            for (t_norm, d, p_slot), conflict_info in cross_busy.items():
+                if t_norm == norm_name or conflict_info.get("teacher_name") == name:
+                    self.cross_institution_locks.add((d, p_slot))
+                    self.cross_institution_conflicts[(d, p_slot)] = conflict_info
         except Exception as e:
             print("Cross-institution lock load error:", e)
 
@@ -193,7 +202,13 @@ class TimeoffDialog(QDialog):
         item.setFont(font)
         
         is_cross_locked = (d_idx, p_idx) in getattr(self, "cross_institution_locks", set())
-        if is_cross_locked:
+        c_info = getattr(self, "cross_institution_conflicts", {}).get((d_idx, p_idx))
+        if c_info:
+            c_inst = c_info.get("institution_name", "Başka Kurum")
+            c_cls = c_info.get("class", "")
+            c_subj = c_info.get("subject", "Ders")
+            item.setToolTip(f"⚠️ ÇAKIŞMA UYARISI: Bu öğretmen {c_inst} kurumunda {c_cls} ({c_subj}) dersindedir!")
+        elif is_cross_locked:
             item.setToolTip("⚠️ Dikkat: Bu öğretmen bu saatte BAŞKA BİR KURUMDA (şubede) derse girmektedir veya kısıtlanmıştır!")
         else:
             item.setToolTip("")

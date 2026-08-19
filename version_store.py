@@ -317,6 +317,27 @@ def touch_institution_timestamp(slug: str) -> str:
             pass
     return upd_str
 
+
+def get_last_active_institution_slug() -> str:
+    path = os.path.join(_base_dir(), "active_institution.json")
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data.get("last_active_slug", "")
+        except Exception:
+            return ""
+    return ""
+
+def set_last_active_institution_slug(slug: str):
+    if not slug: return
+    path = os.path.join(_base_dir(), "active_institution.json")
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"last_active_slug": slug}, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
 def list_institutions():
     """Returns list of dicts: {slug, name, created, color, version_count, path, has_password, active_version, last_updated_str}"""
     base = _ensure_base()
@@ -354,6 +375,11 @@ def list_institutions():
                 "last_updated_str": last_upd_str or "",
                 "path": inst_dir,
             })
+    last_slug = get_last_active_institution_slug()
+    result.sort(key=lambda x: (
+        0 if (last_slug and x["slug"] == last_slug) else 1,
+        -(os.path.getmtime(x["path"]) if os.path.exists(x["path"]) else 0)
+    ))
     return result
 
 def create_institution(name: str, color: str = None, password: str = "") -> dict:

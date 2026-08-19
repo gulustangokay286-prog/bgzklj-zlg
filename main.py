@@ -8,8 +8,16 @@ import os
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 
+import platform
+# Windows Low-End Device Optimization & Anti-Lag CPU/GPU Settings
+if platform.system() == "Windows":
+    os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
+    os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
+    os.environ["QSG_RENDER_LOOP"] = "basic"
+    os.environ["QT_THREAD_PRIORITY"] = "high"
+
 from PySide6.QtWidgets import QApplication, QSplashScreen, QMainWindow, QStackedWidget
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QCoreApplication
 from PySide6.QtGui import QFont, QPixmap, QColor, QPainter, QIcon, QPalette
 
 from login_dialog import LoginDialog

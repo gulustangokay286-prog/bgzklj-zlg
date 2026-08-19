@@ -551,16 +551,28 @@ class TimetablePrintPreview(QDialog):
                     other_name = t_name
                     
             if match:
-                is_comb = bool(item.get("is_combined") or ("+" in str(c_name)) or ("," in str(c_name)))
+                is_comb = bool(item.get("is_combined") or (item.get("combined_classes") and len(item.get("combined_classes")) > 1))
                 for off in range(dur):
                     slot = (d_idx, p_idx + off)
                     if is_teacher and slot in res:
                         old_entry = res[slot]
                         old_c = old_entry.get("class_name", "")
-                        if c_name and c_name not in old_c:
+                        # Only merge class names if this was an explicit combined lesson
+                        if is_comb and c_name and c_name not in old_c:
                             merged_c = f"{old_c} + {c_name}"
                             old_entry["class_name"] = merged_c
                             old_entry["is_combined"] = True
+                        elif not is_comb:
+                            # Not a combined lesson: overwrite with active placement
+                            res[slot] = {
+                                "subject_name": s_name,
+                                "teacher_name": t_name or other_name,
+                                "class_name": c_name or other_name,
+                                "color": scolor,
+                                "is_start": (off == 0),
+                                "duration": dur,
+                                "is_combined": False
+                            }
                     else:
                         res[slot] = {
                             "subject_name": s_name,
@@ -1597,7 +1609,7 @@ class TimetablePrintPreview(QDialog):
                         sname = lesson.get("subject_name", "")
                         if is_teacher:
                             raw_c = str(lesson.get("class_name") or lesson.get("teacher_name") or "")
-                            if "," in raw_c or "&" in raw_c or "+" in raw_c:
+                            if lesson.get("is_combined") and ("," in raw_c or "&" in raw_c or "+" in raw_c):
                                 parts = [c.split("(")[0].strip().replace(" ", "").upper() for c in raw_c.replace("&", ",").replace("+", ",").split(",") if c.strip()]
                                 if len(parts) == 1:
                                     cell_text = parts[0]
@@ -1645,7 +1657,7 @@ class TimetablePrintPreview(QDialog):
                         painter.drawRect(QRectF(px, cur_y, block_w, row_h))
                         
                         if cell_text:
-                            if span >= 2 and is_teacher and ("," in raw_c or "&" in raw_c):
+                            if span >= 2 and is_teacher and lesson.get("is_combined") and ("," in raw_c or "&" in raw_c):
                                 parts = [c.split("(")[0].strip().replace(" ", "").upper() for c in raw_c.replace("&", ",").replace("+", ",").split(",") if c.strip()]
                                 if len(parts) <= 3:
                                     full_text = "+".join(parts)
