@@ -1866,6 +1866,7 @@ class TimetableGrid(QWidget):
         # Connect explicit click, keyboard navigation, and header click for info panel & unplaced dock update
         self.table.cellClicked.connect(self._on_cell_clicked)
         self.table.currentCellChanged.connect(lambda r, c, pr, pc: self._on_cell_clicked(r, c) if r >= 0 and c >= 0 else None)
+        self.table.cellPressed.connect(self._on_cell_clicked)
         self.table.verticalHeader().sectionClicked.connect(self._on_vertical_header_clicked)
         
         layout.addWidget(self.table, stretch=1)
@@ -2048,6 +2049,13 @@ class TimetableGrid(QWidget):
             win._refresh_unplaced_lessons(target_entity=entity_name)
 
     def update_info_panel(self, info):
+        if not info:
+            self.info_color_box.setStyleSheet("background: transparent; border: 1px dashed #94A3B8; border-radius: 4px;")
+            self.info_subject_lbl.setText("Ders Seçilmedi")
+            self.info_class_lbl.setText("-")
+            self.info_teacher_lbl.setText("-")
+            return
+            
         if info:
             subj = info.get("subject_name", "") or info.get("subject", "")
             teacher = info.get("teacher_name", "") or info.get("teacher", "")
