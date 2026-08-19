@@ -1071,7 +1071,7 @@ class LessonAssignmentDialog(QDialog):
             # they may have forced a combined class assignment directly to 'atamalar'.
             # We must preserve this state so final save doesn't overwrite it as separate assignments.
             forced_combined = getattr(dlg, "_is_combined_forced", False)
-            row_data["is_combined"] = dlg.get_is_combined() or forced_combined
+            row_data["is_combined"] = getattr(dlg, "get_is_combined", lambda: False)() or forced_combined
             row_data["classes"] = dlg.get_selected()
             if row_data["is_combined"]:
                 row_data["combined_classes"] = list(row_data["classes"])
@@ -1282,7 +1282,7 @@ class LessonAssignmentDialog(QDialog):
             return
             
         atamalar = self.data_store.get("atamalar", [])
-        my_atamalar = [a for a in atamalar if format_tr_name(a.get("teacher", "")) == format_tr_name(teacher_name)]
+        my_atamalar = [a for a in atamalar if format_tr_name(a.get("ogretmen") or a.get("teacher", "")) == format_tr_name(teacher_name)]
         
         # Clear existing dynamic rows
         for r in list(self.subject_rows):
@@ -1294,11 +1294,11 @@ class LessonAssignmentDialog(QDialog):
         combined_list = []
         
         for a in my_atamalar:
-            s_name = a.get("subject", "").strip()
+            s_name = (a.get("ders") or a.get("subject") or "").strip()
             if not s_name: continue
-            c_name = a.get("class", "").strip()
-            dur = a.get("duration", 2)
-            typ = a.get("type", str(dur))
+            c_name = (a.get("sinif") or a.get("class") or "").strip()
+            dur = a.get("ders_sayisi") or a.get("duration") or 2
+            typ = a.get("dagilim") or a.get("type") or str(dur)
             is_comb = bool(a.get("is_combined") or ("+" in c_name or "&" in c_name))
             
             if is_comb:

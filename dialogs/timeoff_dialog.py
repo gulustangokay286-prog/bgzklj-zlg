@@ -115,7 +115,7 @@ class TimeoffDialog(QDialog):
             for d_idx in range(len(self.days)):
                 state = self.timeoff_data[d_idx][p_idx]
                 item = QTableWidgetItem()
-                self._update_item_visuals(item, state)
+                self._update_item_visuals(item, state, d_idx, p_idx)
                 self.table.setItem(p_idx, d_idx, item)
                 
         self.table.cellClicked.connect(self._on_cell_clicked)
@@ -249,7 +249,7 @@ class TimeoffDialog(QDialog):
         for p in range(self.periods):
             self.timeoff_data[col][p] = new_st
             item = self.table.item(p, col)
-            if item: self._update_item_visuals(item, new_st, col if 'col' in locals() else d, p if 'p' in locals() else row)
+            if item: self._update_item_visuals(item, new_st, col, p)
         self._update_counters()
 
     def _toggle_row(self, row):
@@ -259,7 +259,7 @@ class TimeoffDialog(QDialog):
         for d in range(len(self.days)):
             self.timeoff_data[d][row] = new_st
             item = self.table.item(row, d)
-            if item: self._update_item_visuals(item, new_st, col if 'col' in locals() else d, p if 'p' in locals() else row)
+            if item: self._update_item_visuals(item, new_st, d, row)
         self._update_counters()
 
     def _make_all_open(self):

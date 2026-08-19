@@ -142,6 +142,53 @@ class LeftMenuButton(QPushButton):
         else:
             self.setIcon(create_wizard_icon(self.icon_name))
 
+
+class MiniTimeoffGridWidget(QWidget):
+    def __init__(self, timeoff_data=None, days=5, periods=8, parent=None):
+        super().__init__(parent)
+        self.timeoff_data = timeoff_data or []
+        self.days = days
+        self.periods = periods
+        self.setToolTip("Yeşil: Müsait, Kırmızı: Kapalı")
+        # Ensure minimum size to be visible
+        self.setMinimumSize(40, 24)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # Calculate cell sizes based on widget width/height and grid size
+        w = self.width()
+        h = self.height()
+        
+        margin_x = max(2, (w - (self.days * 4)) // 2)
+        margin_y = max(2, (h - (self.periods * 3)) // 2)
+        
+        cell_w = min(6, (w - margin_x*2) / self.days)
+        cell_h = min(4, (h - margin_y*2) / self.periods)
+        
+        if cell_w < 2: cell_w = 2
+        if cell_h < 2: cell_h = 2
+        
+        # Draw grid
+        for d in range(self.days):
+            for p in range(self.periods):
+                val = 2 # default open
+                if self.timeoff_data and d < len(self.timeoff_data) and p < len(self.timeoff_data[d]):
+                    val = self.timeoff_data[d][p]
+                
+                if val == 2:
+                    color = QColor("#86EFAC") # Green
+                elif val == 1:
+                    color = QColor("#FDE047") # Yellow
+                else:
+                    color = QColor("#FCA5A5") # Red
+                    
+                x = margin_x + d * (cell_w + 1)
+                y = margin_y + p * (cell_h + 1)
+                
+                painter.fillRect(int(x), int(y), int(cell_w), int(cell_h), color)
+
 class ActionButton(QPushButton):
     def __init__(self, text, icon_name=None, is_primary=False, parent=None):
         super().__init__(text, parent)
@@ -264,7 +311,7 @@ class MasterDataDialog(QDialog):
 
         for data in self.data_store.get("dersler", []):
             toplam = str(totals["dersler"].get(data.get("ad", ""), 0))
-            self._add_row(self.table_ders, [data.get("ad",""), data.get("kisa",""), toplam, "Mevcut", "İdeal", str(data.get("max_gunluk", periods))])
+            self._add_row(self.table_ders, [data.get("ad",""), data.get("kisa",""), toplam, "Mevcut", "İdeal", str(data.get("max_gunluk", periods))], timeoff=data.get("timeoff"), days_cnt=len(days), periods_cnt=periods)
         
         for data in self.data_store.get("siniflar", []):
             toplam = str(totals["siniflar"].get(data.get("ad", ""), 0))
@@ -275,9 +322,9 @@ class MasterDataDialog(QDialog):
                 open_cells = sum(1 for r in timeoff for c in r if c > 0)
                 zaman_str = f"{open_cells} Ders"
                 
-            self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), toplam, zaman_str, data.get("ders_bitimi","15:30"), data.get("sinif_ogretmeni",""), data.get("kapasite","30")])
+            self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), toplam, zaman_str, data.get("ders_bitimi","15:30"), data.get("sinif_ogretmeni",""), data.get("kapasite","30")], timeoff=data.get("timeoff"), days_cnt=len(days), periods_cnt=periods)
         for data in self.data_store.get("derslikler", []):
-            self._add_row(self.table_derslik, [data.get("ad",""), data.get("kisa",""), "0", "Mevcut", data.get("kapasite",""), "Merkez"])
+            self._add_row(self.table_derslik, [data.get("ad",""), data.get("kisa",""), "0", "Mevcut", data.get("kapasite",""), "Merkez"], timeoff=data.get("timeoff"), days_cnt=len(days), periods_cnt=periods)
         # Build Class Teacher mapping strictly from siniflar
         class_teacher_map = {}
         for s in self.data_store.get("siniflar", []):
@@ -323,7 +370,7 @@ class MasterDataDialog(QDialog):
             
             self._add_row(self.table_ogretmen, [
                 t_name, data.get("kisa",""), toplam, zaman_str, so_class, brans, atanan_dersler_str
-            ])
+            ], timeoff=data.get("timeoff"), days_cnt=len(days), periods_cnt=periods)
 
     def closeEvent(self, event):
         try:
@@ -1282,15 +1329,30 @@ class MasterDataDialog(QDialog):
             p = self.parent() or getattr(self, "main_window", None)
             if p and hasattr(p, "save_db"): p.save_db()
 
-    def _add_row(self, table, texts):
+    def _add_row(self, table, texts, timeoff=None, days_cnt=5, periods_cnt=8):
         r = table.rowCount()
         table.insertRow(r)
         for c, txt in enumerate(texts):
             item = QTableWidgetItem(str(txt))
-            if c == 3 and table == self.table_ogretmen:
-                item.setForeground(QBrush(QColor("#0078D7")))
-                item.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-            table.setItem(r, c, item)
+            
+            # If this is the "Zaman Tablosu" column (index 3) and it's a known table
+            if c == 3 and table in [self.table_ogretmen, self.table_sinif, self.table_ders, self.table_derslik]:
+                # Instead of text, add the MiniTimeoffGridWidget
+                item.setText("") # Clear text
+                table.setItem(r, c, item)
+                
+                mini_grid = MiniTimeoffGridWidget(timeoff_data=timeoff, days=days_cnt, periods=periods_cnt)
+                
+                # Center the widget in the cell
+                container = QWidget()
+                container_layout = QHBoxLayout(container)
+                container_layout.setContentsMargins(0, 0, 0, 0)
+                container_layout.setAlignment(Qt.AlignCenter)
+                container_layout.addWidget(mini_grid)
+                
+                table.setCellWidget(r, c, container)
+            else:
+                table.setItem(r, c, item)
 
 
 def normalize_tr_str(s: str) -> str:
