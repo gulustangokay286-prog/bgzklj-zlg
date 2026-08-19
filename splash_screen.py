@@ -143,20 +143,20 @@ class HighTechSplashScreen(QDialog):
         layout.addStretch(1)
 
     def _start_progress_animation(self):
-        # We use a group to animate both logo mask and the thin progress bar simultaneously
+        # Snappy modern micro-transition
         self.anim_group = QParallelAnimationGroup(self)
         
         anim_logo = QPropertyAnimation(self.logo_widget, b"progress")
-        anim_logo.setDuration(4000) # 4 seconds loading illusion
+        anim_logo.setDuration(600)
         anim_logo.setStartValue(0.0)
         anim_logo.setEndValue(1.0)
-        anim_logo.setEasingCurve(QEasingCurve.InOutSine)
+        anim_logo.setEasingCurve(QEasingCurve.OutQuad)
         
         anim_bar = QPropertyAnimation(self.progress_bar, b"progress")
-        anim_bar.setDuration(4000)
+        anim_bar.setDuration(600)
         anim_bar.setStartValue(0.0)
         anim_bar.setEndValue(1.0)
-        anim_bar.setEasingCurve(QEasingCurve.InOutSine)
+        anim_bar.setEasingCurve(QEasingCurve.OutQuad)
         
         self.anim_group.addAnimation(anim_logo)
         self.anim_group.addAnimation(anim_bar)

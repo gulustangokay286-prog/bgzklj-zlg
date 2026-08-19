@@ -81,20 +81,8 @@ class AppleSaveDialog(QDialog):
         
         layout.addWidget(container)
 
-def run_apple_save_sequence(parent, duration_seconds=0.65, title="Değişiklikler Kaydediliyor", message="Veritabanı ve bulut senkronizasyonu yapılıyor..."):
-    if duration_seconds <= 0:
-        return
-    dlg = AppleSaveDialog(title, message, parent=parent)
-    dlg.show()
-    QApplication.processEvents()
-    
-    # Ultra-smooth, responsive 60fps micro-animation with clear visibility
-    dur = max(float(duration_seconds), 0.6)
-    t_end = time.time() + dur
-    while time.time() < t_end:
-        QApplication.processEvents()
-        time.sleep(0.012)
-        
-    dlg.close()
-    dlg.deleteLater()
-    QApplication.processEvents()
+def run_apple_save_sequence(parent, duration_seconds=0.0, title="Değişiklikler Kaydediliyor", message="Veritabanı ve bulut senkronizasyonu yapılıyor..."):
+    # Instant non-blocking execution (zero delay)
+    if hasattr(parent, "statusBar") and callable(parent.statusBar):
+        parent.statusBar().showMessage(f"💾 {title}: {message}", 2000)
+    return

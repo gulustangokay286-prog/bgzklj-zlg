@@ -166,7 +166,7 @@ class AppShell(QMainWindow):
         self._open_timetable(slug, vf)
     
     def _go_home(self):
-        """Switch back to the dashboard smoothly and safely without crash."""
+        """Switch back to the dashboard smoothly, instantaneously and safely."""
         editor = self._editor
         self._editor = None
         
@@ -181,8 +181,6 @@ class AppShell(QMainWindow):
                 if slug and ver_fn:
                     import version_store
                     version_store.update_version_in_place(slug, ver_fn, editor.data_store)
-                    from cloud_sync import push_version_to_rtdb
-                    push_version_to_rtdb(slug, ver_fn, dict(editor.data_store), auth)
             except Exception as e:
                 print(f"[GO_HOME] Save error: {e}")
                 
@@ -193,7 +191,7 @@ class AppShell(QMainWindow):
             except Exception as ce:
                 print(f"[GO_HOME] Cleanup error: {ce}")
 
-        # 3. Switch to dashboard
+        # 3. Switch to dashboard instantaneously
         self._stack.setCurrentWidget(self._dashboard)
         self.setWindowTitle("BGZ Ders Planlama — Kurum & Çizelge Yönetimi")
         try:

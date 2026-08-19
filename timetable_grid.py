@@ -867,6 +867,8 @@ class UnplacedLessonsDock(QWidget):
         self.load_unplaced(unplaced_cards, has_assignments=bool(atamalar), display_mode=display_mode)
 
 
+_CELL_COLOR_CACHE = {}
+
 class TimetableCellDelegate(QStyledItemDelegate):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -900,16 +902,26 @@ class TimetableCellDelegate(QStyledItemDelegate):
             subject_name = info.get("subject_name") or info.get("subject") or ""
             teacher_name = info.get("teacher_name") or info.get("teacher") or ""
             
-        # 1. Determine cell background color - prefer subject_name from info
+        # 1. Determine cell background color with instant memory cache
         cell_color = None
-        win = table.window() if table and hasattr(table, "window") else None
-        data_store = getattr(win, "data_store", None)
-        
         color_key = subject_name or clean_str
         if color_key:
-            from dialogs.color_picker_dialog import resolve_subject_color
-            resolved_hex = resolve_subject_color(color_key, data_store)
-            cell_color = QColor(resolved_hex)
+            if color_key in _CELL_COLOR_CACHE:
+                cell_color = _CELL_COLOR_CACHE[color_key]
+            else:
+                win = table.window() if table and hasattr(table, "window") else None
+                data_store = getattr(win, "data_store", None)
+                from dialogs.color_picker_dialog import resolve_subject_color
+                resolved_hex = resolve_subject_color(color_key, data_store)
+                c = QColor(resolved_hex)
+                if c.isValid():
+                    h, s, l, a = c.getHsl()
+                    if s > 85:
+                        new_s = max(65, int(s * 0.65))
+                        new_l = min(220, max(120, int(l * 1.05))) if l < 180 else l
+                        c.setHsl(h, new_s, new_l, a)
+                _CELL_COLOR_CACHE[color_key] = c
+                cell_color = c
         elif info and info.get("color"):
             c = QColor(info["color"])
             if c.isValid():
@@ -919,15 +931,7 @@ class TimetableCellDelegate(QStyledItemDelegate):
             if c.isValid() and c.alpha() > 0 and c.name().upper() not in ("#C0C0C0", "#B4B4B8", "#D0D0D0", "#D8D8D8", "#FFFFFF"):
                 cell_color = c
                 
-        if cell_color and cell_color.isValid():
-            # Eye-friendly desaturation of harsh high-saturation neon tones (+2% subtle boost for perfect vibrancy)
-            h, s, l, a = cell_color.getHsl()
-            if s > 85:
-                new_s = max(65, int(s * 0.65))
-                new_l = min(220, max(120, int(l * 1.05))) if l < 180 else l
-                cell_color = QColor()
-                cell_color.setHsl(h, new_s, new_l, a)
-        else:
+        if not cell_color or not cell_color.isValid():
             cell_color = QColor("#D1D5DB") # Neutral empty slot
                 
         # 2. Fill background

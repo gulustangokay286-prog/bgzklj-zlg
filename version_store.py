@@ -544,14 +544,6 @@ def update_version_in_place(slug: str, filename: str, data_store: dict) -> bool:
     ver_dir = _versions_dir(slug)
     filepath = os.path.join(ver_dir, filename)
     os.makedirs(ver_dir, exist_ok=True)
-    
-    # Safe backup of existing file before overwrite to prevent data loss
-    if os.path.exists(filepath):
-        try:
-            bak_path = filepath + ".bak"
-            shutil.copy2(filepath, bak_path)
-        except Exception:
-            pass
             
     save_data = dict(data_store)
     if "atamalar" in save_data:

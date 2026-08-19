@@ -153,9 +153,9 @@ class CloudSyncWorker(QThread):
                     self.sync_status_changed.emit("Veritabanınız korunuyor: Bağlantı bekleniyor...")
                     self._sleep_interruptible(3)
             else:
-                # Live Poller: Pull remote changes every 4 seconds
+                # Live Poller: Pull remote changes every 15 seconds smoothly
                 now = time.time()
-                if self._last_pull_time + 4 < now:
+                if self._last_pull_time + 15 < now:
                     try:
                         pull_ok, msg, new_count = api_client.pull_all_from_rtdb(self.auth_data)
                         if pull_ok:
@@ -168,8 +168,8 @@ class CloudSyncWorker(QThread):
                     except Exception:
                         self.sync_status_changed.emit("Veritabanı: Çevrimdışı (Yerel Mod)")
                     self._last_pull_time = now
-                self._sleep_interruptible(0.5)
+                self._sleep_interruptible(1.0)
 
     def stop(self):
         self._is_running = False
-        self.wait(1500)
+        self.wait(30)

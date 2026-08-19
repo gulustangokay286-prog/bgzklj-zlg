@@ -18,6 +18,10 @@ class APIClient:
     def __init__(self):
         self.base_url = BASE_URL
         self.token = self.load_token()
+        self.session = requests.Session()
+        adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=20, max_retries=1)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
 
     def load_token(self):
         token_path = _get_token_file_path()
@@ -51,7 +55,7 @@ class APIClient:
         url = f"{self.base_url}/auth/login"
         data = {"username": email, "password": password}
         try:
-            resp = requests.post(url, data=data, timeout=8)
+            resp = self.session.post(url, data=data, timeout=4)
             if resp.status_code == 200:
                 token_data = resp.json()
                 self.save_token(token_data)
@@ -70,9 +74,6 @@ class APIClient:
             self.token = self.load_token()
         if not self.token:
             ok, _ = self.login("admin@bgz.local", "admin")
-            if not ok:
-                # Retry once
-                self.login("admin@bgz.local", "admin")
         return bool(self.token)
 
     def get_headers(self):
@@ -83,16 +84,15 @@ class APIClient:
 
     def _request_with_retry(self, method, url, **kwargs):
         headers = kwargs.pop("headers", None) or self.get_headers()
-        timeout = kwargs.pop("timeout", 8)
+        timeout = kwargs.pop("timeout", 4)
         try:
-            resp = requests.request(method, url, headers=headers, timeout=timeout, **kwargs)
+            resp = self.session.request(method, url, headers=headers, timeout=timeout, **kwargs)
             if resp.status_code == 401:
-                # Token expired or invalid, re-login and retry
                 self.login("admin@bgz.local", "admin")
                 headers = self.get_headers()
-                resp = requests.request(method, url, headers=headers, timeout=timeout, **kwargs)
+                resp = self.session.request(method, url, headers=headers, timeout=timeout, **kwargs)
             return resp
-        except Exception as e:
+        except Exception:
             return None
 
     def pull_all_from_rtdb(self, auth_data=None):

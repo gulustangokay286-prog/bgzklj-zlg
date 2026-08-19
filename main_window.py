@@ -1299,50 +1299,41 @@ class MainWindow(QMainWindow):
         self._set_last_db_path(self.current_roz_path)
         
         try:
-            with open(self.current_roz_path, "w", encoding="utf-8") as f:
-                json.dump(self.data_store, f, ensure_ascii=False, indent=4)
-                
-            # If opened from an institution version, also update version in version_store
+            # If opened from an institution version, update version directly
             if slug and ver_fn:
                 import version_store
                 version_store.update_version_in_place(slug, ver_fn, self.data_store)
+            else:
+                with open(self.current_roz_path, "w", encoding="utf-8") as f:
+                    json.dump(self.data_store, f, ensure_ascii=False, indent=2)
                 
             fname = os.path.basename(self.current_roz_path)
-            self.statusBar().showMessage(f"💾 Tüm değişiklikler '{fname}' dosyasına anlık kaydedildi.")
+            self.statusBar().showMessage(f"💾 Tüm değişiklikler '{fname}' dosyasına anlık kaydedildi.", 2000)
             
-            # 1. SQLite Veritabanı Senkronizasyonu
-            try:
-                from database import sync_data_store_to_sqlite
-                sync_data_store_to_sqlite(self.data_store)
-            except Exception as ex_db:
-                print(f"[SAVE_DB] SQLite sync error: {ex_db}")
-
-            # 2. VDS Senkronizasyonu
+            # Offload SQLite & background tasks asynchronously without UI stutter
             import threading
-            from cloud_sync import push_version_to_rtdb, push_institution_to_rtdb
-            
-            auth = getattr(self, "auth_data", None)
-            
-            if slug and ver_fn:
-                threading.Thread(
-                    target=push_version_to_rtdb,
-                    args=(slug, ver_fn, dict(self.data_store), auth),
-                    daemon=True
-                ).start()
-                if hasattr(self, "cloud_worker") and self.cloud_worker:
-                    self.cloud_worker.add_to_queue("push_version", slug, ver_fn, self.data_store)
-            elif slug:
-                threading.Thread(
-                    target=push_institution_to_rtdb,
-                    args=(slug, auth),
-                    daemon=True
-                ).start()
-                if hasattr(self, "cloud_worker") and self.cloud_worker:
-                    self.cloud_worker.add_to_queue("push_inst", slug)
-            elif auth and hasattr(self, "cloud_worker") and self.cloud_worker:
-                uid = auth.get("uid")
-                if uid:
-                    self.cloud_worker.add_to_queue("push_inst", uid)
+            def _async_bg_sync(store_copy, s_slug, v_fn, auth_copy):
+                try:
+                    from database import sync_data_store_to_sqlite
+                    sync_data_store_to_sqlite(store_copy)
+                except Exception:
+                    pass
+                try:
+                    from cloud_sync import push_version_to_rtdb, push_institution_to_rtdb
+                    if s_slug and v_fn:
+                        push_version_to_rtdb(s_slug, v_fn, store_copy, auth_copy)
+                    elif s_slug:
+                        push_institution_to_rtdb(s_slug, auth_copy)
+                except Exception:
+                    pass
+
+            threading.Thread(
+                target=_async_bg_sync,
+                args=(dict(self.data_store), slug, ver_fn, getattr(self, "auth_data", None)),
+                daemon=True
+            ).start()
+        except Exception as e:
+            print("[SAVE_DB] Error:", e)
         except Exception as e:
             self.statusBar().showMessage(f"Kaydetme hatası: {e}")
 
@@ -2518,13 +2509,12 @@ class MainWindow(QMainWindow):
 
     def _open_subjects(self):
         self._push_undo_state()
-        self.save_db(sync_from_grid=True)
         d = MasterDataDialog(0, self)
-        d.exec()
-        self.save_db()
-        self._refresh_tree()
-        self._restore_grid_placements()
-        self._refresh_unplaced_lessons()
+        if d.exec():
+            self.save_db()
+            self._refresh_tree()
+            self._restore_grid_placements()
+            self._refresh_unplaced_lessons()
 
     def _open_school_info(self):
         self._push_undo_state()
@@ -2565,13 +2555,12 @@ class MainWindow(QMainWindow):
 
     def _open_classes(self):
         self._push_undo_state()
-        self.save_db(sync_from_grid=True)
         d = MasterDataDialog(1, self)
-        d.exec()
-        self.save_db()
-        self._refresh_tree()
-        self._restore_grid_placements()
-        self._refresh_unplaced_lessons()
+        if d.exec():
+            self.save_db()
+            self._refresh_tree()
+            self._restore_grid_placements()
+            self._refresh_unplaced_lessons()
 
     def _open_class_assignments(self, target_class=None):
         self._push_undo_state()
@@ -2635,23 +2624,21 @@ class MainWindow(QMainWindow):
 
     def _open_rooms(self):
         self._push_undo_state()
-        self.save_db(sync_from_grid=True)
         d = MasterDataDialog(2, self)
-        d.exec()
-        self.save_db()
-        self._refresh_tree()
-        self._restore_grid_placements()
-        self._refresh_unplaced_lessons()
+        if d.exec():
+            self.save_db()
+            self._refresh_tree()
+            self._restore_grid_placements()
+            self._refresh_unplaced_lessons()
 
     def _open_teachers(self):
         self._push_undo_state()
-        self.save_db(sync_from_grid=True)
         d = MasterDataDialog(3, self)
-        d.exec()
-        self.save_db()
-        self._refresh_tree()
-        self._restore_grid_placements()
-        self._refresh_unplaced_lessons()
+        if d.exec():
+            self.save_db()
+            self._refresh_tree()
+            self._restore_grid_placements()
+            self._refresh_unplaced_lessons()
 
     def _open_electives(self):
         self._push_undo_state()
