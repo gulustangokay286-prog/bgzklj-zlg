@@ -1,31 +1,30 @@
 import os
-import re
 
 file_path = "/Users/fookay/ders program/dialogs/print_preview.py"
 with open(file_path, "r", encoding="utf-8") as f:
     content = f.read()
 
-# 1. Fix ComboBox enabling for Çarşaf Liste
-old_mode_check = """        elif "Tüm Sınıflar" in mode or "Tüm Öğretmenler" in mode or "Ders Yükü" in mode or ("Çarşaf Liste" in mode and not self.filters.get("classes") and not self.filters.get("teachers")) or "Tablo Olarak" in mode:
-            self.target_combo.addItem("Tümü (Çoklu Sayfa)")
-            self.target_combo.setEnabled(False)
-        elif is_teacher_mode:"""
-new_mode_check = """        elif "Tüm Sınıflar" in mode or "Tüm Öğretmenler" in mode or "Ders Yükü" in mode or "Tablo Olarak" in mode:
-            self.target_combo.addItem("Tümü (Çoklu Sayfa)")
-            self.target_combo.setEnabled(False)
-        elif "Çarşaf Liste" in mode:
-            self.target_combo.setEnabled(True)
-            self.target_combo.addItem("Tümü (Çoklu Sayfa)")
-            if is_teacher_mode:
-                for t in self.filtered_teachers:
-                    if t.get("ad"): self.target_combo.addItem(t.get("ad", ""))
+old_items = """        if is_teacher:
+            items = sorted([t.get("ad", "Öğretmen") for t in (self.filtered_teachers if self.filtered_teachers else self.data_store.get("ogretmenler", []))])
+        else:
+            items = sorted([c.get("ad", "Sınıf") for c in (self.filtered_classes if self.filtered_classes else self.data_store.get("siniflar", []))], key=natural_sort_key)
+            
+        if not items:"""
+
+new_items = """        sel_target = self.target_combo.currentText().strip()
+        
+        if sel_target and "Çoklu Sayfa" not in sel_target and sel_target != "Tümü":
+            items = [sel_target]
+        else:
+            if is_teacher:
+                items = sorted([t.get("ad", "Öğretmen") for t in (self.filtered_teachers if self.filtered_teachers else self.data_store.get("ogretmenler", []))])
             else:
-                for c in self.filtered_classes:
-                    if c.get("ad"): self.target_combo.addItem(c.get("ad", ""))
-        elif is_teacher_mode:"""
-content = content.replace(old_mode_check, new_mode_check)
+                items = sorted([c.get("ad", "Sınıf") for c in (self.filtered_classes if self.filtered_classes else self.data_store.get("siniflar", []))], key=natural_sort_key)
+            
+        if not items:"""
+
+content = content.replace(old_items, new_items)
 
 with open(file_path, "w", encoding="utf-8") as f:
     f.write(content)
-
-print("Patch applied for ComboBox enabling.")
+print("Patched _render_asc_multi_grid")

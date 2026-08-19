@@ -529,7 +529,7 @@ class AutoSchedulerWorker(QThread):
                         if not (a.get("is_combined") or ("+" in str(a.get("class", "")) and len(str(a.get("class", "")).split("+")) > 1) or "," in str(a.get("class", "")) or "&" in str(a.get("class", ""))):
                             continue
                         a_subj = a.get("subject") or a.get("ders") or ""
-                        a_t = format_tr_name(a.get("teacher") or "")
+                        a_t = format_tr_name(a.get("ogretmen") or a.get("teacher", ""))
                         if a_subj == s_name and (not t_name or a_t == t_name):
                             if a.get("combined_classes"):
                                 combined_targets = [str(c).strip() for c in a["combined_classes"] if str(c).strip()]

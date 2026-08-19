@@ -592,10 +592,15 @@ class TimetablePrintPreview(QDialog):
             m = re.match(r"(\d+)(.*)", str(s).strip())
             return (int(m.group(1)), m.group(2)) if m else (999, str(s))
             
-        if is_teacher:
-            items = sorted([t.get("ad", "Öğretmen") for t in (self.filtered_teachers if self.filtered_teachers else self.data_store.get("ogretmenler", []))])
+        sel_target = self.target_combo.currentText().strip()
+        
+        if sel_target and "Çoklu Sayfa" not in sel_target and sel_target != "Tümü":
+            items = [sel_target]
         else:
-            items = sorted([c.get("ad", "Sınıf") for c in (self.filtered_classes if self.filtered_classes else self.data_store.get("siniflar", []))], key=natural_sort_key)
+            if is_teacher:
+                items = sorted([t.get("ad", "Öğretmen") for t in (self.filtered_teachers if self.filtered_teachers else self.data_store.get("ogretmenler", []))])
+            else:
+                items = sorted([c.get("ad", "Sınıf") for c in (self.filtered_classes if self.filtered_classes else self.data_store.get("siniflar", []))], key=natural_sort_key)
             
         if not items:
             items = ["Örnek 1"]
