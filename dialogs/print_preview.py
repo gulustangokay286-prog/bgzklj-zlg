@@ -172,7 +172,7 @@ def _chunk_classes(classes_list, max_len=36, max_count=4):
 def _group_teacher_atamalar_by_subject(atamalar):
     grouped = {}
     for a in atamalar:
-        subj = str(a.get("subject", "")).strip()
+        subj = str(a.get("ders") or a.get("subject", "")).strip()
         if not subj:
             continue
         if subj not in grouped:
@@ -181,11 +181,11 @@ def _group_teacher_atamalar_by_subject(atamalar):
                 "classes": [],
                 "duration": 0,
                 "types": [],
-                "color": a.get("color"),
+                "color": a.get("renk") or a.get("color"),
                 "is_combined": False
             }
-        cls_str = str(a.get("class", "")).strip()
-        if a.get("is_combined") or "+" in cls_str:
+        cls_str = str(a.get("sinif") or a.get("class", "")).strip()
+        if a.get("is_combined") or "+" in cls_str or "," in cls_str or "&" in cls_str:
             grouped[subj]["is_combined"] = True
             combs = a.get("combined_classes") or [c.strip() for c in cls_str.replace("&", "+").replace(",", "+").split("+") if c.strip()]
             for cc in combs:
@@ -195,9 +195,10 @@ def _group_teacher_atamalar_by_subject(atamalar):
             if cls_str and cls_str not in grouped[subj]["classes"]:
                 grouped[subj]["classes"].append(cls_str)
                 
-        dur_val = int(a.get("duration", 1)) if str(a.get("duration", 1)).isdigit() else 1
+        dur_raw = a.get("ders_sayisi") or a.get("duration", 1)
+        dur_val = int(dur_raw) if str(dur_raw).isdigit() else 1
         grouped[subj]["duration"] += dur_val
-        typ = str(a.get("type", "")).strip()
+        typ = str(a.get("dagilim") or a.get("type", "")).strip()
         if typ and typ not in grouped[subj]["types"]:
             grouped[subj]["types"].append(typ)
             
@@ -342,6 +343,7 @@ class TimetablePrintPreview(QDialog):
         mode = self.mode_combo.currentText()
         self.target_combo.blockSignals(True)
         self.target_combo.clear()
+        self.target_combo.setEnabled(True)
         
         is_teacher_mode = bool(
             self.filters.get("teachers") or 
@@ -349,38 +351,25 @@ class TimetablePrintPreview(QDialog):
             "Öğretmen" in mode
         )
         
-        if mode == "Sınıf Dersleri & Atama Listesi (Liste Formatı)":
-            self.target_combo.setEnabled(True)
-            if is_teacher_mode:
-                self.target_combo.addItem("Tüm Öğretmenler (Çoklu Sayfa)")
-                for t in self.filtered_teachers:
-                    if t.get("ad"): self.target_combo.addItem(t.get("ad", ""))
-            else:
-                self.target_combo.addItem("Tüm Sınıflar (Çoklu Sayfa)")
-                for c in self.filtered_classes:
-                    if c.get("ad"): self.target_combo.addItem(c.get("ad", ""))
-        elif "Tüm Sınıflar" in mode or "Tüm Öğretmenler" in mode or "Ders Yükü" in mode or "Tablo Olarak" in mode:
-            self.target_combo.addItem("Tümü (Çoklu Sayfa)")
-            self.target_combo.setEnabled(False)
-        elif "Çarşaf Liste" in mode:
-            self.target_combo.setEnabled(True)
-            self.target_combo.addItem("Tümü (Çoklu Sayfa)")
-            if is_teacher_mode:
-                for t in self.filtered_teachers:
-                    if t.get("ad"): self.target_combo.addItem(t.get("ad", ""))
-            else:
-                for c in self.filtered_classes:
-                    if c.get("ad"): self.target_combo.addItem(c.get("ad", ""))
-        elif is_teacher_mode:
-            self.target_combo.setEnabled(True)
+        teachers_list = [t.get("ad", "").strip() for t in (self.filtered_teachers or self.data_store.get("ogretmenler", [])) if t.get("ad")]
+        teachers_list = sorted(list(set(teachers_list)))
+        
+        import re
+        def natural_sort_key(s):
+            m = re.match(r"(\d+)(.*)", str(s).strip())
+            return (int(m.group(1)), m.group(2)) if m else (999, str(s))
+            
+        raw_classes = [c.get("ad", "").strip() for c in (self.filtered_classes or self.data_store.get("siniflar", [])) if c.get("ad")]
+        classes_list = sorted(list(set(raw_classes)), key=natural_sort_key)
+        
+        if is_teacher_mode:
             self.target_combo.addItem("Tüm Öğretmenler (Çoklu Sayfa)")
-            for t in self.filtered_teachers:
-                if t.get("ad"): self.target_combo.addItem(t.get("ad", ""))
+            for t in teachers_list:
+                self.target_combo.addItem(t)
         else:
-            self.target_combo.setEnabled(True)
             self.target_combo.addItem("Tüm Sınıflar (Çoklu Sayfa)")
-            for c in self.filtered_classes:
-                if c.get("ad"): self.target_combo.addItem(c.get("ad", ""))
+            for c in classes_list:
+                self.target_combo.addItem(c)
                 
         # If filters specified selected_items or default_selection, select it
         sel = self.filters.get("selected_items") or ([self.filters.get("default_selection")] if self.filters.get("default_selection") else [])
@@ -389,7 +378,6 @@ class TimetablePrintPreview(QDialog):
             if idx >= 0:
                 self.target_combo.setCurrentIndex(idx)
         else:
-            # Default to 'Tüm' if no specific selection
             idx = self.target_combo.findText("Tüm Öğretmenler (Çoklu Sayfa)" if is_teacher_mode else "Tüm Sınıflar (Çoklu Sayfa)")
             if idx >= 0:
                 self.target_combo.setCurrentIndex(idx)
@@ -495,15 +483,15 @@ class TimetablePrintPreview(QDialog):
         elif mode == "[BİREBİR] Tüm Öğretmenler (Yatay Sayfada 6'lı Çizelge)":
             self._render_asc_multi_grid(painter, printer, VW, VH, is_teacher=True)
         elif mode == "Sınıf Haftalık Ders Programı (Tekil Çizelge - Tek Sayfa)":
-            self._render_weekly_grid(painter, VW, VH, is_teacher=False)
+            self._render_weekly_grid(painter, printer, VW, VH, is_teacher=False)
         elif mode == "Öğretmen Haftalık Ders Programı (Tekil Çizelge - Tek Sayfa)":
-            self._render_weekly_grid(painter, VW, VH, is_teacher=True)
+            self._render_weekly_grid(painter, printer, VW, VH, is_teacher=True)
         elif mode == "Sınıf Dersleri & Atama Listesi (Liste Formatı)":
             self._render_class_lessons_list(painter, printer, VW, VH)
         elif mode == "Tüm Öğretmenlerin Ders Yükü Listesi":
             self._render_teacher_summary_list(painter, VW, VH)
         else:
-            self._render_weekly_grid(painter, VW, VH, is_teacher=False)
+            self._render_weekly_grid(painter, printer, VW, VH, is_teacher=False)
             
         painter.end()
 
@@ -886,14 +874,14 @@ class TimetablePrintPreview(QDialog):
         
         for ent_name in entities:
             if is_teacher_report:
-                raw_teacher_atamalar = [a for a in raw_atamalar if a.get("teacher") == ent_name or format_tr_name(a.get("teacher", "")) == format_tr_name(ent_name)]
+                raw_teacher_atamalar = [a for a in raw_atamalar if (a.get("ogretmen") or a.get("teacher")) == ent_name or format_tr_name(a.get("ogretmen") or a.get("teacher", "")) == format_tr_name(ent_name)]
                 t_obj = next((t for t in self.data_store.get("ogretmenler", []) if t.get("ad") == ent_name or format_tr_name(t.get("ad", "")) == format_tr_name(ent_name)), {})
                 t_brans = t_obj.get("brans") or t_obj.get("branch") or "Öğretmen"
                 ent_sub = f"{t_brans.upper()} ÖĞRETMENİ"
                 atamalar = _group_teacher_atamalar_by_subject(raw_teacher_atamalar)
                 tot_h = sum(int(a.get("duration", 1)) for a in atamalar if str(a.get("duration", 1)).isdigit())
             else:
-                atamalar = [a for a in raw_atamalar if matches_class(a.get("class", ""), ent_name) or (a.get("is_combined") and any(matches_class(cc, ent_name) for cc in a.get("combined_classes", [])))]
+                atamalar = [a for a in raw_atamalar if matches_class(a.get("sinif") or a.get("class", ""), ent_name) or (a.get("is_combined") and any(matches_class(cc, ent_name) for cc in a.get("combined_classes", [])))]
                 ent_sub = f"{ent_name.upper()} SINIF PROGRAMI"
                 t_brans = "Öğretmen"
                 tot_h = sum(int(a.get("duration", 1)) for a in atamalar if str(a.get("duration", 1)).isdigit())
@@ -1073,7 +1061,7 @@ class TimetablePrintPreview(QDialog):
         
         if is_teacher_report:
             selected_teacher = target_entity
-            raw_t_atamalar = [a for a in raw_atamalar if a.get("teacher") == selected_teacher or format_tr_name(a.get("teacher", "")) == format_tr_name(selected_teacher)]
+            raw_t_atamalar = [a for a in raw_atamalar if (a.get("ogretmen") or a.get("teacher")) == selected_teacher or format_tr_name(a.get("ogretmen") or a.get("teacher", "")) == format_tr_name(selected_teacher)]
             atamalar = _group_teacher_atamalar_by_subject(raw_t_atamalar)
             title_name = selected_teacher.upper()
             t_obj = next((t for t in self.data_store.get("ogretmenler", []) if t.get("ad") == selected_teacher or format_tr_name(t.get("ad", "")) == format_tr_name(selected_teacher)), {})
@@ -1082,7 +1070,7 @@ class TimetablePrintPreview(QDialog):
             panel_title = "Öğretmenin Girdiği Sınıflar & Dersler"
         else:
             selected_class = target_entity
-            atamalar = [a for a in raw_atamalar if matches_class(a.get("class", ""), selected_class) or (a.get("is_combined") and any(matches_class(cc, selected_class) for cc in a.get("combined_classes", [])))]
+            atamalar = [a for a in raw_atamalar if matches_class(a.get("sinif") or a.get("class", ""), selected_class) or (a.get("is_combined") and any(matches_class(cc, selected_class) for cc in a.get("combined_classes", [])))]
             title_name = selected_class.upper()
             clean_sub = f"{selected_class.upper()} SINIF DERS PROGRAMI"
             panel_title = "Sınıfın Dersleri & Atamaları"
@@ -1288,18 +1276,40 @@ class TimetablePrintPreview(QDialog):
         painter.drawText(QRectF(tbl_x, VH - 35, 450, 20), Qt.AlignLeft, f"Toplam Atanan Ders Sayısı: {len(atamalar)} | Toplam Ders Saati: {total_hours} Saat")
         painter.drawText(QRectF(VW - tbl_x - 300, VH - 35, 300, 20), Qt.AlignRight, "BGZ Ders Planlama Sistemi 2026 - 2027")
 
-    def _render_weekly_grid(self, painter, VW, VH, is_teacher=False):
+    def _render_weekly_grid(self, painter, printer, VW, VH, is_teacher=False):
         """Single class or single teacher timetable on one page (Same exact layout as photo)"""
-        target_name = self.target_combo.currentText() or ("Öğretmen" if is_teacher else "Sınıf")
+        import re
+        def natural_sort_key(s):
+            m = re.match(r"(\d+)(.*)", str(s).strip())
+            return (int(m.group(1)), m.group(2)) if m else (999, str(s))
+            
+        sel_target = self.target_combo.currentText().strip()
         school_name = self.data_store.get("okul_adi") or self.data_store.get("settings", {}).get("school_name", "Özel Öğretim Kurumu")
-        placements = self._get_pseudo_placements(target_name, is_teacher)
         
+        if is_teacher:
+            all_items = sorted([t.get("ad", "Öğretmen") for t in (self.filtered_teachers if self.filtered_teachers else self.data_store.get("ogretmenler", [])) if t.get("ad")])
+        else:
+            all_items = sorted([c.get("ad", "Sınıf") for c in (self.filtered_classes if self.filtered_classes else self.data_store.get("siniflar", [])) if c.get("ad")], key=natural_sort_key)
+            
+        if sel_target and "Çoklu Sayfa" not in sel_target and sel_target != "Tümü" and not sel_target.startswith("Tüm "):
+            items = [sel_target]
+        else:
+            items = all_items
+            
+        if not items:
+            items = ["Örnek 1"]
+            
         margin_x = 35
         margin_y = 25
         grid_w = VW - (2 * margin_x)
         grid_h = VH - (2 * margin_y)
         
-        self._draw_mini_grid(painter, margin_x, margin_y, grid_w, grid_h, target_name, school_name, placements, is_teacher=is_teacher, is_single_page=True)
+        for i, item_name in enumerate(items):
+            if i > 0:
+                printer.newPage()
+                painter.fillRect(0, 0, VW, VH, Qt.white)
+            placements = self._get_pseudo_placements(item_name, is_teacher)
+            self._draw_mini_grid(painter, margin_x, margin_y, grid_w, grid_h, item_name, school_name, placements, is_teacher=is_teacher, is_single_page=True)
 
     def _render_teacher_summary_list(self, painter, VW, VH):
         teachers = self.data_store.get("ogretmenler", [])
@@ -1342,9 +1352,9 @@ class TimetablePrintPreview(QDialog):
             
             tname = t.get("ad", "")
             tkisa = t.get("kisa", "")
-            t_atamalar = [a for a in atamalar if a.get("teacher") == tname]
-            subs_str = ", ".join(list({a.get("subject", "") for a in t_atamalar})) or "—"
-            tot_hours = sum(a.get("duration", 1) for a in t_atamalar)
+            t_atamalar = [a for a in atamalar if format_tr_name(a.get("ogretmen") or a.get("teacher", "")) == format_tr_name(tname)]
+            subs_str = ", ".join(list({(a.get("ders") or a.get("subject", "")) for a in t_atamalar if (a.get("ders") or a.get("subject"))})) or "—"
+            tot_hours = sum(int(a.get("ders_sayisi") or a.get("duration", 1)) for a in t_atamalar if str(a.get("ders_sayisi") or a.get("duration", 1)).isdigit())
             
             cur_x = 30
             painter.drawText(QRectF(cur_x + 10, cur_y, cols[0][1] - 10, row_h), Qt.AlignLeft | Qt.AlignVCenter, tname)

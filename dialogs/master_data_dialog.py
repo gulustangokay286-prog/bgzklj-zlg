@@ -1514,8 +1514,8 @@ class TeacherIndividualTimetableDialog(QDialog):
                         for off in range(dur):
                             fill_cell(r + off, d, s_name, c_name, col_hex)
 
-        teacher_atamalar = [a for a in self.data_store.get("atamalar", []) if is_teacher_match(a.get("teacher", ""), self.teacher_name, teacher_objs)]
-        total_assigned_hours = sum(int(a.get("duration", 1)) for a in teacher_atamalar)
+        teacher_atamalar = [a for a in self.data_store.get("atamalar", []) if is_teacher_match(a.get("ogretmen") or a.get("teacher", ""), self.teacher_name, teacher_objs)]
+        total_assigned_hours = sum(int(a.get("ders_sayisi") or a.get("duration", 1)) for a in teacher_atamalar if str(a.get("ders_sayisi") or a.get("duration", 1)).isdigit())
 
         # Summary footer bar
         info_banner = QLabel(f"Toplam Tanımlı Ders: {total_assigned_hours} Saat  |  Haftalık Çizelgede Yerleşen: {placed_hours} Saat")

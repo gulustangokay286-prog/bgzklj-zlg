@@ -1383,11 +1383,17 @@ class LessonAssignmentDialog(QDialog):
                     
                 assignments.append({
                     "ogretmen": teacher_name,
+                    "teacher": teacher_name,
                     "ders": subj,
+                    "subject": subj,
                     "sinif": comb_str,
+                    "class": comb_str,
                     "ders_sayisi": duration,
+                    "duration": duration,
                     "dagilim": type_val,
+                    "type": type_val,
                     "renk": get_subject_color(subj),
+                    "color": get_subject_color(subj),
                     "is_combined": True,
                     "combined_classes": list(comb_classes)
                 })
@@ -1407,11 +1413,17 @@ class LessonAssignmentDialog(QDialog):
                         
                     assignments.append({
                         "ogretmen": teacher_name,
+                        "teacher": teacher_name,
                         "ders": subj,
+                        "subject": subj,
                         "sinif": c_name,
+                        "class": c_name,
                         "ders_sayisi": duration,
+                        "duration": duration,
                         "dagilim": type_val,
+                        "type": type_val,
                         "renk": get_subject_color(subj),
+                        "color": get_subject_color(subj),
                         "is_combined": False,
                         "combined_classes": []
                     })
@@ -1769,9 +1781,13 @@ class DersEditDialog(QDialog):
             self.list_assignments.addItem(QListWidgetItem("Ders adı girildiğinde atamalar burada listelenir."))
             return
             
-        my_atamalar = [a for a in atamalar if format_tr_name(a.get("subject", "")) == format_tr_name(my_ad)]
+        my_atamalar = [a for a in atamalar if format_tr_name(a.get("ders") or a.get("subject", "")) == format_tr_name(my_ad)]
         for a in my_atamalar:
-            item_text = f"• {a.get('teacher', 'Atanmadı')}  →  {a.get('class', '')} ({a.get('duration', 0)} Saat, Tip: {a.get('type', '-')})"
+            t_str = a.get("ogretmen") or a.get("teacher") or "Atanmadı"
+            c_str = a.get("sinif") or a.get("class") or ""
+            dur_str = a.get("ders_sayisi") or a.get("duration", 0)
+            tip_str = a.get("dagilim") or a.get("type", "-")
+            item_text = f"• {t_str}  →  {c_str} ({dur_str} Saat, Tip: {tip_str})"
             item = QListWidgetItem(item_text)
             self.list_assignments.addItem(item)
         if not my_atamalar:
@@ -3357,22 +3373,8 @@ class OgretmenEditDialog(BaseEditForm):
         self.list_assignments.setFixedHeight(80)
         self.list_assignments.setStyleSheet("QListWidget { background: #FFFFFF; border: 1px solid #D0D7DE; border-radius: 4px; font-size: 11px; padding: 4px; }")
         
-        atamalar = data_store.get("atamalar", [])
-        my_name = self.existing_data.get("ad", "")
-        my_atamalar = [a for a in atamalar if format_tr_name(a.get("ogretmen") or a.get("teacher", "")) == format_tr_name(my_name)]
-        my_subjects = list({(a.get("ders") or a.get("subject", "")) for a in my_atamalar if (a.get("ders") or a.get("subject"))})
-        
-        for a in my_atamalar:
-            s_name = a.get("ders") or a.get("subject", "")
-            c_name = a.get("sinif") or a.get("class", "")
-            dur = a.get("ders_sayisi") or a.get("duration", 0)
-            item_text = f"• {s_name}  →  {c_name} ({dur} Saat)"
-            item = QListWidgetItem(item_text)
-            self.list_assignments.addItem(item)
-        if not my_atamalar:
-            self.list_assignments.addItem(QListWidgetItem("Henüz hiçbir derse veya sınıfa atanmadı."))
-            
         lay_ders.addWidget(self.list_assignments)
+        self._update_assignments_list(data_store)
         
 
         
@@ -3472,29 +3474,42 @@ class OgretmenEditDialog(BaseEditForm):
                 if hasattr(p, "_restore_grid_placements"): p._restore_grid_placements()
                 QMessageBox.information(self, "Başarılı", "Otomatik planlama tamamlandı!")
 
+    def _update_assignments_list(self, data_store=None):
+        if data_store is None:
+            p = self.parent()
+            data_store = getattr(p, "data_store", {}) if p else {}
+            if not data_store and hasattr(p, "main_window"):
+                data_store = getattr(p.main_window, "data_store", {})
+        
+        self.list_assignments.clear()
+        atamalar = data_store.get("atamalar", [])
+        my_name = self.w_ad.text().strip() or self.existing_data.get("ad", "").strip()
+        my_norm = format_tr_name(my_name)
+        
+        my_atamalar = [
+            a for a in atamalar 
+            if format_tr_name(a.get("ogretmen") or a.get("teacher") or "") == my_norm
+        ]
+        
+        for a in my_atamalar:
+            s_name = a.get("ders") or a.get("subject", "")
+            c_name = a.get("sinif") or a.get("class", "")
+            dur = a.get("ders_sayisi") or a.get("duration", 0)
+            tip = a.get("dagilim") or a.get("type", str(dur))
+            item_text = f"📚 {s_name}  ➔  🎓 {c_name} ({dur} Saat: {tip})"
+            self.list_assignments.addItem(QListWidgetItem(item_text))
+            
+        if not my_atamalar:
+            self.list_assignments.addItem(QListWidgetItem("❌ Henüz hiçbir derse veya sınıfa atanmadı."))
+
     def _assign_lessons_for_this_teacher(self):
-        t_name = self.w_ad.text().strip()
+        t_name = self.w_ad.text().strip() or self.existing_data.get("ad", "").strip()
         p = self.parent()
         data_store = getattr(p, "data_store", {}) if p else {}
+        if not data_store and hasattr(p, "main_window"):
+            data_store = getattr(p.main_window, "data_store", {})
         d = LessonAssignmentDialog(data_store=data_store, parent=p or self, selected_teacher=t_name)
         if d.exec():
-            data = d.get_data()
-            if "atamalar" not in data_store:
-                data_store["atamalar"] = []
-            
-            # Remove old assignments for this teacher
-            current_teacher = format_tr_name(d.cb_ogretmen.currentText())
-            data_store["atamalar"] = [
-                a for a in data_store["atamalar"] 
-                if format_tr_name(a.get("teacher", "")) != current_teacher
-            ]
-            
-            # Add new ones
-            if isinstance(data, list):
-                data_store["atamalar"].extend(data)
-            else:
-                data_store["atamalar"].append(data)
-                
             trigger_save_db(self, data_store)
             if hasattr(p, "save_db"): p.save_db()
             if hasattr(p, "_refresh_tree"): p._refresh_tree()
@@ -3503,13 +3518,7 @@ class OgretmenEditDialog(BaseEditForm):
             if hasattr(p, "_refresh_grid"): p._refresh_grid()
             
             # Update local UI list
-            self.list_assignments.clear()
-            my_atamalar = [a for a in data_store["atamalar"] if format_tr_name(a.get("teacher", "")) == current_teacher]
-            for a in my_atamalar:
-                item_text = f"📚 {a.get('subject', '')} ➔ 🎓 {a.get('class', '')} ({a.get('duration', 0)} Saat)"
-                self.list_assignments.addItem(QListWidgetItem(item_text))
-            if not my_atamalar:
-                self.list_assignments.addItem(QListWidgetItem("❌ Henüz hiçbir derse veya sınıfa atanmadı."))
+            self._update_assignments_list(data_store)
 
     def _open_custom_fields(self):
         t_name = self.w_ad.text().strip() or "Öğretmen"
