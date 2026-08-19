@@ -24,7 +24,7 @@ jobs:
 
     - name: Build with PyInstaller
       run: |
-        python -m PyInstaller --clean -y --name "Chenki_Akademi" --windowed --icon=app_icon.ico main.py
+        python -m PyInstaller --clean -y Chenki_Akademi.spec
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
