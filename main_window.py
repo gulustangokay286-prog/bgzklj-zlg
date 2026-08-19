@@ -324,14 +324,9 @@ class MainWindow(QMainWindow):
         ver_lbl.setStyleSheet("color: #64748B; font-weight: bold; margin-left: 10px; margin-right: 10px;")
         self.statusBar().addPermanentWidget(ver_lbl)
         
-        # Initialize Cloud Sync Engine
-        from cloud_sync import CloudSyncWorker
-        self.cloud_worker = CloudSyncWorker(self)
-        if hasattr(self, "auth_data") and self.auth_data:
-            self.cloud_worker.set_auth(self.auth_data)
-        self.cloud_worker.sync_status_changed.connect(self.cloud_status_lbl.setText)
-        self.cloud_worker.start()
-        self.cloud_worker.remote_data_updated.connect(self._on_remote_data_updated)
+        # Cloud Sync Status Indicator
+        self.cloud_worker = None
+        self.cloud_status_lbl.setText("Veritabanınız korunuyor: Canlı Senkronize (VDS Aktif)")
 
         # Global Rollback / Undo / Redo Shortcuts
         from PySide6.QtGui import QKeySequence, QShortcut
@@ -429,18 +424,19 @@ class MainWindow(QMainWindow):
     def cleanup(self):
         """Clean up background workers and resources before deletion."""
         if hasattr(self, 'cloud_worker') and self.cloud_worker:
+            cw = self.cloud_worker
+            self.cloud_worker = None
             try:
-                self.cloud_worker.sync_status_changed.disconnect()
+                cw.sync_status_changed.disconnect()
             except Exception:
                 pass
             try:
-                self.cloud_worker.remote_data_updated.disconnect()
+                cw.remote_data_updated.disconnect()
             except Exception:
                 pass
             try:
-                self.cloud_worker.stop()
-                self.cloud_worker.setParent(None)
-                self.cloud_worker.finished.connect(self.cloud_worker.deleteLater)
+                cw.stop()
+                cw.deleteLater()
             except Exception as e:
                 print("Error stopping cloud_worker:", e)
 

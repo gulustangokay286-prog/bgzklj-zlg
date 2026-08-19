@@ -8,7 +8,7 @@ import json
 import time
 import requests
 from collections import deque
-from PySide6.QtCore import QThread, Signal, QMutex, QMutexLocker
+from PySide6.QtCore import QObject, Signal
 from api_client import api_client
 
 def _sanitize_key(key: str) -> str:
@@ -85,8 +85,9 @@ def delete_institution_from_rtdb(slug: str, auth_data: dict = None) -> bool:
 
 
 # ── Background Realtime Live Event Sync Worker ────────────────────────
+import threading
 
-class CloudSyncWorker(QThread):
+class CloudSyncWorker(QObject):
     sync_status_changed = Signal(str)
     remote_data_updated = Signal(str, str) # slug, filename
     institutions_list_changed = Signal()
@@ -95,15 +96,16 @@ class CloudSyncWorker(QThread):
         super().__init__(parent)
         self._is_running = True
         self._queue = deque()
-        self._mutex = QMutex()
+        self._lock = threading.Lock()
         self.auth_data = None
         self._last_pull_time = 0
+        self._thread = None
         
     def set_auth(self, auth_data):
         self.auth_data = auth_data
         
     def add_to_queue(self, action: str, slug: str, filename: str = "", data: dict = None):
-        with QMutexLocker(self._mutex):
+        with self._lock:
             self._queue.append({
                 "action": action,
                 "slug": slug,
@@ -112,6 +114,12 @@ class CloudSyncWorker(QThread):
                 "timestamp": time.time()
             })
             
+    def start(self):
+        if self._thread is None or not self._thread.is_alive():
+            self._is_running = True
+            self._thread = threading.Thread(target=self.run, daemon=True)
+            self._thread.start()
+
     def _sleep_interruptible(self, seconds):
         end_time = time.time() + seconds
         while self._is_running and time.time() < end_time:
@@ -120,7 +128,7 @@ class CloudSyncWorker(QThread):
     def run(self):
         while self._is_running:
             item = None
-            with QMutexLocker(self._mutex):
+            with self._lock:
                 if len(self._queue) > 0:
                     item = self._queue[0]
                     
@@ -145,7 +153,7 @@ class CloudSyncWorker(QThread):
                     success = True
                     
                 if success:
-                    with QMutexLocker(self._mutex):
+                    with self._lock:
                         if len(self._queue) > 0:
                             self._queue.popleft()
                     self.sync_status_changed.emit("Veritabanınız korunuyor: Canlı Senkronize (VDS Aktif)")
@@ -172,4 +180,3 @@ class CloudSyncWorker(QThread):
 
     def stop(self):
         self._is_running = False
-        self.wait(30)

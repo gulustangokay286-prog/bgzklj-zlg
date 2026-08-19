@@ -903,14 +903,15 @@ class TimetableCellDelegate(QStyledItemDelegate):
             teacher_name = info.get("teacher_name") or info.get("teacher") or ""
             
         # 1. Determine cell background color with instant memory cache
+        win = table.window() if table and hasattr(table, "window") else None
+        data_store = getattr(win, "data_store", None)
+        
         cell_color = None
         color_key = subject_name or clean_str
         if color_key:
             if color_key in _CELL_COLOR_CACHE:
                 cell_color = _CELL_COLOR_CACHE[color_key]
             else:
-                win = table.window() if table and hasattr(table, "window") else None
-                data_store = getattr(win, "data_store", None)
                 from dialogs.color_picker_dialog import resolve_subject_color
                 resolved_hex = resolve_subject_color(color_key, data_store)
                 c = QColor(resolved_hex)
