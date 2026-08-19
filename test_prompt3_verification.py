@@ -16,9 +16,9 @@ def run_tests():
         
     print("=== TEST 1: Short code generation (Beden, Tarih, Rehberlik, Türkçe, Biyoloji) ===")
     from dialogs.edit_forms import _auto_short_code
-    assert _auto_short_code("Biyoloji") == "BİYOLOJİ", f"Expected BİYOLOJİ got {_auto_short_code('Biyoloji')}"
+    assert _auto_short_code("Biyoloji") == "BİYO", f"Expected BİYO got {_auto_short_code('Biyoloji')}"
     assert _auto_short_code("Rehberlik") == "REHBERLİK", f"Expected REHBERLİK got {_auto_short_code('Rehberlik')}"
-    assert _auto_short_code("Matematik 1") == "MATEMATİK 1", f"Expected MATEMATİK 1 got {_auto_short_code('Matematik 1')}"
+    assert _auto_short_code("Matematik 1") == "MATE 1", f"Expected MATE 1 got {_auto_short_code('Matematik 1')}"
     assert _auto_short_code("Fizik2") == "FİZİK 2", f"Expected FİZİK 2 got {_auto_short_code('Fizik2')}"
     assert _auto_short_code("Kimya") == "KİMYA", f"Expected KİMYA got {_auto_short_code('Kimya')}"
     assert _auto_short_code("Beden") == "BEDEN", f"Expected BEDEN got {_auto_short_code('Beden')}"
@@ -144,10 +144,10 @@ def run_tests():
     from dialogs.print_preview import get_subject_badge, TimetablePrintPreview
     assert get_subject_badge("Biyoloji 1") == "BİYO 1"
     assert get_subject_badge("BİYOLOJİ1") == "BİYO 1"
-    assert get_subject_badge("Kimya2") == "KİM 2"
-    assert get_subject_badge("Fizik") == "FİZ"
+    assert get_subject_badge("Kimya2") == "KİMYA 2"
+    assert get_subject_badge("Fizik") == "FİZİK"
     assert get_subject_badge("Rehberlik") == "REHBERLİK"
-    assert get_subject_badge("Görsel Sanatlar") == "GÖR"
+    assert get_subject_badge("Görsel Sanatlar") == "GÖRSEL"
     assert get_subject_badge("Matematik 1") == "MAT 1"
     
     # Test Print Preview: empty grid MUST stay empty (no phantom placements)

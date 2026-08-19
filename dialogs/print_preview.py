@@ -1312,42 +1312,44 @@ class TimetablePrintPreview(QDialog):
             self._draw_mini_grid(painter, margin_x, margin_y, grid_w, grid_h, item_name, school_name, placements, is_teacher=is_teacher, is_single_page=True)
 
     def _render_teacher_summary_list(self, painter, VW, VH):
-        teachers = self.data_store.get("ogretmenler", [])
+        teachers = sorted(self.data_store.get("ogretmenler", []), key=lambda t: t.get("ad", ""))
         atamalar = self.data_store.get("atamalar", [])
         
-        painter.setPen(QPen(QColor("#CCCCCC"), 1))
-        painter.setBrush(QBrush(QColor("#F5F7FA")))
+        # Header banner box with clean border
+        painter.setPen(QPen(QColor("#64748B"), 1.2))
+        painter.setBrush(QBrush(QColor("#F8FAFC")))
         painter.drawRoundedRect(30, 20, VW - 60, 50, 6, 6)
         
-        painter.setPen(QPen(QColor("#111111"), 1))
-        painter.setFont(make_font(16, True))
+        painter.setPen(QPen(QColor("#0F172A"), 1))
+        painter.setFont(make_font(17, True))
         painter.drawText(QRectF(50, 25, 600, 40), Qt.AlignLeft | Qt.AlignVCenter, "Tüm Öğretmenlerin Ders Yükü Raporu")
         
         start_y = 85
         tbl_w = VW - 60
-        cols = [("Öğretmen Adı", 300), ("Kısa Kodu", 150), ("Atanan Dersler", 400), ("Toplam Saat", 190)]
+        cols = [("Öğretmen Adı", 280), ("Kısa Kodu", 140), ("Atanan Dersler", 460), ("Toplam Saat", 180)]
         
         cur_x = 30
-        header_h = 32
-        painter.setBrush(QBrush(QColor("#E9ECEF")))
-        painter.setPen(QPen(QColor("#BCC8D8"), 1))
+        header_h = 34
+        painter.setBrush(QBrush(QColor("#E2E8F0")))
+        painter.setPen(QPen(QColor("#64748B"), 1.2))
         painter.drawRect(QRectF(30, start_y, tbl_w, header_h))
         
+        # Draw bold high-contrast column headers
+        painter.setPen(QPen(QColor("#0F172A"), 1))
         painter.setFont(make_font(12, True))
         for col_name, col_w in cols:
             painter.drawText(QRectF(cur_x, start_y, col_w, header_h), Qt.AlignCenter, col_name)
             cur_x += col_w
             
         cur_y = start_y + header_h
-        row_h = 30
-        painter.setFont(make_font(11))
+        row_h = 32
         
         for idx, t in enumerate(teachers):
-            if cur_y + row_h > VH - 50:
+            if cur_y + row_h > VH - 40:
                 break
-            bg_color = QColor("#F8F9FA") if idx % 2 == 1 else QColor("#FFFFFF")
+            bg_color = QColor("#F8FAFC") if idx % 2 == 1 else QColor("#FFFFFF")
             painter.setBrush(QBrush(bg_color))
-            painter.setPen(QPen(QColor("#E0E0E0"), 1))
+            painter.setPen(QPen(QColor("#94A3B8"), 1))
             painter.drawRect(QRectF(30, cur_y, tbl_w, row_h))
             
             tname = t.get("ad", "")
@@ -1356,16 +1358,24 @@ class TimetablePrintPreview(QDialog):
             subs_str = ", ".join(list({(a.get("ders") or a.get("subject", "")) for a in t_atamalar if (a.get("ders") or a.get("subject"))})) or "—"
             tot_hours = sum(int(a.get("ders_sayisi") or a.get("duration", 1)) for a in t_atamalar if str(a.get("ders_sayisi") or a.get("duration", 1)).isdigit())
             
+            # Text pen MUST be high-contrast crisp black / dark slate
+            painter.setPen(QPen(QColor("#0F172A"), 1))
+            painter.setFont(make_font(11, True))
+            
             cur_x = 30
-            painter.drawText(QRectF(cur_x + 10, cur_y, cols[0][1] - 10, row_h), Qt.AlignLeft | Qt.AlignVCenter, tname)
+            painter.drawText(QRectF(cur_x + 12, cur_y, cols[0][1] - 14, row_h), Qt.AlignLeft | Qt.AlignVCenter, tname)
             cur_x += cols[0][1]
             
+            painter.setFont(make_font(11, False))
+            painter.setPen(QPen(QColor("#334155"), 1))
             painter.drawText(QRectF(cur_x, cur_y, cols[1][1], row_h), Qt.AlignCenter, tkisa)
             cur_x += cols[1][1]
             
-            painter.drawText(QRectF(cur_x + 10, cur_y, cols[2][1] - 10, row_h), Qt.AlignLeft | Qt.AlignVCenter, subs_str)
+            painter.drawText(QRectF(cur_x + 10, cur_y, cols[2][1] - 14, row_h), Qt.AlignLeft | Qt.AlignVCenter, subs_str)
             cur_x += cols[2][1]
             
+            painter.setFont(make_font(12, True))
+            painter.setPen(QPen(QColor("#0284C7") if tot_hours > 0 else QColor("#94A3B8"), 1))
             painter.drawText(QRectF(cur_x, cur_y, cols[3][1], row_h), Qt.AlignCenter, f"{tot_hours} Saat")
             cur_y += row_h
 
