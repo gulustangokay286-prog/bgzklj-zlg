@@ -39,7 +39,11 @@ class APIClient:
         if os.path.exists(token_path):
             try:
                 with open(token_path, "r", encoding="utf-8") as f:
-                    return json.load(f).get("access_token")
+                    data = json.load(f)
+                    tok = data.get("access_token")
+                    # Never reuse local dummy tokens for remote VDS requests
+                    if tok and not str(tok).startswith("local_") and not data.get("is_local"):
+                        return tok
             except Exception:
                 pass
         return None
@@ -69,24 +73,18 @@ class APIClient:
     }
 
     def login(self, email="sehersanli@chenki.net", password="seher2311"):
-        # 1. Try VDS API first (fast timeout to avoid UI freeze)
+        # 1. Try VDS API first
         url = f"{self.base_url}/auth/login"
         data = {"username": email, "password": password}
         try:
-            resp = requests.post(url, data=data, timeout=2)
+            resp = requests.post(url, data=data, timeout=6)
             if resp.status_code == 200:
                 token_data = resp.json()
                 token_data["email"] = email
                 token_data["role"] = self._get_role(email)
                 self.save_token(token_data)
                 return True, token_data
-            else:
-                try:
-                    err = resp.json().get("detail", "Login failed")
-                except:
-                    err = "Server connection failed"
-                # Fall through to local auth
-        except Exception as e:
+        except Exception:
             pass  # Fall through to local auth
         
         # 2. Local auth fallback
@@ -124,11 +122,11 @@ class APIClient:
         return self.get_current_role() == "admin"
 
     def ensure_authenticated(self):
-        if not self.token:
+        if not self.token or str(self.token).startswith("local_"):
             self.token = self.load_token()
-        if not self.token:
+        if not self.token or str(self.token).startswith("local_"):
             ok, _ = self.login("sehersanli@chenki.net", "seher2311")
-        return bool(self.token)
+        return bool(self.token and not str(self.token).startswith("local_"))
 
     def get_headers(self):
         self.ensure_authenticated()
@@ -138,7 +136,7 @@ class APIClient:
 
     def _request_with_retry(self, method, url, **kwargs):
         headers = kwargs.pop("headers", None) or self.get_headers()
-        timeout = kwargs.pop("timeout", 2)
+        timeout = kwargs.pop("timeout", 10)
         with _HTTP_LOCK:
             try:
                 resp = requests.request(method, url, headers=headers, timeout=timeout, **kwargs)
