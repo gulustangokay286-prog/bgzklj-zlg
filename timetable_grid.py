@@ -2,15 +2,147 @@
 timetable_grid.py  –  Haftalık ders programı tablosu (drag-drop + sağ tık menüsü destekli)
 """
 import json
+import uuid
+import time
 from PySide6.QtWidgets import (
     QWidget, QTableWidget, QTableWidgetItem, QHeaderView,
     QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton,
     QAbstractItemView, QFrame, QScrollArea, QMenu, QInputDialog,
-    QMessageBox, QStyledItemDelegate, QStyle
+    QMessageBox, QStyledItemDelegate, QStyle, QApplication
 )
-from PySide6.QtCore import Qt, QMimeData, Signal, QByteArray, QRect, QRectF
-from PySide6.QtGui import QFont, QColor, QBrush, QDrag, QPainter, QPixmap, QAction, QPen, QLinearGradient, QIcon, QPainterPath
+from PySide6.QtCore import Qt, QMimeData, Signal, QByteArray, QRect, QRectF, QTimer, QPoint, QEvent
+from PySide6.QtGui import QFont, QColor, QBrush, QDrag, QPainter, QPixmap, QAction, QPen, QLinearGradient, QIcon, QPainterPath, QCursor
 from auto_scheduler import matches_class
+
+class StickyGhostWidget(QLabel):
+    _active_instance = None
+    last_drop_time = 0
+
+    def __init__(self, pixmap, drag_data, parent_window=None):
+        if StickyGhostWidget._active_instance:
+            StickyGhostWidget._active_instance.cancel()
+
+        super().__init__(None)
+        StickyGhostWidget._active_instance = self
+        self.setWindowFlags(Qt.ToolTip | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.BypassWindowManagerHint)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WA_ShowWithoutActivating, True)
+        
+        self.setPixmap(pixmap)
+        self.setFixedSize(pixmap.size())
+        self.drag_data = drag_data
+        self.parent_window = parent_window
+        
+        # Follow cursor with fast timer
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._update_pos)
+        self._timer.start(10)
+        
+        self._update_pos()
+        self.show()
+        
+        # Install application-level event filter after tiny delay
+        QTimer.singleShot(40, self._install_filter)
+
+    def _install_filter(self):
+        if StickyGhostWidget._active_instance == self:
+            QApplication.instance().installEventFilter(self)
+
+    def _update_pos(self):
+        cur = QCursor.pos()
+        self.move(cur.x() - self.width() // 2, cur.y() - self.height() // 2)
+
+    def cancel(self):
+        try:
+            QApplication.instance().removeEventFilter(self)
+        except Exception:
+            pass
+        if hasattr(self, "_timer") and self._timer.isActive():
+            self._timer.stop()
+        self.hide()
+        self.deleteLater()
+        if StickyGhostWidget._active_instance == self:
+            StickyGhostWidget._active_instance = None
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.MouseButtonPress:
+            if event.button() == Qt.RightButton:
+                self.cancel()
+                StickyGhostWidget.last_drop_time = time.time()
+                return True
+                
+            if event.button() == Qt.LeftButton:
+                click_pos = QCursor.pos()
+                data = dict(self.drag_data)
+                self.cancel()
+                StickyGhostWidget.last_drop_time = time.time()
+                
+                target_widget = QApplication.widgetAt(click_pos)
+                candidates = [obj, target_widget]
+                
+                # 1. Check if dropped on grid table
+                table = None
+                for cand in candidates:
+                    p = cand
+                    while p:
+                        if hasattr(p, "lesson_dropped"):
+                            table = p
+                            break
+                        p = p.parent() if hasattr(p, "parent") else None
+                    if table:
+                        break
+                        
+                if table:
+                    local_pos = table.viewport().mapFromGlobal(click_pos)
+                    row = table.rowAt(local_pos.y())
+                    col = table.columnAt(local_pos.x())
+                    if row >= 0 and col >= 0:
+                        table.lesson_dropped.emit(row, col, data)
+                        return True
+                        
+                # 2. Check if dropped on dock (drag alanı)
+                dock = None
+                for cand in candidates:
+                    p = cand
+                    while p:
+                        if hasattr(p, "load_unplaced") or isinstance(p, UnplacedLessonsDock):
+                            dock = p
+                            break
+                        p = p.parent() if hasattr(p, "parent") else None
+                    if dock:
+                        break
+                        
+                if dock or (target_widget and ("dock" in str(type(target_widget)).lower() or "unplaced" in str(type(target_widget)).lower())):
+                    if data.get("is_move"):
+                        orig_r = data.get("origin_row", -1)
+                        orig_c = data.get("origin_col", -1)
+                        table = None
+                        win = self.parent_window
+                        if win:
+                            if hasattr(win, "_editor") and getattr(win, "_editor"):
+                                win = win._editor
+                            if hasattr(win, "_grid") and hasattr(win._grid, "table"):
+                                table = win._grid.table
+                        if not table and dock:
+                            p = dock.parent()
+                            while p:
+                                if hasattr(p, "table") and hasattr(p.table, "_delete_lesson_at"):
+                                    table = p.table
+                                    break
+                                p = p.parent()
+                        if table and orig_r >= 0 and orig_c >= 0:
+                            table._delete_lesson_at(orig_r, orig_c)
+                    return True
+                    
+                return True
+                
+        elif event.type() == QEvent.KeyPress and event.key() == Qt.Key_Escape:
+            self.cancel()
+            StickyGhostWidget.last_drop_time = time.time()
+            return True
+            
+        return super().eventFilter(obj, event)
 
 def make_context_icon(symbol: str, color1: str, color2: str) -> QIcon:
     pix = QPixmap(24, 24)
@@ -507,29 +639,55 @@ class DraggableLessonCard(QLabel):
                 break
             w = w.parent()
         
+    def _get_card_data(self):
+        return {
+            "lesson_id": self.lesson_id,
+            "subject_name": self.subject_name,
+            "color": self.color,
+            "duration": self.duration,
+            "teacher": self.teacher,
+            "class_name": self.class_name,
+            "is_combined": bool(getattr(self, "is_combined", False) or ("+" in self.class_name or "&" in self.class_name)),
+            "combined_classes": getattr(self, "combined_classes", [])
+        }
+
+    def _start_standard_drag(self, pos):
+        drag = QDrag(self)
+        mime = QMimeData()
+        data = self._get_card_data()
+        mime.setData("application/x-lesson", QByteArray(json.dumps(data).encode()))
+        drag.setMimeData(mime)
+        pix = self.grab()
+        drag.setPixmap(pix)
+        drag.setHotSpot(pos)
+        drag.exec_(Qt.MoveAction)
+
+    def _start_sticky_drag(self):
+        data = self._get_card_data()
+        pix = self.grab()
+        win = self.window()
+        StickyGhostWidget(pix, data, win)
+
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            drag = QDrag(self)
-            mime = QMimeData()
-            
-            data = {
-                "lesson_id": self.lesson_id,
-                "subject_name": self.subject_name,
-                "color": self.color,
-                "duration": self.duration,
-                "teacher": self.teacher,
-                "class_name": self.class_name,
-                "is_combined": bool(getattr(self, "is_combined", False) or ("+" in self.class_name or "&" in self.class_name)),
-                "combined_classes": getattr(self, "combined_classes", [])
-            }
-            mime.setData("application/x-lesson", QByteArray(json.dumps(data).encode()))
-            drag.setMimeData(mime)
-            
-            pix = self.grab()
-            drag.setPixmap(pix)
-            drag.setHotSpot(event.pos())
-            
-            drag.exec_(Qt.MoveAction)
+            self._drag_start_pos = event.pos()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if (event.buttons() & Qt.LeftButton) and hasattr(self, '_drag_start_pos'):
+            if (event.pos() - self._drag_start_pos).manhattanLength() >= 5:
+                self._start_standard_drag(event.pos())
+                return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and hasattr(self, '_drag_start_pos'):
+            if time.time() - getattr(StickyGhostWidget, "last_drop_time", 0) < 0.35:
+                return
+            if (event.pos() - self._drag_start_pos).manhattanLength() < 5:
+                self._start_sticky_drag()
+                return
+        super().mouseReleaseEvent(event)
 
     def _show_card_context_menu(self, pos):
         menu = QMenu(self)
@@ -715,13 +873,14 @@ class UnplacedLessonsDock(QWidget):
         # 'Daha Fazla Ders Ekle' button
         self.btn_add_more = QPushButton("➕ Daha Fazla Ders Ekle...")
         self.btn_add_more.setCursor(Qt.PointingHandCursor)
-        self.btn_add_more.setFixedHeight(30)
+        self.btn_add_more.setFixedHeight(32)
+        self.btn_add_more.setMinimumWidth(160)
         self.btn_add_more.setStyleSheet("""
             QPushButton {
                 background: #4F46E5;
                 color: #FFFFFF;
                 font-family: 'Segoe UI', system-ui;
-                font-size: 11px;
+                font-size: 11.5px;
                 font-weight: bold;
                 padding: 4px 12px;
                 border-radius: 6px;
@@ -907,6 +1066,8 @@ class UnplacedLessonsDock(QWidget):
                     orig_r = data.get("origin_row", -1)
                     orig_c = data.get("origin_col", -1)
                     win = self.window()
+                    if hasattr(win, "_editor") and getattr(win, "_editor"):
+                        win = win._editor
                     grid = getattr(win, "_grid", None)
                     if not grid:
                         p = self.parent()
@@ -973,6 +1134,20 @@ class UnplacedLessonsDock(QWidget):
                 msg_layout.addWidget(icon_lbl)
                 msg_layout.addWidget(text_lbl)
                 
+                btn_empty_add = QPushButton("➕ Daha Fazla Ders Ekle...")
+                btn_empty_add.setCursor(Qt.PointingHandCursor)
+                btn_empty_add.setFixedHeight(26)
+                btn_empty_add.setStyleSheet("""
+                    QPushButton {
+                        background: #4F46E5; color: white; font-family: 'Segoe UI';
+                        font-size: 11px; font-weight: bold;
+                        padding: 3px 12px; border-radius: 5px; border: none;
+                    }
+                    QPushButton:hover { background: #4338CA; }
+                """)
+                btn_empty_add.clicked.connect(self._on_add_more_clicked)
+                msg_layout.addWidget(btn_empty_add)
+                
                 self.container_layout.addWidget(msg_widget)
                 return
 
@@ -989,6 +1164,20 @@ class UnplacedLessonsDock(QWidget):
                 card.setAcceptDrops(True)
                 card.installEventFilter(self)
                 self.container_layout.addWidget(card)
+                
+            btn_inline_add = QPushButton("➕ Daha Fazla Ders Ekle...")
+            btn_inline_add.setCursor(Qt.PointingHandCursor)
+            btn_inline_add.setFixedHeight(28)
+            btn_inline_add.setStyleSheet("""
+                QPushButton {
+                    background: #EEF2FF; color: #4F46E5; font-family: 'Segoe UI';
+                    font-size: 10.5px; font-weight: bold;
+                    padding: 3px 10px; border-radius: 5px; border: 1.5px dashed #6366F1;
+                }
+                QPushButton:hover { background: #E0E7FF; border-color: #4F46E5; }
+            """)
+            btn_inline_add.clicked.connect(self._on_add_more_clicked)
+            self.container_layout.addWidget(btn_inline_add)
         finally:
             self.container.setUpdatesEnabled(True)
 
@@ -1288,6 +1477,43 @@ class DropTableWidget(QTableWidget):
             self.drag_start_pos = event.pos()
         super().mousePressEvent(event)
 
+    def mouseReleaseEvent(self, event):
+        super().mouseReleaseEvent(event)
+        if event.button() == Qt.LeftButton and hasattr(self, 'drag_start_pos'):
+            if time.time() - getattr(StickyGhostWidget, "last_drop_time", 0) < 0.35:
+                return
+            if (event.pos() - self.drag_start_pos).manhattanLength() < 5:
+                item = self.itemAt(self.drag_start_pos)
+                if item and item.text().strip():
+                    row = self.rowAt(self.drag_start_pos.y())
+                    col = self.columnAt(self.drag_start_pos.x())
+                    orig_r, orig_c, orig_dur, info = self._get_lesson_origin(row, col)
+                    if info:
+                        s_name = info.get("subject_name", "")
+                        c_name = info.get("class_name", "")
+                        is_comb = bool(info.get("is_combined") or ("+" in c_name or "," in c_name or "&" in c_name))
+                        combined_classes = list(info.get("combined_classes", []))
+                        if is_comb and not combined_classes:
+                            combined_classes = [c.strip().split("(")[0].strip() for c in c_name.replace("&", "+").replace(",", "+").split("+") if c.strip()]
+                        
+                        data = dict(info)
+                        data["is_move"] = True
+                        data["origin_row"] = orig_r
+                        data["origin_col"] = orig_c
+                        data["teacher"] = info.get("teacher_name", "")
+                        data["locked"] = True
+                        data["is_combined"] = is_comb
+                        data["combined_classes"] = combined_classes
+                        if is_comb and combined_classes:
+                            data["class_name"] = " + ".join(combined_classes)
+                            
+                        orig_item = self.item(orig_r, orig_c) or item
+                        rect = self.visualItemRect(orig_item)
+                        pixmap = self.viewport().grab(rect)
+                        
+                        win = self.window()
+                        StickyGhostWidget(pixmap, data, win)
+
     def mouseMoveEvent(self, event):
         # 1. Drag & Drop start when Left button is pressed
         if (event.buttons() & Qt.LeftButton) and hasattr(self, 'drag_start_pos'):
@@ -1482,7 +1708,9 @@ class DropTableWidget(QTableWidget):
 
         # ── Capture target_entity BEFORE any grid mutation ──
         win = self.window()
-        if not hasattr(win, "data_store") and hasattr(win, "parent") and hasattr(win.parent(), "data_store"):
+        if hasattr(win, "_editor") and getattr(win, "_editor"):
+            win = win._editor
+        elif not hasattr(win, "data_store") and hasattr(win, "parent") and hasattr(win.parent(), "data_store"):
             win = win.parent()
             
         if hasattr(win, "_push_undo_state"):
@@ -1636,29 +1864,11 @@ class DropTableWidget(QTableWidget):
             if hasattr(win, "save_db"):
                 win.save_db(sync_from_grid=False)
                 
-            # ── 4. Refresh grid from updated memory (skip unplaced — we do our own deferred refresh) ──
+            # ── 4. Refresh grid & unplaced lessons from updated memory ──
             if hasattr(win, "_refresh_grid"):
-                win._refresh_grid(skip_unplaced=True)
-                
-            # ── 5. Show the DELETED lesson in dock (not a generic refresh) ──
-            if hasattr(win, "_grid") and hasattr(win._grid, "unplaced_dock") and s_name:
-                from dialogs.color_picker_dialog import resolve_subject_color
-                deleted_lesson = {
-                    "id": f"deleted_{orig_r}_{orig_c}",
-                    "subject_name": s_name,
-                    "color": resolve_subject_color(s_name, win.data_store),
-                    "teacher": t_name,
-                    "class_name": c_name or target_entity,
-                    "duration": orig_dur,
-                    "is_combined": is_comb,
-                    "combined_classes": target_classes if is_comb else []
-                }
-                win._grid.unplaced_dock.load_unplaced(
-                    [deleted_lesson],
-                    has_assignments=True,
-                    display_mode=view_mode,
-                    target_entity=target_entity
-                )
+                win._refresh_grid(skip_unplaced=False)
+            if hasattr(win, "_refresh_unplaced_lessons"):
+                win._refresh_unplaced_lessons()
             if hasattr(win, "_refresh_tree"):
                 win._refresh_tree()
 

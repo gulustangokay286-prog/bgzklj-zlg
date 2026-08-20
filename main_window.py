@@ -1605,73 +1605,13 @@ class MainWindow(QMainWindow):
                         "combined_classes": list(target_classes) if is_comb else []
                     })
                     
-        # --- CHECK EMPTY SLOTS AND LIMIT UNPLACED COUNT ---
-        empty_slot_count = 0
-        if target_entity and scoped_atamalar:
-            settings = self.data_store.get("settings", {})
-            d_len = len(settings.get("days", [])) or int(settings.get("day_count", self.data_store.get("gun_sayisi", 5)))
-            p_len = int(settings.get("periods", self.data_store.get("ders_saati", 8)))
-            total_slots = d_len * p_len
-            
-            placed_for_target = 0
-            for p in grid_placements:
-                dur = int(p.get("duration", 1))
-                if dur <= 0: continue
-                p_c = (p.get("class_name") or p.get("class") or "").strip()
-                p_t = format_tr_name(p.get("teacher_name") or p.get("teacher") or "")
-                
-                match = False
-                if display_mode == "classes":
-                    from auto_scheduler import matches_class
-                    if matches_class(target_entity, p_c) or matches_class(p_c, target_entity):
-                        match = True
-                    elif p.get("combined_classes"):
-                        if any(matches_class(target_entity, x) for x in p["combined_classes"]):
-                            match = True
-                    elif "+" in p_c or "&" in p_c or "," in p_c:
-                        if any(matches_class(target_entity, x.strip()) for x in p_c.replace("&", "+").replace(",", "+").split("+")):
-                            match = True
-                else:
-                    if _matches_teacher(p_t, target_entity) or p_t == format_tr_name(target_entity):
-                        match = True
-                        
-                if match:
-                    placed_for_target += dur
-                    
-            empty_slot_count = max(0, total_slots - placed_for_target)
-            
-            # If grid is completely full, no lessons to show
-            if empty_slot_count <= 0:
-                unplaced = []
-            elif unplaced:
-                # Limit shown unplaced lessons to number of empty slots
-                limited = []
-                slot_budget = empty_slot_count
-                for u in unplaced:
-                    u_dur = u.get("duration", 1)
-                    if slot_budget >= u_dur:
-                        limited.append(u)
-                        slot_budget -= u_dur
-                    elif slot_budget > 0:
-                        u_copy = dict(u)
-                        u_copy["duration"] = slot_budget
-                        limited.append(u_copy)
-                        slot_budget = 0
-                        break
-                    else:
-                        break
-                unplaced = limited
-                # Store full unplaced for "load more" feature
-                self._full_unplaced_list = [u for u in unplaced]
-        # --------------------------------
-
         has_assignments = bool(scoped_atamalar) if target_entity else bool(atamalar)
         self._grid.unplaced_dock.load_unplaced(
             unplaced, 
             has_assignments=has_assignments, 
             display_mode=display_mode, 
             target_entity=target_entity or "",
-            empty_slot_count=empty_slot_count
+            empty_slot_count=0
         )
 
     def _remove_placement_by_data(self, p_item):
@@ -2790,14 +2730,16 @@ class MainWindow(QMainWindow):
             if hasattr(self, "_grid"):
                 self._grid.clear_grid()
             slug = getattr(self, "institution_slug", None)
-            if slug:
+            ver_fn = getattr(self, "version_filename", None)
+            if slug and ver_fn:
                 import version_store
-                new_fn = version_store.save_version(slug, self.data_store, source="manual", note="Çizelge Sıfırlandı")
-                self.version_filename = new_fn
+                version_store.update_version_in_place(slug, ver_fn, self.data_store)
+                version_store.touch_institution_timestamp(slug)
+            self.mark_dirty()
             self.save_db(sync_from_grid=False)
             self._refresh_grid()
             self._refresh_tree()
-            self.statusBar().showMessage("🧹 Tüm çizelge dersleri başarıyla sıfırlandı ve yeni sürüme kaydedildi.")
+            self.statusBar().showMessage("🧹 Tüm çizelge dersleri başarıyla sıfırlandı.")
 
     def _open_extracted(self, dialog_id):
         from dialogs.extracted_dialog import open_extracted_dialog

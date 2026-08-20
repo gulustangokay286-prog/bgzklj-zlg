@@ -210,8 +210,8 @@ class AutoScheduleDialog(QDialog):
         self.chk_zero_gap.setEnabled(False)
         form_param.addRow("", self.chk_zero_gap)
         
-        self.chk_fill_empty = QCheckBox("Boş kalan saatleri 'Etüt / Serbest Çalışma' ile doldur")
-        self.chk_fill_empty.setChecked(False)
+        self.chk_fill_empty = QCheckBox("Boş kalan saatleri 'Etüt / Serbest Çalışma' ile doldur (Tüm çizelgeyi tamamla)")
+        self.chk_fill_empty.setChecked(True)
         form_param.addRow("", self.chk_fill_empty)
         
         main_layout.addWidget(grp_param)
@@ -399,14 +399,18 @@ class AutoScheduleDialog(QDialog):
             if hasattr(p, "_refresh_tree"):
                 p._refresh_tree()
             
-            # Auto-save as a new version
+            # Update current version in place and mark dirty (version is created when user saves / goes home)
             slug = getattr(p, "institution_slug", None)
-            if slug:
+            ver_fn = getattr(p, "version_filename", None)
+            if slug and ver_fn:
                 try:
                     import version_store
-                    version_store.save_version(slug, self.data_store, source="auto", note="Otomatik planlayıcı tarafından oluşturuldu")
+                    version_store.update_version_in_place(slug, ver_fn, self.data_store)
+                    version_store.touch_institution_timestamp(slug)
+                    if hasattr(p, "mark_dirty"):
+                        p.mark_dirty()
                 except Exception as ve:
-                    print(f"[AUTO_SCHEDULE] Version save error: {ve}")
+                    print(f"[AUTO_SCHEDULE] In-place update error: {ve}")
         
         # Store violations for showing AFTER dialog closes
         self._pending_violations = result.get("constraint_violations", [])

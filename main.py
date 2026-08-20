@@ -203,16 +203,22 @@ class AppShell(QMainWindow):
         editor = self._editor
         self._editor = None
         
-        # 1. Save current work before going home (main_window._go_home already created new version if dirty)
+        # 1. Save current work before going home (creates new version ONLY if modified)
         if editor:
             try:
                 slug = getattr(editor, "institution_slug", None)
                 ver_fn = getattr(editor, "version_filename", None)
-                if slug and ver_fn:
+                if slug:
                     import version_store
-                    version_store.update_version_in_place(slug, ver_fn, editor.data_store)
+                    if getattr(editor, "_is_dirty", False):
+                        new_vf = version_store.save_version(slug, editor.data_store, source="manual", note="Değişiklikler kaydedildi")
+                        version_store.set_active_version(slug, new_vf)
+                        editor.version_filename = new_vf
+                        editor._is_dirty = False
+                    elif ver_fn:
+                        version_store.update_version_in_place(slug, ver_fn, editor.data_store)
                     version_store.touch_institution_timestamp(slug)
-                    print(f"[MAIN_GO_HOME] Saved version: {ver_fn}")
+                    self._dashboard._selected_slug = slug
             except Exception as e:
                 print(f"[GO_HOME] Save error: {e}")
                 
@@ -249,13 +255,20 @@ class AppShell(QMainWindow):
         from save_dialog import run_apple_save_sequence
         run_apple_save_sequence(self, duration_seconds=0.2, title="Kapatılıyor", message="Veriler kaydedildi.")
         
-        if self._editor and hasattr(self._editor, "save_db"):
+        if self._editor and hasattr(self._editor, "data_store"):
             try:
                 slug = getattr(self._editor, "institution_slug", None)
                 ver_fn = getattr(self._editor, "version_filename", None)
-                if slug and ver_fn:
+                if slug:
                     import version_store
-                    version_store.update_version_in_place(slug, ver_fn, self._editor.data_store)
+                    if getattr(self._editor, "_is_dirty", False):
+                        new_vf = version_store.save_version(slug, self._editor.data_store, source="manual", note="Kapanış kaydı")
+                        version_store.set_active_version(slug, new_vf)
+                        self._editor.version_filename = new_vf
+                        self._editor._is_dirty = False
+                    elif ver_fn:
+                        version_store.update_version_in_place(slug, ver_fn, self._editor.data_store)
+                    version_store.touch_institution_timestamp(slug)
             except Exception as e:
                 print(f"[CLOSE] Auto-save error: {e}")
                 

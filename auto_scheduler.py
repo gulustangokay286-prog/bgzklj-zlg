@@ -122,7 +122,7 @@ class AutoSchedulerWorker(QThread):
     finished_successfully = Signal(dict)
     failed = Signal(str)
 
-    def __init__(self, data_store, target_class=None, parent=None, fill_empty=False, institution_slug=None, use_vds=False, infinite_mode=True):
+    def __init__(self, data_store, target_class=None, parent=None, fill_empty=True, institution_slug=None, use_vds=False, infinite_mode=True):
         super().__init__(parent)
         self.data_store = data_store
         self.target_class = target_class if target_class and str(target_class).strip() and "Tum" not in str(target_class) and "Tüm" not in str(target_class) else None
@@ -163,13 +163,12 @@ class AutoSchedulerWorker(QThread):
         for asgn in assignments:
             raw_c = (asgn.get("class") or asgn.get("sinif") or asgn.get("class_name") or "").strip()
             if raw_c:
-                for p_c in raw_c.replace("&", ",").replace("+", ",").split(","):
-                    p_clean = p_c.strip()
-                    if p_clean:
-                        assigned_class_names.add(p_clean)
-                        for full_c in all_class_names:
-                            if matches_class(full_c, p_clean):
-                                assigned_class_names.add(full_c)
+                raw_c_clean = raw_c.replace("&", "+").replace(",", "+")
+                parts = [p.strip() for p in raw_c_clean.split("+") if p.strip()]
+                for p_clean in (parts if parts else [raw_c]):
+                    for full_c in all_class_names:
+                        if matches_class(full_c, p_clean):
+                            assigned_class_names.add(full_c)
 
         if self.target_class:
             matched = [c for c in all_class_names if matches_class(c, self.target_class)]
@@ -227,14 +226,13 @@ class AutoSchedulerWorker(QThread):
                         global_teacher_busy[t].add((d, per + off))
 
         # ── CLASS-BY-CLASS SCHEDULING ─────────────────────────────────
-        all_placements = list(other_placements)
-        total_placed = 0
         total_target = len(classes_to_schedule) * D * P
 
         best_result = None
         best_score = -1
+        best_violations = []
 
-        for attempt in range(20):
+        for attempt in range(50):
             if not self._is_running:
                 break
             
@@ -350,7 +348,7 @@ class AutoSchedulerWorker(QThread):
                                     continue
                             
                             for off in range(dur):
-                                grid[best_d if 'best_d' in dir() else d][p + off] = {
+                                grid[d][p + off] = {
                                     "subject": s, "teacher": t, "block_id": bid,
                                     "is_combined": blk["is_combined"], "block_start": p
                                 }
@@ -364,31 +362,32 @@ class AutoSchedulerWorker(QThread):
                 
                 # Fill remaining empty cells with filler lessons (cycle through assigned subjects)
                 templates = class_blocks.get(cn, [])
-                if templates:
+                if self.fill_empty and templates:
                     tmpl_idx = 0
                     for d in range(D):
                         p = 0
                         while p < P:
                             if grid[d][p] is None:
-                                # Try to place a 2-hour filler block
                                 dur = 2 if (p + 1 < P and grid[d][p + 1] is None) else 1
-                                tmpl = templates[tmpl_idx % len(templates)]
-                                t = tmpl["teacher"]
-                                s = tmpl["subject"]
                                 
-                                # Prevent 3+ consecutive same subject
-                                if p >= 2 and grid[d][p-1] is not None and grid[d][p-2] is not None:
-                                    if grid[d][p-1]["subject"] == s and grid[d][p-2]["subject"] == s:
-                                        # Skip to next template to avoid 3 in a row
-                                        tmpl_idx += 1
-                                        tmpl = templates[tmpl_idx % len(templates)]
-                                        t = tmpl["teacher"]
-                                        s = tmpl["subject"]
-                                elif p >= 1 and grid[d][p-1] is not None and grid[d][p-1]["subject"] == s and dur == 2:
-                                    # Already 1 of same subject before, limit filler to 1 hour
-                                    dur = 1
+                                prev_subj = grid[d][p - 1]["subject"] if (p > 0 and grid[d][p - 1] is not None) else None
+                                next_subj = grid[d][p + dur]["subject"] if (p + dur < P and grid[d][p + dur] is not None) else None
                                 
-                                # Check teacher constraints for filler
+                                chosen_tmpl = None
+                                for off_idx in range(len(templates)):
+                                    cand = templates[(tmpl_idx + off_idx) % len(templates)]
+                                    if cand["subject"] != prev_subj and cand["subject"] != next_subj:
+                                        chosen_tmpl = cand
+                                        tmpl_idx = (tmpl_idx + off_idx + 1) % len(templates)
+                                        break
+                                if not chosen_tmpl:
+                                    chosen_tmpl = templates[tmpl_idx % len(templates)]
+                                    tmpl_idx += 1
+                                    
+                                t = chosen_tmpl["teacher"]
+                                s = chosen_tmpl["subject"]
+                                
+                                # Check teacher constraints
                                 can_place = True
                                 if t:
                                     for off in range(dur):
@@ -398,26 +397,24 @@ class AutoSchedulerWorker(QThread):
                                         if t in teacher_timeoff and (d, p + off) in teacher_timeoff[t]:
                                             can_place = False
                                             break
-                                
+                                            
                                 if not can_place and dur == 2:
-                                    dur = 1  # Try single hour
+                                    dur = 1
                                     can_place = True
                                     if t:
                                         if (d, p) in attempt_teacher_busy.get(t, set()):
                                             can_place = False
                                         if t in teacher_timeoff and (d, p) in teacher_timeoff[t]:
                                             can_place = False
-                                
+                                            
                                 if not can_place:
-                                    # Try different teacher
-                                    for alt_idx in range(len(templates)):
-                                        alt = templates[(tmpl_idx + alt_idx + 1) % len(templates)]
+                                    for alt in templates:
                                         alt_t = alt["teacher"]
+                                        if alt["subject"] == prev_subj:
+                                            continue
                                         alt_ok = True
                                         if alt_t:
-                                            if (d, p) in attempt_teacher_busy.get(alt_t, set()):
-                                                alt_ok = False
-                                            if alt_t in teacher_timeoff and (d, p) in teacher_timeoff[alt_t]:
+                                            if (d, p) in attempt_teacher_busy.get(alt_t, set()) or (alt_t in teacher_timeoff and (d, p) in teacher_timeoff[alt_t]):
                                                 alt_ok = False
                                         if alt_ok:
                                             t = alt_t
@@ -425,33 +422,17 @@ class AutoSchedulerWorker(QThread):
                                             dur = 1
                                             can_place = True
                                             break
-                                
-                                if can_place:
-                                    bid = f"fill_{_uuid.uuid4().hex[:8]}"
-                                    for off in range(dur):
-                                        grid[d][p + off] = {
-                                            "subject": s, "teacher": t, "block_id": bid,
-                                            "is_combined": False, "block_start": p
-                                        }
-                                    if t:
-                                        for off in range(dur):
-                                            attempt_teacher_busy[t].add((d, p + off))
-                                    p += dur
-                                else:
-                                    # Force-fill with no teacher constraint — record violation
-                                    tmpl = templates[tmpl_idx % len(templates)]
-                                    bid = f"force_{_uuid.uuid4().hex[:8]}"
-                                    grid[d][p] = {
-                                        "subject": tmpl["subject"], "teacher": tmpl["teacher"],
-                                        "block_id": bid, "is_combined": False, "block_start": p
+                                            
+                                bid = f"fill_{_uuid.uuid4().hex[:8]}"
+                                for off in range(dur):
+                                    grid[d][p + off] = {
+                                        "subject": s, "teacher": t, "block_id": bid,
+                                        "is_combined": False, "block_start": p
                                     }
-                                    attempt_violations.append({
-                                        "class": cn, "teacher": tmpl["teacher"],
-                                        "subject": tmpl["subject"], "day": d, "period": p,
-                                        "reason": "Öğretmen kısıtlaması (izinli gün/saat) bypass edildi"
-                                    })
-                                    p += 1
-                                tmpl_idx += 1
+                                if t:
+                                    for off in range(dur):
+                                        attempt_teacher_busy[t].add((d, p + off))
+                                p += dur
                             else:
                                 p += 1
                 
