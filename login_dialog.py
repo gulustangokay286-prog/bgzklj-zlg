@@ -400,11 +400,14 @@ class LoginDialog(QDialog):
         
         if success:
             self.auth_data = result
-            # Initial cloud pull from RTDB
-            try:
-                api_client.pull_all_from_rtdb()
-            except Exception as ex:
-                print(f"[Login] Initial cloud pull note: {ex}")
+            # Cloud pull in background — do NOT block login UI
+            import threading
+            def _bg_pull():
+                try:
+                    api_client.pull_all_from_rtdb()
+                except Exception as ex:
+                    print(f"[Login] Background cloud pull note: {ex}")
+            threading.Thread(target=_bg_pull, daemon=True).start()
                 
             self.accept()
         else:

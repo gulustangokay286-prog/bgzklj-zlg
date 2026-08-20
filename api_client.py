@@ -69,11 +69,11 @@ class APIClient:
     }
 
     def login(self, email="sehersanli@chenki.net", password="seher2311"):
-        # 1. Try VDS API first
+        # 1. Try VDS API first (fast timeout to avoid UI freeze)
         url = f"{self.base_url}/auth/login"
         data = {"username": email, "password": password}
         try:
-            resp = requests.post(url, data=data, timeout=4)
+            resp = requests.post(url, data=data, timeout=2)
             if resp.status_code == 200:
                 token_data = resp.json()
                 token_data["email"] = email
@@ -138,12 +138,12 @@ class APIClient:
 
     def _request_with_retry(self, method, url, **kwargs):
         headers = kwargs.pop("headers", None) or self.get_headers()
-        timeout = kwargs.pop("timeout", 4)
+        timeout = kwargs.pop("timeout", 2)
         with _HTTP_LOCK:
             try:
                 resp = requests.request(method, url, headers=headers, timeout=timeout, **kwargs)
                 if resp.status_code == 401:
-                    self.login("admin@bgz.local", "admin")
+                    self.login("sehersanli@chenki.net", "seher2311")
                     headers = self.get_headers()
                     resp = requests.request(method, url, headers=headers, timeout=timeout, **kwargs)
                 return resp

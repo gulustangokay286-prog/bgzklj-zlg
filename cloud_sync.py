@@ -52,7 +52,7 @@ def push_institution_to_rtdb(slug: str, auth_data: dict = None) -> bool:
     }
     url = f"{api_client.base_url}/api/institutions"
     try:
-        resp = api_client._request_with_retry("POST", url, json=payload, timeout=12)
+        resp = api_client._request_with_retry("POST", url, json=payload, timeout=5)
         return resp is not None and resp.status_code in (200, 201)
     except Exception as e:
         print(f"push_institution_to_rtdb error for {slug}: {e}")

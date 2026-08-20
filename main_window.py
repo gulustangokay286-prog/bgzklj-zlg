@@ -258,9 +258,9 @@ class MainWindow(QMainWindow):
         self.current_roz_path = self.db_path
         self.data_store = {"dersler": [], "siniflar": [], "derslikler": [], "ogretmenler": [], "atamalar": [], "settings": {}}
         
-        # Eğer giriş yapılmışsa, buluttan o kuruma (uid) ait veriyi çek
-        if self.auth_data and self.auth_data.get("uid"):
-            self._download_cloud_data()
+        # Cloud sync handled by background worker — do NOT block init
+        # if self.auth_data and self.auth_data.get("uid"):
+        #     self._download_cloud_data()
             
         self._build_ui()
         self.load_db()
