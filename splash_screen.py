@@ -193,14 +193,14 @@ class HighTechSplashScreen(QDialog):
     def _run_auth_check(self):
         def check():
             from api_client import api_client
-            if api_client.token:
-                try:
-                    resp = requests.get(f"{api_client.base_url}/api/institutions", headers=api_client.get_headers(), timeout=3)
-                    if resp.status_code == 200:
+            try:
+                if api_client.ensure_authenticated():
+                    resp = api_client._request_with_retry("GET", f"{api_client.base_url}/api/institutions", timeout=8)
+                    if resp and resp.status_code == 200:
                         self.is_valid_token = True
                         self.auth_data = {"access_token": api_client.token}
-                except Exception:
-                    pass
+            except Exception:
+                pass
         threading.Thread(target=check, daemon=True).start()
 
     def _finish(self):
