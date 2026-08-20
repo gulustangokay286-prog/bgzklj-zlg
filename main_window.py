@@ -354,52 +354,44 @@ class MainWindow(QMainWindow):
                 print(f"[MainWindow] Live data update notice: {e}")
 
     def _download_cloud_data(self, show_message=False):
-        if not hasattr(self, "auth_data") or not self.auth_data: return
-        # Yerelde henüz buluta yüklenmemiş değişiklikler varsa buluttan indirip ezme!
+        """Pulls latest data from VDS backend API (replaces old Firebase RTDB call)."""
+        if not hasattr(self, "auth_data") or not self.auth_data:
+            return
+        # Don't overwrite if there are pending local pushes
         if hasattr(self, "cloud_worker") and self.cloud_worker and len(self.cloud_worker._queue) > 0:
             return
-            
-        uid = self.auth_data.get("uid")
-        id_token = self.auth_data.get("idToken")
-        if not uid or not id_token: return
         
-        import requests
-        from cloud_sync import RTDB_URL
-        
-        url = f"{RTDB_URL}/institutions/{uid}.json?auth={id_token}"
         try:
-            resp = requests.get(url, timeout=5)
-            if resp.status_code == 200 and resp.json():
-                cloud_data = resp.json()
-                local_classes = len(self.data_store.get("siniflar", []))
-                local_teachers = len(self.data_store.get("ogretmenler", []))
-                cloud_classes = len(cloud_data.get("siniflar", []))
-                cloud_teachers = len(cloud_data.get("ogretmenler", []))
-
-                # Safe merge/sync: do not wipe local non-empty data with empty cloud data
-                if (local_classes > 0 or local_teachers > 0) and (cloud_classes == 0 and cloud_teachers == 0):
-                    if hasattr(self, "cloud_worker") and self.cloud_worker and uid:
-                        self.cloud_worker.add_to_queue("institutions", uid, self.data_store)
-                elif show_message or (local_classes == 0 and local_teachers == 0 and (cloud_classes > 0 or cloud_teachers > 0)):
-                    if cloud_data != getattr(self, "data_store", None):
-                        self.data_store.update(cloud_data)
-                        self.save_db()
+            from api_client import api_client
+            pull_ok, msg, count = api_client.pull_all_from_rtdb(self.auth_data)
+            if pull_ok:
+                # Reload the current version from disk (pull may have updated it)
+                if hasattr(self, "institution_slug") and hasattr(self, "version_filename"):
+                    import version_store
+                    refreshed = version_store.load_version(self.institution_slug, self.version_filename)
+                    if refreshed and refreshed != self.data_store:
+                        self.data_store.clear()
+                        self.data_store.update(refreshed)
                         self._refresh_tree()
-                        self._on_tree_selection_changed()
-                        self.statusBar().showMessage("Buluttan veriler senkronize edildi! ☁️✅")
-                        if show_message:
-                            QMessageBox.information(self, "Bulut Senkronizasyon", "Buluttan en güncel veriler başarıyla indirildi!")
+                        self._refresh_grid()
+                        self.statusBar().showMessage("VDS'den veriler senkronize edildi ✅", 4000)
+                if show_message:
+                    QMessageBox.information(self, "Bulut Senkronizasyon", f"Senkronizasyon tamamlandı.\n{msg}")
             elif show_message:
-                QMessageBox.warning(self, "Bulut Senkronizasyon", f"Buluttan veri çekilemedi. Yanıt Kodu: {resp.status_code}")
+                QMessageBox.warning(self, "Bulut Senkronizasyon", f"Senkronizasyon başarısız: {msg}")
         except Exception as e:
-            print(f"Bulut veri çekme hatası: {e}")
+            print(f"[MainWindow] VDS data pull error: {e}")
             if show_message:
                 QMessageBox.warning(self, "Bulut Senkronizasyon", f"Bağlantı hatası: {e}")
 
     def _act_check_updates(self):
         import requests, webbrowser
-        from cloud_sync import RTDB_URL
-        url = f"{RTDB_URL}/updates.json"
+        try:
+            from api_client import api_client
+            base_url = getattr(api_client, 'base_url', 'https://chenki.net')
+            url = f"{base_url}/api/updates" if '/api' not in base_url else f"{base_url}/updates"
+        except Exception:
+            url = "https://chenki.net/api/updates"
         try:
             resp = requests.get(url, timeout=5)
             if resp.status_code == 200 and resp.json():
@@ -441,31 +433,19 @@ class MainWindow(QMainWindow):
                 print("Error stopping cloud_worker:", e)
 
     def closeEvent(self, event):
-        # 1. Show Apple UI Feedback with progress animation
+        # 1. Quick save feedback
         from save_dialog import run_apple_save_sequence
-        run_apple_save_sequence(self, duration_seconds=1.0, title="Uygulama Kapatılıyor", message="Tüm veriler ve çizelgeler güvenle kaydedildi.")
+        run_apple_save_sequence(self, duration_seconds=0.15, title="Kapatılıyor", message="Veriler kaydedildi.")
         
-        # 2. Auto-save in-memory and to disk with grid sync
+        # 2. Save to disk
         try:
-            self.save_db(sync_from_grid=True)
             if hasattr(self, "institution_slug") and hasattr(self, "version_filename") and self.institution_slug and self.version_filename:
                 import version_store
                 version_store.update_version_in_place(self.institution_slug, self.version_filename, self.data_store)
         except Exception as e:
             print("Auto-save on exit error:", e)
             
-        # 3. Flush to VDS synchronously before window destruction
-        try:
-            slug = getattr(self, "institution_slug", None)
-            ver_fn = getattr(self, "version_filename", None)
-            auth = getattr(self, "auth_data", None)
-            if slug and ver_fn:
-                from cloud_sync import push_version_to_rtdb
-                push_version_to_rtdb(slug, ver_fn, dict(self.data_store), auth)
-        except Exception as e:
-            print("VDS flush on close error:", e)
-            
-        # 4. Clean up cloud worker
+        # 3. Clean up
         self.cleanup()
         super().closeEvent(event)
 
@@ -949,6 +929,9 @@ class MainWindow(QMainWindow):
         initial_hash = getattr(self, "_initial_hash", "")
         return bool(initial_hash and current_hash and current_hash != initial_hash)
 
+    def has_unsaved_changes(self) -> bool:
+        return self.is_dirty()
+
     def _sync_grid_to_store(self, view_type=None, entity_name=None):
         if getattr(self, "_is_loading", False):
             return
@@ -1275,14 +1258,11 @@ class MainWindow(QMainWindow):
 
 
 
-    def save_db(self, path=None, sync_from_grid=True):
+    def save_db(self, path=None, sync_from_grid=False):
         if getattr(self, "_is_loading", False):
             return
             
         import json
-        if sync_from_grid:
-            self._sync_grid_to_store()
-            
         slug = getattr(self, "institution_slug", None)
         ver_fn = getattr(self, "version_filename", None)
         
@@ -1299,10 +1279,11 @@ class MainWindow(QMainWindow):
         self._set_last_db_path(self.current_roz_path)
         
         try:
-            # If opened from an institution version, update version directly
+            # If opened from an institution version, update version directly and touch timestamp
             if slug and ver_fn:
                 import version_store
                 version_store.update_version_in_place(slug, ver_fn, self.data_store)
+                version_store.touch_institution_timestamp(slug)
             else:
                 with open(self.current_roz_path, "w", encoding="utf-8") as f:
                     json.dump(self.data_store, f, ensure_ascii=False, indent=2)
@@ -1624,7 +1605,7 @@ class MainWindow(QMainWindow):
                         "combined_classes": list(target_classes) if is_comb else []
                     })
                     
-        # --- DUMMY INJECTION FOR DOCK ---
+        # --- CHECK IF GRID IS FULL FOR THIS TARGET ---
         if target_entity and scoped_atamalar:
             settings = self.data_store.get("settings", {})
             d_len = len(settings.get("days", [])) or int(settings.get("day_count", self.data_store.get("gun_sayisi", 5)))
@@ -1656,36 +1637,9 @@ class MainWindow(QMainWindow):
                 if match:
                     placed_for_target += dur
                     
-            deficit = total_slots - placed_for_target
-            if deficit > 0:
-                import random
-                import uuid
-                rng = random.Random(target_entity)
-                base_atamalar = sorted(list(scoped_atamalar), key=lambda x: str(x.get("subject", "")))
-                while deficit > 0:
-                    chosen = rng.choice(base_atamalar)
-                    c_name = chosen.get("class", "")
-                    t_name = chosen.get("teacher", "")
-                    s_name = chosen.get("subject", "")
-                    is_comb = bool(chosen.get("is_combined") or ("+" in c_name or "&" in c_name or "," in c_name))
-                    t_classes = chosen.get("combined_classes", [])
-                    if not t_classes and is_comb:
-                        t_classes = [x.strip() for x in c_name.replace("&", "+").replace(",", "+").split("+") if x.strip()]
-                    elif not t_classes:
-                        t_classes = [c_name]
-                    color = resolve_subject_color(s_name, self.data_store)
-                    dur = 1
-                    unplaced.append({
-                        "id": f"dummy_{uuid.uuid4().hex[:8]}",
-                        "subject_name": s_name,
-                        "color": color,
-                        "teacher": t_name,
-                        "class_name": c_name,
-                        "duration": dur,
-                        "is_combined": is_comb,
-                        "combined_classes": t_classes
-                    })
-                    deficit -= dur
+            # If grid is full, clear unplaced - no lessons to show
+            if placed_for_target >= total_slots:
+                unplaced = []
         # --------------------------------
 
         has_assignments = bool(scoped_atamalar) if target_entity else bool(atamalar)
@@ -2192,12 +2146,25 @@ class MainWindow(QMainWindow):
     def _go_home(self):
         """Return to the Home Dashboard."""
         try:
-            self.save_db(sync_from_grid=False)
-            if hasattr(self, "institution_slug") and hasattr(self, "version_filename") and self.institution_slug and self.version_filename:
+            slug = getattr(self, "institution_slug", None)
+            ver_fn = getattr(self, "version_filename", None)
+            if slug:
                 import version_store
-                version_store.update_version_in_place(self.institution_slug, self.version_filename, self.data_store)
+                # Always update current version file with latest in-memory data
+                if ver_fn:
+                    version_store.update_version_in_place(slug, ver_fn, self.data_store)
+                # If any changes were made, also create a brand new version snapshot
+                if getattr(self, "_is_dirty", False):
+                    new_vf = version_store.save_version(slug, self.data_store, source="manual", note="Değişiklikler kaydedildi")
+                    version_store.set_active_version(slug, new_vf)
+                    self.version_filename = new_vf
+                    self._is_dirty = False
+                    print(f"[GO_HOME] New version created: {new_vf}")
+                else:
+                    print(f"[GO_HOME] No changes, kept: {ver_fn}")
+                version_store.touch_institution_timestamp(slug)
         except Exception as e:
-            print("Auto-save on _go_home error:", e)
+            print(f"Auto-save on _go_home error: {e}")
         if callable(self.go_home_requested):
             from PySide6.QtCore import QTimer
             QTimer.singleShot(0, self.go_home_requested)
@@ -2324,10 +2291,27 @@ class MainWindow(QMainWindow):
 
     def _act_save(self):
         self.save_db(sync_from_grid=True)
+        slug = getattr(self, "institution_slug", None)
+        if slug:
+            import version_store
+            new_vf = version_store.save_version(slug, self.data_store, source="manual", note="Kullanıcı kaydı")
+            self.version_filename = new_vf
+            self.current_roz_path = os.path.join(version_store._base_dir(), slug, "versions", new_vf)
+            self.db_path = self.current_roz_path
+            version_store.set_active_version(slug, new_vf)
+            version_store.touch_institution_timestamp(slug)
+            
+            # Update title
+            import re
+            m = re.match(r"v(\d+)_", new_vf)
+            v_num = f"v{int(m.group(1))}" if m else ""
+            inst_name = getattr(self, "institution_name", slug)
+            self.setWindowTitle(f"BGZ Ders Planlama — {inst_name} — {v_num}")
+            
         fname = os.path.basename(self.current_roz_path or self.db_path or "program.roz")
         from save_dialog import run_apple_save_sequence
-        run_apple_save_sequence(self, duration_seconds=0.35, title="Kaydediliyor", message=f"'{fname}' başarıyla yerel sisteme ve buluta kaydedildi.")
-        self.statusBar().showMessage(f"💾 '{fname}' başarıyla kaydedildi.", 3000)
+        run_apple_save_sequence(self, duration_seconds=0.35, title="Kaydediliyor", message=f"'{fname}' başarıyla kaydedildi ve yeni versiyon yayına alındı.")
+        self.statusBar().showMessage(f"💾 Yeni versiyon kaydedildi ve yayına alındı.", 3000)
 
     def _act_print(self):
         self._handle_print_preview(is_direct_print=True)

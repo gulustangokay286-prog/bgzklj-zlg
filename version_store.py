@@ -254,20 +254,101 @@ def _hash_password(password: str) -> str:
     salt = "chenki_akademi_secure_salt_2026"
     return hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
 
+def compute_data_hash(data_store: dict) -> str:
+    """Computes a deterministic hash of meaningful data fields for change detection."""
+    import copy
+    d = copy.deepcopy(data_store) if data_store else {}
+    # Remove volatile metadata fields that change every save
+    d.pop("_version_meta", None)
+    # Sort keys for deterministic serialization
+    try:
+        canonical = json.dumps(d, sort_keys=True, ensure_ascii=False, default=str)
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+    except Exception:
+        return ""
+
+# ── Device Password Cache ────────────────────────────────────────────
+
+import uuid as _uuid
+
+def _get_device_id() -> str:
+    """Returns a persistent device UUID, creating one if it doesn't exist."""
+    device_path = os.path.join(os.path.expanduser("~"), ".chenki_akademi", "device_id.json")
+    if os.path.exists(device_path):
+        try:
+            with open(device_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                did = data.get("device_id", "")
+                if did:
+                    return did
+        except Exception:
+            pass
+    did = str(_uuid.uuid4())
+    try:
+        os.makedirs(os.path.dirname(device_path), exist_ok=True)
+        with open(device_path, "w", encoding="utf-8") as f:
+            json.dump({"device_id": did}, f)
+    except Exception:
+        pass
+    return did
+
+def save_device_password_cache(slug: str, password: str):
+    """Caches a successful password entry for this device so the user won't be asked again."""
+    cache_path = os.path.join(os.path.expanduser("~"), ".chenki_akademi", "device_pwd_cache.json")
+    cache = {}
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                cache = json.load(f)
+        except Exception:
+            cache = {}
+    device_id = _get_device_id()
+    cache[f"{device_id}_{slug}"] = _hash_password(password)
+    try:
+        with open(cache_path, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def check_device_password_cache(slug: str) -> bool:
+    """Returns True if this device has previously entered the correct password for this institution."""
+    meta = get_institution_meta(slug)
+    if not meta.get("has_password", False) or not meta.get("password_hash"):
+        return True  # No password required
+    cache_path = os.path.join(os.path.expanduser("~"), ".chenki_akademi", "device_pwd_cache.json")
+    if not os.path.exists(cache_path):
+        return False
+    try:
+        with open(cache_path, "r", encoding="utf-8") as f:
+            cache = json.load(f)
+        device_id = _get_device_id()
+        cached_hash = cache.get(f"{device_id}_{slug}", "")
+        return cached_hash == meta.get("password_hash", "")
+    except Exception:
+        return False
+
 def set_institution_password(slug: str, password: str):
     """Sets or updates the password for an institution."""
     meta_path = os.path.join(_base_dir(), slug, "meta.json")
     if os.path.exists(meta_path):
-        with open(meta_path, "r", encoding="utf-8") as f:
-            meta = json.load(f)
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+        except Exception:
+            meta = {"name": slug}
+            
         if password:
             meta["password_hash"] = _hash_password(password)
             meta["has_password"] = True
         else:
             meta.pop("password_hash", None)
             meta["has_password"] = False
-        with open(meta_path, "w", encoding="utf-8") as f:
-            json.dump(meta, f, ensure_ascii=False, indent=2)
+            
+        try:
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
             
         try:
             import cloud_sync
@@ -488,11 +569,18 @@ def create_institution(name: str, color: str = None, password: str = "") -> dict
 def rename_institution(slug: str, new_name: str):
     meta_path = os.path.join(_base_dir(), slug, "meta.json")
     if os.path.exists(meta_path):
-        with open(meta_path, "r", encoding="utf-8") as f:
-            meta = json.load(f)
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+        except Exception:
+            meta = {"name": slug}
+            
         meta["name"] = new_name.strip()
-        with open(meta_path, "w", encoding="utf-8") as f:
-            json.dump(meta, f, ensure_ascii=False, indent=2)
+        try:
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
             
         try:
             import threading
@@ -504,11 +592,18 @@ def rename_institution(slug: str, new_name: str):
 def set_institution_color(slug: str, color: str):
     meta_path = os.path.join(_base_dir(), slug, "meta.json")
     if os.path.exists(meta_path):
-        with open(meta_path, "r", encoding="utf-8") as f:
-            meta = json.load(f)
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+        except Exception:
+            meta = {"name": slug}
+            
         meta["color"] = color
-        with open(meta_path, "w", encoding="utf-8") as f:
-            json.dump(meta, f, ensure_ascii=False, indent=2)
+        try:
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
             
         try:
             import threading
@@ -598,7 +693,8 @@ def save_version(slug: str, data_store: dict, source: str = "manual", note: str 
     return filename
 
 def update_version_in_place(slug: str, filename: str, data_store: dict) -> bool:
-    """Overwrites an existing version file with updated data and pushes to cloud with conflict backup."""
+    """Overwrites an existing version file with updated data and pushes to cloud with conflict backup.
+    Uses hash-based change detection to avoid unnecessary writes and pushes."""
     if not slug or not filename or not data_store:
         return False
     ver_dir = _versions_dir(slug)
@@ -608,11 +704,25 @@ def update_version_in_place(slug: str, filename: str, data_store: dict) -> bool:
     save_data = dict(data_store)
     if "atamalar" in save_data:
         save_data["atamalar"] = sanitize_atamalar(save_data["atamalar"])
+
+    # Hash-based change detection: skip write if data hasn't changed
+    new_hash = compute_data_hash(save_data)
+    if os.path.exists(filepath) and new_hash:
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                existing_data = json.load(f)
+            old_hash = compute_data_hash(existing_data)
+            if old_hash == new_hash:
+                # Data unchanged — no write, no push, no version inflation
+                return True
+        except Exception:
+            pass
         
     now = datetime.now()
     if "_version_meta" not in save_data:
         save_data["_version_meta"] = {}
     save_data["_version_meta"]["last_modified"] = now.isoformat()
+    save_data["_version_meta"]["data_hash"] = new_hash
         
     try:
         with open(filepath, "w", encoding="utf-8") as f:
@@ -742,6 +852,8 @@ def delete_version(slug: str, version_filename: str):
 
 def get_active_version(slug: str) -> str:
     """Returns the filename of the active/official version."""
+    if not slug:
+        return ""
     meta = get_institution_meta(slug)
     active = meta.get("active_version")
     if active:
@@ -749,28 +861,52 @@ def get_active_version(slug: str) -> str:
         if os.path.exists(os.path.join(_versions_dir(slug), active)):
             return active
     # Fallback to latest
-    versions = list_versions(slug)
-    if versions:
-        new_active = versions[0]["filename"]
-        set_active_version(slug, new_active)
-        return new_active
+    try:
+        versions = list_versions(slug)
+        if versions:
+            new_active = versions[0]["filename"]
+            set_active_version(slug, new_active)
+            return new_active
+    except Exception:
+        pass
     return ""
 
 def set_active_version(slug: str, version_filename: str):
+    if not slug:
+        return
     meta_path = os.path.join(_base_dir(), slug, "meta.json")
-    if os.path.exists(meta_path):
+    if not os.path.exists(meta_path):
+        # Create minimal meta if missing
+        meta_dir = os.path.dirname(meta_path)
+        os.makedirs(meta_dir, exist_ok=True)
+        meta = {"name": slug, "active_version": version_filename}
+        try:
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+        return
+    try:
         with open(meta_path, "r", encoding="utf-8") as f:
             meta = json.load(f)
+    except Exception as e:
+        print(f"[version_store] Corrupted meta.json detected, resetting. Error: {e}")
+        meta = {"name": slug}
+        
+    try:
         meta["active_version"] = version_filename
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[version_store] set_active_version write error: {e}")
+        return
             
-        try:
-            import threading
-            import cloud_sync
-            threading.Thread(target=cloud_sync.push_institution_to_rtdb, args=(slug,), daemon=True).start()
-        except Exception:
-            pass
+    try:
+        import threading
+        import cloud_sync
+        threading.Thread(target=cloud_sync.push_institution_to_rtdb, args=(slug,), daemon=True).start()
+    except Exception:
+        pass
 
 def ensure_institution_has_version(slug: str) -> str:
     """Ensures that the institution has at least one active version. Returns version filename."""

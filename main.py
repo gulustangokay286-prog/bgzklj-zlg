@@ -145,6 +145,10 @@ class AppShell(QMainWindow):
         self._stack.addWidget(self._editor)
         self._stack.setCurrentWidget(self._editor)
         
+        # Auto-set opened version as active and update timestamp
+        version_store.set_active_version(slug, version_filename)
+        version_store.touch_institution_timestamp(slug)
+        
         # Update title
         v_num = ""
         import re
@@ -154,15 +158,44 @@ class AppShell(QMainWindow):
         self.setWindowTitle(f"BGZ Ders Planlama — {inst_name} — {v_num}")
     
     def _open_empty_timetable(self, slug):
-        """Create a new empty version and open it."""
+        """Create a new version that inherits master data from the current active version (fresh grid)."""
         meta = version_store.get_institution_meta(slug)
         inst_name = meta.get("name", slug)
-        empty_data = {
-            "dersler": [], "siniflar": [], "derslikler": [],
-            "ogretmenler": [], "atamalar": [], "settings": {},
-            "grid_placements": [], "kisitlamalar": {},
-        }
-        vf = version_store.save_version(slug, empty_data, source="manual", note="Yeni boş çizelge")
+        
+        # Try to load current active version's master data
+        active_ver = version_store.get_active_version(slug)
+        base_data = None
+        if active_ver:
+            base_data = version_store.load_version(slug, active_ver)
+        
+        if base_data and any(base_data.get(k) for k in ("dersler", "siniflar", "ogretmenler", "atamalar")):
+            # Inherit ALL master data, constraints, bell schedules, plan relations — only reset grid
+            new_data = {
+                "dersler": list(base_data.get("dersler", [])),
+                "siniflar": list(base_data.get("siniflar", [])),
+                "derslikler": list(base_data.get("derslikler", [])),
+                "ogretmenler": list(base_data.get("ogretmenler", [])),
+                "atamalar": list(base_data.get("atamalar", [])),
+                "settings": dict(base_data.get("settings", {})),
+                "grid_placements": [],  # Fresh empty grid
+                "kisitlamalar": dict(base_data.get("kisitlamalar", {})) if isinstance(base_data.get("kisitlamalar"), dict) else base_data.get("kisitlamalar", {}),
+                "ders_programlari": base_data.get("ders_programlari", {}),
+                "plan_iliskileri": base_data.get("plan_iliskileri", {}),
+                "zil_programi": base_data.get("zil_programi", {}),
+                "temel_bilgiler": base_data.get("temel_bilgiler", {}),
+                "gun_sayisi": base_data.get("gun_sayisi", 5),
+                "ders_saati": base_data.get("ders_saati", 8),
+            }
+            note = f"Yeni çizelge — '{inst_name}' verileri aktarıldı (boş yerleşim)"
+        else:
+            new_data = {
+                "dersler": [], "siniflar": [], "derslikler": [],
+                "ogretmenler": [], "atamalar": [], "settings": {},
+                "grid_placements": [], "kisitlamalar": {},
+            }
+            note = "Yeni boş çizelge"
+        
+        vf = version_store.save_version(slug, new_data, source="manual", note=note)
         self._open_timetable(slug, vf)
     
     def _go_home(self):
@@ -170,17 +203,16 @@ class AppShell(QMainWindow):
         editor = self._editor
         self._editor = None
         
-        # 1. Save current work before going home
+        # 1. Save current work before going home (main_window._go_home already created new version if dirty)
         if editor:
             try:
-                if hasattr(editor, "save_db"):
-                    editor.save_db(sync_from_grid=True)
                 slug = getattr(editor, "institution_slug", None)
                 ver_fn = getattr(editor, "version_filename", None)
-                auth = getattr(editor, "auth_data", None)
                 if slug and ver_fn:
                     import version_store
                     version_store.update_version_in_place(slug, ver_fn, editor.data_store)
+                    version_store.touch_institution_timestamp(slug)
+                    print(f"[MAIN_GO_HOME] Saved version: {ver_fn}")
             except Exception as e:
                 print(f"[GO_HOME] Save error: {e}")
                 
@@ -191,9 +223,9 @@ class AppShell(QMainWindow):
             except Exception as ce:
                 print(f"[GO_HOME] Cleanup error: {ce}")
 
-        # 3. Show Apple Feedback and switch to dashboard
+        # 3. Switch to dashboard instantly
         from save_dialog import run_apple_save_sequence
-        run_apple_save_sequence(self, duration_seconds=0.35, title="Kaydediliyor", message="Çizelge kaydedildi, anasayfaya dönülüyor...")
+        run_apple_save_sequence(self, duration_seconds=0.1, title="Kaydedildi", message="Anasayfaya dönülüyor...")
         
         self._stack.setCurrentWidget(self._dashboard)
         self.setWindowTitle("BGZ Ders Planlama — Kurum & Çizelge Yönetimi")
@@ -215,19 +247,15 @@ class AppShell(QMainWindow):
     def closeEvent(self, event):
         """Save active editor and flush database & cloud sync before closing the application."""
         from save_dialog import run_apple_save_sequence
-        run_apple_save_sequence(self, duration_seconds=1.1, title="Uygulama Kapatılıyor", message="Tüm veriler ve çizelgeler güvenle kaydedildi.")
+        run_apple_save_sequence(self, duration_seconds=0.2, title="Kapatılıyor", message="Veriler kaydedildi.")
         
         if self._editor and hasattr(self._editor, "save_db"):
             try:
-                self._editor.save_db(sync_from_grid=True)
                 slug = getattr(self._editor, "institution_slug", None)
                 ver_fn = getattr(self._editor, "version_filename", None)
-                auth = getattr(self._editor, "auth_data", None)
                 if slug and ver_fn:
                     import version_store
                     version_store.update_version_in_place(slug, ver_fn, self._editor.data_store)
-                    from cloud_sync import push_version_to_rtdb
-                    push_version_to_rtdb(slug, ver_fn, dict(self._editor.data_store), auth)
             except Exception as e:
                 print(f"[CLOSE] Auto-save error: {e}")
                 

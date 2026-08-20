@@ -24,29 +24,16 @@ def matches_class(asgn_class_str: str, target_cn: str) -> bool:
     norm_asgn = normalize_class_name(asgn_class_str)
     if norm_asgn == norm_target:
         return True
-        
-    target_has_paren = "(" in norm_target and ")" in norm_target
-    asgn_has_paren = "(" in norm_asgn and ")" in norm_asgn
-    
     clean_target = norm_target.split("(")[0].strip()
     clean_asgn = norm_asgn.split("(")[0].strip()
-    
-    if target_has_paren and asgn_has_paren:
-        if norm_asgn == norm_target:
-            return True
-    elif clean_target and clean_asgn and clean_target == clean_asgn:
+    if clean_target and clean_asgn and clean_target == clean_asgn:
         return True
-        
     for part in str(asgn_class_str).replace("&", ",").replace("+", ",").split(","):
         p_norm = normalize_class_name(part)
         if p_norm == norm_target:
             return True
-        p_has_paren = "(" in p_norm and ")" in p_norm
         p_clean = p_norm.split("(")[0].strip()
-        if target_has_paren and p_has_paren:
-            if p_norm == norm_target:
-                return True
-        elif clean_target and p_clean and p_clean == clean_target:
+        if clean_target and p_clean and p_clean == clean_target:
             return True
     return False
 
@@ -55,9 +42,9 @@ def format_tr_name(name_str: str) -> str:
     return " ".join(w.capitalize() for w in str(name_str).strip().split())
 
 def parse_distribution_parts(type_str: str, total_duration: int = 0) -> list:
+    """Parses distribution: '2+2' -> [2,2], '2+1+1' -> [2,1,1], or auto-splits total into max-2 blocks."""
     type_str = str(type_str or "").strip()
     parts = []
-    
     if "+" in type_str:
         raw_parts = [p.strip() for p in type_str.split("+") if p.strip().isdigit()]
         for p in raw_parts:
@@ -68,30 +55,77 @@ def parse_distribution_parts(type_str: str, total_duration: int = 0) -> list:
         val = int(type_str)
         rem = val
         while rem > 0:
-            b = 2 if rem >= 2 else 1
+            b = min(2, rem)
             parts.append(b)
             rem -= b
-            
     if not parts and total_duration > 0:
         rem = total_duration
         while rem > 0:
-            b = 2 if rem >= 2 else 1
+            b = min(2, rem)
             parts.append(b)
             rem -= b
-            
     return parts or ([total_duration] if total_duration > 0 else [2])
 
 
+def _build_teacher_timeoff_map(data_store: dict) -> dict:
+    """Builds teacher_name -> set of (day_idx, period_idx) that are BLOCKED."""
+    blocked = defaultdict(set)
+    for t in data_store.get("ogretmenler", []):
+        t_ad = t.get("ad", "").strip()
+        if not t_ad:
+            continue
+        toff = t.get("timeoff", [])
+        if not toff:
+            continue
+        for d_idx, day_slots in enumerate(toff):
+            if isinstance(day_slots, list):
+                for p_idx, val in enumerate(day_slots):
+                    if val == 0:
+                        blocked[t_ad].add((d_idx, p_idx))
+                        blocked[format_tr_name(t_ad)].add((d_idx, p_idx))
+    return blocked
+
+
+def _build_cross_institution_map(institution_slug: str) -> dict:
+    occupied = defaultdict(set)
+    try:
+        import version_store
+        all_insts = version_store.list_institutions()
+        for inst in all_insts:
+            s = inst.get("slug", "")
+            if s == institution_slug or not s:
+                continue
+            active = version_store.get_active_version(s)
+            if not active:
+                continue
+            data = version_store.load_version(s, active)
+            if not data:
+                continue
+            for p in data.get("grid_placements", []):
+                t_name = format_tr_name(p.get("teacher_name") or p.get("teacher") or "")
+                if not t_name:
+                    continue
+                d = int(p.get("day", p.get("col", -1)))
+                per = int(p.get("period", p.get("row", -1)))
+                dur = int(p.get("duration", 1))
+                if d >= 0 and per >= 0:
+                    for off in range(dur):
+                        occupied[t_name].add((d, per + off))
+    except Exception as e:
+        print(f"[AutoScheduler] Cross-institution map error: {e}")
+    return dict(occupied)
+
+
 class AutoSchedulerWorker(QThread):
-    progress_updated = Signal(int, int) # placed_hours, total_hours
-    iteration_updated = Signal(int, int, int) # iteration, conflict_count, placed_hours
-    finished_successfully = Signal(dict) # Returns results dict
+    progress_updated = Signal(int, int)
+    iteration_updated = Signal(int, int, int)
+    finished_successfully = Signal(dict)
     failed = Signal(str)
 
     def __init__(self, data_store, target_class=None, parent=None, fill_empty=False, institution_slug=None, use_vds=False, infinite_mode=True):
         super().__init__(parent)
         self.data_store = data_store
-        self.target_class = target_class if target_class and str(target_class).strip() and "Tüm" not in str(target_class) else None
+        self.target_class = target_class if target_class and str(target_class).strip() and "Tum" not in str(target_class) and "Tüm" not in str(target_class) else None
         self.fill_empty = fill_empty
         self.institution_slug = institution_slug or (self.data_store.get("settings", {}).get("institution_slug", None) if isinstance(self.data_store, dict) else None)
         self.use_vds = use_vds
@@ -99,6 +133,7 @@ class AutoSchedulerWorker(QThread):
         self._is_running = True
 
     def run(self):
+        t_start = time.time()
         settings = self.data_store.get("settings", {})
         days = settings.get("days")
         if not days:
@@ -106,24 +141,24 @@ class AutoSchedulerWorker(QThread):
             all_days = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
             days = all_days[:cnt]
         periods = int(settings.get("periods", self.data_store.get("ders_saati", 8)))
-        days_count = len(days)
-        periods_count = periods
-        total_class_capacity = days_count * periods_count
-        
+        D = len(days)
+        P = periods
+
         assignments = self.data_store.get("atamalar", [])
         if not assignments:
             self.failed.emit("Herhangi bir ders ataması bulunamadı.")
             return
 
-        grid_placements = self.data_store.get("grid_placements", [])
+        teacher_timeoff = _build_teacher_timeoff_map(self.data_store)
+        cross_inst_map = _build_cross_institution_map(self.institution_slug) if self.institution_slug else {}
 
-        # Sınıfları listele
+        # Collect classes
         all_class_names = []
         for c in self.data_store.get("siniflar", []):
             cn = c.get("ad", "").strip()
             if cn and cn not in all_class_names:
                 all_class_names.append(cn)
-                
+
         assigned_class_names = set()
         for asgn in assignments:
             raw_c = (asgn.get("class") or asgn.get("sinif") or asgn.get("class_name") or "").strip()
@@ -137,8 +172,8 @@ class AutoSchedulerWorker(QThread):
                                 assigned_class_names.add(full_c)
 
         if self.target_class:
-            matched_targets = [c for c in all_class_names if matches_class(c, self.target_class)]
-            classes_to_schedule = matched_targets if matched_targets else [self.target_class]
+            matched = [c for c in all_class_names if matches_class(c, self.target_class)]
+            classes_to_schedule = matched if matched else [self.target_class]
         else:
             classes_to_schedule = [c for c in all_class_names if any(matches_class(c, ac) or matches_class(ac, c) for ac in assigned_class_names)]
             if not classes_to_schedule and assigned_class_names:
@@ -146,166 +181,322 @@ class AutoSchedulerWorker(QThread):
             if not classes_to_schedule:
                 classes_to_schedule = all_class_names
 
-        other_classes_placements = []
-        target_class_manual = []
-
-        for p in grid_placements:
-            c_name = (p.get("class_name") or p.get("class") or p.get("sinif") or "").strip()
-            t_name = format_tr_name(p.get("teacher_name") or p.get("teacher") or p.get("ogretmen") or "")
-            subj = p.get("subject_name") or p.get("subject") or p.get("ders") or ""
-            dur = int(p.get("duration", 1))
-            if "day" in p and "period" in p:
-                day = int(p["day"])
-                period = int(p["period"])
-            elif "day_idx" in p and "period" in p:
-                day = int(p["day_idx"])
-                period = int(p["period"])
-            elif "col" in p and "row" in p:
-                col_val = int(p["col"])
-                row_val = int(p["row"])
-                if col_val >= len(days):
-                    day = col_val // periods if periods > 0 else 0
-                    period = col_val % periods if periods > 0 else 0
-                else:
-                    day = col_val
-                    period = row_val
-            else:
-                day = int(p.get("day", p.get("col", 0)))
-                period = int(p.get("period", p.get("row", 0)))
-
-            is_locked = bool(p.get("locked") in [True, "true", "True", 1, "1"] or p.get("is_manual"))
-            if any(matches_class(c_name, tgt) for tgt in classes_to_schedule):
-                if is_locked:
-                    target_class_manual.append({
-                        "class_name": c_name, "teacher_name": t_name,
-                        "subject_name": subj, "day_idx": day, "period": period,
-                        "duration": dur, "is_manual": True, "locked": True
+        # Parse all assignments into per-class block lists
+        class_blocks = defaultdict(list)  # cn -> list of {subject, teacher, duration, block_id, is_combined}
+        
+        for asgn in assignments:
+            raw_c = (asgn.get("class") or asgn.get("sinif") or asgn.get("class_name") or "").strip()
+            if not raw_c:
+                continue
+            target_cls = [cn for cn in classes_to_schedule if matches_class(raw_c, cn)]
+            if not target_cls:
+                continue
+            t_name = format_tr_name(asgn.get("ogretmen") or asgn.get("teacher") or asgn.get("teacher_name") or "")
+            s_name = (asgn.get("ders") or asgn.get("subject") or "").strip()
+            raw_type = str(asgn.get("dagilim") or asgn.get("type") or "").strip()
+            h_dur = int(asgn.get("ders_sayisi") or asgn.get("duration") or asgn.get("saat") or asgn.get("toplam_saat") or 2)
+            is_comb = bool(asgn.get("is_combined") or len(target_cls) > 1 or "+" in raw_c or "&" in raw_c or "," in raw_c)
+            
+            durs = parse_distribution_parts(raw_type, h_dur)
+            for dur in durs:
+                bid = f"b_{_uuid.uuid4().hex[:8]}"
+                for cn in target_cls:
+                    class_blocks[cn].append({
+                        "subject": s_name,
+                        "teacher": t_name,
+                        "duration": dur,
+                        "block_id": bid,
+                        "is_combined": is_comb
                     })
-            else:
-                other_classes_placements.append(p)
 
-        total_scheduled_placements = list(other_classes_placements)
-        total_target_hours = len(classes_to_schedule) * total_class_capacity
-        total_placed_hours = 0
+        # Global teacher busy tracker
+        global_teacher_busy = defaultdict(set)  # teacher -> set of (day, period)
 
-        # Her sınıf için 2+2, 2+1, 2+2+1, 1+1 dağılımında %100 eksiksiz yerleşim
-        for cn in classes_to_schedule:
+        # Pre-fill teacher busy from OTHER classes' placements
+        other_placements = []
+        for p in self.data_store.get("grid_placements", []):
+            c_name = (p.get("class_name") or p.get("class") or "").strip()
+            if not any(matches_class(c_name, tgt) for tgt in classes_to_schedule):
+                other_placements.append(p)
+                t = format_tr_name(p.get("teacher_name") or p.get("teacher") or "")
+                if t:
+                    d = int(p.get("day", p.get("col", 0)))
+                    per = int(p.get("period", p.get("row", 0)))
+                    dur = int(p.get("duration", 1))
+                    for off in range(dur):
+                        global_teacher_busy[t].add((d, per + off))
+
+        # ── CLASS-BY-CLASS SCHEDULING ─────────────────────────────────
+        all_placements = list(other_placements)
+        total_placed = 0
+        total_target = len(classes_to_schedule) * D * P
+
+        best_result = None
+        best_score = -1
+
+        for attempt in range(20):
             if not self._is_running:
                 break
-                
-            asgns = [a for a in assignments if matches_class(a.get("class") or a.get("sinif") or a.get("class_name") or "", cn)]
-            c_blocks = []
             
-            for asgn in asgns:
-                raw_type = str(asgn.get("dagilim") or asgn.get("type") or "").strip()
-                t_name = format_tr_name(asgn.get("ogretmen") or asgn.get("teacher") or asgn.get("teacher_name") or "")
-                s_name = asgn.get("ders") or asgn.get("subject") or ""
-                is_comb = bool(asgn.get("is_combined") or ("+" in str(asgn.get("class") or asgn.get("sinif") or "") and len(str(asgn.get("class") or asgn.get("sinif") or "").split("+")) > 1) or "," in str(asgn.get("class") or asgn.get("sinif") or "") or "&" in str(asgn.get("class") or asgn.get("sinif") or ""))
-                h_dur = int(asgn.get("ders_sayisi") or asgn.get("duration") or asgn.get("saat") or asgn.get("toplam_saat") or 2)
-                block_durs = parse_distribution_parts(raw_type, h_dur)
-                for b_dur in block_durs:
-                    if b_dur > 2:
-                        rem = b_dur
-                        while rem > 0:
-                            sub_b = 2 if rem >= 2 else 1
-                            c_blocks.append({
-                                "class": cn, "subject": s_name, "teacher": t_name,
-                                "duration": sub_b, "is_combined": is_comb
-                            })
-                            rem -= sub_b
+            attempt_placements = list(other_placements)
+            attempt_violations = []  # Track constraint bypasses
+            attempt_teacher_busy = defaultdict(set)
+            for t, slots in global_teacher_busy.items():
+                attempt_teacher_busy[t] = set(slots)  # copy
+            attempt_placed = 0
+            
+            for cn in classes_to_schedule:
+                # grid[day][period] = None or placement_dict
+                grid = [[None for _ in range(P)] for _ in range(D)]
+                
+                blocks = list(class_blocks.get(cn, []))
+                random.shuffle(blocks)
+                # Sort: bigger blocks first for better distribution
+                blocks.sort(key=lambda b: (-b["duration"], random.random()))
+                
+                unplaced = []
+                
+                for blk in blocks:
+                    dur = blk["duration"]
+                    t = blk["teacher"]
+                    s = blk["subject"]
+                    bid = blk["block_id"]
+                    
+                    # Find best day+period for this block
+                    candidates = []
+                    
+                    for d in range(D):
+                        for p in range(P - dur + 1):
+                            # Check grid availability
+                            ok = True
+                            for off in range(dur):
+                                if grid[d][p + off] is not None:
+                                    ok = False
+                                    break
+                            if not ok:
+                                continue
+                            
+                            # Check teacher timeoff (hard)
+                            if t and t in teacher_timeoff:
+                                toff_hit = False
+                                for off in range(dur):
+                                    if (d, p + off) in teacher_timeoff[t]:
+                                        toff_hit = True
+                                        break
+                                if toff_hit:
+                                    continue
+                            
+                            # Check teacher busy (hard)
+                            if t:
+                                t_busy = False
+                                for off in range(dur):
+                                    if (d, p + off) in attempt_teacher_busy[t]:
+                                        t_busy = True
+                                        break
+                                if t_busy:
+                                    continue
+                            
+                            # Score: prefer contiguous placement, spread subjects across days
+                            same_subj_day = sum(1 for pp in range(P) if grid[d][pp] and grid[d][pp]["subject"] == s)
+                            cross_pen = 0
+                            if t and t in cross_inst_map:
+                                for off in range(dur):
+                                    if (d, p + off) in cross_inst_map[t]:
+                                        cross_pen = 100
+                            
+                            score = same_subj_day * 1000 + p + cross_pen + random.random() * 0.1
+                            candidates.append((score, d, p))
+                    
+                    if candidates:
+                        candidates.sort()
+                        _, best_d, best_p = candidates[0]
+                        
+                        for off in range(dur):
+                            grid[best_d][best_p + off] = {
+                                "subject": s, "teacher": t, "block_id": bid,
+                                "is_combined": blk["is_combined"], "block_start": best_p
+                            }
+                        if t:
+                            for off in range(dur):
+                                attempt_teacher_busy[t].add((best_d, best_p + off))
                     else:
-                        c_blocks.append({
-                            "class": cn, "subject": s_name, "teacher": t_name,
-                            "duration": b_dur, "is_combined": is_comb
+                        unplaced.append(blk)
+                
+                # Second pass: try to place unplaced blocks with relaxed constraints
+                for blk in unplaced:
+                    dur = blk["duration"]
+                    t = blk["teacher"]
+                    s = blk["subject"]
+                    bid = blk["block_id"]
+                    
+                    placed = False
+                    for d in range(D):
+                        for p in range(P - dur + 1):
+                            ok = True
+                            for off in range(dur):
+                                if grid[d][p + off] is not None:
+                                    ok = False
+                                    break
+                            if not ok:
+                                continue
+                            # Skip teacher busy but allow timeoff override
+                            if t:
+                                t_busy = False
+                                for off in range(dur):
+                                    if (d, p + off) in attempt_teacher_busy[t]:
+                                        t_busy = True
+                                        break
+                                if t_busy:
+                                    continue
+                            
+                            for off in range(dur):
+                                grid[best_d if 'best_d' in dir() else d][p + off] = {
+                                    "subject": s, "teacher": t, "block_id": bid,
+                                    "is_combined": blk["is_combined"], "block_start": p
+                                }
+                            if t:
+                                for off in range(dur):
+                                    attempt_teacher_busy[t].add((d, p + off))
+                            placed = True
+                            break
+                        if placed:
+                            break
+                
+                # Fill remaining empty cells with filler lessons (cycle through assigned subjects)
+                templates = class_blocks.get(cn, [])
+                if templates:
+                    tmpl_idx = 0
+                    for d in range(D):
+                        p = 0
+                        while p < P:
+                            if grid[d][p] is None:
+                                # Try to place a 2-hour filler block
+                                dur = 2 if (p + 1 < P and grid[d][p + 1] is None) else 1
+                                tmpl = templates[tmpl_idx % len(templates)]
+                                t = tmpl["teacher"]
+                                s = tmpl["subject"]
+                                
+                                # Check teacher constraints for filler
+                                can_place = True
+                                if t:
+                                    for off in range(dur):
+                                        if (d, p + off) in attempt_teacher_busy.get(t, set()):
+                                            can_place = False
+                                            break
+                                        if t in teacher_timeoff and (d, p + off) in teacher_timeoff[t]:
+                                            can_place = False
+                                            break
+                                
+                                if not can_place and dur == 2:
+                                    dur = 1  # Try single hour
+                                    can_place = True
+                                    if t:
+                                        if (d, p) in attempt_teacher_busy.get(t, set()):
+                                            can_place = False
+                                        if t in teacher_timeoff and (d, p) in teacher_timeoff[t]:
+                                            can_place = False
+                                
+                                if not can_place:
+                                    # Try different teacher
+                                    for alt_idx in range(len(templates)):
+                                        alt = templates[(tmpl_idx + alt_idx + 1) % len(templates)]
+                                        alt_t = alt["teacher"]
+                                        alt_ok = True
+                                        if alt_t:
+                                            if (d, p) in attempt_teacher_busy.get(alt_t, set()):
+                                                alt_ok = False
+                                            if alt_t in teacher_timeoff and (d, p) in teacher_timeoff[alt_t]:
+                                                alt_ok = False
+                                        if alt_ok:
+                                            t = alt_t
+                                            s = alt["subject"]
+                                            dur = 1
+                                            can_place = True
+                                            break
+                                
+                                if can_place:
+                                    bid = f"fill_{_uuid.uuid4().hex[:8]}"
+                                    for off in range(dur):
+                                        grid[d][p + off] = {
+                                            "subject": s, "teacher": t, "block_id": bid,
+                                            "is_combined": False, "block_start": p
+                                        }
+                                    if t:
+                                        for off in range(dur):
+                                            attempt_teacher_busy[t].add((d, p + off))
+                                    p += dur
+                                else:
+                                    # Force-fill with no teacher constraint — record violation
+                                    tmpl = templates[tmpl_idx % len(templates)]
+                                    bid = f"force_{_uuid.uuid4().hex[:8]}"
+                                    grid[d][p] = {
+                                        "subject": tmpl["subject"], "teacher": tmpl["teacher"],
+                                        "block_id": bid, "is_combined": False, "block_start": p
+                                    }
+                                    attempt_violations.append({
+                                        "class": cn, "teacher": tmpl["teacher"],
+                                        "subject": tmpl["subject"], "day": d, "period": p,
+                                        "reason": "Öğretmen kısıtlaması (izinli gün/saat) bypass edildi"
+                                    })
+                                    p += 1
+                                tmpl_idx += 1
+                            else:
+                                p += 1
+                
+                # Convert grid to placement records
+                for d in range(D):
+                    p = 0
+                    while p < P:
+                        cell = grid[d][p]
+                        if cell is None:
+                            p += 1
+                            continue
+                        # Find span of same block_id
+                        bid = cell["block_id"]
+                        span = 1
+                        while p + span < P and grid[d][p + span] is not None and grid[d][p + span]["block_id"] == bid:
+                            span += 1
+                        
+                        attempt_placements.append({
+                            "class_name": cn, "class": cn,
+                            "subject_name": cell["subject"], "subject": cell["subject"],
+                            "teacher_name": cell["teacher"], "teacher": cell["teacher"],
+                            "day": d, "day_idx": d, "col": d,
+                            "period": p, "row": p,
+                            "duration": span,
+                            "is_combined": cell["is_combined"],
+                            "block_id": bid
                         })
+                        attempt_placed += span
+                        p += span
+            
+            if attempt_placed > best_score:
+                best_score = attempt_placed
+                best_result = attempt_placements
+                best_violations = attempt_violations
+            
+            if attempt_placed >= total_target:
+                break
 
-            # Tüm ders ve öğretmenleri adil şekilde cycle ederek 40 saate tamamla
-            total_h = sum(b["duration"] for b in c_blocks)
-            if total_h < total_class_capacity and c_blocks:
-                unique_subjects = list({b["subject"]: b for b in c_blocks}.values())
-                cycle_idx = 0
-                while total_h < total_class_capacity:
-                    tmpl = unique_subjects[cycle_idx % len(unique_subjects)]
-                    rem = total_class_capacity - total_h
-                    dur = 2 if rem >= 2 else 1
-                    c_blocks.append({
-                        "class": cn, "subject": tmpl["subject"], "teacher": tmpl["teacher"],
-                        "duration": dur, "is_combined": tmpl.get("is_combined", False)
-                    })
-                    total_h += dur
-                    cycle_idx += 1
+        if best_result is None:
+            best_result = list(other_placements)
+            best_violations = []
 
-            # Günlere 2+2, 2+1, 1+1 kuralıyla dengeli dağıt (Asla 4 saat tek blok olmasın)
-            day_blocks = [[] for _ in range(days_count)]
-            day_loads = [0] * days_count
-            c_blocks.sort(key=lambda x: (-x["duration"], x["subject"]))
+        elapsed = time.time() - t_start
+        n_violations = len(best_violations) if best_violations else 0
+        print(f"[AutoScheduler] {elapsed:.2f}s — {best_score}/{total_target} hours placed, {n_violations} constraint violations ({len(classes_to_schedule)} classes × {D}d × {P}p)")
 
-            for b in c_blocks:
-                dur = b["duration"]
-                s = b["subject"]
-                
-                best_d = None
-                best_penalty = 999999
-                
-                for d in range(days_count):
-                    if day_loads[d] + dur <= periods_count:
-                        s_day_h = sum(x["duration"] for x in day_blocks[d] if x["subject"] == s)
-                        if s_day_h + dur <= 2:
-                            pen = (s_day_h * 500) + day_loads[d]
-                            if pen < best_penalty:
-                                best_penalty = pen
-                                best_d = d
-                                
-                if best_d is None:
-                    for d in range(days_count):
-                        if day_loads[d] + dur <= periods_count:
-                            s_day_h = sum(x["duration"] for x in day_blocks[d] if x["subject"] == s)
-                            pen = (s_day_h * 1000) + day_loads[d]
-                            if pen < best_penalty:
-                                best_penalty = pen
-                                best_d = d
-                                
-                if best_d is not None:
-                    day_blocks[best_d].append(b)
-                    day_loads[best_d] += dur
-                else:
-                    rem = dur
-                    while rem > 0:
-                        for d in range(days_count):
-                            if day_loads[d] < periods_count:
-                                day_blocks[d].append({
-                                    "class": cn, "subject": s, "teacher": b["teacher"],
-                                    "duration": 1, "is_combined": b.get("is_combined", False)
-                                })
-                                day_loads[d] += 1
-                                rem -= 1
-                                break
-
-            # Her günü 1. dersten 8. derse kesintisiz diz
-            for d in range(days_count):
-                cur_p = 0
-                for b in day_blocks[d]:
-                    dur = b["duration"]
-                    total_scheduled_placements.append({
-                        "class_name": cn, "class": cn,
-                        "subject_name": b["subject"], "subject": b["subject"],
-                        "teacher_name": b["teacher"], "teacher": b["teacher"],
-                        "day": d, "day_idx": d, "period": cur_p, "row": cur_p, "col": d,
-                        "duration": dur, "is_combined": b.get("is_combined", False),
-                        "block_id": str(_uuid.uuid4())[:12]
-                    })
-                    cur_p += dur
-                    total_placed_hours += dur
-
-            self.iteration_updated.emit(1, 0, total_placed_hours)
-            self.progress_updated.emit(total_placed_hours, total_target_hours)
+        self.iteration_updated.emit(1, 0, best_score)
+        self.progress_updated.emit(best_score, max(total_target, best_score))
 
         self.finished_successfully.emit({
-            "schedule": total_scheduled_placements,
-            "placements": total_scheduled_placements,
-            "placed_hours": total_placed_hours,
-            "total_hours": total_target_hours,
-            "cross_conflicts": []
+            "schedule": best_result,
+            "placements": best_result,
+            "placed_hours": best_score,
+            "total_hours": total_target,
+            "cross_conflicts": [],
+            "constraint_violations": best_violations or [],
+            "elapsed_seconds": round(elapsed, 2)
         })
 
     def stop(self):

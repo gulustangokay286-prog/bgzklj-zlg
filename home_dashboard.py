@@ -318,36 +318,6 @@ class AppleConfirmDialog(QDialog):
         
         c_lay.addLayout(btn_box)
         layout.addWidget(container)
-        btn_box.setSpacing(12)
-        
-        btn_cancel = QPushButton(cancel_text)
-        btn_cancel.setFixedHeight(34)
-        btn_cancel.setStyleSheet("""
-            QPushButton {
-                background: #F2F2F7; color: #1D1D1F; border: 1px solid #E5E5EA;
-                border-radius: 8px; padding: 6px 18px; font-weight: 500;
-            }
-            QPushButton:hover { background: #E5E5EA; }
-        """)
-        btn_cancel.clicked.connect(self.reject)
-        btn_box.addWidget(btn_cancel)
-        
-        btn_ok = QPushButton(confirm_text)
-        btn_ok.setFixedHeight(34)
-        bg_col = "#FF3B30" if is_destructive else "#0071E3"
-        hover_col = "#DC2626" if is_destructive else "#0062C4"
-        btn_ok.setStyleSheet(f"""
-            QPushButton {{
-                background: {bg_col}; color: #FFFFFF; border: none;
-                border-radius: 8px; padding: 6px 20px; font-weight: 600;
-            }}
-            QPushButton:hover {{ background: {hover_col}; }}
-        """)
-        btn_ok.clicked.connect(self.accept)
-        btn_box.addWidget(btn_ok)
-        
-        c_lay.addLayout(btn_box)
-        layout.addWidget(container)
 
 
 class AppleColorPickerDialog(QDialog):
@@ -2115,6 +2085,8 @@ class HomeDashboard(QWidget):
             return
         if version_store.verify_institution_password(self._selected_slug, pwd):
             self._unlocked_slugs.add(self._selected_slug)
+            # Cache password for this device so it won't be asked again
+            version_store.save_device_password_cache(self._selected_slug, pwd)
             self.pwd_err_lbl.hide()
             self.pwd_card_input.clear()
             self.right_panel_stack.setCurrentWidget(self.right_content_widget)
@@ -2188,7 +2160,9 @@ class HomeDashboard(QWidget):
         self._selected_slug = slug
         version_store.set_last_active_institution_slug(slug)
         self._selected_version = None
-        self._unlocked_slugs.discard(slug)
+        # Auto-unlock if this device has previously authenticated for this institution
+        if version_store.check_device_password_cache(slug):
+            self._unlocked_slugs.add(slug)
         
         for i in range(self.inst_list_layout.count() - 1):
             w = self.inst_list_layout.itemAt(i).widget()
@@ -2251,6 +2225,13 @@ class HomeDashboard(QWidget):
 
     def _refresh_versions(self):
         if not self._selected_slug:
+            return
+        
+        # Guard: if institution was just deleted, its directory no longer exists
+        import os
+        inst_dir = os.path.join(os.path.expanduser("~"), ".chenki_akademi", "institutions", self._selected_slug)
+        if not os.path.isdir(inst_dir):
+            self._selected_slug = None
             return
             
         meta = version_store.get_institution_meta(self._selected_slug)

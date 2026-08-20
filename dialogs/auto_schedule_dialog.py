@@ -253,6 +253,38 @@ class AutoScheduleDialog(QDialog):
         main_layout.addLayout(btn_layout)
         
     def _start_generation(self):
+        # Pre-check: find teachers without any assignments
+        from auto_scheduler import format_tr_name, normalize_clean
+        teachers = self.data_store.get("ogretmenler", [])
+        atamalar = self.data_store.get("atamalar", [])
+        teacher_names = [t.get("ad", "").strip() for t in teachers if t.get("ad", "").strip()]
+        assigned_teachers = set()
+        for a in atamalar:
+            t = (a.get("teacher") or a.get("ogretmen") or "").strip()
+            if t:
+                assigned_teachers.add(t)
+                assigned_teachers.add(format_tr_name(t))
+                assigned_teachers.add(normalize_clean(t))
+        
+        unassigned = []
+        for tn in teacher_names:
+            if (tn not in assigned_teachers and 
+                format_tr_name(tn) not in assigned_teachers and
+                normalize_clean(tn) not in assigned_teachers):
+                unassigned.append(tn)
+        
+        if unassigned:
+            from PySide6.QtWidgets import QMessageBox
+            msg = (f"⚠️ Aşağıdaki {len(unassigned)} öğretmenin hiçbir ders ataması bulunamadı:\n\n"
+                   + "\n".join(f"• {t}" for t in sorted(unassigned))
+                   + "\n\nBu öğretmenler programa dahil edilemeyecektir. "
+                   "Lütfen önce 'Atamalar' bölümünden bu öğretmenlere ders atayın.\n\n"
+                   "Devam etmek istiyor musunuz?")
+            reply = QMessageBox.warning(self, "Ataması Olmayan Öğretmenler", msg,
+                                        QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply != QMessageBox.Yes:
+                return
+        
         self.progress.setValue(0)
         self.btn_start.setEnabled(False)
         self.btn_cancel.setText("Durdur ve Kaydet")
@@ -322,17 +354,6 @@ class AutoScheduleDialog(QDialog):
                         filtered_schedule.append(item)
                 schedule = filtered_schedule
                 total_hrs = sum(item.get("duration", 1) for item in schedule)
-        
-        pct = int((total_hrs / max(1, target_hrs)) * 100)
-        if total_hrs >= target_hrs:
-            self.lbl_stats.setText(f"Yerleştirilen: {total_hrs} / {target_hrs} Ders Saati (Haftalık Program %100 Eksiksiz Dolduruldu)")
-            self.lbl_info.setText("Program başarıyla oluşturuldu! (Tüm sınıflar ve dersler eksiksiz yerleştirildi)")
-            self.lbl_info.setStyleSheet("color: #10B981; font-weight: bold;")
-        else:
-            unp = target_hrs - total_hrs
-            self.lbl_stats.setText(f"Yerleştirilen: {total_hrs} / {target_hrs} Ders Saati (Haftalık Program %{pct} Dolduruldu • {unp} Saat Kapasite/Kısıt Nedeniyle Yerleşemedi)")
-            self.lbl_info.setText(f"Program oluşturuldu ({total_hrs} saat yerleştirildi, {unp} saat kısıtlamalar nedeniyle dışarıda kaldı).")
-            self.lbl_info.setStyleSheet("color: #D97706; font-weight: bold;")
             
         self.data_store["auto_schedule_results"] = schedule
         
@@ -360,7 +381,9 @@ class AutoScheduleDialog(QDialog):
                     "class_name": cl, "class": cl,
                     "color": color,
                     "duration": dur,
-                    "locked": is_locked
+                    "locked": is_locked,
+                    "block_id": item.get("block_id", ""),
+                    "is_combined": bool(item.get("is_combined", False))
                 })
                 
         self.data_store["grid_placements"] = new_placements
@@ -369,6 +392,8 @@ class AutoScheduleDialog(QDialog):
         if p:
             if hasattr(p, "save_db"):
                 p.save_db(sync_from_grid=False)
+            if hasattr(p, "mark_dirty"):
+                p.mark_dirty()
             if hasattr(p, "_refresh_grid"):
                 p._refresh_grid()
             if hasattr(p, "_refresh_tree"):
@@ -382,22 +407,62 @@ class AutoScheduleDialog(QDialog):
                     version_store.save_version(slug, self.data_store, source="auto", note="Otomatik planlayıcı tarafından oluşturuldu")
                 except Exception as ve:
                     print(f"[AUTO_SCHEDULE] Version save error: {ve}")
-                
-        self.btn_start.setEnabled(True)
-        self.btn_start.setText("Tamam")
-        self.btn_start.clicked.disconnect()
-        self.btn_start.clicked.connect(self.accept)
-        self.btn_cancel.setText("Kapat")
         
-    def _on_failed(self, err_msg):
-        self.lbl_info.setText(f"Hata: {err_msg}")
-        self.lbl_info.setStyleSheet("color: red; font-weight: bold;")
-        self.btn_start.setEnabled(True)
-        self.btn_start.setText("Tekrar Dene")
-        self.btn_cancel.setText("Kapat")
+        # Store violations for showing AFTER dialog closes
+        self._pending_violations = result.get("constraint_violations", [])
+        self._result_summary = {
+            "total_hrs": total_hrs,
+            "target_hrs": target_hrs
+        }
+        
+        # Auto-close dialog immediately
+        self.accept()
+    
+    def accept(self):
+        """Override accept to show violations popup on parent AFTER dialog closes."""
+        violations = getattr(self, "_pending_violations", [])
+        summary = getattr(self, "_result_summary", {})
+        total_hrs = summary.get("total_hrs", 0)
+        target_hrs = summary.get("target_hrs", 0)
+        parent = self.parent()
+        
+        # Close dialog first
+        super().accept()
+        
+        # Now show popups on the parent window (after grid is already populated)
+        if parent and violations:
+            days_tr = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
+            viol_teachers = set()
+            viol_details = []
+            for v in violations[:15]:
+                t = v.get("teacher", "?")
+                s = v.get("subject", "?")
+                c = v.get("class", "?")
+                d_name = days_tr[v.get("day", 0)] if v.get("day", 0) < len(days_tr) else "?"
+                p_num = v.get("period", 0) + 1
+                viol_teachers.add(t)
+                viol_details.append(f"• {t} → {c} {s} ({d_name} {p_num}. saat)")
+            
+            msg = (f"✅ Çizelge oluşturuldu! ({total_hrs}/{target_hrs} saat yerleştirildi)\n\n"
+                   f"⚠️ {len(violations)} adet öğretmen kısıtlaması "
+                   f"(izinli gün/saat) yoksayıldı ve devam edildi.\n\n"
+                   f"Etkilenen öğretmenler: {', '.join(sorted(viol_teachers))}\n\n"
+                   + "\n".join(viol_details[:10]))
+            if len(violations) > 15:
+                msg += f"\n... ve {len(violations) - 15} adet daha."
+            msg += "\n\nBu dersleri öğretmenler görünümünden manuel olarak kontrol edip düzeltmeniz önerilir."
+            
+            from PySide6.QtWidgets import QMessageBox
+            from PySide6.QtCore import QTimer
+            def show_warning():
+                QMessageBox.warning(parent, "Kısıtlama Bildirimi", msg, QMessageBox.Ok)
+            QTimer.singleShot(100, show_warning)
+        elif parent and total_hrs > 0:
+            if hasattr(parent, "statusBar"):
+                parent.statusBar().showMessage(f"✅ Otomatik çizelge oluşturuldu! ({total_hrs}/{target_hrs} saat yerleştirildi)", 5000)
 
     def reject(self):
-        if hasattr(self, 'worker') and self.worker.isRunning():
+        if hasattr(self, 'worker') and self.worker is not None and self.worker.isRunning():
             self.worker.stop()
             self.worker.wait()
         super().reject()

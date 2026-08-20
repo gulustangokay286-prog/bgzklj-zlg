@@ -197,17 +197,9 @@ class APIClient:
                     except Exception:
                         pass
                         
-            # Clean up local versions that were deleted in cloud
-            try:
-                for local_fn in os.listdir(ver_dir):
-                    if local_fn.endswith(".roz") and local_fn not in valid_cloud_filenames and len(valid_cloud_filenames) > 0:
-                        try:
-                            os.remove(os.path.join(ver_dir, local_fn))
-                            print(f"[APIClient] Removed obsolete local version: {local_fn}")
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+            # Note: Do NOT delete local versions that are missing from cloud.
+            # Cloud may only store a subset (recent versions) while local keeps the full history.
+            # Deleting based on cloud subset would cause data loss and version jumping.
                 
         return True, f"Merkezi veritabanı senkronizasyonu tamamlandı ({len(data)} kurum, {synced_count} güncellenen versiyon).", synced_count
 

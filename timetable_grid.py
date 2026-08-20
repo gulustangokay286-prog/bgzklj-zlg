@@ -1207,7 +1207,7 @@ class DropTableWidget(QTableWidget):
             
             if row >= 0 and col >= 0:
                 # Removed redundant locked slot check because main_window now handles overrides
-                # Öğretmen timeoff kontrolü
+                # Öğretmen timeoff bilgisi (kullanıcıyı bloklamadan hafif uyarı veya doğrudan yerleşim)
                 teacher = lesson_info.get("teacher", "")
                 dur = int(lesson_info.get("duration", 1))
                 win = self.window()
@@ -1221,15 +1221,12 @@ class DropTableWidget(QTableWidget):
                         t_ad = t.get("ad", "")
                         if t_ad and (t_ad == teacher or t_ad.upper() == teacher.upper()):
                             toff = t.get("timeoff", [])
-                            if toff:
+                            if toff and hasattr(win, "statusBar") and win.statusBar():
                                 for off in range(dur):
                                     chk_p = period_idx + off
                                     if day_idx < len(toff) and chk_p < len(toff[day_idx]) and toff[day_idx][chk_p] == 0:
-                                        QMessageBox.warning(self, "Kısıtlama Engeli",
-                                            f"⛔ {t_ad} öğretmeni bu zaman diliminde kısıtlıdır.\n"
-                                            f"Önce öğretmenin kısıtlama ayarlarını değiştirin.")
-                                        event.ignore()
-                                        return
+                                        win.statusBar().showMessage(f"ℹ️ {t_ad} öğretmeninin bu saatte kısıtlaması bulunuyor.", 3000)
+                                        break
                             break
                 
                 self.lesson_dropped.emit(row, col, lesson_info)
@@ -1437,7 +1434,7 @@ class DropTableWidget(QTableWidget):
                 win.mark_dirty()
                 
             if hasattr(win, "save_db"):
-                win.save_db(sync_from_grid=True)
+                win.save_db(sync_from_grid=False)
                 
             # ── 4. Refresh grid from updated memory (skip unplaced — we do our own deferred refresh) ──
             if hasattr(win, "_refresh_grid"):

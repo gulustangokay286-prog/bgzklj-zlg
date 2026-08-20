@@ -34,8 +34,8 @@ def push_institution_to_rtdb(slug: str, auth_data: dict = None) -> bool:
     versions_dict = {}
     if os.path.isdir(ver_dir):
         all_files = sorted([f for f in os.listdir(ver_dir) if f.endswith(".roz")], reverse=True)
-        # Include top 12 most recent versions in root payload for high performance
-        for fn in all_files[:12]:
+        # Push all versions for complete cross-device synchronization
+        for fn in all_files:
             v_path = os.path.join(ver_dir, fn)
             try:
                 with open(v_path, "r", encoding="utf-8") as f:
