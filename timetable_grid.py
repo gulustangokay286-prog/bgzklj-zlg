@@ -610,11 +610,15 @@ class DraggableLessonCard(QLabel):
                     pass
         elif action == act_del:
             if data_store and "atamalar" in data_store:
+                from auto_scheduler import format_tr_name as _fmt, normalize_clean as _nc
+                s_fmt = _fmt(self.subject_name)
+                c_fmt = _fmt(self.class_name)
+                t_fmt = _fmt(self.teacher)
                 data_store["atamalar"] = [
                     a for a in data_store["atamalar"] 
-                    if not (a.get("subject", "").strip().upper() == self.subject_name.strip().upper() and 
-                            a.get("class", "").strip().upper() == self.class_name.strip().upper() and
-                            a.get("teacher", "").strip().upper() == self.teacher.strip().upper())
+                    if not (_fmt(a.get("subject", "")) == s_fmt and 
+                            _fmt(a.get("class", "")) == c_fmt and
+                            (not t_fmt or _fmt(a.get("teacher", "")) == t_fmt or _nc(a.get("teacher","")) == _nc(self.teacher)))
                 ]
                 if win:
                     if hasattr(win, "save_db"): win.save_db()
@@ -623,15 +627,24 @@ class DraggableLessonCard(QLabel):
             return
             
         if parts and data_store:
+            from auto_scheduler import format_tr_name as _fmt, normalize_clean as _nc
             if "atamalar" in data_store:
+                s_fmt = _fmt(self.subject_name)
+                c_fmt = _fmt(self.class_name)
+                t_fmt = _fmt(self.teacher)
+                found = False
                 for a in data_store["atamalar"]:
-                    if (a.get("subject", "").strip().upper() == self.subject_name.strip().upper() and 
-                        a.get("class", "").strip().upper() == self.class_name.strip().upper() and
-                        a.get("teacher", "").strip().upper() == self.teacher.strip().upper()):
+                    a_s = _fmt(a.get("subject", ""))
+                    a_c = _fmt(a.get("class", ""))
+                    a_t = _fmt(a.get("teacher", ""))
+                    if a_s == s_fmt and a_c == c_fmt and (not t_fmt or a_t == t_fmt or _nc(a.get("teacher","")) == _nc(self.teacher)):
                         a["type"] = "+".join(map(str, parts))
                         a["distribution"] = parts
                         a["duration"] = sum(parts)
+                        found = True
                         break
+                if not found:
+                    print(f"[ContextMenu] WARNING: no matching atama for {self.subject_name}/{self.class_name}/{self.teacher}")
             if win:
                 if hasattr(win, "save_db"): win.save_db()
                 if hasattr(win, "_refresh_tree"): win._refresh_tree()
@@ -778,17 +791,6 @@ class UnplacedLessonsDock(QWidget):
                 return
 
             self.container_layout.setAlignment(Qt.AlignLeft)
-            
-            # Show empty slot info badge
-            if empty_slot_count > 0 and target_entity:
-                badge = QLabel(f"📋 {empty_slot_count} boş")
-                badge.setFont(QFont("Segoe UI", 7.5, QFont.Bold))
-                badge.setStyleSheet("""
-                    background: #FEF3C7; color: #92400E; border: 1px solid #FCD34D;
-                    border-radius: 8px; padding: 2px 8px;
-                """)
-                badge.setFixedHeight(28)
-                self.container_layout.addWidget(badge)
             
             for l in lessons_data:
                 dur = l.get("duration", 1)
