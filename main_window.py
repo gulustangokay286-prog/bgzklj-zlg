@@ -1605,7 +1605,8 @@ class MainWindow(QMainWindow):
                         "combined_classes": list(target_classes) if is_comb else []
                     })
                     
-        # --- CHECK IF GRID IS FULL FOR THIS TARGET ---
+        # --- CHECK EMPTY SLOTS AND LIMIT UNPLACED COUNT ---
+        empty_slot_count = 0
         if target_entity and scoped_atamalar:
             settings = self.data_store.get("settings", {})
             d_len = len(settings.get("days", [])) or int(settings.get("day_count", self.data_store.get("gun_sayisi", 5)))
@@ -1637,9 +1638,31 @@ class MainWindow(QMainWindow):
                 if match:
                     placed_for_target += dur
                     
-            # If grid is full, clear unplaced - no lessons to show
-            if placed_for_target >= total_slots:
+            empty_slot_count = max(0, total_slots - placed_for_target)
+            
+            # If grid is completely full, no lessons to show
+            if empty_slot_count <= 0:
                 unplaced = []
+            elif unplaced:
+                # Limit shown unplaced lessons to number of empty slots
+                limited = []
+                slot_budget = empty_slot_count
+                for u in unplaced:
+                    u_dur = u.get("duration", 1)
+                    if slot_budget >= u_dur:
+                        limited.append(u)
+                        slot_budget -= u_dur
+                    elif slot_budget > 0:
+                        u_copy = dict(u)
+                        u_copy["duration"] = slot_budget
+                        limited.append(u_copy)
+                        slot_budget = 0
+                        break
+                    else:
+                        break
+                unplaced = limited
+                # Store full unplaced for "load more" feature
+                self._full_unplaced_list = [u for u in unplaced]
         # --------------------------------
 
         has_assignments = bool(scoped_atamalar) if target_entity else bool(atamalar)
@@ -1647,7 +1670,8 @@ class MainWindow(QMainWindow):
             unplaced, 
             has_assignments=has_assignments, 
             display_mode=display_mode, 
-            target_entity=target_entity or ""
+            target_entity=target_entity or "",
+            empty_slot_count=empty_slot_count
         )
 
     def _remove_placement_by_data(self, p_item):

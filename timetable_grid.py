@@ -724,7 +724,7 @@ class UnplacedLessonsDock(QWidget):
                 print("Dock drop error:", e)
             event.acceptProposedAction()
 
-    def load_unplaced(self, lessons_data, has_assignments=True, display_mode="classes", target_entity=""):
+    def load_unplaced(self, lessons_data, has_assignments=True, display_mode="classes", target_entity="", empty_slot_count=0):
         self.container.setUpdatesEnabled(False)
         try:
             # clear existing
@@ -765,9 +765,9 @@ class UnplacedLessonsDock(QWidget):
                     icon_lbl.setPixmap(make_grid_action_icon("check_circle", 18).pixmap(18, 18))
                     if target_entity:
                         ent_desc = "sınıfının" if display_mode == "classes" else "öğretmeninin"
-                        text_lbl.setText(f"🎉 {target_entity} {ent_desc} tüm dersleri başarıyla programa yerleştirildi!")
+                        text_lbl.setText(f"✅ {target_entity} {ent_desc} çizelgesi dolu — boş hücre yok.")
                     else:
-                        text_lbl.setText("🎉 Tüm dersler başarıyla programa yerleştirildi!")
+                        text_lbl.setText("✅ Çizelge dolu — yerleştirilecek ders kalmadı.")
                     text_lbl.setFont(QFont("Segoe UI", 8.5, QFont.Bold))
                     text_lbl.setStyleSheet("color: #15803D; background: transparent; border: none;")
                     
@@ -778,6 +778,18 @@ class UnplacedLessonsDock(QWidget):
                 return
 
             self.container_layout.setAlignment(Qt.AlignLeft)
+            
+            # Show empty slot info badge
+            if empty_slot_count > 0 and target_entity:
+                badge = QLabel(f"📋 {empty_slot_count} boş")
+                badge.setFont(QFont("Segoe UI", 7.5, QFont.Bold))
+                badge.setStyleSheet("""
+                    background: #FEF3C7; color: #92400E; border: 1px solid #FCD34D;
+                    border-radius: 8px; padding: 2px 8px;
+                """)
+                badge.setFixedHeight(28)
+                self.container_layout.addWidget(badge)
+            
             for l in lessons_data:
                 dur = l.get("duration", 1)
                 teacher = l.get("teacher", "")
