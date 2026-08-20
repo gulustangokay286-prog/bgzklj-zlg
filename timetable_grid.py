@@ -1454,9 +1454,25 @@ class DropTableWidget(QTableWidget):
             if hasattr(win, "_refresh_grid"):
                 win._refresh_grid(skip_unplaced=True)
                 
-            # ── 5. Refresh of unplaced dock (after grid rebuild completes) ──
-            if hasattr(win, "_refresh_unplaced_lessons"):
-                win._refresh_unplaced_lessons()
+            # ── 5. Show the DELETED lesson in dock (not a generic refresh) ──
+            if hasattr(win, "_grid") and hasattr(win._grid, "unplaced_dock") and s_name:
+                from dialogs.color_picker_dialog import resolve_subject_color
+                deleted_lesson = {
+                    "id": f"deleted_{orig_r}_{orig_c}",
+                    "subject_name": s_name,
+                    "color": resolve_subject_color(s_name, win.data_store),
+                    "teacher": t_name,
+                    "class_name": c_name or target_entity,
+                    "duration": orig_dur,
+                    "is_combined": is_comb,
+                    "combined_classes": target_classes if is_comb else []
+                }
+                win._grid.unplaced_dock.load_unplaced(
+                    [deleted_lesson],
+                    has_assignments=True,
+                    display_mode=view_mode,
+                    target_entity=target_entity
+                )
             if hasattr(win, "_refresh_tree"):
                 win._refresh_tree()
 

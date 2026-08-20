@@ -376,6 +376,18 @@ class AutoSchedulerWorker(QThread):
                                 t = tmpl["teacher"]
                                 s = tmpl["subject"]
                                 
+                                # Prevent 3+ consecutive same subject
+                                if p >= 2 and grid[d][p-1] is not None and grid[d][p-2] is not None:
+                                    if grid[d][p-1]["subject"] == s and grid[d][p-2]["subject"] == s:
+                                        # Skip to next template to avoid 3 in a row
+                                        tmpl_idx += 1
+                                        tmpl = templates[tmpl_idx % len(templates)]
+                                        t = tmpl["teacher"]
+                                        s = tmpl["subject"]
+                                elif p >= 1 and grid[d][p-1] is not None and grid[d][p-1]["subject"] == s and dur == 2:
+                                    # Already 1 of same subject before, limit filler to 1 hour
+                                    dur = 1
+                                
                                 # Check teacher constraints for filler
                                 can_place = True
                                 if t:
