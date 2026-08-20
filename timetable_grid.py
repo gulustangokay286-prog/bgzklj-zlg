@@ -645,21 +645,48 @@ class DraggableLessonCard(QLabel):
                         break
                 if not found:
                     print(f"[ContextMenu] WARNING: no matching atama for {self.subject_name}/{self.class_name}/{self.teacher}")
+            
+            # Immediately split and replace this card in the dock container
+            p_widget = self.parent()
+            if p_widget and hasattr(p_widget, "layout") and p_widget.layout():
+                c_layout = p_widget.layout()
+                idx = c_layout.indexOf(self)
+                c_layout.removeWidget(self)
+                self.hide()
+                self.deleteLater()
+                
+                # Insert cards for each part in parts
+                for p_idx, p_dur in enumerate(parts):
+                    new_id = f"{self.lesson_id}_split_{p_idx}_{uuid.uuid4().hex[:4]}"
+                    new_card = DraggableLessonCard(
+                        new_id, self.subject_name, self.color, duration=p_dur,
+                        teacher=self.teacher, class_name=self.class_name,
+                        display_mode=getattr(self, "display_mode", "classes")
+                    )
+                    new_card.setAcceptDrops(True)
+                    if hasattr(p_widget, "installEventFilter"):
+                        new_card.installEventFilter(p_widget)
+                    if idx >= 0:
+                        c_layout.insertWidget(idx + p_idx, new_card)
+                    else:
+                        c_layout.addWidget(new_card)
+            
             if win:
                 if hasattr(win, "save_db"): win.save_db()
                 if hasattr(win, "_refresh_tree"): win._refresh_tree()
-                if hasattr(win, "_refresh_grid"): win._refresh_grid()
+                if hasattr(win, "statusBar"):
+                    win.statusBar().showMessage(f"ℹ️ '{self.subject_name}' dersi {'+'.join(map(str, parts))} yapısına dönüştürüldü ({sum(parts)} saat).", 4000)
 
 
 class UnplacedLessonsDock(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
-        self.setFixedHeight(44)
+        self.setFixedHeight(46)
         
         self.layout = QHBoxLayout(self)
-        self.layout.setContentsMargins(0, 0, 0, 0)
-        self.layout.setSpacing(0)
+        self.layout.setContentsMargins(6, 0, 6, 0)
+        self.layout.setSpacing(8)
         
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -678,16 +705,175 @@ class UnplacedLessonsDock(QWidget):
         self.container.setAcceptDrops(True)
         self.container.setStyleSheet("background: transparent;")
         self.container_layout = QHBoxLayout(self.container)
-        self.container_layout.setContentsMargins(6, 0, 6, 0)
+        self.container_layout.setContentsMargins(4, 0, 4, 0)
         self.container_layout.setSpacing(6)
         self.container_layout.setAlignment(Qt.AlignLeft)
         
         self.scroll.setWidget(self.container)
-        self.layout.addWidget(self.scroll)
+        self.layout.addWidget(self.scroll, 1)
+        
+        # 'Daha Fazla Ders Ekle' button
+        self.btn_add_more = QPushButton("➕ Daha Fazla Ders Ekle...")
+        self.btn_add_more.setCursor(Qt.PointingHandCursor)
+        self.btn_add_more.setFixedHeight(30)
+        self.btn_add_more.setStyleSheet("""
+            QPushButton {
+                background: #4F46E5;
+                color: #FFFFFF;
+                font-family: 'Segoe UI', system-ui;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 4px 12px;
+                border-radius: 6px;
+                border: 1px solid #4338CA;
+            }
+            QPushButton:hover {
+                background: #4338CA;
+                border-color: #3730A3;
+            }
+            QPushButton:pressed {
+                background: #3730A3;
+            }
+        """)
+        self.btn_add_more.clicked.connect(self._on_add_more_clicked)
+        self.layout.addWidget(self.btn_add_more)
         
         self.scroll.installEventFilter(self)
         self.scroll.viewport().installEventFilter(self)
         self.container.installEventFilter(self)
+
+    def _on_add_more_clicked(self):
+        win = self.window()
+        if not hasattr(win, "data_store") and hasattr(win, "parent") and hasattr(win.parent(), "data_store"):
+            win = win.parent()
+        if not win or not hasattr(win, "data_store"):
+            return
+            
+        grid = getattr(win, "_grid", None)
+        display_mode = getattr(grid, "current_view_mode", "classes") if grid else "classes"
+        
+        # Determine active entity (class or teacher)
+        target_entity = None
+        if grid and hasattr(grid, "table"):
+            cur_r = grid.table.currentRow()
+            if cur_r < 0 and hasattr(grid, "_current_selected_pos") and grid._current_selected_pos:
+                cur_r = grid._current_selected_pos[0]
+            if cur_r >= 0:
+                if display_mode == "classes" and hasattr(grid, "class_list") and cur_r < len(grid.class_list):
+                    target_entity = grid.class_list[cur_r]
+                elif display_mode == "teachers" and hasattr(grid, "teacher_list") and cur_r < len(grid.teacher_list):
+                    target_entity = grid.teacher_list[cur_r]
+                    
+        if not target_entity and hasattr(win, "_tree"):
+            cur_item = win._tree.currentItem()
+            if cur_item and cur_item.parent():
+                target_entity = cur_item.data(0, Qt.UserRole)
+                
+        atamalar = win.data_store.get("atamalar", [])
+        from auto_scheduler import matches_class, format_tr_name, normalize_clean
+        
+        # Build menu of lessons
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu { background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 8px; padding: 4px; font-family: 'Segoe UI', system-ui; font-size: 12px; }
+            QMenu::item { padding: 6px 20px; border-radius: 4px; }
+            QMenu::item:selected { background: #EEF2FF; color: #4338CA; font-weight: bold; }
+            QMenu::separator { height: 1px; background: #E2E8F0; margin: 4px 8px; }
+        """)
+        
+        relevant_assignments = []
+        if target_entity:
+            if display_mode == "classes":
+                relevant_assignments = [
+                    a for a in atamalar
+                    if matches_class(a.get("class", ""), target_entity) or
+                       (a.get("is_combined") and any(matches_class(cc, target_entity) for cc in a.get("combined_classes", []))) or
+                       ("+" in str(a.get("class", "")) and any(matches_class(p, target_entity) for p in str(a.get("class", "")).replace("&", "+").replace(",", "+").split("+") if p.strip()))
+                ]
+            else:
+                relevant_assignments = [
+                    a for a in atamalar
+                    if format_tr_name(a.get("teacher", "")) == format_tr_name(target_entity)
+                ]
+        if not relevant_assignments:
+            relevant_assignments = atamalar
+            
+        if not relevant_assignments:
+            for d in win.data_store.get("dersler", []):
+                s_name = d.get("ad", "").strip()
+                if s_name:
+                    relevant_assignments.append({"subject": s_name, "class": target_entity or "", "teacher": "", "duration": 2})
+                    
+        title_act = menu.addAction(f"📚 {target_entity or 'Genel'} — Eklenecek Dersi Seçin:")
+        title_act.setEnabled(False)
+        menu.addSeparator()
+        
+        seen = set()
+        for idx, a in enumerate(relevant_assignments):
+            s_name = (a.get("subject") or a.get("ders") or "Ders").strip()
+            t_name = format_tr_name(a.get("teacher") or a.get("ogretmen") or "")
+            c_name = (a.get("class") or a.get("sinif") or target_entity or "").strip()
+            key = (s_name, t_name, c_name)
+            if key in seen:
+                continue
+            seen.add(key)
+            
+            sub_menu = menu.addMenu(f"📖 {s_name}  ({t_name or 'Öğretmen Yok'})")
+            sub_menu.setStyleSheet(menu.styleSheet())
+            
+            act_1 = sub_menu.addAction("1 Saat Ekle (Tekli)")
+            act_2 = sub_menu.addAction("2 Saat Ekle (İkili Blok)")
+            act_2_2 = sub_menu.addAction("2+2 Saat Ekle (2x İkili Blok)")
+            
+            def make_handler(sn, tn, cn, dur_choice):
+                return lambda: self._add_custom_card(sn, tn, cn, dur_choice)
+                
+            act_1.triggered.connect(make_handler(s_name, t_name, c_name, 1))
+            act_2.triggered.connect(make_handler(s_name, t_name, c_name, 2))
+            act_2_2.triggered.connect(make_handler(s_name, t_name, c_name, 4))
+            
+        from PySide6.QtCore import QPoint
+        menu.exec_(self.btn_add_more.mapToGlobal(QPoint(0, self.btn_add_more.height())))
+
+    def _add_custom_card(self, s_name, t_name, c_name, duration):
+        win = self.window()
+        if not hasattr(win, "data_store") and hasattr(win, "parent") and hasattr(win.parent(), "data_store"):
+            win = win.parent()
+        data_store = getattr(win, "data_store", {})
+        from dialogs.color_picker_dialog import resolve_subject_color
+        color = resolve_subject_color(s_name, data_store)
+        grid = getattr(win, "_grid", None)
+        display_mode = getattr(grid, "current_view_mode", "classes") if grid else "classes"
+        
+        card_durs = [2, 2] if duration == 4 else [duration]
+        
+        self.container_layout.setAlignment(Qt.AlignLeft)
+        # Remove empty message widget if exists
+        for i in range(self.container_layout.count()):
+            item = self.container_layout.itemAt(i)
+            if item and item.widget() and not isinstance(item.widget(), DraggableLessonCard):
+                w = item.widget()
+                self.container_layout.removeWidget(w)
+                w.hide()
+                w.deleteLater()
+                break
+                
+        last_card = None
+        for cd in card_durs:
+            cid = f"manual_{s_name}_{c_name}_{uuid.uuid4().hex[:6]}"
+            card = DraggableLessonCard(
+                cid, s_name, color, duration=cd, teacher=t_name,
+                class_name=c_name, display_mode=display_mode
+            )
+            card.setAcceptDrops(True)
+            card.installEventFilter(self)
+            self.container_layout.addWidget(card)
+            last_card = card
+            
+        if last_card:
+            self.scroll.ensureWidgetVisible(last_card)
+        if win and hasattr(win, "statusBar"):
+            win.statusBar().showMessage(f"➕ '{s_name}' ders kartı yerleştirilmek üzere alt panele eklendi.", 4000)
 
     def eventFilter(self, watched, event):
         from PySide6.QtCore import QEvent

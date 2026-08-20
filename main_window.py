@@ -1111,18 +1111,18 @@ class MainWindow(QMainWindow):
                             
                             span = 1
                             cell_bid = cell_info.get("block_id")
-                            while p + span < periods:
+                            while p + span < periods and span < 2:
                                 next_info = t_matrix[matrix_idx][p + span]
                                 if not next_info or not next_info.get("subject_name"):
                                     break
                                 next_bid = next_info.get("block_id")
-                                # block_id varsa: sadece aynı block_id birleşir
+                                # block_id varsa: sadece aynı block_id birleşir (max 2 saat)
                                 if cell_bid and next_bid:
                                     if cell_bid == next_bid:
                                         span += 1
                                     else:
                                         break
-                                # Legacy (block_id yok): tüm özellikler eşleşmeli
+                                # Legacy (block_id yok): tüm özellikler eşleşmeli (max 2 saat)
                                 elif (next_info.get("subject_name") == s_name
                                         and next_info.get("class_name") == c_name
                                         and next_info.get("teacher_name") == cell_info["teacher_name"]
@@ -1224,18 +1224,18 @@ class MainWindow(QMainWindow):
                             
                             span = 1
                             cell_bid = cell_info.get("block_id")
-                            while p + span < periods:
+                            while p + span < periods and span < 2:
                                 next_info = c_matrix[matrix_idx][p + span]
                                 if not next_info or not next_info.get("subject_name"):
                                     break
                                 next_bid = next_info.get("block_id")
-                                # block_id varsa: sadece aynı block_id birleşir
+                                # block_id varsa: sadece aynı block_id birleşir (max 2 saat)
                                 if cell_bid and next_bid:
                                     if cell_bid == next_bid:
                                         span += 1
                                     else:
                                         break
-                                # Legacy (block_id yok): tüm özellikler + is_combined eşleşmeli
+                                # Legacy (block_id yok): tüm özellikler + is_combined eşleşmeli (max 2 saat)
                                 elif (next_info.get("subject_name") == s_name
                                         and next_info.get("class_name") == tc
                                         and next_info.get("teacher_name") == t_name
@@ -1997,12 +1997,15 @@ class MainWindow(QMainWindow):
                     check_p = period_idx + ext
                     if day_idx < len(c_timeoff) and check_p < len(c_timeoff[day_idx]):
                         if c_timeoff[day_idx][check_p] == 0:
-                            QMessageBox.warning(
-                                self, "Sınıf Kısıtlama Engeli",
-                                f"⚠️ '{chk_c}' sınıfının {day_name} günü {check_p+1}. ders saati 'KAPALI' olarak kısıtlanmıştır!\nDers yerleştirilemez."
+                            ret = QMessageBox.warning(
+                                self, "Sınıf Kısıtlama Uyarısı",
+                                f"⚠️ <b>'{chk_c}'</b> sınıfının <b>{day_name}</b> günü <b>{check_p+1}. ders saati</b> 'KAPALI' olarak kısıtlanmıştır.<br><br>"
+                                "Yine de kısıtlamayı yok sayıp bu dersi yerleştirmek istiyor musunuz?",
+                                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
                             )
-                            self.statusBar().showMessage(f"Sınıf Kısıtlama engeli: {chk_c} - {day_name} {check_p+1}. saat kapalı!")
-                            return
+                            if ret != QMessageBox.Yes:
+                                self.statusBar().showMessage(f"İptal edildi: {chk_c} - {day_name} {check_p+1}. saat kapalı!")
+                                return
 
         # Öğretmen Timeoff Kontrolü (Global Kisitlamalar ve Yerel Timeoff)
         if teacher:
@@ -2016,22 +2019,28 @@ class MainWindow(QMainWindow):
                 # Global çapraz kısıtlama
                 is_available = kisitlamalar.get(teacher, {}).get(cell_key, True)
                 if not is_available:
-                    QMessageBox.warning(
-                        self, "Kısıtlama Engeli",
-                        f"⚠️ '{teacher}' öğretmeninin {day_name} günü {check_p+1}. ders saatinde 'ÇALIŞAMAZ / KAPALI' kısıtlaması bulunmaktadır!\nDers yerleştirilemez."
+                    ret = QMessageBox.warning(
+                        self, "Kısıtlama Uyarısı",
+                        f"⚠️ <b>'{teacher}'</b> öğretmeninin <b>{day_name}</b> günü <b>{check_p+1}. ders saatinde</b> 'ÇALIŞAMAZ / KAPALI' kısıtlaması bulunmaktadır.<br><br>"
+                        "Yine de kısıtlamayı yok sayıp bu dersi yerleştirmek istiyor musunuz?",
+                        QMessageBox.Yes | QMessageBox.No, QMessageBox.No
                     )
-                    self.statusBar().showMessage(f"Kısıtlama engeli: {teacher} - {day_name} {check_p+1}. saat kapalı!")
-                    return
+                    if ret != QMessageBox.Yes:
+                        self.statusBar().showMessage(f"İptal edildi: {teacher} - {day_name} {check_p+1}. saat kapalı!")
+                        return
                     
                 # Yerel timeoff (Grid üzerinden ayarlanan)
                 if t_timeoff and day_idx < len(t_timeoff) and check_p < len(t_timeoff[day_idx]):
                     if t_timeoff[day_idx][check_p] == 0:
-                        QMessageBox.warning(
-                            self, "Öğretmen Kısıtlama Engeli",
-                            f"⚠️ '{teacher}' öğretmeninin {day_name} günü {check_p+1}. ders saati 'KAPALI' olarak kısıtlanmıştır!\nDers yerleştirilemez."
+                        ret = QMessageBox.warning(
+                            self, "Öğretmen Kısıtlama Uyarısı",
+                            f"⚠️ <b>'{teacher}'</b> öğretmeninin <b>{day_name}</b> günü <b>{check_p+1}. ders saati</b> 'KAPALI' olarak kısıtlanmıştır.<br><br>"
+                            "Yine de kısıtlamayı yok sayıp bu dersi yerleştirmek istiyor musunuz?",
+                            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
                         )
-                        self.statusBar().showMessage(f"Öğretmen Kısıtlama engeli: {teacher} - {day_name} {check_p+1}. saat kapalı!")
-                        return
+                        if ret != QMessageBox.Yes:
+                            self.statusBar().showMessage(f"İptal edildi: {teacher} - {day_name} {check_p+1}. saat kapalı!")
+                            return
 
         # ── 3. KONTROL: Öğretmen Çakışması Kontrolü
         teacher_info = next((t for t in self.data_store.get("ogretmenler", []) if format_tr_name(t.get("ad", "")) == teacher), {})
@@ -2780,15 +2789,15 @@ class MainWindow(QMainWindow):
             self.data_store["yerlesim"] = {}
             if hasattr(self, "_grid"):
                 self._grid.clear_grid()
-            self.save_db(sync_from_grid=False)
             slug = getattr(self, "institution_slug", None)
-            ver_fn = getattr(self, "version_filename", None)
-            if slug and ver_fn:
+            if slug:
                 import version_store
-                version_store.update_version_in_place(slug, ver_fn, self.data_store)
+                new_fn = version_store.save_version(slug, self.data_store, source="manual", note="Çizelge Sıfırlandı")
+                self.version_filename = new_fn
+            self.save_db(sync_from_grid=False)
             self._refresh_grid()
             self._refresh_tree()
-            self.statusBar().showMessage("🧹 Tüm çizelge dersleri başarıyla sıfırlandı ve anlık kaydedildi.")
+            self.statusBar().showMessage("🧹 Tüm çizelge dersleri başarıyla sıfırlandı ve yeni sürüme kaydedildi.")
 
     def _open_extracted(self, dialog_id):
         from dialogs.extracted_dialog import open_extracted_dialog

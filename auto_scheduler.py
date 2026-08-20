@@ -463,10 +463,10 @@ class AutoSchedulerWorker(QThread):
                         if cell is None:
                             p += 1
                             continue
-                        # Find span of same block_id
+                        # Find span of same block_id (strictly max 2 hours per block)
                         bid = cell["block_id"]
                         span = 1
-                        while p + span < P and grid[d][p + span] is not None and grid[d][p + span]["block_id"] == bid:
+                        while p + span < P and span < 2 and grid[d][p + span] is not None and grid[d][p + span]["block_id"] == bid:
                             span += 1
                         
                         attempt_placements.append({
