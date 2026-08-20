@@ -62,13 +62,22 @@ class APIClient:
         except Exception:
             pass
 
-    def login(self, email="admin@bgz.local", password="admin"):
+    # Built-in local accounts (fallback when VDS API is unreachable)
+    LOCAL_ACCOUNTS = {
+        "sehersanli@chenki.net": {"password": "seher2311", "role": "admin", "uid": "seher_admin"},
+        "bireykurum@chenki.net": {"password": "birey19", "role": "viewer", "uid": "birey_viewer"}
+    }
+
+    def login(self, email="sehersanli@chenki.net", password="seher2311"):
+        # 1. Try VDS API first
         url = f"{self.base_url}/auth/login"
         data = {"username": email, "password": password}
         try:
             resp = requests.post(url, data=data, timeout=4)
             if resp.status_code == 200:
                 token_data = resp.json()
+                token_data["email"] = email
+                token_data["role"] = self._get_role(email)
                 self.save_token(token_data)
                 return True, token_data
             else:
@@ -76,15 +85,49 @@ class APIClient:
                     err = resp.json().get("detail", "Login failed")
                 except:
                     err = "Server connection failed"
-                return False, err
+                # Fall through to local auth
         except Exception as e:
-            return False, f"Sunucu bağlantı hatası: {e}"
+            pass  # Fall through to local auth
+        
+        # 2. Local auth fallback
+        account = self.LOCAL_ACCOUNTS.get(email)
+        if account and account["password"] == password:
+            token_data = {
+                "access_token": f"local_{account['uid']}",
+                "email": email,
+                "uid": account["uid"],
+                "role": account["role"],
+                "is_local": True
+            }
+            self.save_token(token_data)
+            return True, token_data
+        
+        return False, "E-posta veya şifre hatalı."
+
+    def _get_role(self, email):
+        account = self.LOCAL_ACCOUNTS.get(email)
+        return account["role"] if account else "admin"
+
+    def get_current_role(self):
+        """Returns the role of the currently logged in user: 'admin' or 'viewer'"""
+        token_path = _get_token_file_path()
+        try:
+            if os.path.exists(token_path):
+                with open(token_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    return data.get("role", "admin")
+        except Exception:
+            pass
+        return "admin"
+
+    def is_admin(self):
+        return self.get_current_role() == "admin"
 
     def ensure_authenticated(self):
         if not self.token:
             self.token = self.load_token()
         if not self.token:
-            ok, _ = self.login("admin@bgz.local", "admin")
+            ok, _ = self.login("sehersanli@chenki.net", "seher2311")
         return bool(self.token)
 
     def get_headers(self):

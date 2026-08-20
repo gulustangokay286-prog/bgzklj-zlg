@@ -1232,7 +1232,10 @@ class AppleInstitutionCard(QFrame):
                 act_primary_dis.setEnabled(False)
             menu.addSeparator()
             
-        act_rename = menu.addAction("Yeniden Adlandır")
+        if self.is_master_admin:
+            act_rename = menu.addAction("Yeniden Adlandır")
+        else:
+            act_rename = None
         act_color = menu.addAction("Renk Değiştir")
         
         menu.addSeparator()
@@ -1257,7 +1260,7 @@ class AppleInstitutionCard(QFrame):
             version_store.set_primary_institution(self.slug)
             show_apple_info(self, "Ana Kurum Güncellendi", f"'{self.inst_name}' varsayılan ana kurum olarak ayarlandı.", is_success=True)
             self._notify_parent_refresh()
-        elif action == act_rename:
+        elif act_rename and action == act_rename:
             dlg = AppleInputDialog("Kurum Adı", "Yeni kurum adı:", default_text=self.inst_name, parent=self)
             if dlg.exec() == QDialog.Accepted and dlg.text_value():
                 new_name = dlg.text_value()
@@ -1691,9 +1694,10 @@ class HomeDashboard(QWidget):
         
         user_email = self.auth_data.get("email", "").lower()
         user_role = self.auth_data.get("role", "").lower()
-        is_guest = bool(self.auth_data.get("is_guest") or self.auth_data.get("is_shared") or user_role in ["guest", "shared"])
-        # Master admin can delete institutions and change/remove passwords; shared/guest accounts cannot
-        self.is_master_admin = True if ("admin" in user_email or not user_email or not is_guest) else False
+        is_guest = bool(self.auth_data.get("is_guest") or self.auth_data.get("is_shared") or user_role in ["guest", "shared", "viewer"])
+        # Master admin can delete institutions and change/remove passwords; viewer/guest accounts cannot
+        from api_client import api_client
+        self.is_master_admin = api_client.is_admin() and not is_guest
         self.display_name = get_user_display_name(user_email, self)
         
         version_store.migrate_existing_data()
