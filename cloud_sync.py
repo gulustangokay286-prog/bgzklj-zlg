@@ -169,6 +169,19 @@ class CloudSyncWorker(QObject):
                 now = time.time()
                 if self._pull_requested or self._last_pull_time + self._poll_interval() < now:
                     self._pull_requested = False
+
+                    # Retire any deletions that never reached the server — the app
+                    # may have been offline, or closed before the request completed.
+                    # This runs BEFORE the pull, so a still-pending delete is pushed
+                    # up before the server has a chance to hand the version back.
+                    try:
+                        import version_store
+                        confirmed = version_store.flush_pending_deletes()
+                        if confirmed:
+                            print(f"[CloudSync] {confirmed} bekleyen silme işlemi tamamlandı")
+                    except Exception as exc:
+                        print(f"[CloudSync] pending delete flush note: {exc}")
+
                     try:
                         pull_ok, msg, new_count = api_client.pull_all_from_rtdb(self.auth_data)
                         if pull_ok:

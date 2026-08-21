@@ -313,6 +313,15 @@ class APIClient:
             self._merge_meta(inst_dir, _strip_versions(inst.get("meta") or {}), inst.get("name"))
             changed += 1
 
+        # Local tombstones are read once per institution rather than per version;
+        # each read parses meta.json.
+        tombstones_by_slug = {}
+
+        def _tombstones(slug):
+            if slug not in tombstones_by_slug:
+                tombstones_by_slug[slug] = version_store.list_tombstones(slug)
+            return tombstones_by_slug[slug]
+
         for ver in payload.get("versions", []):
             slug = ver.get("slug")
             filename = ver.get("filename")
@@ -322,10 +331,10 @@ class APIClient:
             target = os.path.join(ver_dir, filename)
 
             if ver.get("deleted"):
-                # A tombstone. Honouring it is what finally makes a delete stick:
-                # previously local files were never removed on pull, so a version
-                # deleted on one device stayed on every other one and kept being
-                # re-uploaded.
+                # The server says this was deleted. Record it locally as well, so the
+                # deletion survives even if this device never sees that delta again.
+                version_store.merge_tombstones(slug, [filename])
+                tombstones_by_slug.pop(slug, None)
                 if os.path.exists(target):
                     try:
                         os.remove(target)
@@ -333,6 +342,24 @@ class APIClient:
                         changed += 1
                     except OSError:
                         pass
+                continue
+
+            # THE resurrection bug. This branch used to write whatever the server
+            # sent, with no regard for whether the user had deleted it here. So a
+            # delete that had not yet stuck server-side — or that another device had
+            # re-uploaded — came straight back down on the very next poll, over and
+            # over. A locally tombstoned version is never written, and any copy
+            # already on disk is removed instead.
+            if filename in _tombstones(slug):
+                if os.path.exists(target):
+                    try:
+                        os.remove(target)
+                        version_store.invalidate_version_summary(slug, filename)
+                        changed += 1
+                    except OSError:
+                        pass
+                # Re-assert the deletion against the server; it evidently still has it.
+                version_store.queue_cloud_delete(slug, filename)
                 continue
 
             data = ver.get("data")
@@ -420,8 +447,13 @@ class APIClient:
 
             self._merge_meta(inst_dir, _strip_versions(inst_obj.get("meta") or {}))
 
-            # Tombstones tell us which local files to drop.
-            for filename in inst_obj.get("tombstones", []) or []:
+            # Tombstones tell us which local files to drop. Record them locally too,
+            # so this device keeps refusing the version even if the server later
+            # forgets (an older build, or a purge of old tombstones).
+            server_tombstones = inst_obj.get("tombstones", []) or []
+            if server_tombstones:
+                version_store.merge_tombstones(slug, server_tombstones)
+            for filename in server_tombstones:
                 target = os.path.join(ver_dir, filename)
                 if os.path.exists(target):
                     try:
@@ -430,6 +462,10 @@ class APIClient:
                         synced += 1
                     except OSError:
                         pass
+
+            # Anything tombstoned locally but still present on disk (restored by an
+            # older build before these rules existed) goes now.
+            synced += version_store.enforce_tombstones(slug)
 
             index = inst_obj.get("version_index")
             if index:
@@ -488,9 +524,25 @@ class APIClient:
 
         synced = 0
         wanted = set()
+        # Deleted here means deleted, whatever the server's index still advertises.
+        # Without this check the index branch happily re-downloaded a version the
+        # user had just removed.
+        tombstoned = version_store.list_tombstones(slug)
+
         for entry in index:
             filename = entry.get("filename")
             if not filename:
+                continue
+            if filename in tombstoned:
+                target = os.path.join(ver_dir, filename)
+                if os.path.exists(target):
+                    try:
+                        os.remove(target)
+                        version_store.invalidate_version_summary(slug, filename)
+                        synced += 1
+                    except OSError:
+                        pass
+                version_store.queue_cloud_delete(slug, filename)
                 continue
             wanted.add(filename)
             target = os.path.join(ver_dir, filename)
@@ -573,6 +625,19 @@ class APIClient:
             merged.setdefault("name", name)
         merged.pop("versions", None)
 
+        # Tombstones are UNIONED, never replaced. merged.update() above takes the
+        # server's list wholesale, and the server is always at least one round-trip
+        # behind a delete made here a moment ago — so overwriting would silently drop
+        # that tombstone and let the version come back on the very next pull. This is
+        # also how a deletion made on Windows reaches a Mac: the union travels in
+        # both directions through the institution meta.
+        combined_tombstones = list(local_meta.get("tombstones", []) or [])
+        for name_ in (remote_meta.get("tombstones", []) or []):
+            if name_ not in combined_tombstones:
+                combined_tombstones.append(name_)
+        if combined_tombstones:
+            merged["tombstones"] = combined_tombstones[-2000:]
+
         local_folders = {f.get("id"): f for f in local_meta.get("folders", []) if isinstance(f, dict) and f.get("id")}
         remote_folders = {f.get("id"): f for f in remote_meta.get("folders", []) if isinstance(f, dict) and f.get("id")}
         deleted_folders = set(local_meta.get("deleted_folders", []))
@@ -602,6 +667,16 @@ class APIClient:
     def push_version_to_rtdb(self, slug, filename, roz_data, auth_data=None):
         if not isinstance(roz_data, dict) or not roz_data:
             return False
+
+        # Never upload something this device has deleted. This is the half of the
+        # loop that made a delete un-stick across machines: device A deletes, device
+        # B still has the file and pushes it on its next save or manual sync, and the
+        # version reappears on A. Re-assert the deletion instead.
+        import version_store
+        if version_store.is_tombstoned(slug, filename):
+            version_store.queue_cloud_delete(slug, filename)
+            return False
+
         url = f"{self.base_url}/api/sync/{slug}/{filename_to_key(filename)}"
         resp = self._request_with_retry("PUT", url, json=roz_data, timeout=25)
         if resp is None or resp.status_code not in (200, 201):

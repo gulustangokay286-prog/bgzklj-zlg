@@ -1292,10 +1292,16 @@ def list_versions(slug: str, source_filter: str = "all") -> list:
         return []
 
     folders_by_id = {f.get("id"): f.get("name", "") for f in list_folders(slug)}
+    # Last line of defence: a deleted version is never listed, even if some sync
+    # path managed to put the file back on disk. Whatever else goes wrong, the user
+    # does not see something they deleted.
+    tombstoned = list_tombstones(slug)
     versions = []
 
     for f in sorted(os.listdir(ver_dir), reverse=True):
         if not f.endswith(".roz"):
+            continue
+        if f in tombstoned:
             continue
         filepath = os.path.join(ver_dir, f)
 
@@ -1389,35 +1395,260 @@ def load_version(slug: str, version_filename: str) -> dict:
             print(f"Error loading version {version_filename}: {e}")
             return {}
 
-def delete_version(slug: str, version_filename: str):
+def delete_version(slug: str, version_filename: str) -> bool:
+    """Deletes a version permanently, on this device and everywhere else.
+
+    A delete has to survive three separate things that were each individually
+    capable of undoing it:
+
+      1. The local file coming back on the next cloud pull. Handled by the
+         tombstone written below, which every read and write path now consults.
+      2. The cloud DELETE silently failing (offline, expired token, timeout). The
+         old code fired it into a daemon thread and never looked at the result, so
+         a delete made on a laptop with no connection simply never happened. It is
+         now queued and retried until the server confirms it.
+      3. Another device that still holds the file uploading it again. It cannot:
+         a tombstoned filename is refused by the push path, and the tombstone list
+         travels between devices inside the institution meta.
+    """
+    if not slug or not version_filename:
+        return False
+
+    add_tombstone(slug, version_filename)
+
     filepath = os.path.join(_versions_dir(slug), version_filename)
     if os.path.exists(filepath):
         try:
             os.remove(filepath)
-        except OSError:
-            pass
+        except OSError as exc:
+            print(f"[version_store] could not remove {version_filename}: {exc}")
     invalidate_version_summary(slug, version_filename)
 
-    # Record tombstone in meta.json so cloud pull will never revive it
+    queue_cloud_delete(slug, version_filename)
+
+    # If the deleted version was the active one, promote whatever remains.
+    try:
+        meta = get_institution_meta(slug)
+        if meta.get("active_version") == version_filename:
+            remaining = list_versions(slug)
+            set_active_version(slug, remaining[0]["filename"] if remaining else None)
+    except Exception:
+        pass
+
+    return True
+
+
+# ── Tombstones ───────────────────────────────────────────────────────
+# A tombstone is the record that a version was deliberately deleted. It has to
+# outlive the file itself, because the whole problem is other copies of that file
+# trying to come back. Stored in the institution's meta.json, which is pushed to and
+# pulled from the VDS, so the deletion reaches other devices even when the server is
+# running an older build that cannot express one itself.
+
+def list_tombstones(slug: str) -> set:
+    """Filenames deleted from this institution."""
+    if not slug:
+        return set()
+    return set(get_institution_meta(slug).get("tombstones", []) or [])
+
+
+def is_tombstoned(slug: str, filename: str) -> bool:
+    return bool(slug and filename and filename in list_tombstones(slug))
+
+
+def add_tombstone(slug: str, filename: str) -> bool:
+    if not slug or not filename:
+        return False
     meta_path = os.path.join(_base_dir(), slug, "meta.json")
-    if os.path.exists(meta_path):
-        try:
-            with open(meta_path, "r", encoding="utf-8") as f:
-                meta = json.load(f)
-            tombstones = meta.setdefault("tombstones", [])
-            if version_filename not in tombstones:
-                tombstones.append(version_filename)
-            _atomic_write_json(meta_path, meta)
-            _invalidate_meta_cache(slug)
-        except Exception:
-            pass
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception:
+        meta = {"name": slug}
+
+    tombstones = list(meta.get("tombstones", []) or [])
+    if filename in tombstones:
+        return True
+    tombstones.append(filename)
+    # Keep the list bounded; the oldest entries are for versions no device can still
+    # be holding. 2000 is far more than any real institution accumulates.
+    meta["tombstones"] = tombstones[-2000:]
+
+    if not _atomic_write_json(meta_path, meta):
+        return False
+    _invalidate_meta_cache(slug)
 
     try:
         import threading
-        from cloud_sync import delete_version_from_rtdb
-        threading.Thread(target=delete_version_from_rtdb, args=(slug, version_filename), daemon=True).start()
+        import cloud_sync
+        threading.Thread(target=cloud_sync.push_institution_to_rtdb, args=(slug,), daemon=True).start()
     except Exception:
         pass
+    return True
+
+
+def remove_tombstone(slug: str, filename: str) -> bool:
+    """Lifts a tombstone, so the version may sync back down again.
+
+    Only for an explicit "restore this" action — never call it to make a sync
+    succeed, which would recreate exactly the bug tombstones exist to prevent.
+    """
+    if not slug or not filename:
+        return False
+    meta_path = os.path.join(_base_dir(), slug, "meta.json")
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception:
+        return False
+    tombstones = [t for t in (meta.get("tombstones", []) or []) if t != filename]
+    meta["tombstones"] = tombstones
+    if not _atomic_write_json(meta_path, meta):
+        return False
+    _invalidate_meta_cache(slug)
+    return True
+
+
+def merge_tombstones(slug: str, incoming) -> set:
+    """Unions tombstones arriving from the cloud into the local list.
+
+    Union, never replace: a device that deleted something a moment ago has a
+    tombstone the server has not heard about yet, and overwriting the local list
+    with the server's copy would drop it and let the file come straight back.
+    """
+    if not slug:
+        return set()
+    incoming = {t for t in (incoming or []) if t}
+    if not incoming:
+        return list_tombstones(slug)
+
+    meta_path = os.path.join(_base_dir(), slug, "meta.json")
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception:
+        meta = {"name": slug}
+
+    current = list(meta.get("tombstones", []) or [])
+    merged = list(current)
+    for name in incoming:
+        if name not in merged:
+            merged.append(name)
+    if len(merged) != len(current):
+        meta["tombstones"] = merged[-2000:]
+        _atomic_write_json(meta_path, meta)
+        _invalidate_meta_cache(slug)
+    return set(merged)
+
+
+def enforce_tombstones(slug: str) -> int:
+    """Deletes any local file that is tombstoned. Returns how many were removed.
+
+    A safety net for files an older build restored before the tombstone rules
+    existed, and for anything a partially-completed sync left behind.
+    """
+    removed = 0
+    tombstones = list_tombstones(slug)
+    if not tombstones:
+        return 0
+    ver_dir = _versions_dir(slug)
+    for filename in tombstones:
+        path = os.path.join(ver_dir, filename)
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+                invalidate_version_summary(slug, filename)
+                removed += 1
+            except OSError:
+                pass
+    return removed
+
+
+# ── Durable cloud-delete queue ───────────────────────────────────────
+# Deletions used to be fired at the server from a daemon thread whose result was
+# never checked. Anything that made that one request fail — being offline, an
+# expired token, a timeout — meant the server kept the version and handed it back on
+# the next poll. Queued deletions are retried until the server actually confirms.
+
+def _pending_deletes_path() -> str:
+    return os.path.join(os.path.expanduser("~"), ".chenki_akademi", "pending_deletes.json")
+
+
+def _load_pending_deletes() -> list:
+    try:
+        with open(_pending_deletes_path(), "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _save_pending_deletes(items: list):
+    _atomic_write_json(_pending_deletes_path(), items)
+
+
+def queue_cloud_delete(slug: str, filename: str):
+    """Records a deletion to push to the VDS, and tries once immediately."""
+    items = _load_pending_deletes()
+    if not any(i.get("slug") == slug and i.get("filename") == filename for i in items):
+        items.append({
+            "slug": slug,
+            "filename": filename,
+            "queued_at": datetime.now().isoformat(),
+            "attempts": 0,
+        })
+        _save_pending_deletes(items)
+
+    try:
+        import threading
+        threading.Thread(target=flush_pending_deletes, daemon=True).start()
+    except Exception:
+        pass
+
+
+def flush_pending_deletes() -> int:
+    """Retries every queued deletion. Returns how many the server confirmed.
+
+    Safe to call from a background thread and safe to call often — an entry is only
+    dropped once the server has actually accepted the delete.
+    """
+    items = _load_pending_deletes()
+    if not items:
+        return 0
+
+    try:
+        from api_client import api_client
+    except Exception:
+        return 0
+
+    confirmed = 0
+    remaining = []
+    for item in items:
+        slug = item.get("slug")
+        filename = item.get("filename")
+        if not (slug and filename):
+            continue
+        try:
+            ok = api_client.delete_version_from_rtdb(slug, filename)
+        except Exception:
+            ok = False
+        if ok:
+            confirmed += 1
+            continue
+        item["attempts"] = int(item.get("attempts", 0)) + 1
+        # Keep retrying for a long time, but not forever: after ~200 failed attempts
+        # the institution itself has almost certainly been deleted server-side, and
+        # the local tombstone already keeps the file from coming back regardless.
+        if item["attempts"] < 200:
+            remaining.append(item)
+
+    if len(remaining) != len(items):
+        _save_pending_deletes(remaining)
+    return confirmed
+
+
+def pending_delete_count() -> int:
+    return len(_load_pending_deletes())
     
     # If deleted version was active, set to latest remaining
     meta = get_institution_meta(slug)

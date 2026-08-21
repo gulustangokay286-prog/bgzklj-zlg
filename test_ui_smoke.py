@@ -13,6 +13,7 @@ import os
 import shutil
 import sys
 import tempfile
+import types
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -27,11 +28,45 @@ version_store._base_dir = lambda: os.path.join(SANDBOX, "institutions")
 
 
 class _NullCloud:
+    """Any attribute is a callable that succeeds and does nothing."""
+
+    def __getattr__(self, _name):
+        return lambda *a, **k: True
+
+
+class _FakeApiClient:
+    """Shaped like the real APIClient, but never touches the network."""
+
+    base_url = "http://localhost.invalid"
+    token = None
+
+    def is_admin(self):
+        return True
+
+    def get_current_role(self):
+        return "admin"
+
+    def get_latest_release(self):
+        return None
+
     def __getattr__(self, _name):
         return lambda *a, **k: True
 
 
 # Keep every network path inert; this test is about widgets, not sync.
+#
+# cloud_sync and api_client MUST be stubbed, not just database: HomeDashboard starts
+# a CloudSyncWorker and a RealtimeSyncClient, and version_store.create_institution
+# pushes to the cloud from a background thread. Without these the test uploaded its
+# fixtures to the REAL production VDS — "Smoke Okulu" showed up there and had to be
+# removed by hand.
+_fake_api_module = types.ModuleType("api_client")
+_fake_api_module.api_client = _FakeApiClient()
+_fake_api_module.token_manager = _fake_api_module.api_client
+_fake_api_module.filename_to_key = lambda name: (name or "").replace(".", "_")
+
+sys.modules["cloud_sync"] = _NullCloud()
+sys.modules["api_client"] = _fake_api_module
 sys.modules["database"] = _NullCloud()
 
 from PySide6.QtCore import QMimeData, QPoint, Qt  # noqa: E402
