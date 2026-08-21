@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QDialog, QCheckBox, QGraphicsDropShadowEffect, QGraphicsBlurEffect,
     QStackedLayout, QMenu, QSizePolicy
 )
-from PySide6.QtCore import Qt, Signal, QSize, QRectF, QPoint, QMimeData
+from PySide6.QtCore import Qt, Signal, QSize, QRectF, QPoint, QMimeData, QEvent
 from PySide6.QtGui import (
     QFont, QColor, QPainter, QPen, QBrush, QIcon, QPixmap,
     QPainterPath, QLinearGradient, QRadialGradient, QDrag
@@ -1520,12 +1520,14 @@ class CollapsibleVersionGroup(QFrame):
         # Icon
         icon_lbl = QLabel()
         icon_lbl.setPixmap(make_dashboard_icon(icon_name, color_hex, 18))
+        icon_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         hdr_lay.addWidget(icon_lbl)
 
         # Title
         title_lbl = QLabel(f"<b>{title}</b>")
         title_lbl.setFont(QFont("Segoe UI", 9.5, QFont.Bold))
         title_lbl.setStyleSheet("color: #0F172A;")
+        title_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         hdr_lay.addWidget(title_lbl)
 
         # Badge
@@ -1533,6 +1535,7 @@ class CollapsibleVersionGroup(QFrame):
             badge = QLabel(badge_text)
             badge.setFont(QFont("Segoe UI", 8, QFont.Bold))
             badge.setStyleSheet("background: #F1F5F9; color: #64748B; padding: 2px 8px; border-radius: 5px;")
+            badge.setAttribute(Qt.WA_TransparentForMouseEvents, True)
             hdr_lay.addWidget(badge)
 
         hdr_lay.addStretch(1)
@@ -1565,6 +1568,7 @@ class CollapsibleVersionGroup(QFrame):
         # Chevron icon
         self.chevron_lbl = QLabel()
         self.chevron_lbl.setPixmap(make_dashboard_icon("chevron_right" if is_collapsed else "chevron_down", "#86868B", 14))
+        self.chevron_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         hdr_lay.addWidget(self.chevron_lbl)
 
         self.main_lay.addWidget(self.header)
@@ -1579,6 +1583,29 @@ class CollapsibleVersionGroup(QFrame):
         self.content_widget.setVisible(not is_collapsed)
 
         self.header.mousePressEvent = self._toggle_collapse
+
+        if is_drop_target:
+            self.header.setAcceptDrops(True)
+            self.header.installEventFilter(self)
+            self.content_widget.setAcceptDrops(True)
+            self.content_widget.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if self.is_drop_target:
+            t = event.type()
+            if t == QEvent.DragEnter:
+                self.dragEnterEvent(event)
+                return event.isAccepted()
+            elif t == QEvent.DragMove:
+                self.dragMoveEvent(event)
+                return event.isAccepted()
+            elif t == QEvent.DragLeave:
+                self.dragLeaveEvent(event)
+                return True
+            elif t == QEvent.Drop:
+                self.dropEvent(event)
+                return event.isAccepted()
+        return super().eventFilter(obj, event)
 
     def _set_collapsed(self, collapsed: bool):
         self.is_collapsed = collapsed
@@ -1670,6 +1697,7 @@ class AppleVersionRow(QFrame):
         v_title.setFont(QFont("Segoe UI", 9.5, QFont.Bold))
         v_title.setStyleSheet("color: #0F172A; background: transparent; border: none;")
         v_title.setFixedWidth(95)
+        v_title.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         if version_info.get("has_number_collision"):
             v_title.setToolTip(
                 "Bu numara başka bir cihazda da kullanılmış. İçerikleri farklı olduğu "
@@ -1684,6 +1712,7 @@ class AppleVersionRow(QFrame):
         dt_lbl.setFont(QFont("Segoe UI", 8.5))
         dt_lbl.setStyleSheet("color: #64748B; background: transparent; border: none;")
         dt_lbl.setFixedWidth(135)
+        dt_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         layout.addWidget(dt_lbl)
         
         # Details: Stats badge + Note
@@ -1705,6 +1734,7 @@ class AppleVersionRow(QFrame):
             stats_badge.setFont(QFont("Segoe UI", 8))
             stats_badge.setStyleSheet("background: #F1F5F9; color: #64748B; border: 1px solid #E2E8F0; padding: 2px 8px; border-radius: 5px;")
             
+        stats_badge.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         layout.addWidget(stats_badge)
         
         note_text = version_info.get("note", "")
@@ -1717,6 +1747,7 @@ class AppleVersionRow(QFrame):
             note_lbl.setFont(QFont("Segoe UI", 8))
             note_lbl.setStyleSheet("color: #94A3B8; background: transparent; border: none;")
             note_lbl.setMaximumWidth(200)
+            note_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
             layout.addWidget(note_lbl)
         layout.addStretch(1)
             
@@ -1726,6 +1757,7 @@ class AppleVersionRow(QFrame):
         size_lbl.setStyleSheet("color: #94A3B8; background: transparent; border: none;")
         size_lbl.setFixedWidth(55)
         size_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        size_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         layout.addWidget(size_lbl)
         
         # Active Status Indicator / Action
