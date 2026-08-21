@@ -199,29 +199,25 @@ class AppShell(QMainWindow):
         self._open_timetable(slug, vf)
     
     def _go_home(self):
-        """Switch back to the dashboard smoothly, instantaneously and safely."""
+        """Switch back to the dashboard smoothly, instantaneously and safely.
+
+        Note: saving (with the folder-picker dialog, when there are unsaved changes) has
+        ALREADY happened by the time this runs — MainWindow._go_home does that itself and
+        only invokes this callback afterward (and only if the user didn't cancel the
+        picker), via self.go_home_requested. Re-doing the save here would just be redundant
+        duplicate logic racing the one above.
+        """
         editor = self._editor
         self._editor = None
-        
-        # 1. Save current work before going home (creates new version ONLY if modified)
+
         if editor:
             try:
                 slug = getattr(editor, "institution_slug", None)
-                ver_fn = getattr(editor, "version_filename", None)
                 if slug:
-                    import version_store
-                    if getattr(editor, "_is_dirty", False):
-                        new_vf = version_store.save_version(slug, editor.data_store, source="manual", note="Değişiklikler kaydedildi")
-                        version_store.set_active_version(slug, new_vf)
-                        editor.version_filename = new_vf
-                        editor._is_dirty = False
-                    elif ver_fn:
-                        version_store.update_version_in_place(slug, ver_fn, editor.data_store)
-                    version_store.touch_institution_timestamp(slug)
                     self._dashboard._selected_slug = slug
             except Exception as e:
-                print(f"[GO_HOME] Save error: {e}")
-                
+                print(f"[GO_HOME] Error: {e}")
+
             # 2. Cleanup background workers safely
             try:
                 if hasattr(editor, "cleanup"):
@@ -251,27 +247,16 @@ class AppShell(QMainWindow):
                 pass
 
     def closeEvent(self, event):
-        """Save active editor and flush database & cloud sync before closing the application."""
+        """Save active editor (asking which folder to save into, if there's anything new
+        to save) and flush database & cloud sync before closing the application."""
+        if self._editor and hasattr(self._editor, "_save_new_version_with_folder_picker"):
+            if not self._editor._save_new_version_with_folder_picker("Kapanış kaydı", force=False):
+                event.ignore()  # user cancelled the folder picker — don't close
+                return
+
         from save_dialog import run_apple_save_sequence
         run_apple_save_sequence(self, duration_seconds=0.2, title="Kapatılıyor", message="Veriler kaydedildi.")
-        
-        if self._editor and hasattr(self._editor, "data_store"):
-            try:
-                slug = getattr(self._editor, "institution_slug", None)
-                ver_fn = getattr(self._editor, "version_filename", None)
-                if slug:
-                    import version_store
-                    if getattr(self._editor, "_is_dirty", False):
-                        new_vf = version_store.save_version(slug, self._editor.data_store, source="manual", note="Kapanış kaydı")
-                        version_store.set_active_version(slug, new_vf)
-                        self._editor.version_filename = new_vf
-                        self._editor._is_dirty = False
-                    elif ver_fn:
-                        version_store.update_version_in_place(slug, ver_fn, self._editor.data_store)
-                    version_store.touch_institution_timestamp(slug)
-            except Exception as e:
-                print(f"[CLOSE] Auto-save error: {e}")
-                
+
         super().closeEvent(event)
 
     @property

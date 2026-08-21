@@ -11,10 +11,10 @@ from PySide6.QtWidgets import (
     QLineEdit, QDialog, QCheckBox, QGraphicsDropShadowEffect, QGraphicsBlurEffect,
     QStackedLayout, QMenu, QSizePolicy
 )
-from PySide6.QtCore import Qt, Signal, QSize, QRectF
+from PySide6.QtCore import Qt, Signal, QSize, QRectF, QPoint, QMimeData
 from PySide6.QtGui import (
     QFont, QColor, QPainter, QPen, QBrush, QIcon, QPixmap,
-    QPainterPath, QLinearGradient, QRadialGradient
+    QPainterPath, QLinearGradient, QRadialGradient, QDrag
 )
 
 import version_store
@@ -1375,6 +1375,36 @@ def make_dashboard_icon(name: str, color_hex: str = "#0071E3", size: int = 18) -
         p.setBrush(Qt.NoBrush)
         p.drawLine(int(size * 0.38), int(size * 0.25), int(size * 0.65), int(size * 0.5))
         p.drawLine(int(size * 0.65), int(size * 0.5), int(size * 0.38), int(size * 0.75))
+    elif name == "edit":
+        # Pencil
+        p.setPen(QPen(c, 1.8, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.setBrush(Qt.NoBrush)
+        path = QPainterPath()
+        path.moveTo(size * 0.18, size * 0.82)
+        path.lineTo(size * 0.22, size * 0.62)
+        path.lineTo(size * 0.65, size * 0.19)
+        path.lineTo(size * 0.81, size * 0.35)
+        path.lineTo(size * 0.38, size * 0.78)
+        path.closeSubpath()
+        p.drawPath(path)
+        p.setBrush(QBrush(c))
+        p.setPen(Qt.NoPen)
+        p.drawEllipse(QRectF(size * 0.15, size * 0.77, size * 0.1, size * 0.1))
+    elif name == "trash":
+        p.setPen(QPen(c, 1.8, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.setBrush(Qt.NoBrush)
+        p.drawLine(int(size * 0.22), int(size * 0.28), int(size * 0.78), int(size * 0.28))
+        p.drawLine(int(size * 0.38), int(size * 0.28), int(size * 0.42), int(size * 0.16))
+        p.drawLine(int(size * 0.42), int(size * 0.16), int(size * 0.58), int(size * 0.16))
+        p.drawLine(int(size * 0.58), int(size * 0.16), int(size * 0.62), int(size * 0.28))
+        path = QPainterPath()
+        path.moveTo(size * 0.28, size * 0.34)
+        path.lineTo(size * 0.32, size * 0.86)
+        path.lineTo(size * 0.68, size * 0.86)
+        path.lineTo(size * 0.72, size * 0.34)
+        p.drawPath(path)
+        p.drawLine(int(size * 0.42), int(size * 0.42), int(size * 0.44), int(size * 0.78))
+        p.drawLine(int(size * 0.58), int(size * 0.42), int(size * 0.56), int(size * 0.78))
     else:
         p.setBrush(QBrush(c))
         p.setPen(Qt.NoPen)
@@ -1383,12 +1413,27 @@ def make_dashboard_icon(name: str, color_hex: str = "#0071E3", size: int = 18) -
     p.end()
     return pix
 
-def get_user_display_name(email: str, parent=None) -> str:
+def get_user_display_name(email: str, parent=None, auth_data=None) -> str:
+    # 1. Check auth_data for full_name or name from VDS backend
+    if auth_data and isinstance(auth_data, dict):
+        fn = auth_data.get("full_name") or auth_data.get("name")
+        if fn and str(fn).strip():
+            return str(fn).strip()
+            
     clean_email = (email or "").strip().lower()
-    if not clean_email or clean_email in ("admin@bgz.local", "admin", "yonetici", "admin@chenki.net"):
-        return "Seher Şanlı"
     
-    profiles_path = "bgz_user_profiles.json"
+    # 2. Known default accounts
+    if not clean_email or "seher" in clean_email or clean_email in ("admin@bgz.local", "admin", "yonetici", "admin@chenki.net", "sehersanli@chenki.net"):
+        return "Seher Şanlı"
+    if "birey" in clean_email or clean_email in ("bireykurum@chenki.net", "birey@chenki.net"):
+        return "Birey Kurum"
+        
+    # 3. Persistent profile in user directory
+    import os, json
+    base_dir = os.path.join(os.path.expanduser("~"), ".chenki_akademi")
+    os.makedirs(base_dir, exist_ok=True)
+    profiles_path = os.path.join(base_dir, "bgz_user_profiles.json")
+    
     profiles = {}
     if os.path.exists(profiles_path):
         try:
@@ -1400,18 +1445,12 @@ def get_user_display_name(email: str, parent=None) -> str:
     if clean_email in profiles and profiles[clean_email].get("name"):
         return profiles[clean_email]["name"]
         
-    if parent:
-        from PySide6.QtWidgets import QInputDialog
-        dlg = QInputDialog(parent)
-        dlg.setWindowTitle("Kullanıcı Profili")
-        dlg.setLabelText(f"Hoşgeldiniz!\nSayın {clean_email}, lütfen adınızı ve soyadınızı giriniz:")
-        dlg.setTextValue(clean_email.split("@")[0].capitalize())
-        if dlg.exec() == QDialog.Accepted and dlg.textValue().strip():
-            name = dlg.textValue().strip()
-        else:
-            name = clean_email.split("@")[0].capitalize()
-    else:
-        name = clean_email.split("@")[0].capitalize()
+    # Default name derived from email without popup prompt
+    name = clean_email.split("@")[0].capitalize()
+    if "seher" in clean_email:
+        name = "Seher Şanlı"
+    elif "birey" in clean_email:
+        name = "Birey Kurum"
         
     profiles[clean_email] = {"name": name, "email": clean_email}
     try:
@@ -1423,23 +1462,50 @@ def get_user_display_name(email: str, parent=None) -> str:
 
 # ── Collapsible Version Group with Chevron ───────────────────────────
 
+VERSION_DRAG_MIME = "application/x-chenki-version"
+
+
 class CollapsibleVersionGroup(QFrame):
-    def __init__(self, title: str, icon_name: str, badge_text: str, color_hex: str = "#0071E3", is_collapsed: bool = False, parent=None):
+    """A collapsible section of version rows. When `is_drop_target` is set, dragging an
+    AppleVersionRow onto it (anywhere, header included — most useful while collapsed)
+    files that version under `folder_id` (folder_id=None means "Klasörsüz"/Genel).
+    When `show_folder_actions` is set, a rename (pencil) and delete (trash) icon appear
+    in the header for real user-created folders."""
+
+    rename_requested = Signal()
+    delete_requested = Signal()
+    version_dropped = Signal(str, str)  # slug, filename
+
+    def __init__(self, title: str, icon_name: str, badge_text: str, color_hex: str = "#0071E3",
+                 is_collapsed: bool = False, folder_id=None, is_drop_target: bool = False,
+                 show_folder_actions: bool = False, parent=None):
         super().__init__(parent)
         self.is_collapsed = is_collapsed
         self.color_hex = color_hex
-        self.setStyleSheet("""
+        self.folder_id = folder_id
+        self.is_drop_target = is_drop_target
+        self._normal_style = """
             CollapsibleVersionGroup {
                 background: #FFFFFF;
                 border: 1px solid #E2E8F0;
                 border-radius: 10px;
             }
-        """)
-        
+        """
+        self._dragover_style = """
+            CollapsibleVersionGroup {
+                background: #EAF3FF;
+                border: 1.5px dashed #0071E3;
+                border-radius: 10px;
+            }
+        """
+        self.setStyleSheet(self._normal_style)
+        if is_drop_target:
+            self.setAcceptDrops(True)
+
         self.main_lay = QVBoxLayout(self)
         self.main_lay.setContentsMargins(12, 10, 12, 10)
         self.main_lay.setSpacing(6)
-        
+
         # Header Button / Frame
         self.header = QFrame()
         self.header.setCursor(Qt.PointingHandCursor)
@@ -1447,49 +1513,97 @@ class CollapsibleVersionGroup(QFrame):
         hdr_lay = QHBoxLayout(self.header)
         hdr_lay.setContentsMargins(2, 2, 2, 2)
         hdr_lay.setSpacing(10)
-        
+
         # Icon
         icon_lbl = QLabel()
         icon_lbl.setPixmap(make_dashboard_icon(icon_name, color_hex, 18))
         hdr_lay.addWidget(icon_lbl)
-        
+
         # Title
         title_lbl = QLabel(f"<b>{title}</b>")
         title_lbl.setFont(QFont("Segoe UI", 9.5, QFont.Bold))
         title_lbl.setStyleSheet("color: #0F172A;")
         hdr_lay.addWidget(title_lbl)
-        
+
         # Badge
         if badge_text:
             badge = QLabel(badge_text)
             badge.setFont(QFont("Segoe UI", 8, QFont.Bold))
             badge.setStyleSheet("background: #F1F5F9; color: #64748B; padding: 2px 8px; border-radius: 5px;")
             hdr_lay.addWidget(badge)
-            
+
         hdr_lay.addStretch(1)
-        
+
+        if show_folder_actions:
+            btn_rename = QPushButton()
+            btn_rename.setIcon(QIcon(make_dashboard_icon("edit", "#64748B", 14)))
+            btn_rename.setFixedSize(26, 26)
+            btn_rename.setCursor(Qt.PointingHandCursor)
+            btn_rename.setToolTip("Klasörü Yeniden Adlandır")
+            btn_rename.setStyleSheet("""
+                QPushButton { background: transparent; border: 1px solid #E2E8F0; border-radius: 6px; }
+                QPushButton:hover { background: #F1F5F9; border-color: #CBD5E1; }
+            """)
+            btn_rename.clicked.connect(lambda: self.rename_requested.emit())
+            hdr_lay.addWidget(btn_rename)
+
+            btn_del = QPushButton()
+            btn_del.setIcon(QIcon(make_dashboard_icon("trash", "#94A3B8", 14)))
+            btn_del.setFixedSize(26, 26)
+            btn_del.setCursor(Qt.PointingHandCursor)
+            btn_del.setToolTip("Klasörü Sil")
+            btn_del.setStyleSheet("""
+                QPushButton { background: transparent; border: 1px solid #E2E8F0; border-radius: 6px; }
+                QPushButton:hover { background: #FEF2F2; border-color: #FECACA; }
+            """)
+            btn_del.clicked.connect(lambda: self.delete_requested.emit())
+            hdr_lay.addWidget(btn_del)
+
         # Chevron icon
         self.chevron_lbl = QLabel()
         self.chevron_lbl.setPixmap(make_dashboard_icon("chevron_right" if is_collapsed else "chevron_down", "#86868B", 14))
         hdr_lay.addWidget(self.chevron_lbl)
-        
+
         self.main_lay.addWidget(self.header)
-        
+
         # Inner content container
         self.content_widget = QWidget()
         self.content_lay = QVBoxLayout(self.content_widget)
         self.content_lay.setContentsMargins(0, 4, 0, 2)
         self.content_lay.setSpacing(5)
-        
+
         self.main_lay.addWidget(self.content_widget)
         self.content_widget.setVisible(not is_collapsed)
-        
+
         self.header.mousePressEvent = self._toggle_collapse
-        
+
     def _toggle_collapse(self, event):
         self.is_collapsed = not self.is_collapsed
         self.content_widget.setVisible(not self.is_collapsed)
         self.chevron_lbl.setPixmap(make_dashboard_icon("chevron_right" if self.is_collapsed else "chevron_down", "#64748B", 14))
+
+    def dragEnterEvent(self, event):
+        if self.is_drop_target and event.mimeData().hasFormat(VERSION_DRAG_MIME):
+            event.acceptProposedAction()
+            self.setStyleSheet(self._dragover_style)
+        else:
+            event.ignore()
+
+    def dragLeaveEvent(self, event):
+        self.setStyleSheet(self._normal_style)
+
+    def dropEvent(self, event):
+        self.setStyleSheet(self._normal_style)
+        if not (self.is_drop_target and event.mimeData().hasFormat(VERSION_DRAG_MIME)):
+            event.ignore()
+            return
+        raw = bytes(event.mimeData().data(VERSION_DRAG_MIME)).decode("utf-8")
+        slug, _, filename = raw.partition("\n")
+        if slug and filename:
+            event.acceptProposedAction()
+            self.version_dropped.emit(slug, filename)
+        else:
+            event.ignore()
 
 # ── Apple Clean Version Row (Compact & Modern) ───────────────────────
 
@@ -1639,8 +1753,26 @@ class AppleVersionRow(QFrame):
         if not self._is_active:
             act_active = menu.addAction("Aktif Çizelge Yap")
         menu.addSeparator()
+
+        move_menu = menu.addMenu("Klasöre Taşı")
+        move_menu.setStyleSheet(menu.styleSheet())
+        current_folder_id = self.version_info.get("folder_id")
+        act_move_general = move_menu.addAction("Klasörsüz (Genel)")
+        act_move_general.setCheckable(True)
+        act_move_general.setChecked(not current_folder_id)
+        move_actions = {}
+        folders = version_store.list_folders(self.slug)
+        if folders:
+            move_menu.addSeparator()
+        for folder in folders:
+            act = move_menu.addAction(folder.get("name", ""))
+            act.setCheckable(True)
+            act.setChecked(folder.get("id") == current_folder_id)
+            move_actions[act] = folder.get("id")
+
+        menu.addSeparator()
         act_del = menu.addAction("Versiyonu Sil")
-        
+
         action = menu.exec_(self.mapToGlobal(pos))
         if action == act_open:
             self.action_requested.emit("open", self.slug, self.filename)
@@ -1648,6 +1780,20 @@ class AppleVersionRow(QFrame):
             self.action_requested.emit("set_active", self.slug, self.filename)
         elif action == act_del:
             self.action_requested.emit("delete", self.slug, self.filename)
+        elif action == act_move_general:
+            version_store.assign_version_folder(self.slug, self.filename, None)
+            self._notify_parent_refresh_versions()
+        elif action in move_actions:
+            version_store.assign_version_folder(self.slug, self.filename, move_actions[action])
+            self._notify_parent_refresh_versions()
+
+    def _notify_parent_refresh_versions(self):
+        p = self.parent()
+        while p:
+            if hasattr(p, "_refresh_versions"):
+                p._refresh_versions()
+                break
+            p = p.parent() if hasattr(p, "parent") and callable(p.parent) else None
         
     def _update_style(self):
         if self._is_selected:
@@ -1672,9 +1818,21 @@ class AppleVersionRow(QFrame):
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.selected.emit(self.filename)
+            self._drag_start_pos = event.pos()
         super().mousePressEvent(event)
-        
+
         super().mouseDoubleClickEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.LeftButton and getattr(self, "_drag_start_pos", None) is not None:
+            if (event.pos() - self._drag_start_pos).manhattanLength() >= QApplication.startDragDistance():
+                drag = QDrag(self)
+                mime = QMimeData()
+                mime.setData(VERSION_DRAG_MIME, f"{self.slug}\n{self.filename}".encode("utf-8"))
+                drag.setMimeData(mime)
+                drag.exec(Qt.MoveAction)
+                self._drag_start_pos = None
+        super().mouseMoveEvent(event)
 
 
 # ── Main Home Dashboard ──────────────────────────────────────────────
@@ -1698,7 +1856,7 @@ class HomeDashboard(QWidget):
         # Master admin can delete institutions and change/remove passwords; viewer/guest accounts cannot
         from api_client import api_client
         self.is_master_admin = api_client.is_admin() and not is_guest
-        self.display_name = get_user_display_name(user_email, self)
+        self.display_name = get_user_display_name(user_email, self, self.auth_data)
         
         version_store.migrate_existing_data()
         self._build_ui()
@@ -1717,6 +1875,19 @@ class HomeDashboard(QWidget):
             self.cloud_worker.start()
         except Exception as cwe:
             print(f"[HomeDashboard] Cloud worker init note: {cwe}")
+
+        # Real-time push notifications: when another device changes the institution
+        # currently open here, refresh almost instantly instead of waiting for the
+        # CloudSyncWorker's ~15s poll. Purely additive — if the server or connection
+        # doesn't support it, this just stays quiet and the poll loop still covers it.
+        try:
+            from cloud_sync import RealtimeSyncClient
+            self._realtime = RealtimeSyncClient(self)
+            self._realtime.sync_notified.connect(lambda slug: self._on_cloud_synced())
+            if self._selected_slug:
+                self._realtime.watch(self._selected_slug)
+        except Exception as rte:
+            print(f"[HomeDashboard] Realtime sync init note: {rte}")
             
     def _start_initial_cloud_sync(self):
         import threading
@@ -1955,7 +2126,20 @@ class HomeDashboard(QWidget):
         """)
         self.btn_new_empty.clicked.connect(self._on_new_empty_clicked)
         right_hdr.addWidget(self.btn_new_empty)
-        
+
+        self.btn_new_folder = QPushButton("📁 Yeni Klasör")
+        self.btn_new_folder.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        self.btn_new_folder.setCursor(Qt.PointingHandCursor)
+        self.btn_new_folder.setStyleSheet("""
+            QPushButton {
+                background: #EEF2FF; color: #4F46E5; border: 1px solid #C7D2FE;
+                border-radius: 8px; padding: 6px 14px;
+            }
+            QPushButton:hover { background: #E0E7FF; border-color: #A5B4FC; }
+        """)
+        self.btn_new_folder.clicked.connect(self._on_new_folder_clicked)
+        right_hdr.addWidget(self.btn_new_folder)
+
         self.right_panel_layout.addLayout(right_hdr)
         
         # Versions Stack Container
@@ -2172,7 +2356,10 @@ class HomeDashboard(QWidget):
             w = self.inst_list_layout.itemAt(i).widget()
             if isinstance(w, AppleInstitutionCard):
                 w.set_selected(w.slug == slug)
-                
+
+        if hasattr(self, "_realtime"):
+            self._realtime.watch(slug)
+
         self._refresh_versions()
         
     def _on_make_selected_primary_clicked(self):
@@ -2183,6 +2370,75 @@ class HomeDashboard(QWidget):
         version_store.set_primary_institution(self._selected_slug)
         show_apple_info(self, "Ana Kurum Güncellendi", f"'{inst_name}' başarıyla varsayılan ana kurum olarak ayarlandı.", is_success=True)
         self._refresh_institutions()
+        self._refresh_versions()
+
+    def _on_new_folder_clicked(self):
+        if not self._selected_slug:
+            return
+        dlg = AppleInputDialog("Yeni Klasör", "Klasör adı (Örn: Yaz Çizelgesi):", parent=self)
+        if dlg.exec() == QDialog.Accepted and dlg.text_value().strip():
+            name = dlg.text_value().strip()
+            folder, created = version_store.create_folder(self._selected_slug, name)
+            if not created:
+                show_apple_info(
+                    self, "Klasör Zaten Var",
+                    f"\"{name}\" isimli bir klasör zaten mevcut. Aynı isimle ikinci bir klasör oluşturulmadı — mevcut klasör seçili kaldı.",
+                    is_success=False
+                )
+            self._refresh_versions()
+
+    def _on_folder_rename(self, folder_id, current_name):
+        if not self._selected_slug or not folder_id:
+            return
+        dlg = AppleInputDialog("Klasörü Yeniden Adlandır", "Yeni klasör adı:", default_text=current_name, parent=self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        new_name = dlg.text_value().strip()
+        if not new_name or new_name == current_name:
+            return
+        ok = version_store.rename_folder(self._selected_slug, folder_id, new_name)
+        if not ok:
+            show_apple_info(
+                self, "Klasör Zaten Var",
+                f"\"{new_name}\" isimli başka bir klasör zaten var. İsim değiştirilmedi.",
+                is_success=False
+            )
+        self._refresh_versions()
+
+    def _on_folder_delete(self, folder_id, folder_name):
+        if not self._selected_slug or not folder_id:
+            return
+        count = sum(
+            1 for v in version_store.list_versions(self._selected_slug)
+            if v.get("folder_id") == folder_id
+        )
+        if count:
+            message = (
+                f"\"{folder_name}\" klasörü ve içindeki {count} çizelge kalıcı olarak "
+                "silinecek ve buluttan da kaldırılacaktır. Bu işlem geri alınamaz."
+            )
+        else:
+            message = f"\"{folder_name}\" klasörü silinecek. Bu işlem geri alınamaz."
+        dlg = AppleConfirmDialog(
+            title="Klasörü Sil",
+            message=message,
+            confirm_text="Klasörü Sil",
+            cancel_text="Vazgeç",
+            is_destructive=True,
+            parent=self
+        )
+        if dlg.exec() != QDialog.Accepted:
+            return
+        from save_dialog import run_apple_save_sequence
+        run_apple_save_sequence(self, duration_seconds=0.25, title="Klasör Siliniyor", message=f"\"{folder_name}\" ve içeriği siliniyor...")
+        version_store.delete_folder(self._selected_slug, folder_id)
+        self._refresh_versions()
+        self._refresh_institutions()
+
+    def _on_version_dropped_on_folder(self, slug, filename, folder_id):
+        if slug != self._selected_slug:
+            return
+        version_store.assign_version_folder(slug, filename, folder_id)
         self._refresh_versions()
 
     def _create_version_group_card(self, title: str, icon_name: str, badge_text: str, color_hex: str = "#0071E3"):
@@ -2277,31 +2533,35 @@ class HomeDashboard(QWidget):
         else:
             self.last_update_badge.hide()
         
-        if not versions:
+        folders = version_store.list_folders(self._selected_slug)
+        folder_order = [f["id"] for f in folders]
+        folder_names = {f["id"]: f.get("name", "") for f in folders}
+
+        if not versions and not folders:
             empty_box = QFrame()
             empty_box.setStyleSheet(f"background: #FFFFFF; border: 1px dashed {BORDER_HAIRLINE}; border-radius: 12px; padding: 40px;")
             el = QVBoxLayout(empty_box)
             el.setAlignment(Qt.AlignCenter)
             el.setSpacing(8)
-            
+
             el_txt = QLabel("Bu kurumda henüz versiyon bulunmuyor.\n'Yeni Boş Çizelge' butonuna basarak başlayabilirsiniz.")
             el_txt.setFont(QFont("Segoe UI", 11))
             el_txt.setStyleSheet(f"color: {TEXT_SECONDARY};")
             el_txt.setAlignment(Qt.AlignCenter)
             el.addWidget(el_txt)
-            
+
             self.ver_list_layout.addWidget(empty_box)
         else:
             # 1. Separate Active and Older Versions
             active_list = []
             older_list = []
-            
+
             for v in versions:
                 if v["filename"] == active_ver:
                     active_list.append(v)
                 else:
                     older_list.append(v)
-                    
+
             # 1. Active Timetable Card at top
             if active_list:
                 card, lay = self._create_version_group_card("Aktif Çizelge", "active", "Yayında", "#047857")
@@ -2312,18 +2572,47 @@ class HomeDashboard(QWidget):
                     row.action_requested.connect(self._on_version_action)
                     lay.addWidget(row)
                 self.ver_list_layout.addWidget(card)
-                
-            # 2. Collapsible Older Versions Group with Chevron
-            if older_list:
-                hist_group = CollapsibleVersionGroup("Eski Sürümler", "history", f"{len(older_list)} Versiyon", "#64748B", is_collapsed=True)
-                for v in older_list:
+
+            # 2. Older versions, grouped by folder (plus a "Klasörsüz" bucket for the rest).
+            # Every folder gets shown here — even a brand-new, still-empty one — so creating
+            # a folder is immediately visible instead of only appearing once something has
+            # been moved into it.
+            by_folder = {}
+            unfoldered = []
+            for v in older_list:
+                fid = v.get("folder_id")
+                if fid and fid in folder_names:
+                    by_folder.setdefault(fid, []).append(v)
+                else:
+                    unfoldered.append(v)
+
+            def _add_group(title, icon, color, items, folder_id=None, show_folder_actions=False):
+                group = CollapsibleVersionGroup(
+                    title, icon, f"{len(items)} Versiyon", color, is_collapsed=True,
+                    folder_id=folder_id, is_drop_target=True, show_folder_actions=show_folder_actions,
+                )
+                for v in items:
                     row = AppleVersionRow(self._selected_slug, v, is_active=False)
                     row.selected.connect(self._on_version_selected)
                     row.double_clicked.connect(self._on_version_double_clicked)
                     row.action_requested.connect(self._on_version_action)
-                    hist_group.content_lay.addWidget(row)
-                self.ver_list_layout.addWidget(hist_group)
-                
+                    group.content_lay.addWidget(row)
+                group.version_dropped.connect(
+                    lambda slug, filename, fid=folder_id: self._on_version_dropped_on_folder(slug, filename, fid)
+                )
+                if show_folder_actions:
+                    group.rename_requested.connect(lambda fid=folder_id, name=title: self._on_folder_rename(fid, name))
+                    group.delete_requested.connect(lambda fid=folder_id, name=title: self._on_folder_delete(fid, name))
+                self.ver_list_layout.addWidget(group)
+
+            for fid in folder_order:
+                _add_group(folder_names[fid], "folder", "#4F46E5", by_folder.get(fid, []), folder_id=fid, show_folder_actions=True)
+
+            # Keep "Klasörsüz" visible (even empty) whenever folders exist, so it stays a
+            # valid drag target to take a version back out of a folder.
+            if unfoldered or folder_order:
+                _add_group("Klasörsüz (Eski Sürümler)", "history", "#64748B", unfoldered, folder_id=None)
+
         self.ver_list_layout.addStretch(1)
                 
         # Password Protection with Full Coverage Modal in Stack

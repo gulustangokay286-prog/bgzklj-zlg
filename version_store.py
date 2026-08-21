@@ -189,12 +189,29 @@ def sanitize_atamalar(atamalar: list) -> list:
         
     return list(seen.values())
 
+_cross_busy_cache = {}  # exclude_slug -> (monotonic_timestamp, result_dict)
+_CROSS_BUSY_CACHE_TTL = 4.0  # seconds
+
 def get_cross_institution_teacher_busy_slots(exclude_slug: str = None) -> dict:
     """
     Returns a dictionary of busy slots for teachers across all other institutions.
     Key: (normalized_teacher_name, day_idx, period_idx)
     Value: dict with conflict details
+
+    This is called synchronously on EVERY single manual lesson placement (the cross-
+    institution conflict check in _on_lesson_dropped), and it fully re-reads and
+    re-parses every other institution's active schedule file from disk each time.
+    With more than one saved institution that made every single drag-drop feel slow
+    to settle. Cache the result briefly — cross-institution schedules don't change
+    fast enough for a few seconds of staleness to matter, but doing this disk work
+    on every drag tick does.
     """
+    import time as _time
+    now = _time.monotonic()
+    cached = _cross_busy_cache.get(exclude_slug)
+    if cached and (now - cached[0]) < _CROSS_BUSY_CACHE_TTL:
+        return cached[1]
+
     busy_slots = {}
     institutions = list_institutions()
     
@@ -245,7 +262,8 @@ def get_cross_institution_teacher_busy_slots(exclude_slug: str = None) -> dict:
                 busy_slots[(norm_t, day, slot_p)] = slot_info
                 clean_k = "".join(c for c in norm_t.lower() if c.isalnum())
                 busy_slots[(clean_k, day, slot_p)] = slot_info
-                
+
+    _cross_busy_cache[exclude_slug] = (now, busy_slots)
     return busy_slots
 
 # ── Password & Security ──────────────────────────────────────────────
@@ -255,9 +273,17 @@ def _hash_password(password: str) -> str:
     return hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
 
 def compute_data_hash(data_store: dict) -> str:
-    """Computes a deterministic hash of meaningful data fields for change detection."""
-    import copy
-    d = copy.deepcopy(data_store) if data_store else {}
+    """Computes a deterministic hash of meaningful data fields for change detection.
+
+    This runs synchronously on the UI thread on every single grid edit (via
+    update_version_in_place -> save_db), so it must stay cheap. A shallow copy is
+    enough to safely drop the volatile "_version_meta" key before serializing —
+    json.dumps only reads the nested structures, it never mutates them — so the
+    previous copy.deepcopy() (which walks and clones the entire schedule twice per
+    save: once here, once again for the on-disk comparison value) was pure overhead
+    and a meaningful contributor to the "slow to settle after every drag" feel.
+    """
+    d = dict(data_store) if data_store else {}
     # Remove volatile metadata fields that change every save
     d.pop("_version_meta", None)
     # Sort keys for deterministic serialization
@@ -634,6 +660,171 @@ def get_institution_meta(slug: str) -> dict:
             return {}
     return {}
 
+# ── Version Folders ──────────────────────────────────────────────────
+# Folders group saved versions under a user-given name (e.g. "Yaz Çizelgesi").
+# The folder registry lives in the institution's meta.json (meta["folders"] =
+# [{id, name, created}, ...]); which folder a given version belongs to is stored
+# inside that version's own _version_meta["folder_id"] (None = no folder / "Genel").
+
+def list_folders(slug: str) -> list:
+    """Returns this institution's folders: [{id, name, created}, ...]."""
+    return get_institution_meta(slug).get("folders", [])
+
+def create_folder(slug: str, name: str) -> tuple:
+    """Creates a new named folder for organizing versions.
+
+    Returns (folder_dict, created) — created=False means a folder with that name
+    (case-insensitive) already existed and was reused rather than duplicated, so the
+    caller can warn the user instead of silently pretending a new one was made.
+    """
+    name = (name or "").strip()
+    if not slug or not name:
+        return {}, False
+    meta_path = os.path.join(_base_dir(), slug, "meta.json")
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception:
+        meta = {"name": slug}
+
+    folders = meta.setdefault("folders", [])
+    # Reuse an existing folder with the same (case-insensitive) name instead of duplicating it
+    for existing in folders:
+        if existing.get("name", "").strip().lower() == name.lower():
+            return existing, False
+
+    new_folder = {
+        "id": _uuid.uuid4().hex[:10],
+        "name": name,
+        "created": datetime.now().isoformat(),
+    }
+    folders.append(new_folder)
+
+    try:
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+    try:
+        import threading
+        import cloud_sync
+        threading.Thread(target=cloud_sync.push_institution_to_rtdb, args=(slug,), daemon=True).start()
+    except Exception:
+        pass
+
+    return new_folder, True
+
+def rename_folder(slug: str, folder_id: str, new_name: str) -> bool:
+    """Renames a folder. Returns False (no-op) if new_name is empty or collides
+    case-insensitively with a DIFFERENT existing folder; True on success."""
+    new_name = (new_name or "").strip()
+    if not slug or not folder_id or not new_name:
+        return False
+    meta_path = os.path.join(_base_dir(), slug, "meta.json")
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception:
+        return False
+
+    folders = meta.get("folders", [])
+    for other in folders:
+        if other.get("id") != folder_id and other.get("name", "").strip().lower() == new_name.lower():
+            return False
+
+    changed = False
+    for folder in folders:
+        if folder.get("id") == folder_id:
+            folder["name"] = new_name
+            changed = True
+            break
+    if not changed:
+        return False
+
+    try:
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+    try:
+        import threading
+        import cloud_sync
+        threading.Thread(target=cloud_sync.push_institution_to_rtdb, args=(slug,), daemon=True).start()
+    except Exception:
+        pass
+    return True
+
+def delete_folder(slug: str, folder_id: str) -> int:
+    """Deletes a folder AND every version filed under it (cascading, incl. from the
+    cloud) — a folder like "Ağustos ayı" groups a batch of schedules on purpose, so
+    removing it should remove what's in it rather than scattering it back into
+    "Genel". Returns the number of versions that were deleted."""
+    if not slug or not folder_id:
+        return 0
+
+    deleted = 0
+    for v in list_versions(slug):
+        if v.get("folder_id") == folder_id:
+            delete_version(slug, v["filename"])
+            deleted += 1
+
+    meta_path = os.path.join(_base_dir(), slug, "meta.json")
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception:
+        return deleted
+
+    folders = meta.get("folders", [])
+    new_folders = [f for f in folders if f.get("id") != folder_id]
+    if len(new_folders) == len(folders):
+        return deleted
+    meta["folders"] = new_folders
+
+    try:
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+    try:
+        import threading
+        import cloud_sync
+        threading.Thread(target=cloud_sync.push_institution_to_rtdb, args=(slug,), daemon=True).start()
+    except Exception:
+        pass
+    return deleted
+
+def assign_version_folder(slug: str, filename: str, folder_id: str):
+    """Moves an already-saved version into (or out of, if folder_id is None) a folder."""
+    if not slug or not filename:
+        return False
+    filepath = os.path.join(_versions_dir(slug), filename)
+    if not os.path.exists(filepath):
+        return False
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return False
+
+    data.setdefault("_version_meta", {})["folder_id"] = folder_id
+    try:
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        return False
+
+    try:
+        import threading
+        from cloud_sync import push_version_to_rtdb
+        threading.Thread(target=push_version_to_rtdb, args=(slug, filename, data), daemon=True).start()
+    except Exception:
+        pass
+    return True
+
 # ── Version CRUD ─────────────────────────────────────────────────────
 
 def _versions_dir(slug: str) -> str:
@@ -650,7 +841,7 @@ def _next_version_number(slug: str) -> int:
             max_num = max(max_num, int(m.group(1)))
     return max_num + 1
 
-def save_version(slug: str, data_store: dict, source: str = "manual", note: str = "") -> str:
+def save_version(slug: str, data_store: dict, source: str = "manual", note: str = "", folder_id: str = None) -> str:
     """Saves a new version. Returns the version filename."""
     ver_dir = _versions_dir(slug)
     num = _next_version_number(slug)
@@ -659,18 +850,19 @@ def save_version(slug: str, data_store: dict, source: str = "manual", note: str 
     src_tag = "auto" if source == "auto" else "manual"
     filename = f"v{num:03d}_{ts}_{src_tag}.roz"
     filepath = os.path.join(ver_dir, filename)
-    
+
     # Embed version metadata into the data_store copy
     save_data = dict(data_store)
     if "atamalar" in save_data:
         save_data["atamalar"] = sanitize_atamalar(save_data["atamalar"])
-        
+
     save_data["_version_meta"] = {
         "version_number": num,
         "timestamp": now.isoformat(),
         "source": src_tag,
         "note": note,
         "filename": filename,
+        "folder_id": folder_id,
     }
     
     with open(filepath, "w", encoding="utf-8") as f:
@@ -750,7 +942,10 @@ def list_versions(slug: str, source_filter: str = "all") -> list:
     versions = []
     if not os.path.exists(ver_dir):
         return []
-        
+
+    folders_by_id = {f.get("id"): f.get("name", "") for f in list_folders(slug)}
+
+
     for f in sorted(os.listdir(ver_dir), reverse=True):
         if not f.endswith(".roz"):
             continue
@@ -781,21 +976,24 @@ def list_versions(slug: str, source_filter: str = "all") -> list:
         total_hours = 0
         placed_hours = 0
         unplaced_hours = 0
+        folder_id = None
         try:
             with open(filepath, "r", encoding="utf-8") as fh:
                 d = json.load(fh)
-                note = d.get("_version_meta", {}).get("note", "")
-                
+                v_meta = d.get("_version_meta", {})
+                note = v_meta.get("note", "")
+                folder_id = v_meta.get("folder_id")
+
                 # Compute stats
                 placements = d.get("grid_placements", [])
                 placed_hours = sum(p.get("duration", 1) for p in placements)
-                
+
                 atamalar = d.get("atamalar", [])
                 total_hours = sum(a.get("duration", 2) for a in atamalar)
                 unplaced_hours = max(0, total_hours - placed_hours)
         except Exception:
             pass
-        
+
         versions.append({
             "filename": f,
             "filepath": filepath,
@@ -811,6 +1009,8 @@ def list_versions(slug: str, source_filter: str = "all") -> list:
             "total_hours": total_hours,
             "placed_hours": placed_hours,
             "unplaced_hours": unplaced_hours,
+            "folder_id": folder_id,
+            "folder_name": folders_by_id.get(folder_id, ""),
         })
     
     return versions

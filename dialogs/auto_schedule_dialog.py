@@ -383,7 +383,8 @@ class AutoScheduleDialog(QDialog):
                     "duration": dur,
                     "locked": is_locked,
                     "block_id": item.get("block_id", ""),
-                    "is_combined": bool(item.get("is_combined", False))
+                    "is_combined": bool(item.get("is_combined", False)),
+                    "is_filler": bool(item.get("is_filler", False))
                 })
                 
         self.data_store["grid_placements"] = new_placements

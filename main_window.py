@@ -433,18 +433,17 @@ class MainWindow(QMainWindow):
                 print("Error stopping cloud_worker:", e)
 
     def closeEvent(self, event):
-        # 1. Quick save feedback
+        # 1. If there are unsaved changes, ask which folder to save the new version
+        # into (same picker as "Kaydet" / "Ana Sayfa") — cancelling the picker aborts
+        # the close instead of quietly discarding the choice.
+        if not self._save_new_version_with_folder_picker("Kapanırken kaydedildi", force=False):
+            event.ignore()
+            return
+
+        # 2. Quick save feedback
         from save_dialog import run_apple_save_sequence
         run_apple_save_sequence(self, duration_seconds=0.15, title="Kapatılıyor", message="Veriler kaydedildi.")
-        
-        # 2. Save to disk
-        try:
-            if hasattr(self, "institution_slug") and hasattr(self, "version_filename") and self.institution_slug and self.version_filename:
-                import version_store
-                version_store.update_version_in_place(self.institution_slug, self.version_filename, self.data_store)
-        except Exception as e:
-            print("Auto-save on exit error:", e)
-            
+
         # 3. Clean up
         self.cleanup()
         super().closeEvent(event)
@@ -1440,7 +1439,7 @@ class MainWindow(QMainWindow):
         atamalar = self.data_store.get("atamalar", [])
         grid_placements = self.data_store.get("grid_placements", [])
         
-        from auto_scheduler import matches_class, format_tr_name, normalize_clean
+        from auto_scheduler import matches_class, format_tr_name, normalize_clean, parse_distribution_parts
         from version_store import _matches_teacher
         from dialogs.color_picker_dialog import resolve_subject_color
         
@@ -1463,43 +1462,6 @@ class MainWindow(QMainWindow):
                 if cur_item and cur_item.parent():
                     target_entity = cur_item.data(0, Qt.UserRole)
         
-        # 1. Build a placed slot pool deduplicated by (day, period, teacher, subject)
-        # Prevents combined classes (e.g. 10A + 10B) from double-counting placed hours!
-        placed_slots = {}
-        for p in grid_placements:
-            dur = int(p.get("duration", 1))
-            if dur <= 0:
-                continue
-            
-            p_day = int(p.get("day") if "day" in p else p.get("col", 0))
-            p_per = int(p.get("period") if "period" in p else p.get("row", 0))
-            p_s = (p.get("subject_name") or p.get("subject") or "").strip()
-            p_t = (p.get("teacher_name") or p.get("teacher") or "").strip()
-            p_c = (p.get("class_name") or p.get("class") or "").strip()
-            
-            if not p_s or p_s.lower() in ["boş", "bos", "atanmadı"]:
-                continue
-                
-            slot_key = (p_day, p_per, format_tr_name(p_t), format_tr_name(p_s))
-            if slot_key not in placed_slots:
-                placed_slots[slot_key] = {
-                    "subject": p_s,
-                    "teacher": p_t,
-                    "classes": set(),
-                    "remaining": dur,
-                    "is_combined": bool(p.get("is_combined") or ("+" in p_c or "&" in p_c or "," in p_c))
-                }
-            if p_c:
-                for sc in p_c.replace("&", "+").replace(",", "+").split("+"):
-                    if sc.strip():
-                        placed_slots[slot_key]["classes"].add(sc.strip().upper())
-            if p.get("combined_classes"):
-                for sc in p["combined_classes"]:
-                    if str(sc).strip():
-                        placed_slots[slot_key]["classes"].add(str(sc).strip().upper())
-                        
-        placed_pool = list(placed_slots.values())
-        
         # Scope assignments based on target_entity (selected class or selected teacher)
         if target_entity:
             if display_mode == "classes":
@@ -1517,7 +1479,7 @@ class MainWindow(QMainWindow):
                 ]
         else:
             scoped_atamalar = atamalar
-            
+
         def matches_subject(s1, s2):
             if not s1 or not s2: return False
             if s1 == s2: return True
@@ -1531,80 +1493,262 @@ class MainWindow(QMainWindow):
                 return True
             return False
 
-        unplaced = []
+        # ═══ STEP 1: Group atamalar by (subject, class, teacher) ═══
+        # Atamalar can be stored as separate rows (e.g. Türkçe 9A = hours:2 + hours:2 = 4 total)
+        # We must merge them into a single group and sum their hours.
+        grouped = {}  # key -> {total_hours, distribution, type, color, is_comb, ...}
         for idx, atama in enumerate(scoped_atamalar):
             s_name = (atama.get("subject") or atama.get("ders") or "Ders").strip()
             t_name = (atama.get("teacher") or atama.get("ogretmen") or "").strip()
             c_name = (atama.get("class") or atama.get("sinif") or "").strip()
-            dur = int(atama.get("duration", 1))
-            type_str = str(atama.get("type", "")).strip()
-            color = resolve_subject_color(s_name, self.data_store)
+            
+            # Read hours: try 'duration' first, then 'hours', fallback 1
+            h = atama.get("duration") or atama.get("hours") or 1
+            try:
+                h = int(h)
+            except (ValueError, TypeError):
+                h = 1
+            if h <= 0:
+                h = 1
+                
             is_comb = bool(atama.get("is_combined") or ("+" in c_name or "&" in c_name or "," in c_name))
             
-            target_classes = set()
-            if is_comb:
-                if atama.get("combined_classes"):
-                    for sc in atama["combined_classes"]:
-                        if str(sc).strip(): target_classes.add(str(sc).strip().upper())
-                else:
-                    for sc in c_name.replace("&", "+").replace(",", "+").split("+"):
-                        if sc.strip(): target_classes.add(sc.strip().upper())
-            elif c_name:
-                target_classes.add(c_name.strip().upper())
-                
-            # Breakdown block distribution (e.g. 2+2 -> [2, 2], 2+3 -> [2, 1, 1, 1], 2+1 -> [2, 1])
-            from auto_scheduler import parse_distribution_parts
-            parts = parse_distribution_parts(type_str, dur)
+            group_key = (format_tr_name(s_name), format_tr_name(c_name), format_tr_name(t_name))
+            
+            if group_key not in grouped:
+                color = resolve_subject_color(s_name, self.data_store)
+                target_classes = set()
+                if is_comb:
+                    if atama.get("combined_classes"):
+                        for sc in atama["combined_classes"]:
+                            if str(sc).strip(): target_classes.add(str(sc).strip().upper())
+                    else:
+                        for sc in c_name.replace("&", "+").replace(",", "+").split("+"):
+                            if sc.strip(): target_classes.add(sc.strip().upper())
+                elif c_name:
+                    target_classes.add(c_name.strip().upper())
                     
+                grouped[group_key] = {
+                    "s_name": s_name,
+                    "t_name": t_name,
+                    "c_name": c_name,
+                    "total_hours": 0,
+                    "color": color,
+                    "is_comb": is_comb,
+                    "target_classes": target_classes,
+                    "distribution": None,
+                    "type_str": "",
+                    "idx": idx,
+                }
+            
+            grouped[group_key]["total_hours"] += h
+            
+            # If any atama in this group has an explicit distribution, use it
+            if atama.get("distribution") and isinstance(atama.get("distribution"), list):
+                grouped[group_key]["distribution"] = [int(p) for p in atama["distribution"] if int(p) > 0]
+            if atama.get("type") and "+" in str(atama.get("type", "")):
+                grouped[group_key]["type_str"] = str(atama["type"]).strip()
+
+        # Hours already represented by a loose card (something the user just removed straight
+        # off the grid — see _delete_lesson_at) must not ALSO be recomputed as "still unplaced"
+        # below, or the same lesson would show up twice in the dock.
+        loose_hours_by_group = {}
+        for lc in self.data_store.get("loose_unplaced_cards", []):
+            lc_key = (format_tr_name(lc.get("subject_name", "")), format_tr_name(lc.get("class_name", "")), format_tr_name(lc.get("teacher", "")))
+            loose_hours_by_group[lc_key] = loose_hours_by_group.get(lc_key, 0) + int(lc.get("duration", 1))
+
+        # ═══ STEP 2: For each group, calculate parts and unplaced cards ═══
+        unplaced = []
+        for group_key, grp in grouped.items():
+            s_name = grp["s_name"]
+            t_name = grp["t_name"]
+            c_name = grp["c_name"]
+            color = grp["color"]
+            is_comb = grp["is_comb"]
+            target_classes = grp["target_classes"]
+            idx = grp["idx"]
+            
+            dist = grp["distribution"]
+            type_str = grp["type_str"]
+            
+            # If explicit distribution (e.g. [2, 2, 1]) or type with '+' is set, its sum is the authoritative total hours!
+            if dist and len(dist) > 0:
+                total_hours = sum(dist)
+                parts = list(dist)
+            elif type_str and "+" in type_str:
+                parsed_parts = parse_distribution_parts(type_str, grp["total_hours"])
+                if parsed_parts:
+                    total_hours = sum(parsed_parts)
+                    parts = parsed_parts
+                else:
+                    total_hours = grp["total_hours"]
+                    parts = parse_distribution_parts("", total_hours)
+            else:
+                total_hours = grp["total_hours"]
+                parts = parse_distribution_parts("", total_hours)
+                
+            # Find placed blocks on the grid for this group
             s_fmt = format_tr_name(s_name)
             t_fmt = format_tr_name(t_name)
             
-            for p_idx, block_dur in enumerate(parts):
-                needed = block_dur
-                for p_item in placed_pool:
-                    if p_item["remaining"] <= 0:
-                        continue
-                    p_s = p_item["subject"]
-                    s_match = matches_subject(p_s, s_name)
-                    if not s_match:
-                        continue
+            matched_slots = []
+            seen_slots = set()
+            
+            for p in grid_placements:
+                p_s = (p.get("subject_name") or p.get("subject") or "").strip()
+                if not p_s or p_s.lower() in ["boş", "bos", "atanmadı"]:
+                    continue
+                # Auto-scheduler "fill empty slots" padding duplicates a real subject just to
+                # avoid a visual gap — it must NOT count as "already placed" hours of the real
+                # assignment, or removing an actual assigned hour would never show back up
+                # here (there'd always be leftover filler copies making the total look
+                # over-satisfied). Filler blocks get their own loose, re-placeable dock card
+                # instead — see _delete_lesson_at's loose_unplaced_cards handling.
+                if p.get("is_filler"):
+                    continue
+                if not matches_subject(p_s, s_name):
+                    continue
                     
-                    # If in teacher view or teacher-scoped filter, require teacher match
-                    if display_mode == "teachers" or (not target_entity and t_name):
-                        if t_name and p_item["teacher"]:
-                            p_t = p_item["teacher"]
-                            t_match = (format_tr_name(p_t) == t_fmt or normalize_clean(p_t) == normalize_clean(t_name) or p_t == t_name or _matches_teacher(p_t, t_name))
-                            if not t_match:
-                                continue
-                            
-                    # Class match
-                    if target_classes:
-                        p_classes = p_item["classes"]
-                        if is_comb:
-                            if not p_classes.intersection(target_classes) and not (p_item["is_combined"] and any(matches_class(pc, tc) for pc in p_classes for tc in target_classes)):
-                                continue
-                        else:
-                            if not any(matches_class(pc, tc) or matches_class(tc, pc) or pc == tc for pc in p_classes for tc in target_classes):
-                                continue
-                    
-                    deduct = min(needed, p_item["remaining"])
-                    needed -= deduct
-                    p_item["remaining"] -= deduct
-                    if needed <= 0:
-                        break
+                p_c = (p.get("class_name") or p.get("class") or "").strip()
+                p_t = (p.get("teacher_name") or p.get("teacher") or "").strip()
+                
+                # Check teacher
+                if t_name and p_t:
+                    if not (format_tr_name(p_t) == t_fmt or normalize_clean(p_t) == normalize_clean(t_name) or p_t == t_name or _matches_teacher(p_t, t_name)):
+                        continue
                         
-                if needed > 0:
-                    unplaced.append({
-                        "id": f"{idx}_{p_idx}",
-                        "subject_name": s_name,
-                        "color": color,
-                        "teacher": t_name,
-                        "class_name": c_name,
-                        "duration": needed,
-                        "is_combined": is_comb,
-                        "combined_classes": list(target_classes) if is_comb else []
+                # Check class
+                if target_classes:
+                    p_classes = set()
+                    for sc in p_c.replace("&", "+").replace(",", "+").split("+"):
+                        if sc.strip(): p_classes.add(sc.strip().upper())
+                    for sc in p.get("combined_classes", []):
+                        if str(sc).strip(): p_classes.add(str(sc).strip().upper())
+                        
+                    if is_comb:
+                        if not p_classes.intersection(target_classes) and not (p.get("is_combined") and any(matches_class(pc, tc) for pc in p_classes for tc in target_classes)):
+                            continue
+                    else:
+                        if not any(matches_class(pc, tc) or matches_class(tc, pc) or pc == tc for pc in p_classes for tc in target_classes):
+                            continue
+                            
+                p_day = int(p.get("day") if "day" in p else p.get("col", 0))
+                p_per = int(p.get("period") if "period" in p else p.get("row", 0))
+                p_dur = int(p.get("duration", 1))
+                b_id = p.get("block_id")
+                
+                if (p_day, p_per) not in seen_slots:
+                    seen_slots.add((p_day, p_per))
+                    matched_slots.append({
+                        "day": p_day, "period": p_per, "dur": p_dur, "block_id": b_id
                     })
+
+            # Calculate total placed hours (sum of all hours placed on the grid), PLUS any
+            # hours already accounted for by a loose card for this exact group (see above) —
+            # otherwise this computed reconciliation would generate an extra, duplicate card
+            # for hours that are already showing up as their own direct loose card.
+            total_placed_hours = sum(max(1, s["dur"]) for s in matched_slots)
+            loose_hours = loose_hours_by_group.get(group_key, 0)
+            accounted_for_hours = total_placed_hours + loose_hours
+
+            # If total placed hours reaches or exceeds assigned total_hours, NO UNPLACED CARDS!
+            if accounted_for_hours >= total_hours:
+                continue
+
+            remaining_hours = max(0, total_hours - accounted_for_hours)
+            if remaining_hours <= 0:
+                continue
+                
+            # Group placed slots into contiguous blocks for block-matching
+            matched_slots.sort(key=lambda x: (x["day"], x["period"]))
+            placed_blocks = []
+            mi = 0
+            while mi < len(matched_slots):
+                cur = matched_slots[mi]
+                b_dur = cur["dur"]
+                while mi + 1 < len(matched_slots):
+                    nxt = matched_slots[mi + 1]
+                    if nxt["day"] == cur["day"] and nxt["period"] == cur["period"] + b_dur:
+                        if cur.get("block_id") and nxt.get("block_id") and cur["block_id"] != nxt["block_id"]:
+                            break
+                        b_dur += nxt["dur"]
+                        mi += 1
+                    else:
+                        break
+                placed_blocks.append(b_dur)
+                mi += 1
+                
+            # Block Matching Algorithm
+            remaining_parts = list(parts)
+            
+            # 1. Exact matches first
+            for pb in list(placed_blocks):
+                if pb in remaining_parts:
+                    remaining_parts.remove(pb)
+                    placed_blocks.remove(pb)
                     
+            # 2. Leftover placed hours deducted from parts
+            leftover_placed = sum(placed_blocks)
+            if leftover_placed > 0:
+                remaining_parts.sort(reverse=True)
+                new_remaining = []
+                for rp in remaining_parts:
+                    if leftover_placed >= rp:
+                        leftover_placed -= rp
+                    elif leftover_placed > 0:
+                        new_remaining.append(rp - leftover_placed)
+                        leftover_placed = 0
+                    else:
+                        new_remaining.append(rp)
+                remaining_parts = new_remaining
+                
+            # 3. Ensure remaining_parts sum strictly equals remaining_hours
+            if sum(remaining_parts) != remaining_hours:
+                remaining_parts = []
+                rem = remaining_hours
+                while rem > 0:
+                    b = min(2, rem)
+                    remaining_parts.append(b)
+                    rem -= b
+            
+            # 4. Emit unplaced cards
+            for p_idx, block_dur in enumerate(remaining_parts):
+                if block_dur <= 0:
+                    continue
+                unplaced.append({
+                    "id": f"{idx}_{p_idx}_{block_dur}",
+                    "subject_name": s_name,
+                    "color": color,
+                    "teacher": t_name,
+                    "class_name": c_name,
+                    "duration": block_dur,
+                    "is_combined": is_comb,
+                    "combined_classes": list(target_classes) if is_comb else []
+                })
+                
+        # Loose cards: anything removed straight off the grid (see _delete_lesson_at) shows up
+        # here directly and unconditionally, scoped to the same class/teacher as everything
+        # else in this view. This list is only READ here; a card is removed from it once it's
+        # actually dropped back onto the grid (see _on_lesson_dropped), never just by viewing.
+        for lc in self.data_store.get("loose_unplaced_cards", []):
+            if target_entity:
+                if display_mode == "classes":
+                    if not matches_class(lc.get("class_name", ""), target_entity):
+                        continue
+                else:
+                    if format_tr_name(lc.get("teacher", "")) != format_tr_name(target_entity):
+                        continue
+            unplaced.append({
+                "id": lc["id"],
+                "subject_name": lc.get("subject_name", ""),
+                "color": lc.get("color", "#94A3B8"),
+                "teacher": lc.get("teacher", ""),
+                "class_name": lc.get("class_name", ""),
+                "duration": lc.get("duration", 1),
+                "is_combined": lc.get("is_combined", False),
+                "combined_classes": lc.get("combined_classes", [])
+            })
+
         has_assignments = bool(scoped_atamalar) if target_entity else bool(atamalar)
         self._grid.unplaced_dock.load_unplaced(
             unplaced, 
@@ -2069,7 +2213,20 @@ class MainWindow(QMainWindow):
         # block_id: aynı yerleştirme operasyonundan gelen tüm saatler aynı ID'yi paylaşır
         import uuid as _uuid
         _block_id = str(_uuid.uuid4())[:12]
-        
+
+        # If this came from a loose card (something removed straight off the grid earlier —
+        # see _delete_lesson_at), carry its filler status through to the new placement:
+        # otherwise removing a re-placed FILLER a second time would have nothing to fall back
+        # on (no atamalar entry) and would just vanish instead of returning to the dock again.
+        _dropped_loose_id = lesson_info.get("lesson_id", "")
+        _dropped_loose_card = None
+        if isinstance(_dropped_loose_id, str) and _dropped_loose_id.startswith("loose_"):
+            _dropped_loose_card = next(
+                (lc for lc in self.data_store.get("loose_unplaced_cards", []) if lc.get("id") == _dropped_loose_id),
+                None
+            )
+        _is_filler_drop = bool(_dropped_loose_card and _dropped_loose_card.get("is_filler"))
+
         for ext in range(duration):
             target_p = period_idx + ext
             self.data_store.setdefault("grid_placements", [])
@@ -2094,50 +2251,93 @@ class MainWindow(QMainWindow):
                     "teacher_name": teacher, "teacher": teacher,
                     "subject_name": subject_name, "subject": subject_name,
                     "duration": 1,
-                    "locked": bool(lesson_info.get("locked", True)),
+                    # NOTE: defaulting this to True (as it did before) meant every lesson
+                    # ever manually dropped from the dock, or ever moved within the grid,
+                    # became permanently "locked" — silently, with no user action asking for
+                    # it — so removing it later always required confirming through a
+                    # "locked lesson" warning dialog the user never expected. A lesson is
+                    # locked only when it explicitly says so (dock cards never carry a
+                    # "locked" key at all, and a completed move now explicitly clears it).
+                    "locked": bool(lesson_info.get("locked", False)),
                     "is_manual": True,
                     "color": color,
                     "is_combined": is_comb,
                     "combined_classes": list(combined_classes) if combined_classes else [],
-                    "block_id": _block_id
+                    "block_id": _block_id,
+                    "is_filler": _is_filler_drop
                 })
-            
+
         if "auto_schedule_results" in self.data_store:
             self.data_store["auto_schedule_results"] = list(self.data_store.get("grid_placements", []))
-            
-        self._refresh_grid()
+
+        # It's now back on the grid — remove it from the loose pool so it doesn't also linger
+        # in the dock as a duplicate.
+        if _dropped_loose_card and "loose_unplaced_cards" in self.data_store:
+            self.data_store["loose_unplaced_cards"] = [
+                lc for lc in self.data_store["loose_unplaced_cards"] if lc.get("id") != _dropped_loose_id
+            ]
+
+        self._refresh_grid(skip_unplaced=True)
         self.save_db(sync_from_grid=False)
-        if hasattr(self, "institution_slug") and hasattr(self, "version_filename") and self.institution_slug and self.version_filename:
-            import version_store
-            version_store.update_version_in_place(self.institution_slug, self.version_filename, self.data_store)
-            
-        self._refresh_unplaced_lessons()
-        self._refresh_tree()
+        self._refresh_unplaced_lessons(target_entity=cls_name if display_mode == "classes" else teacher)
+        
+        # Debounce tree refresh to ensure 0ms instant UI drop response
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(250, self._refresh_tree)
         self.statusBar().showMessage(f"'{subject_name}' ({cls_name} - {teacher}) dersi {day_name} günü {period_idx+1}. saate yerleştirildi.")
 
     # ── Actions ───────────────────────────────────────────────────────────────
-    def _go_home(self):
-        """Return to the Home Dashboard."""
-        try:
-            slug = getattr(self, "institution_slug", None)
-            ver_fn = getattr(self, "version_filename", None)
-            if slug:
-                import version_store
-                # Always update current version file with latest in-memory data
+    def _save_new_version_with_folder_picker(self, note, force=False):
+        """Saves the current schedule, first asking (via a modal dialog) which folder the
+        new version should go into — used by "Kaydet", "Ana Sayfa", and app-close.
+
+        Returns True if it's fine for the calling action to proceed (a version was saved,
+        or there was nothing new to save), or False if the user cancelled the folder-picker
+        dialog — in which case the caller must abort (don't go home / don't close).
+
+        With force=False (Ana Sayfa / kapatma), the picker only appears if there are
+        actually unsaved changes — nothing to ask about otherwise. With force=True
+        ("Kaydet" button), a brand new version is always created and the picker always
+        appears, matching the button's existing "always saves" behavior.
+        """
+        slug = getattr(self, "institution_slug", None)
+        if not slug:
+            return True
+
+        import version_store
+        ver_fn = getattr(self, "version_filename", None)
+
+        if not force and not getattr(self, "_is_dirty", False):
+            try:
                 if ver_fn:
                     version_store.update_version_in_place(slug, ver_fn, self.data_store)
-                # If any changes were made, also create a brand new version snapshot
-                if getattr(self, "_is_dirty", False):
-                    new_vf = version_store.save_version(slug, self.data_store, source="manual", note="Değişiklikler kaydedildi")
-                    version_store.set_active_version(slug, new_vf)
-                    self.version_filename = new_vf
-                    self._is_dirty = False
-                    print(f"[GO_HOME] New version created: {new_vf}")
-                else:
-                    print(f"[GO_HOME] No changes, kept: {ver_fn}")
                 version_store.touch_institution_timestamp(slug)
+            except Exception as e:
+                print(f"[SAVE] Auto-save error: {e}")
+            return True
+
+        from dialogs.save_location_dialog import SaveLocationDialog
+        folder_id, cancelled = SaveLocationDialog.choose(self, slug)
+        if cancelled:
+            return False
+
+        try:
+            self.save_db(sync_from_grid=True)
+            new_vf = version_store.save_version(slug, self.data_store, source="manual", note=note, folder_id=folder_id)
+            self.version_filename = new_vf
+            self.current_roz_path = os.path.join(version_store._base_dir(), slug, "versions", new_vf)
+            self.db_path = self.current_roz_path
+            version_store.set_active_version(slug, new_vf)
+            version_store.touch_institution_timestamp(slug)
+            self._is_dirty = False
         except Exception as e:
-            print(f"Auto-save on _go_home error: {e}")
+            print(f"[SAVE] New version save error: {e}")
+        return True
+
+    def _go_home(self):
+        """Return to the Home Dashboard."""
+        if not self._save_new_version_with_folder_picker("Değişiklikler kaydedildi", force=False):
+            return  # user cancelled the folder picker — stay in the editor
         if callable(self.go_home_requested):
             from PySide6.QtCore import QTimer
             QTimer.singleShot(0, self.go_home_requested)
@@ -2263,24 +2463,19 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Açıldı: {path}")
 
     def _act_save(self):
-        self.save_db(sync_from_grid=True)
+        if not self._save_new_version_with_folder_picker("Kullanıcı kaydı", force=True):
+            return  # user cancelled the folder picker
+
         slug = getattr(self, "institution_slug", None)
-        if slug:
-            import version_store
-            new_vf = version_store.save_version(slug, self.data_store, source="manual", note="Kullanıcı kaydı")
-            self.version_filename = new_vf
-            self.current_roz_path = os.path.join(version_store._base_dir(), slug, "versions", new_vf)
-            self.db_path = self.current_roz_path
-            version_store.set_active_version(slug, new_vf)
-            version_store.touch_institution_timestamp(slug)
-            
+        new_vf = getattr(self, "version_filename", None)
+        if slug and new_vf:
             # Update title
             import re
             m = re.match(r"v(\d+)_", new_vf)
             v_num = f"v{int(m.group(1))}" if m else ""
             inst_name = getattr(self, "institution_name", slug)
             self.setWindowTitle(f"BGZ Ders Planlama — {inst_name} — {v_num}")
-            
+
         fname = os.path.basename(self.current_roz_path or self.db_path or "program.roz")
         from save_dialog import run_apple_save_sequence
         run_apple_save_sequence(self, duration_seconds=0.35, title="Kaydediliyor", message=f"'{fname}' başarıyla kaydedildi ve yeni versiyon yayına alındı.")

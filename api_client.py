@@ -68,8 +68,11 @@ class APIClient:
 
     # Built-in local accounts (fallback when VDS API is unreachable)
     LOCAL_ACCOUNTS = {
-        "sehersanli@chenki.net": {"password": "seher2311", "role": "admin", "uid": "seher_admin"},
-        "bireykurum@chenki.net": {"password": "birey19", "role": "viewer", "uid": "birey_viewer"}
+        "sehersanli@chenki.net": {"password": "seher2311", "role": "admin", "uid": "seher_admin", "full_name": "Seher Şanlı", "name": "Seher Şanlı"},
+        "admin@bgz.local": {"password": "admin", "role": "admin", "uid": "admin_local", "full_name": "Seher Şanlı", "name": "Seher Şanlı"},
+        "admin@chenki.net": {"password": "seher2311", "role": "admin", "uid": "admin_chenki", "full_name": "Seher Şanlı", "name": "Seher Şanlı"},
+        "bireykurum@chenki.net": {"password": "birey19", "role": "viewer", "uid": "birey_viewer", "full_name": "Birey Kurum", "name": "Birey Kurum"},
+        "birey@chenki.net": {"password": "birey19", "role": "viewer", "uid": "birey_viewer", "full_name": "Birey Kurum", "name": "Birey Kurum"}
     }
 
     def login(self, email="sehersanli@chenki.net", password="seher2311"):
@@ -82,6 +85,9 @@ class APIClient:
                 token_data = resp.json()
                 token_data["email"] = email
                 token_data["role"] = self._get_role(email)
+                if not token_data.get("full_name"):
+                    token_data["full_name"] = "Seher Şanlı" if "seher" in email.lower() else ("Birey Kurum" if "birey" in email.lower() else email.split("@")[0].capitalize())
+                token_data["name"] = token_data["full_name"]
                 self.save_token(token_data)
                 return True, token_data
         except Exception:
@@ -95,6 +101,8 @@ class APIClient:
                 "email": email,
                 "uid": account["uid"],
                 "role": account["role"],
+                "full_name": account.get("full_name", "Seher Şanlı" if "seher" in email.lower() else "Kullanıcı"),
+                "name": account.get("name", "Seher Şanlı" if "seher" in email.lower() else "Kullanıcı"),
                 "is_local": True
             }
             self.save_token(token_data)
@@ -193,8 +201,26 @@ class APIClient:
             
             meta_data = inst_obj.get("meta", {})
             if meta_data:
+                # Merge (don't overwrite) the local "folders" list: this pull runs on a
+                # ~15s poll and at startup, racing against folder create/rename/delete
+                # calls that write locally first and push to the cloud in a background
+                # thread. Blindly writing the cloud's copy of "folders" here used to wipe
+                # out a folder the instant it was created, before its push had landed —
+                # union-merge by id so a not-yet-pushed local folder always survives.
+                local_meta_path = os.path.join(inst_dir, "meta.json")
                 try:
-                    with open(os.path.join(inst_dir, "meta.json"), "w", encoding="utf-8") as f:
+                    with open(local_meta_path, "r", encoding="utf-8") as f:
+                        local_meta = json.load(f)
+                except Exception:
+                    local_meta = {}
+                local_folders = {f.get("id"): f for f in local_meta.get("folders", []) if f.get("id")}
+                remote_folders = {f.get("id"): f for f in meta_data.get("folders", []) if f.get("id")}
+                merged = dict(remote_folders)
+                for fid, f in local_folders.items():
+                    merged.setdefault(fid, f)
+                meta_data["folders"] = list(merged.values())
+                try:
+                    with open(local_meta_path, "w", encoding="utf-8") as f:
                         json.dump(meta_data, f, ensure_ascii=False, indent=2)
                 except Exception:
                     pass

@@ -360,7 +360,20 @@ class AutoSchedulerWorker(QThread):
                         if placed:
                             break
                 
-                # Fill remaining empty cells with filler lessons (cycle through assigned subjects)
+                # Fill remaining empty cells with filler lessons (cycle through this class's
+                # own assigned subjects), so the schedule has no visual gaps.
+                #
+                # IMPORTANT: this places MORE hours of a subject than were actually assigned
+                # (e.g. an assigned 5h "Kimya" can end up with 8-9h actually on the grid). That
+                # used to silently break the unplaced-dock bookkeeping: removing one placed
+                # copy never returned anything to the dock, because the reconciliation counted
+                # these filler copies as "real placed hours" too, so the assignment always
+                # looked over-satisfied. Every block placed here is tagged is_filler=True so
+                # the rest of the app can tell padding apart from a real assignment: the
+                # reconciliation in _refresh_unplaced_lessons ignores filler hours when
+                # deciding how many REAL hours are still unplaced, and removing a filler block
+                # instead drops it straight into the dock as its own loose, re-placeable card
+                # (see _delete_lesson_at / loose_unplaced_cards).
                 templates = class_blocks.get(cn, [])
                 if self.fill_empty and templates:
                     tmpl_idx = 0
@@ -369,10 +382,10 @@ class AutoSchedulerWorker(QThread):
                         while p < P:
                             if grid[d][p] is None:
                                 dur = 2 if (p + 1 < P and grid[d][p + 1] is None) else 1
-                                
+
                                 prev_subj = grid[d][p - 1]["subject"] if (p > 0 and grid[d][p - 1] is not None) else None
                                 next_subj = grid[d][p + dur]["subject"] if (p + dur < P and grid[d][p + dur] is not None) else None
-                                
+
                                 chosen_tmpl = None
                                 for off_idx in range(len(templates)):
                                     cand = templates[(tmpl_idx + off_idx) % len(templates)]
@@ -383,10 +396,10 @@ class AutoSchedulerWorker(QThread):
                                 if not chosen_tmpl:
                                     chosen_tmpl = templates[tmpl_idx % len(templates)]
                                     tmpl_idx += 1
-                                    
+
                                 t = chosen_tmpl["teacher"]
                                 s = chosen_tmpl["subject"]
-                                
+
                                 # Check teacher constraints
                                 can_place = True
                                 if t:
@@ -397,7 +410,7 @@ class AutoSchedulerWorker(QThread):
                                         if t in teacher_timeoff and (d, p + off) in teacher_timeoff[t]:
                                             can_place = False
                                             break
-                                            
+
                                 if not can_place and dur == 2:
                                     dur = 1
                                     can_place = True
@@ -406,7 +419,7 @@ class AutoSchedulerWorker(QThread):
                                             can_place = False
                                         if t in teacher_timeoff and (d, p) in teacher_timeoff[t]:
                                             can_place = False
-                                            
+
                                 if not can_place:
                                     for alt in templates:
                                         alt_t = alt["teacher"]
@@ -422,12 +435,12 @@ class AutoSchedulerWorker(QThread):
                                             dur = 1
                                             can_place = True
                                             break
-                                            
+
                                 bid = f"fill_{_uuid.uuid4().hex[:8]}"
                                 for off in range(dur):
                                     grid[d][p + off] = {
                                         "subject": s, "teacher": t, "block_id": bid,
-                                        "is_combined": False, "block_start": p
+                                        "is_combined": False, "block_start": p, "is_filler": True
                                     }
                                 if t:
                                     for off in range(dur):
@@ -458,7 +471,8 @@ class AutoSchedulerWorker(QThread):
                             "period": p, "row": p,
                             "duration": span,
                             "is_combined": cell["is_combined"],
-                            "block_id": bid
+                            "block_id": bid,
+                            "is_filler": bool(cell.get("is_filler", False))
                         })
                         attempt_placed += span
                         p += span

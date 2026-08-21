@@ -16,6 +16,7 @@ from auto_scheduler import matches_class
 
 class StickyGhostWidget(QLabel):
     _active_instance = None
+    _hovered_table = None
     last_drop_time = 0
 
     def __init__(self, pixmap, drag_data, parent_window=None):
@@ -31,19 +32,23 @@ class StickyGhostWidget(QLabel):
         
         self.setPixmap(pixmap)
         self.setFixedSize(pixmap.size())
+        # Low opacity so the ghost reads as "in flight" rather than a fully solid card
+        self.setWindowOpacity(0.62)
         self.drag_data = drag_data
         self.parent_window = parent_window
-        
+        self._tick_count = 0
+        self._last_cursor_pos = None
+
         # Follow cursor with fast timer
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._update_pos)
-        self._timer.start(10)
-        
+        self._timer.start(12)
+
         self._update_pos()
         self.show()
-        
-        # Install application-level event filter after tiny delay
-        QTimer.singleShot(40, self._install_filter)
+
+        # Install application-level event filter
+        QTimer.singleShot(20, self._install_filter)
 
     def _install_filter(self):
         if StickyGhostWidget._active_instance == self:
@@ -51,13 +56,59 @@ class StickyGhostWidget(QLabel):
 
     def _update_pos(self):
         cur = QCursor.pos()
+        # Always move the ghost itself every tick so it tracks the cursor smoothly.
         self.move(cur.x() - self.width() // 2, cur.y() - self.height() // 2)
+
+        # The hit-testing + preview computation below (QApplication.widgetAt is a global
+        # window hit-test) is the expensive part. Running it on every 12ms tick was the
+        # main cause of the freeze/lag feeling while dragging. Skip it when the cursor
+        # hasn't actually moved, and otherwise only run it every 3rd tick (~36ms, still
+        # well under human perception for a hover highlight) instead of every tick.
+        self._tick_count += 1
+        if cur == self._last_cursor_pos:
+            return
+        self._last_cursor_pos = cur
+        if self._tick_count % 3 != 0:
+            return
+
+        # Live preview on table under cursor
+        target_widget = QApplication.widgetAt(cur)
+        table = None
+        p = target_widget
+        while p:
+            if hasattr(p, "lesson_dropped") and hasattr(p, "set_drag_preview"):
+                table = p
+                break
+            p = p.parent() if hasattr(p, "parent") else None
+
+        if StickyGhostWidget._hovered_table and StickyGhostWidget._hovered_table != table:
+            try:
+                StickyGhostWidget._hovered_table.clear_drag_preview()
+            except Exception:
+                pass
+            StickyGhostWidget._hovered_table = None
+
+        if table:
+            StickyGhostWidget._hovered_table = table
+            local_pos = table.viewport().mapFromGlobal(cur)
+            r = table.rowAt(local_pos.y())
+            c = table.columnAt(local_pos.x())
+            if r >= 0 and c >= 0:
+                table.set_drag_preview(r, c, self.drag_data)
+            else:
+                table.clear_drag_preview()
 
     def cancel(self):
         try:
             QApplication.instance().removeEventFilter(self)
         except Exception:
             pass
+        if StickyGhostWidget._hovered_table:
+            try:
+                StickyGhostWidget._hovered_table.clear_drag_preview()
+            except Exception:
+                pass
+            StickyGhostWidget._hovered_table = None
         if hasattr(self, "_timer") and self._timer.isActive():
             self._timer.stop()
         self.hide()
@@ -506,6 +557,83 @@ class AsCTimetableHeader(QHeaderView):
         painter.end()
 
 
+def _compute_free_slot_capacity(data_store, class_name, teacher_name, is_comb, combined_classes, exclude_subject_fmt):
+    """Best-effort estimate of how many empty slots across the whole week are actually
+    available for a lesson, so a distribution edit (e.g. picking "2+2+1" = 5 hours) can be
+    checked against reality before it's applied. Returns None if there's nothing to check
+    against (no class and no teacher), otherwise the slot count as an int.
+
+    "Available" = total weekly slots, minus slots closed off by timeoff/restrictions, minus
+    slots already occupied by OTHER subjects. Hours this SAME subject/class/teacher already
+    occupies are not subtracted — those aren't "used up" by redefining the structure, they're
+    part of the lesson itself. For a combined lesson (multiple classes at once) and/or when a
+    teacher is set, the binding constraint is whichever entity has the least room.
+    """
+    from auto_scheduler import format_tr_name as fmt, matches_class as mcls
+
+    settings = data_store.get("settings", {})
+    periods = int(settings.get("periods", data_store.get("ders_saati", 8)) or 8)
+    days_list = settings.get("days")
+    if not days_list:
+        days_count = int(settings.get("days_count", settings.get("day_count", data_store.get("gun_sayisi", 5))))
+        days_list = DAYS[:days_count]
+    total_slots = periods * max(1, len(days_list))
+
+    target_classes = list(combined_classes) if (is_comb and combined_classes) else ([class_name] if class_name else [])
+    if not target_classes and not teacher_name:
+        return None
+
+    def _occupied_by_others(matches_entity_fn, timeoff_rows):
+        unusable = set()
+        for d_idx, day_offs in enumerate(timeoff_rows or []):
+            for p_idx, val in enumerate(day_offs):
+                if val == 0:
+                    unusable.add((d_idx, p_idx))
+        for p in data_store.get("grid_placements", []):
+            if not matches_entity_fn(p):
+                continue
+            p_s = fmt(p.get("subject_name") or p.get("subject") or "")
+            if p_s == exclude_subject_fmt:
+                continue
+            d = int(p.get("day") if "day" in p else p.get("col", 0))
+            per = int(p.get("period") if "period" in p else p.get("row", 0))
+            dur = int(p.get("duration", 1))
+            for off in range(dur):
+                unusable.add((d, per + off))
+        return unusable
+
+    capacities = []
+    for cn in target_classes:
+        timeoff = []
+        for c in data_store.get("siniflar", []):
+            if mcls(c.get("ad", ""), cn) or mcls(cn, c.get("ad", "")):
+                timeoff = c.get("timeoff", [])
+                break
+
+        def _class_match(p, cn=cn):
+            p_c = (p.get("class_name") or p.get("class") or "").strip()
+            return bool(mcls(p_c, cn) or mcls(cn, p_c))
+
+        unusable = _occupied_by_others(_class_match, timeoff)
+        capacities.append(total_slots - len(unusable))
+
+    if teacher_name:
+        t_fmt = fmt(teacher_name)
+        timeoff = []
+        for t in data_store.get("ogretmenler", []):
+            if fmt(t.get("ad", "")) == t_fmt:
+                timeoff = t.get("timeoff", [])
+                break
+
+        def _teacher_match(p):
+            return fmt(p.get("teacher_name") or p.get("teacher") or "") == t_fmt
+
+        unusable = _occupied_by_others(_teacher_match, timeoff)
+        capacities.append(total_slots - len(unusable))
+
+    return min(capacities) if capacities else None
+
+
 class DraggableLessonCard(QLabel):
     def __init__(self, lesson_id: int, subject_name: str, color: str, duration: int = 1, teacher: str = "", class_name: str = "", display_mode: str = "classes", parent=None):
         super().__init__(parent)
@@ -682,8 +810,6 @@ class DraggableLessonCard(QLabel):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton and hasattr(self, '_drag_start_pos'):
-            if time.time() - getattr(StickyGhostWidget, "last_drop_time", 0) < 0.35:
-                return
             if (event.pos() - self._drag_start_pos).manhattanLength() < 5:
                 self._start_sticky_drag()
                 return
@@ -715,6 +841,8 @@ class DraggableLessonCard(QLabel):
             return
             
         win = self.window()
+        if not hasattr(win, "data_store") and hasattr(win, "parent") and hasattr(win.parent(), "data_store"):
+            win = win.parent()
         data_store = getattr(win, "data_store", None)
         
         if action == act_palette:
@@ -748,6 +876,24 @@ class DraggableLessonCard(QLabel):
                 update_subject_color_globally(self, data_store, self.subject_name, new_hex)
             return
 
+        def _row_matches(a, s_fmt, c_fmt, t_fmt):
+            # atamalar rows can use either the English or the Turkish field names
+            # ("subject"/"ders", "class"/"sinif", "teacher"/"ogretmen") depending on where
+            # they were written from (manual entry vs. auto-scheduler vs. older saves).
+            # Only checking the English names here — while _refresh_unplaced_lessons's
+            # grouping checks BOTH — let stale rows survive a "replace" edit: the new rows
+            # got inserted, but an old duplicate (under "ders"/"sinif") stuck around too,
+            # and whichever one the grouping step happened to see LAST silently overrode the
+            # distribution/total shown in the dock (this is what caused "2+2+1" to render as
+            # "2+1" even though nothing was actually placed on the grid).
+            from auto_scheduler import format_tr_name as _fmt2, normalize_clean as _nc2
+            a_s = _fmt2(a.get("subject") or a.get("ders") or "")
+            a_c = _fmt2(a.get("class") or a.get("sinif") or "")
+            a_t_raw = a.get("teacher") or a.get("ogretmen") or ""
+            a_t = _fmt2(a_t_raw)
+            return (a_s == s_fmt and (not c_fmt or a_c == c_fmt) and
+                    (not t_fmt or a_t == t_fmt or _nc2(a_t_raw) == _nc2(self.teacher)))
+
         parts = None
         if action == act_2_2:
             parts = [2, 2]
@@ -768,71 +914,87 @@ class DraggableLessonCard(QLabel):
                     pass
         elif action == act_del:
             if data_store and "atamalar" in data_store:
-                from auto_scheduler import format_tr_name as _fmt, normalize_clean as _nc
+                from auto_scheduler import format_tr_name as _fmt
                 s_fmt = _fmt(self.subject_name)
                 c_fmt = _fmt(self.class_name)
                 t_fmt = _fmt(self.teacher)
-                data_store["atamalar"] = [
-                    a for a in data_store["atamalar"] 
-                    if not (_fmt(a.get("subject", "")) == s_fmt and 
-                            _fmt(a.get("class", "")) == c_fmt and
-                            (not t_fmt or _fmt(a.get("teacher", "")) == t_fmt or _nc(a.get("teacher","")) == _nc(self.teacher)))
-                ]
+                data_store["atamalar"] = [a for a in data_store["atamalar"] if not _row_matches(a, s_fmt, c_fmt, t_fmt)]
                 if win:
                     if hasattr(win, "save_db"): win.save_db()
                     if hasattr(win, "_refresh_tree"): win._refresh_tree()
                     if hasattr(win, "_refresh_grid"): win._refresh_grid()
+                    if hasattr(win, "_refresh_unplaced_lessons"): win._refresh_unplaced_lessons()
             return
-            
+
         if parts and data_store:
-            from auto_scheduler import format_tr_name as _fmt, normalize_clean as _nc
+            from auto_scheduler import format_tr_name as _fmt
             if "atamalar" in data_store:
                 s_fmt = _fmt(self.subject_name)
                 c_fmt = _fmt(self.class_name)
                 t_fmt = _fmt(self.teacher)
-                found = False
-                for a in data_store["atamalar"]:
-                    a_s = _fmt(a.get("subject", ""))
-                    a_c = _fmt(a.get("class", ""))
-                    a_t = _fmt(a.get("teacher", ""))
-                    if a_s == s_fmt and a_c == c_fmt and (not t_fmt or a_t == t_fmt or _nc(a.get("teacher","")) == _nc(self.teacher)):
-                        a["type"] = "+".join(map(str, parts))
-                        a["distribution"] = parts
-                        a["duration"] = sum(parts)
-                        found = True
-                        break
-                if not found:
-                    print(f"[ContextMenu] WARNING: no matching atama for {self.subject_name}/{self.class_name}/{self.teacher}")
-            
-            # Immediately split and replace this card in the dock container
-            p_widget = self.parent()
-            if p_widget and hasattr(p_widget, "layout") and p_widget.layout():
-                c_layout = p_widget.layout()
-                idx = c_layout.indexOf(self)
-                c_layout.removeWidget(self)
-                self.hide()
-                self.deleteLater()
-                
-                # Insert cards for each part in parts
-                for p_idx, p_dur in enumerate(parts):
-                    new_id = f"{self.lesson_id}_split_{p_idx}_{uuid.uuid4().hex[:4]}"
-                    new_card = DraggableLessonCard(
-                        new_id, self.subject_name, self.color, duration=p_dur,
-                        teacher=self.teacher, class_name=self.class_name,
-                        display_mode=getattr(self, "display_mode", "classes")
+
+                # Warn (and refuse) rather than silently produce a distribution that can
+                # never actually fit on the timetable: check how many empty/eligible slots
+                # this class (and teacher, if any) has across the whole week, NOT counting
+                # hours this same lesson already occupies (those aren't "used up" by the edit).
+                capacity = _compute_free_slot_capacity(
+                    data_store, self.class_name, self.teacher,
+                    getattr(self, "is_comb", False), getattr(self, "combined_classes", []), s_fmt
+                )
+                if capacity is not None and sum(parts) > capacity:
+                    QMessageBox.warning(
+                        self, "Yeterli Boş Saat Yok",
+                        f"⚠️ '{self.subject_name}' dersi için seçilen <b>{'+'.join(map(str, parts))}</b> dağılımı "
+                        f"toplam <b>{sum(parts)} saat</b> gerektiriyor.<br><br>"
+                        f"Ancak <b>{self.class_name}</b>{' / ' + self.teacher if self.teacher else ''} için çizelgede "
+                        f"sadece <b>{capacity} saat</b> boş yer var.<br><br>"
+                        "Lütfen daha küçük bir dağılım seçin ya da önce çizelgede yer açın."
                     )
-                    new_card.setAcceptDrops(True)
-                    if hasattr(p_widget, "installEventFilter"):
-                        new_card.installEventFilter(p_widget)
-                    if idx >= 0:
-                        c_layout.insertWidget(idx + p_idx, new_card)
-                    else:
-                        c_layout.addWidget(new_card)
-            
+                    return
+
+                # Find ALL matching atama rows for this subject/class/teacher (both English
+                # and Turkish field-name variants — see _row_matches above)
+                matching_indices = [i for i, a in enumerate(data_store["atamalar"]) if _row_matches(a, s_fmt, c_fmt, t_fmt)]
+
+                if not matching_indices:
+                    # Broader search: just subject match
+                    matching_indices = [
+                        i for i, a in enumerate(data_store["atamalar"])
+                        if _fmt(a.get("subject") or a.get("ders") or "") == s_fmt
+                    ]
+
+                if matching_indices:
+                    # Replace all old matching rows with new distribution rows. This edits
+                    # ONLY the assignment definition (atamalar) — it must NEVER touch
+                    # grid_placements, or it would rip already-scheduled hours off the
+                    # actual timetable just for having redefined the lesson's structure.
+                    old_rows = data_store["atamalar"]
+                    template = dict(old_rows[matching_indices[0]])
+                    matching_set = set(matching_indices)
+                    insert_pos = matching_indices[0]
+
+                    new_rows = []
+                    for p_idx, p_val in enumerate(parts):
+                        import uuid as _uuid
+                        new_row = dict(template)
+                        new_row["hours"] = p_val
+                        new_row["duration"] = p_val
+                        new_row["type"] = "+".join(map(str, parts))
+                        new_row["distribution"] = list(parts)
+                        new_row["id"] = str(_uuid.uuid4())
+                        new_rows.append(new_row)
+
+                    # Reassign (not in-place pop/insert) so any earlier deep-copied undo
+                    # snapshot still safely references the OLD list object, untouched.
+                    tail = [a for idx, a in enumerate(old_rows) if idx >= insert_pos and idx not in matching_set]
+                    data_store["atamalar"] = old_rows[:insert_pos] + new_rows + tail
+
             if win:
                 if hasattr(win, "save_db"): win.save_db()
                 if hasattr(win, "_refresh_tree"): win._refresh_tree()
-                if hasattr(win, "statusBar"):
+                if hasattr(win, "_refresh_unplaced_lessons"):
+                    win._refresh_unplaced_lessons()
+                if hasattr(win, "statusBar") and win.statusBar():
                     win.statusBar().showMessage(f"ℹ️ '{self.subject_name}' dersi {'+'.join(map(str, parts))} yapısına dönüştürüldü ({sum(parts)} saat).", 4000)
 
 
@@ -1431,209 +1593,171 @@ class DropTableWidget(QTableWidget):
         self.setHorizontalHeader(self.asc_header)
         self.horizontalScrollBar().valueChanged.connect(lambda: self.asc_header.viewport().update())
         self.setItemDelegate(TimetableCellDelegate(self))
-        
+        self._drag_preview_info = None
+
+    def _preview_rect(self, preview):
+        """Union rect covering a preview's full duration span, or None if off-grid."""
+        if not preview:
+            return None
+        r = preview.get("row", -1)
+        c = preview.get("col", -1)
+        dur = max(1, int(preview.get("duration", 1)))
+        if not (0 <= r < self.rowCount() and 0 <= c < self.columnCount()):
+            return None
+        grid = self.parent()
+        periods = grid._periods if (grid and hasattr(grid, "_periods")) else 8
+        if periods <= 0: periods = 8
+        day_start_col = (c // periods) * periods
+        day_end_col = day_start_col + periods - 1
+        effective_end_col = min(c + dur - 1, day_end_col, self.columnCount() - 1)
+        start_rect = self.visualRect(self.model().index(r, c))
+        end_rect = self.visualRect(self.model().index(r, effective_end_col))
+        return start_rect.united(end_rect)
+
+    def _clear_preview_targeted(self):
+        """Drop the preview and repaint only the (small) rect it occupied, instead of the
+        whole viewport — called constantly while dragging, so this keeps drag-move handling
+        cheap and the UI responsive instead of freezing/lagging."""
+        if self._drag_preview_info is not None:
+            old_rect = self._preview_rect(self._drag_preview_info)
+            self._drag_preview_info = None
+            if old_rect:
+                self.viewport().update(old_rect.adjusted(-2, -2, 2, 2))
+            else:
+                self.viewport().update()
+
+    def set_drag_preview(self, row: int, col: int, lesson_info: dict):
+        if not lesson_info or row < 0 or col < 0 or row >= self.rowCount() or col >= self.columnCount():
+            self._clear_preview_targeted()
+            return
+
+        dur = int(lesson_info.get("duration", 1))
+        if dur <= 0: dur = 1
+
+        grid = self.parent()
+        periods = grid._periods if (grid and hasattr(grid, "_periods")) else 8
+        if periods <= 0: periods = 8
+
+        # Check day boundary: preview must not cross days
+        day_start_col = (col // periods) * periods
+        day_end_col = day_start_col + periods - 1
+        if col + dur - 1 > day_end_col or col + dur > self.columnCount():
+            self._clear_preview_targeted()
+            return
+
+        is_move = bool(lesson_info.get("is_move", False))
+        orig_r = lesson_info.get("origin_row", -1)
+        orig_c = lesson_info.get("origin_col", -1)
+
+        # CRITICAL: If ANY cell in [col, col + dur - 1] is OCCUPIED, DO NOT SHOW PREVIEW!
+        for off in range(dur):
+            chk_c = col + off
+            if is_move and row == orig_r and (orig_c <= chk_c < orig_c + dur):
+                continue # moving from itself is allowed
+
+            # 1. Check table item
+            cell_item = self.item(row, chk_c)
+            if cell_item and cell_item.text().strip():
+                self._clear_preview_targeted()
+                return
+
+            # 2. Check in-memory _placed_lessons
+            if grid and hasattr(grid, "_placed_lessons") and (row, chk_c) in grid._placed_lessons:
+                pl = grid._placed_lessons[(row, chk_c)]
+                if pl and (pl.get("subject_name") or pl.get("subject")):
+                    self._clear_preview_targeted()
+                    return
+
+        subj = lesson_info.get("subject_name") or lesson_info.get("subject") or ""
+
+        # Cheap identity check FIRST — skip the (relatively) expensive color resolution
+        # below entirely on every drag-move tick when the preview hasn't actually moved
+        # to a new cell/subject. This is what used to make dragging feel laggy: a full
+        # color lookup + dict rebuild on every single mouse-move event, dozens of times
+        # a second, even while hovering the exact same cell.
+        prev = self._drag_preview_info
+        if prev and prev.get("row") == row and prev.get("col") == col and prev.get("duration") == dur and prev.get("subject_name") == subj:
+            return
+
+        teacher = lesson_info.get("teacher_name") or lesson_info.get("teacher") or ""
+        cls = lesson_info.get("class_name") or lesson_info.get("class") or ""
+
+        win = self.window()
+        if not hasattr(win, "data_store") and hasattr(win, "parent") and hasattr(win.parent(), "data_store"):
+            win = win.parent()
+        data_store = getattr(win, "data_store", None)
+        from dialogs.color_picker_dialog import resolve_subject_color
+        color = resolve_subject_color(subj, data_store) if subj else (lesson_info.get("color") or "#2563EB")
+
+        new_preview = {
+            "row": row,
+            "col": col,
+            "duration": dur,
+            "subject_name": subj,
+            "teacher_name": teacher,
+            "class_name": cls,
+            "color": color,
+            "is_combined": bool(lesson_info.get("is_combined") or ("+" in cls or "," in cls or "&" in cls)),
+            "combined_classes": lesson_info.get("combined_classes", [])
+        }
+
+        old_rect = self._preview_rect(prev)
+        self._drag_preview_info = new_preview
+        new_rect = self._preview_rect(new_preview)
+        repaint_rect = old_rect.united(new_rect) if (old_rect and new_rect) else (new_rect or old_rect)
+        if repaint_rect:
+            self.viewport().update(repaint_rect.adjusted(-2, -2, 2, 2))
+        else:
+            self.viewport().update()
+
+    def clear_drag_preview(self):
+        self._clear_preview_targeted()
+
     def dragEnterEvent(self, event):
         if event.mimeData().hasFormat("application/x-lesson"):
-            event.accept()
+            event.acceptProposedAction()
         else:
             event.ignore()
-            
-    def _clear_highlight(self):
-        if hasattr(self, '_drag_hl_cell') and self._drag_hl_cell:
-            r, c = self._drag_hl_cell
-            item = self.item(r, c)
-            if item and getattr(item, "_is_temp_highlight", False):
-                self.setItem(r, c, None)
-            self._drag_hl_cell = None
 
     def dragLeaveEvent(self, event):
-        self._clear_highlight()
+        self.clear_drag_preview()
         event.accept()
-        
+
     def dragMoveEvent(self, event):
         if event.mimeData().hasFormat("application/x-lesson"):
+            try:
+                data = event.mimeData().data("application/x-lesson").data().decode()
+                lesson_info = json.loads(data)
+            except Exception:
+                lesson_info = {}
+                
             item = self.itemAt(event.pos())
             r = self.row(item) if item else self.rowAt(event.pos().y())
             c = self.column(item) if item else self.columnAt(event.pos().x())
             
-            if (r, c) != getattr(self, '_drag_hl_cell', None):
-                self._clear_highlight()
-                if r >= 0 and c >= 0:
-                    current = self.item(r, c)
-                    if not current:
-                        temp = QTableWidgetItem("✚ Bırak")
-                        temp._is_temp_highlight = True
-                        temp.setBackground(QColor("#DCFCE7")) # Subtle light green
-                        temp.setForeground(QColor("#16A34A"))
-                        temp.setTextAlignment(Qt.AlignCenter)
-                        self.setItem(r, c, temp)
-                        self._drag_hl_cell = (r, c)
-            event.accept()
+            if r >= 0 and c >= 0:
+                self.set_drag_preview(r, c, lesson_info)
+                event.acceptProposedAction()
+            else:
+                self.clear_drag_preview()
+                event.ignore()
         else:
             event.ignore()
-            
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.drag_start_pos = event.pos()
-        super().mousePressEvent(event)
-
-    def mouseReleaseEvent(self, event):
-        super().mouseReleaseEvent(event)
-        if event.button() == Qt.LeftButton and hasattr(self, 'drag_start_pos'):
-            if time.time() - getattr(StickyGhostWidget, "last_drop_time", 0) < 0.35:
-                return
-            if (event.pos() - self.drag_start_pos).manhattanLength() < 5:
-                item = self.itemAt(self.drag_start_pos)
-                if item and item.text().strip():
-                    row = self.rowAt(self.drag_start_pos.y())
-                    col = self.columnAt(self.drag_start_pos.x())
-                    orig_r, orig_c, orig_dur, info = self._get_lesson_origin(row, col)
-                    if info:
-                        s_name = info.get("subject_name", "")
-                        c_name = info.get("class_name", "")
-                        is_comb = bool(info.get("is_combined") or ("+" in c_name or "," in c_name or "&" in c_name))
-                        combined_classes = list(info.get("combined_classes", []))
-                        if is_comb and not combined_classes:
-                            combined_classes = [c.strip().split("(")[0].strip() for c in c_name.replace("&", "+").replace(",", "+").split("+") if c.strip()]
-                        
-                        data = dict(info)
-                        data["is_move"] = True
-                        data["origin_row"] = orig_r
-                        data["origin_col"] = orig_c
-                        data["teacher"] = info.get("teacher_name", "")
-                        data["locked"] = True
-                        data["is_combined"] = is_comb
-                        data["combined_classes"] = combined_classes
-                        if is_comb and combined_classes:
-                            data["class_name"] = " + ".join(combined_classes)
-                            
-                        orig_item = self.item(orig_r, orig_c) or item
-                        rect = self.visualItemRect(orig_item)
-                        pixmap = self.viewport().grab(rect)
-                        
-                        win = self.window()
-                        StickyGhostWidget(pixmap, data, win)
-
-    def mouseMoveEvent(self, event):
-        # 1. Drag & Drop start when Left button is pressed
-        if (event.buttons() & Qt.LeftButton) and hasattr(self, 'drag_start_pos'):
-            if (event.pos() - self.drag_start_pos).manhattanLength() >= 5:
-                item = self.itemAt(self.drag_start_pos)
-                if item and item.text().strip():
-                    row = self.rowAt(self.drag_start_pos.y())
-                    col = self.columnAt(self.drag_start_pos.x())
-                    orig_r, orig_c, orig_dur, info = self._get_lesson_origin(row, col)
-                    if info:
-                        # Combined lesson check
-                        s_name = info.get("subject_name", "")
-                        c_name = info.get("class_name", "")
-                        is_comb = bool(info.get("is_combined") or ("+" in c_name or "," in c_name or "&" in c_name))
-                        if is_comb:
-                            if info.get("combined_classes"):
-                                combined_classes = list(info["combined_classes"])
-                            else:
-                                combined_classes = [c.strip().split("(")[0].strip() for c in c_name.replace("&", "+").replace(",", "+").split("+") if c.strip()]
-                        else:
-                            combined_classes = []
-
-                        # Kilitli ders taşıma uyarısı
-                        was_locked = bool(info.get("locked"))
-                        if was_locked:
-                            from auto_scheduler import matches_class
-                            ret = QMessageBox.warning(
-                                self, "Kilitli Ders Uyarısı",
-                                f"🔒 '{s_name}' ({c_name}) dersi kilitlenmiştir.\n\n"
-                                "Kilitli bir dersi taşımak istiyor musunuz?",
-                                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-                            )
-                            if ret != QMessageBox.Yes:
-                                return
-                            
-                            # Kullanıcı onayladı: Başlangıç slotunun kilidini her iki sınıfta da hemen kaldır
-                            info["locked"] = False
-                            grid = self.parent()
-                            if hasattr(grid, "_placed_lessons"):
-                                for (r_k, c_k), pl in list(grid._placed_lessons.items()):
-                                    if abs(c_k - orig_c) < orig_dur and (pl.get("subject_name") == s_name):
-                                        if not is_comb or any(matches_class(pl.get("class_name", ""), tc) for tc in combined_classes) or pl.get("class_name") == c_name:
-                                            pl["locked"] = False
-                            win = self.window()
-                            if hasattr(win, "data_store"):
-                                periods = int(getattr(grid, "_periods", 8))
-                                if periods <= 0: periods = 8
-                                d_day = orig_c // periods
-                                d_per = orig_c % periods
-                                for p in win.data_store.get("grid_placements", []):
-                                    p_d = int(p.get("day") if "day" in p else p.get("col", -1))
-                                    p_p = int(p.get("period") if "period" in p else p.get("row", -1))
-                                    p_c = (p.get("class_name") or p.get("class") or "").strip()
-                                    if p_d == d_day and (d_per <= p_p < d_per + orig_dur):
-                                        if not is_comb or any(matches_class(p_c, tc) for tc in combined_classes) or p_c == c_name:
-                                            p["locked"] = False
-                            self.viewport().update()
-
-                        from PySide6.QtGui import QDrag
-                        drag = QDrag(self)
-                        mime = QMimeData()
-                        
-                        data = dict(info)
-                        data["is_move"] = True
-                        data["origin_row"] = orig_r
-                        data["origin_col"] = orig_c
-                        data["teacher"] = info.get("teacher_name", "")
-                        data["locked"] = True # Yeni yere konulduğunda tekrar kilitlensin
-                        data["is_combined"] = is_comb
-                        data["combined_classes"] = combined_classes
-                        if is_comb and combined_classes:
-                            data["class_name"] = " + ".join(combined_classes)
-                        
-                        mime.setData("application/x-lesson", QByteArray(json.dumps(data).encode()))
-                        drag.setMimeData(mime)
-                        
-                        orig_item = self.item(orig_r, orig_c) or item
-                        rect = self.visualItemRect(orig_item)
-                        pixmap = self.viewport().grab(rect)
-                        drag.setPixmap(pixmap)
-                        
-                        hotspot = event.pos() - rect.topLeft()
-                        drag.setHotSpot(hotspot)
-                        
-                        drag.exec_(Qt.MoveAction)
-                        return
-
-        # 2. Pure Hover (Farenin hiçbir tuşuna basılmadığı an)
-        super().mouseMoveEvent(event)
-        item = self.itemAt(event.pos())
-        grid = self.parent() if self.parent() else None
-        
-        info = None
-        if item:
-            r = item.row()
-            c = item.column()
-            orig_r, orig_c, orig_dur, info = self._get_lesson_origin(r, c) if hasattr(self, "_get_lesson_origin") else (r, c, 1, None)
-            if not info and grid and hasattr(grid, "_placed_lessons"):
-                info = grid._placed_lessons.get((r, c))
-                
-        if info and (info.get("subject_name") or info.get("subject")):
-            self.viewport().setCursor(Qt.PointingHandCursor)
-            if grid and hasattr(grid, "update_info_panel"):
-                grid.update_info_panel(info)
-        else:
-            self.viewport().setCursor(Qt.ArrowCursor)
 
     def dropEvent(self, event):
-        self._clear_highlight()
+        self.clear_drag_preview()
         if event.mimeData().hasFormat("application/x-lesson"):
-            data = event.mimeData().data("application/x-lesson").data().decode()
-            lesson_info = json.loads(data)
-            
+            try:
+                data = event.mimeData().data("application/x-lesson").data().decode()
+                lesson_info = json.loads(data)
+            except Exception:
+                lesson_info = {}
+                
             item = self.itemAt(event.pos())
             row = self.row(item) if item else self.rowAt(event.pos().y())
             col = self.column(item) if item else self.columnAt(event.pos().x())
             
-            if row >= 0 and col >= 0:
-                # Removed redundant locked slot check because main_window now handles overrides
-                # Öğretmen timeoff bilgisi (kullanıcıyı bloklamadan hafif uyarı veya doğrudan yerleşim)
+            if row >= 0 and col >= 0 and lesson_info:
                 teacher = lesson_info.get("teacher", "")
                 dur = int(lesson_info.get("duration", 1))
                 win = self.window()
@@ -1656,11 +1780,278 @@ class DropTableWidget(QTableWidget):
                             break
                 
                 self.lesson_dropped.emit(row, col, lesson_info)
-                event.accept()
+                event.acceptProposedAction()
             else:
                 event.ignore()
         else:
             event.ignore()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        
+        # Draw drag preview ghost overlay if active
+        preview = self._drag_preview_info
+        if preview and isinstance(preview, dict):
+            dur = max(1, int(preview.get("duration", 1)))
+            union_rect = self._preview_rect(preview)
+            grid = self.parent()
+
+            if union_rect is not None:
+                if not union_rect.isEmpty():
+                    painter = QPainter(self.viewport())
+                    painter.setRenderHint(QPainter.Antialiasing, True)
+                    
+                    base_color = QColor(preview.get("color") or "#3B82F6")
+                    fill_color = QColor(base_color.red(), base_color.green(), base_color.blue(), 145)
+                    painter.setBrush(QBrush(fill_color))
+                    
+                    pen = QPen(QColor(base_color.darker(130)), 2, Qt.DashLine)
+                    painter.setPen(pen)
+                    painter.drawRoundedRect(union_rect.adjusted(1, 1, -1, -1), 4, 4)
+                    
+                    display_mode = getattr(grid, "current_view_mode", "classes") if grid else "classes"
+                    s_name = preview.get("subject_name", "")
+                    c_name = preview.get("class_name", "")
+                    if display_mode == "teachers":
+                        main_txt = c_name or s_name
+                    else:
+                        main_txt = get_subject_abbr(s_name) if s_name else c_name
+                        
+                    if dur > 1:
+                        main_txt += f" ({dur}h)"
+                        
+                    painter.setFont(QFont("Segoe UI", 9, QFont.Bold))
+                    painter.setPen(QColor("#000000"))
+                    painter.drawText(union_rect, Qt.AlignCenter, main_txt)
+                    
+                    painter.end()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.drag_start_pos = event.pos()
+        super().mousePressEvent(event)
+
+    def _lookup_placement_fallback(self, row, col):
+        """Fallback used ONLY when the _placed_lessons cache has no entry for (row, col).
+
+        This used to match a stored placement by day/period ALONE, with no check that it
+        actually belongs to the class/teacher of the ROW that was clicked. Since every row
+        (class or teacher) shares the exact same day/period columns, that meant clicking a
+        cell that was genuinely empty FOR THIS ROW could still "find" a completely unrelated
+        lesson belonging to some OTHER class/teacher that simply happened to be scheduled at
+        the same time slot — picking it up as a phantom card that could then be dropped
+        somewhere else, effectively duplicating a lesson out of thin air. Now it requires the
+        placement's class (or teacher, in teacher view) to actually match this row.
+        """
+        grid = self.parent()
+        win = self.window()
+        if hasattr(win, "_editor") and getattr(win, "_editor"):
+            win = win._editor
+        elif not hasattr(win, "data_store") and hasattr(win, "parent") and hasattr(win.parent(), "data_store"):
+            win = win.parent()
+        if not hasattr(win, "data_store"):
+            return None, row, col, 1
+
+        periods = int(getattr(grid, "_periods", 8))
+        if periods <= 0: periods = 8
+        d_day = col // periods
+        d_per = col % periods
+        view_mode = getattr(grid, "current_view_mode", "classes")
+        v_item = self.verticalHeaderItem(row)
+        row_header_name = v_item.text().strip() if v_item else ""
+
+        from auto_scheduler import matches_class, format_tr_name
+        for p in win.data_store.get("grid_placements", []):
+            p_d = int(p.get("day") if "day" in p else p.get("col", 0))
+            p_p = int(p.get("period") if "period" in p else p.get("row", 0))
+            p_dur = int(p.get("duration", 1))
+            if p_d != d_day or not (p_p <= d_per < p_p + p_dur):
+                continue
+            p_cls = (p.get("class_name") or p.get("class") or "").strip()
+            p_t = (p.get("teacher_name") or p.get("teacher") or "").strip()
+            if row_header_name:
+                if view_mode == "classes":
+                    if not (matches_class(p_cls, row_header_name) or matches_class(row_header_name, p_cls)):
+                        continue
+                else:
+                    if format_tr_name(p_t) != format_tr_name(row_header_name):
+                        continue
+            info = {
+                "subject_name": p.get("subject_name") or p.get("subject", ""),
+                "teacher_name": p.get("teacher_name") or p.get("teacher", ""),
+                "class_name": p.get("class_name") or p.get("class", ""),
+                "duration": p_dur,
+                "color": p.get("color", "#2563EB"),
+                "locked": bool(p.get("locked")),
+                "is_combined": bool(p.get("is_combined")),
+                "combined_classes": p.get("combined_classes", []),
+                "origin_row": row,
+                "origin_col": d_day * periods + p_p,
+                "block_id": p.get("block_id")
+            }
+            return info, row, d_day * periods + p_p, p_dur
+        return None, row, col, 1
+
+    def mouseReleaseEvent(self, event):
+        super().mouseReleaseEvent(event)
+        if event.button() == Qt.LeftButton and hasattr(self, 'drag_start_pos'):
+            if (event.pos() - self.drag_start_pos).manhattanLength() < 5:
+                row = self.rowAt(self.drag_start_pos.y())
+                col = self.columnAt(self.drag_start_pos.x())
+                if row >= 0 and col >= 0:
+                    orig_r, orig_c, orig_dur, info = self._get_lesson_origin(row, col)
+                    if not info:
+                        info, orig_r, orig_c, orig_dur = self._lookup_placement_fallback(row, col)
+                    if info:
+                        s_name = info.get("subject_name", "")
+                        c_name = info.get("class_name", "")
+                        is_comb = bool(info.get("is_combined") or ("+" in c_name or "," in c_name or "&" in c_name))
+                        combined_classes = list(info.get("combined_classes", []))
+                        if is_comb and not combined_classes:
+                            combined_classes = [c.strip().split("(")[0].strip() for c in c_name.replace("&", "+").replace(",", "+").split("+") if c.strip()]
+                        
+                        data = dict(info)
+                        data["is_move"] = True
+                        data["origin_row"] = orig_r
+                        data["origin_col"] = orig_c
+                        data["teacher"] = info.get("teacher_name", "")
+                        # Preserve the lesson's ACTUAL lock state instead of forcing it to
+                        # True — this used to silently lock every lesson ever picked up this
+                        # way, even ones that were never locked, causing an unwanted "locked
+                        # lesson" confirmation dialog the next time anyone tried to remove it.
+                        data["locked"] = bool(info.get("locked", False))
+                        data["is_combined"] = is_comb
+                        data["combined_classes"] = combined_classes
+                        if is_comb and combined_classes:
+                            data["class_name"] = " + ".join(combined_classes)
+
+                        # Always size the grabbed ghost pixmap to the lesson's FULL duration
+                        # span (not just the single cell that was clicked/found), so a 2-hour
+                        # block always drags as a 2-wide rectangle, never a 1-cell square.
+                        rect = self._preview_rect({"row": orig_r, "col": orig_c, "duration": orig_dur})
+                        if rect is None:
+                            rect = self.visualRect(self.model().index(orig_r, orig_c))
+                        pixmap = self.viewport().grab(rect)
+
+                        win = self.window()
+                        StickyGhostWidget(pixmap, data, win)
+
+    def mouseMoveEvent(self, event):
+        # 1. Drag & Drop start when Left button is pressed
+        if (event.buttons() & Qt.LeftButton) and hasattr(self, 'drag_start_pos'):
+            if (event.pos() - self.drag_start_pos).manhattanLength() >= 5:
+                row = self.rowAt(self.drag_start_pos.y())
+                col = self.columnAt(self.drag_start_pos.x())
+                if row >= 0 and col >= 0:
+                    orig_r, orig_c, orig_dur, info = self._get_lesson_origin(row, col)
+                    if not info:
+                        info, orig_r, orig_c, orig_dur = self._lookup_placement_fallback(row, col)
+                    if info:
+                        s_name = info.get("subject_name", "")
+                        c_name = info.get("class_name", "")
+                        is_comb = bool(info.get("is_combined") or ("+" in c_name or "," in c_name or "&" in c_name))
+                        combined_classes = list(info.get("combined_classes", [])) if is_comb else []
+                        if is_comb and not combined_classes:
+                            combined_classes = [c.strip().split("(")[0].strip() for c in c_name.replace("&", "+").replace(",", "+").split("+") if c.strip()]
+
+                        # Kilitli ders taşıma uyarısı
+                        was_locked = bool(info.get("locked"))
+                        if was_locked:
+                            from auto_scheduler import matches_class
+                            ret = QMessageBox.warning(
+                                self, "Kilitli Ders Uyarısı",
+                                f"🔒 '{s_name}' ({c_name}) dersi kilitlenmiştir.\n\n"
+                                "Kilitli bir dersi taşımak istiyor musunuz?",
+                                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+                            )
+                            if ret != QMessageBox.Yes:
+                                return
+                            
+                            info["locked"] = False
+                            grid = self.parent()
+                            # NOTE: both scans below must check the ROW (class/teacher) too, not
+                            # just subject+column proximity — otherwise unlocking this lesson
+                            # could silently unlock an unrelated lesson belonging to a DIFFERENT
+                            # class/teacher that just happened to share the same subject name and
+                            # sit in a nearby/same-day column. Same for the `not is_comb or ...`
+                            # shortcut below: for a non-combined lesson that unconditionally
+                            # matched ANY class at that day/period, not just this one.
+                            if hasattr(grid, "_placed_lessons"):
+                                for (r_k, c_k), pl in list(grid._placed_lessons.items()):
+                                    if r_k == orig_r and abs(c_k - orig_c) < orig_dur and (pl.get("subject_name") == s_name):
+                                        if (is_comb and any(matches_class(pl.get("class_name", ""), tc) for tc in combined_classes)) or pl.get("class_name") == c_name:
+                                            pl["locked"] = False
+                            win = self.window()
+                            if hasattr(win, "data_store"):
+                                periods = int(getattr(grid, "_periods", 8))
+                                if periods <= 0: periods = 8
+                                d_day = orig_c // periods
+                                d_per = orig_c % periods
+                                for p in win.data_store.get("grid_placements", []):
+                                    p_d = int(p.get("day") if "day" in p else p.get("col", 0))
+                                    p_p = int(p.get("period") if "period" in p else p.get("row", 0))
+                                    p_c = (p.get("class_name") or p.get("class") or "").strip()
+                                    if p_d == d_day and (d_per <= p_p < d_per + orig_dur):
+                                        if (is_comb and any(matches_class(p_c, tc) for tc in combined_classes)) or p_c == c_name:
+                                            p["locked"] = False
+                            self.viewport().update()
+
+                        from PySide6.QtGui import QDrag
+                        drag = QDrag(self)
+                        mime = QMimeData()
+                        
+                        data = dict(info)
+                        data["is_move"] = True
+                        data["origin_row"] = orig_r
+                        data["origin_col"] = orig_c
+                        data["teacher"] = info.get("teacher_name", "")
+                        # info["locked"] was just explicitly cleared above (after confirming
+                        # the unlock) if this lesson was locked — forcing True back here
+                        # undid that confirmation and silently re-locked (or, for a never-
+                        # locked lesson, newly locked) it at the destination every single
+                        # time anything was moved, which is why removing a lesson later kept
+                        # popping an unexpected "locked lesson" confirmation dialog.
+                        data["locked"] = bool(info.get("locked", False))
+                        data["is_combined"] = is_comb
+                        data["combined_classes"] = combined_classes
+                        if is_comb and combined_classes:
+                            data["class_name"] = " + ".join(combined_classes)
+                        
+                        mime.setData("application/x-lesson", QByteArray(json.dumps(data).encode()))
+                        drag.setMimeData(mime)
+
+                        # Always size the dragged pixmap to the lesson's FULL duration span.
+                        rect = self._preview_rect({"row": orig_r, "col": orig_c, "duration": orig_dur})
+                        if rect is None:
+                            rect = self.visualRect(self.model().index(orig_r, orig_c))
+                        pixmap = self.viewport().grab(rect)
+                        drag.setPixmap(pixmap)
+                        
+                        hotspot = event.pos() - rect.topLeft()
+                        drag.setHotSpot(hotspot)
+                        
+                        drag.exec_(Qt.MoveAction)
+                        return
+
+        # 2. Pure Hover
+        super().mouseMoveEvent(event)
+        item = self.itemAt(event.pos())
+        grid = self.parent() if self.parent() else None
+        
+        info = None
+        if item:
+            r = item.row()
+            c = item.column()
+            orig_r, orig_c, orig_dur, info = self._get_lesson_origin(r, c) if hasattr(self, "_get_lesson_origin") else (r, c, 1, None)
+            if not info and grid and hasattr(grid, "_placed_lessons"):
+                info = grid._placed_lessons.get((r, c))
+                
+        if info and (info.get("subject_name") or info.get("subject")):
+            self.viewport().setCursor(Qt.PointingHandCursor)
+            if grid and hasattr(grid, "update_info_panel"):
+                grid.update_info_panel(info)
+        else:
+            self.viewport().setCursor(Qt.ArrowCursor)
 
     def _get_lesson_origin(self, row, col):
         """Finds the true starting cell (origin_row, origin_col) and info of a placed lesson at (row, col)."""
@@ -1677,25 +2068,88 @@ class DropTableWidget(QTableWidget):
         return row, col, max(c_span, r_span, 1), None
 
     def _delete_lesson_at(self, row, col):
-        from PySide6.QtCore import QTimer
         orig_r, orig_c, orig_dur, info = self._get_lesson_origin(row, col)
         grid = self.parent()
+        periods = int(getattr(grid, "_periods", 8))
+        if periods <= 0: periods = 8
+        del_day = int(orig_c) // periods
+        del_period = int(orig_c) % periods
         
-        # Fallback: if info is None, try to get it from _placed_lessons at any offset
-        if not info and hasattr(grid, "_placed_lessons"):
-            for off in range(max(orig_dur, 3)):
-                info = grid._placed_lessons.get((orig_r, orig_c + off))
-                if info:
-                    break
-            if not info:
-                info = grid._placed_lessons.get((row, col))
+        view_mode = getattr(grid, "current_view_mode", "classes")
+        v_item = self.verticalHeaderItem(orig_r)
+        row_header_name = v_item.text().strip() if v_item else ""
         
-        c_name = (info.get("class_name") or info.get("class") or "") if info else ""
-        t_name = (info.get("teacher_name") or info.get("teacher") or "") if info else ""
-        s_name = (info.get("subject_name") or info.get("subject") or "") if info else ""
+        win = self.window()
+        if hasattr(win, "_editor") and getattr(win, "_editor"):
+            win = win._editor
+        elif not hasattr(win, "data_store") and hasattr(win, "parent") and hasattr(win.parent(), "data_store"):
+            win = win.parent()
+            
+        # 1. Accurately find ALL placements in data_store for this cell's lesson block
+        from auto_scheduler import matches_class, format_tr_name, normalize_clean
+        matching_block_placements = []
         
-        # ── Lock Check for combined/single lessons ──
-        is_locked = bool(info and info.get("locked"))
+        if hasattr(win, "data_store") and "grid_placements" in win.data_store:
+            # Find primary placement matching slot
+            primary_p = None
+            for p in win.data_store.get("grid_placements", []):
+                p_day = int(p.get("day") if "day" in p else p.get("col", 0))
+                p_period = int(p.get("period") if "period" in p else p.get("row", 0))
+                p_dur = int(p.get("duration", 1))
+                if p_day == del_day and (p_period <= del_period < p_period + p_dur):
+                    p_cls = (p.get("class_name") or p.get("class") or "").strip()
+                    p_t = (p.get("teacher_name") or p.get("teacher") or "").strip()
+                    if view_mode == "classes" and (matches_class(p_cls, row_header_name) or row_header_name in p_cls or not row_header_name):
+                        primary_p = p
+                        break
+                    elif view_mode == "teachers" and (format_tr_name(p_t) == format_tr_name(row_header_name) or p_t == row_header_name or not row_header_name):
+                        primary_p = p
+                        break
+                        
+            if primary_p:
+                p_bid = primary_p.get("block_id")
+                p_sub = primary_p.get("subject_name") or primary_p.get("subject") or ""
+                p_cls = primary_p.get("class_name") or primary_p.get("class") or ""
+                p_tea = primary_p.get("teacher_name") or primary_p.get("teacher") or ""
+                p_per = int(primary_p.get("period") if "period" in primary_p else primary_p.get("row", del_period))
+                
+                if p_bid:
+                    matching_block_placements = [
+                        p for p in win.data_store.get("grid_placements", [])
+                        if p.get("block_id") == p_bid
+                    ]
+                else:
+                    matching_block_placements = [
+                        p for p in win.data_store.get("grid_placements", [])
+                        if (int(p.get("day") if "day" in p else p.get("col", 0)) == del_day and
+                            abs(int(p.get("period") if "period" in p else p.get("row", 0)) - p_per) <= 2 and
+                            (p.get("subject_name") or p.get("subject")) == p_sub and
+                            (matches_class(p.get("class_name") or p.get("class", ""), p_cls) or
+                             format_tr_name(p.get("teacher_name") or p.get("teacher", "")) == format_tr_name(p_tea)))
+                    ]
+                    
+        # Extract metadata from primary placement or info
+        if matching_block_placements:
+            ref_p = matching_block_placements[0]
+            c_name = ref_p.get("class_name") or ref_p.get("class") or row_header_name
+            t_name = ref_p.get("teacher_name") or ref_p.get("teacher") or ""
+            s_name = ref_p.get("subject_name") or ref_p.get("subject") or ""
+            is_locked = bool(ref_p.get("locked"))
+            is_comb = bool(ref_p.get("is_combined") or ("+" in c_name or "," in c_name or "&" in c_name))
+            is_filler = bool(ref_p.get("is_filler"))
+            removed_color = ref_p.get("color") or ""
+            removed_combined_classes = ref_p.get("combined_classes") or []
+        else:
+            c_name = (info.get("class_name") or info.get("class") or row_header_name) if info else row_header_name
+            t_name = (info.get("teacher_name") or info.get("teacher") or "") if info else ""
+            s_name = (info.get("subject_name") or info.get("subject") or "") if info else ""
+            is_locked = bool(info and info.get("locked"))
+            is_comb = bool(info and (info.get("is_combined") or ("+" in c_name or "," in c_name or "&" in c_name)))
+            is_filler = bool(info and info.get("is_filler"))
+            removed_color = (info.get("color") if info else "") or ""
+            removed_combined_classes = (info.get("combined_classes") if info else []) or []
+
+        # Lock Check
         if is_locked and not getattr(self, "_test_mode", False) and not getattr(self.window(), "_test_mode", False):
             ret = QMessageBox.warning(
                 self, "Kilitli Ders Uyarısı",
@@ -1706,171 +2160,115 @@ class DropTableWidget(QTableWidget):
             if ret != QMessageBox.Yes:
                 return
 
-        # ── Capture target_entity BEFORE any grid mutation ──
-        win = self.window()
-        if hasattr(win, "_editor") and getattr(win, "_editor"):
-            win = win._editor
-        elif not hasattr(win, "data_store") and hasattr(win, "parent") and hasattr(win.parent(), "data_store"):
-            win = win.parent()
-            
         if hasattr(win, "_push_undo_state"):
             win._push_undo_state()
-            
-        view_mode = getattr(grid, "current_view_mode", "classes")
-        v_item = self.verticalHeaderItem(orig_r)
-        row_header_name = v_item.text().strip() if v_item else ""
+
+        target_entity = c_name if view_mode == "classes" else (t_name or row_header_name)
         
-        c_name = (info.get("class_name") or info.get("class") or "") if info else ""
-        t_name = (info.get("teacher_name") or info.get("teacher") or "") if info else ""
-        s_name = (info.get("subject_name") or info.get("subject") or "") if info else ""
-        
-        is_comb = bool(info and (info.get("is_combined") or ("+" in c_name or "," in c_name or "&" in c_name)))
-        if is_comb:
-            if info.get("combined_classes"):
-                target_classes = [str(c).strip().split("(")[0].strip() for c in info["combined_classes"] if str(c).strip()]
-            else:
-                target_classes = [c.strip().split("(")[0].strip() for c in c_name.replace("&", "+").replace(",", "+").split("+") if c.strip()]
-        else:
-            target_classes = [c_name] if c_name else []
-            
-        if view_mode == "classes":
-            target_entity = c_name or row_header_name
-        else:
-            target_entity = t_name or row_header_name
-        
-        import os as _os
-        _log_path = _os.path.join(_os.path.expanduser("~"), "Desktop", "delete_debug.log")
-        def _log(msg):
-            try:
-                with open(_log_path, "a", encoding="utf-8") as _f:
-                    _f.write(msg + "\n")
-            except Exception:
-                pass
-            print(msg)
-        
-        _log(f"[DELETE] view={view_mode} row={orig_r} col={orig_c} dur={orig_dur} info={'YES' if info else 'NONE'}")
-        
-        # ── 1. Clear grid cells visually ──
-        if self.rowSpan(orig_r, orig_c) > 1 or self.columnSpan(orig_r, orig_c) > 1:
-            self.setSpan(orig_r, orig_c, 1, 1)
-        for off in range(orig_dur):
-            tc = orig_c + off
-            if tc < self.columnCount():
-                if self.rowSpan(orig_r, tc) > 1 or self.columnSpan(orig_r, tc) > 1:
-                    self.setSpan(orig_r, tc, 1, 1)
-                self.removeCellWidget(orig_r, tc)
-                self.takeItem(orig_r, tc)
-                self.setItem(orig_r, tc, None)
-                
-        # ── 2. Clear from in-memory placed_lessons dict ──
+        # 2. Identify all target slots to remove
+        block_ids = {p.get("block_id") for p in matching_block_placements if p.get("block_id")}
+        target_slots = set()
+        for p in matching_block_placements:
+            sd = int(p.get("day") if "day" in p else p.get("col", del_day))
+            sp = int(p.get("period") if "period" in p else p.get("row", del_period))
+            # CRITICAL: expand across this row's OWN duration, not just its starting period.
+            # Manually-placed lessons are stored as one row per hour (duration always 1), so
+            # this never mattered there — but the auto-scheduler stores a whole 1-2 hour block
+            # as a SINGLE row with duration=span. Only ever adding the start left the block's
+            # trailing hour(s) out of target_slots entirely: grid_placements still happened to
+            # get cleaned (the one row's own start matched), but the in-memory _placed_lessons
+            # cache for that trailing hour was never popped, so it kept "remembering" a lesson
+            # that no longer existed there — which is exactly why clicking a now visually-empty
+            # cell could still make an already-removed lesson pop back up.
+            p_dur = int(p.get("duration", 1))
+            for off in range(max(1, p_dur)):
+                target_slots.add((sd, sp + off))
+
+        if not target_slots:
+            for off in range(max(1, orig_dur)):
+                target_slots.add((del_day, del_period + off))
+
+        # Belt-and-suspenders: also sweep _placed_lessons for any cell that still points back
+        # to this SAME lesson instance (same origin_row/origin_col) but wasn't captured above,
+        # e.g. because matching_block_placements/block_id lookup missed a sibling row. Without
+        # this, such a cell would look empty (its QTableWidgetItem/span gets reset below) while
+        # still "containing" a lesson as far as click/hover lookups are concerned.
         if hasattr(grid, "_placed_lessons"):
-            from auto_scheduler import matches_class, format_tr_name
-            for (r_k, c_k), pl in list(grid._placed_lessons.items()):
-                if abs(c_k - orig_c) < orig_dur and (pl.get("subject_name") == s_name or format_tr_name(pl.get("subject_name", "")) == format_tr_name(s_name)):
-                    pl_c = (pl.get("class_name") or "").strip()
-                    if is_comb:
-                        if any(matches_class(pl_c, tc) or matches_class(tc, pl_c) or pl_c == tc for tc in target_classes) or pl_c == c_name:
-                            grid._placed_lessons.pop((r_k, c_k), None)
-                            if self.rowSpan(r_k, c_k) > 1 or self.columnSpan(r_k, c_k) > 1:
-                                self.setSpan(r_k, c_k, 1, 1)
-                            self.removeCellWidget(r_k, c_k)
-                            self.takeItem(r_k, c_k)
-                            self.setItem(r_k, c_k, None)
-                    else:
-                        if r_k == orig_r:
-                            grid._placed_lessons.pop((r_k, c_k), None)
-            
+            for (pr, pc), pl in list(grid._placed_lessons.items()):
+                if pr == orig_r and pl.get("origin_row", pr) == orig_r and pl.get("origin_col", pc) == orig_c:
+                    target_slots.add((pc // periods, pc % periods))
+
+        # 3. Clear cells visually & from placed_lessons
+        for (sd, sp) in target_slots:
+            sc = sd * periods + sp
+            if self.rowSpan(orig_r, sc) > 1 or self.columnSpan(orig_r, sc) > 1:
+                self.setSpan(orig_r, sc, 1, 1)
+            self.removeCellWidget(orig_r, sc)
+            self.takeItem(orig_r, sc)
+            self.setItem(orig_r, sc, None)
+            if hasattr(grid, "_placed_lessons"):
+                grid._placed_lessons.pop((orig_r, sc), None)
+
         self.viewport().update()
-        self.update()
-        
-        # ── 3. Update data_store in memory (NO disk write) ──
-        win = self.window()
-        if not hasattr(win, "data_store") and hasattr(win, "parent") and hasattr(win.parent(), "data_store"):
-            win = win.parent()
 
+        # 4. Remove from data_store["grid_placements"] & auto_schedule_results
         if hasattr(win, "data_store"):
-            periods = int(getattr(grid, "_periods", 8))
-            if periods <= 0: periods = 8
-            del_day = int(orig_c) // periods
-            del_period = int(orig_c) % periods
-            
-            from auto_scheduler import matches_class, format_tr_name, normalize_clean
-            
-            target_cls = c_name or (row_header_name if view_mode == "classes" else "")
-            target_t = t_name or (row_header_name if view_mode == "teachers" else "")
-            
-            def safe_int(v, default=-1):
-                try: return int(v)
-                except: return default
+            def should_remove(p):
+                if block_ids and p.get("block_id") in block_ids:
+                    return True
+                p_d = int(p.get("day") if "day" in p else p.get("col", 0))
+                p_p = int(p.get("period") if "period" in p else p.get("row", 0))
+                if (p_d, p_p) in target_slots:
+                    p_s = (p.get("subject_name") or p.get("subject") or "").strip()
+                    p_c = (p.get("class_name") or p.get("class") or "").strip()
+                    if not s_name or (p_s == s_name or format_tr_name(p_s) == format_tr_name(s_name)):
+                        if view_mode == "classes":
+                            if is_comb or not c_name or (matches_class(p_c, c_name) or p_c == c_name):
+                                return True
+                        else:
+                            return True
+                return False
 
-            def is_target_placement(p):
-                p_day = safe_int(p.get("day") if "day" in p else p.get("col", 0), 0)
-                p_period = safe_int(p.get("period") if "period" in p else p.get("row", 0), 0)
-                p_dur = safe_int(p.get("duration", 1), 1)
-                if p_day != del_day:
-                    return False
-                overlap = max(0, min(p_period + p_dur, del_period + orig_dur) - max(p_period, del_period))
-                if overlap <= 0:
-                    return False
-                
-                p_cls = (p.get("class_name") or p.get("class") or "").strip()
-                p_t = (p.get("teacher_name") or p.get("teacher") or "").strip()
-                p_s = (p.get("subject_name") or p.get("subject") or "").strip()
-                
-                if s_name and not (p_s == s_name or format_tr_name(p_s) == format_tr_name(s_name) or normalize_clean(p_s) == normalize_clean(s_name)):
-                    return False
-                    
-                if view_mode == "classes":
-                    if is_comb:
-                        return (any(matches_class(p_cls, tc) or matches_class(tc, p_cls) or p_cls == tc for tc in target_classes) or p_cls == c_name or bool(p.get("is_combined")))
-                    if target_cls and not (matches_class(p_cls, target_cls) or matches_class(target_cls, p_cls) or p_cls == target_cls):
-                        return False
-                    if t_name and p_t and not (p_t == t_name or format_tr_name(p_t) == format_tr_name(t_name) or normalize_clean(p_t) == normalize_clean(t_name)):
-                        return False
-                    return True
-                else:
-                    if target_t and not (format_tr_name(p_t) == format_tr_name(target_t) or normalize_clean(p_t) == normalize_clean(target_t) or p_t == target_t):
-                        return False
-                    if c_name and p_cls and not (matches_class(p_cls, c_name) or matches_class(c_name, p_cls) or p_cls == c_name):
-                        return False
-                    return True
-            
-            gp_before = len(win.data_store.get("grid_placements", []))
-            
-            # Log first 3 placements that match day for debugging
-            day_matches = [p for p in win.data_store.get("grid_placements", []) if safe_int(p.get("day", p.get("col", -1))) == del_day]
-            for dm in day_matches[:5]:
-                _log(f"[DELETE] day_match: day={dm.get('day')} per={dm.get('period')} dur={dm.get('duration')} cls='{dm.get('class_name',dm.get('class',''))}' subj='{dm.get('subject_name',dm.get('subject',''))}' tch='{dm.get('teacher_name',dm.get('teacher',''))}' -> is_target={is_target_placement(dm)}")
-            
-            # Remove from grid_placements & auto_schedule_results (memory only)
             if "grid_placements" in win.data_store:
-                win.data_store["grid_placements"] = [p for p in win.data_store.get("grid_placements", []) if not is_target_placement(p)]
+                win.data_store["grid_placements"] = [p for p in win.data_store.get("grid_placements", []) if not should_remove(p)]
             if "auto_schedule_results" in win.data_store:
-                win.data_store["auto_schedule_results"] = [p for p in win.data_store.get("auto_schedule_results", []) if not is_target_placement(p)]
-            
-            gp_after = len(win.data_store.get("grid_placements", []))
-            _log(f"[DELETE] grid_placements: {gp_before} -> {gp_after} (removed {gp_before - gp_after})")
-            
-            # Remove from yerlesim (memory only)
-            yerlesim = win.data_store.get("yerlesim", {})
-            if isinstance(yerlesim, dict):
-                for off in range(orig_dur):
-                    yerlesim.pop(f"{orig_r},{orig_c + off}", None)
-                
-            # Mark dirty for exit-time save
+                win.data_store["auto_schedule_results"] = [p for p in win.data_store.get("auto_schedule_results", []) if not should_remove(p)]
+
+            # Whatever was just removed from the grid goes STRAIGHT into the dock as its own
+            # card — unconditionally, no recomputing "assigned vs. placed" hours to decide
+            # whether it's allowed to show up. This is on top of (not instead of) the
+            # atamalar-based reconciliation below, which still covers hours that were never
+            # placed on the grid in the first place; _refresh_unplaced_lessons treats any
+            # hours already represented by one of these loose cards as accounted for, so nothing
+            # is ever shown twice.
+            if s_name:
+                win.data_store.setdefault("loose_unplaced_cards", []).append({
+                    "id": f"loose_{uuid.uuid4().hex[:8]}",
+                    "subject_name": s_name,
+                    "teacher": t_name,
+                    "class_name": c_name,
+                    "duration": orig_dur,
+                    "color": removed_color or "#94A3B8",
+                    "is_combined": is_comb,
+                    "combined_classes": removed_combined_classes,
+                    "is_filler": is_filler,
+                })
+
             if hasattr(win, "mark_dirty"):
                 win.mark_dirty()
-                
+
             if hasattr(win, "save_db"):
                 win.save_db(sync_from_grid=False)
-                
-            # ── 4. Refresh grid & unplaced lessons from updated memory ──
+
+            # 5. Refresh grid and unplaced dock (skip_unplaced=True: we do the dock refresh
+            # ourselves right below with the correct target_entity, so _refresh_grid must not
+            # also do its own untargeted one — that duplicate call was doubling the rebuild
+            # cost on every single drag, and its untargeted result could race with/clobber
+            # this one, which is why a second consecutive removal sometimes failed to show up)
             if hasattr(win, "_refresh_grid"):
-                win._refresh_grid(skip_unplaced=False)
+                win._refresh_grid(skip_unplaced=True)
             if hasattr(win, "_refresh_unplaced_lessons"):
-                win._refresh_unplaced_lessons()
-            if hasattr(win, "_refresh_tree"):
-                win._refresh_tree()
+                win._refresh_unplaced_lessons(target_entity=target_entity)
 
     def keyPressEvent(self, event):
         win = self.window()
@@ -2620,21 +3018,27 @@ class TimetableGrid(QWidget):
         self._periods = periods
         self.class_list = class_list
         self.current_view_mode = "classes"
-        self.table.setRowCount(len(class_list))
-        self.table.setVerticalHeaderLabels(class_list)
         total_cols = len(days_list) * periods
-        self.table.setColumnCount(total_cols)
-        
-        # Configure AsCTimetableHeader
-        if hasattr(self.table, "asc_header"):
-            self.table.asc_header.set_config(periods, days_list)
-        
-        # Set compact column widths (36px) and row heights (28px) for scale reduction
-        for i in range(total_cols):
-            self.table.setColumnWidth(i, 36)
-        for r in range(len(class_list)):
-            self.table.setRowHeight(r, 28)
-            
+
+        # Every single drag/drop calls this to rebuild the grid. Re-running the header/size
+        # setup below on every call was the main source of the "slow to settle" feel, since
+        # 99% of the time only the CONTENTS changed, not the class list/periods/days
+        # themselves. Skip the structural setup when it's identical to last time.
+        sig = (tuple(class_list), periods, tuple(days_list))
+        if getattr(self, "_classes_layout_sig", None) != sig:
+            self._classes_layout_sig = sig
+            self.table.setRowCount(len(class_list))
+            self.table.setVerticalHeaderLabels(class_list)
+            self.table.setColumnCount(total_cols)
+
+            if hasattr(self.table, "asc_header"):
+                self.table.asc_header.set_config(periods, days_list)
+
+            for i in range(total_cols):
+                self.table.setColumnWidth(i, 36)
+            for r in range(len(class_list)):
+                self.table.setRowHeight(r, 28)
+
         self.clear_grid()
 
     def set_mode_all_teachers(self, teacher_list: list, periods: int, days_list: list):
@@ -2642,20 +3046,22 @@ class TimetableGrid(QWidget):
         self._periods = periods
         self.teacher_list = teacher_list
         self.current_view_mode = "teachers"
-        self.table.setRowCount(len(teacher_list))
-        self.table.setVerticalHeaderLabels(teacher_list)
         total_cols = len(days_list) * periods
-        self.table.setColumnCount(total_cols)
-        
-        # Configure AsCTimetableHeader
-        if hasattr(self.table, "asc_header"):
-            self.table.asc_header.set_config(periods, days_list)
-        
-        # Set compact column widths (36px) and row heights (28px) for scale reduction
-        for i in range(total_cols):
-            self.table.setColumnWidth(i, 36)
-        for r in range(len(teacher_list)):
-            self.table.setRowHeight(r, 28)
-            
+
+        sig = (tuple(teacher_list), periods, tuple(days_list))
+        if getattr(self, "_teachers_layout_sig", None) != sig:
+            self._teachers_layout_sig = sig
+            self.table.setRowCount(len(teacher_list))
+            self.table.setVerticalHeaderLabels(teacher_list)
+            self.table.setColumnCount(total_cols)
+
+            if hasattr(self.table, "asc_header"):
+                self.table.asc_header.set_config(periods, days_list)
+
+            for i in range(total_cols):
+                self.table.setColumnWidth(i, 36)
+            for r in range(len(teacher_list)):
+                self.table.setRowHeight(r, 28)
+
         self.clear_grid()
 

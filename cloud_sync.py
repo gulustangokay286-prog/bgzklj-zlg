@@ -8,8 +8,15 @@ import json
 import time
 import requests
 from collections import deque
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal, QUrl, QTimer
 from api_client import api_client
+
+try:
+    from PySide6.QtWebSockets import QWebSocket
+    _HAS_WEBSOCKETS = True
+except ImportError:
+    QWebSocket = None
+    _HAS_WEBSOCKETS = False
 
 def _sanitize_key(key: str) -> str:
     return re.sub(r'[\.\#\$\/\[\]]', '_', str(key))
@@ -180,3 +187,102 @@ class CloudSyncWorker(QObject):
 
     def stop(self):
         self._is_running = False
+
+
+# ── Real-time push notifications (WebSocket) ──────────────────────────
+class RealtimeSyncClient(QObject):
+    """Watches ONE institution over a WebSocket connection to the VDS backend, so a change
+    another device pushes shows up within a fraction of a second instead of waiting for the
+    CloudSyncWorker's ~15s poll. Runs on the Qt event loop (no extra thread needed — QWebSocket
+    is fully async via signals). If the connection can't be made or the server doesn't support
+    it yet, this simply stays quiet and the existing poll loop remains the safety net either
+    way, so it degrades gracefully.
+    """
+    sync_notified = Signal(str)          # slug that changed
+    connection_state_changed = Signal(bool)  # True once connected, False on drop
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._slug = None
+        self._socket = None
+        self._reconnect_timer = QTimer(self)
+        self._reconnect_timer.setSingleShot(True)
+        self._reconnect_timer.timeout.connect(self._reconnect)
+        self._reconnect_delay_ms = 3000
+
+    def watch(self, slug: str):
+        """Start (or switch to) watching this institution's slug for live changes."""
+        if not _HAS_WEBSOCKETS or not slug:
+            return
+        if slug == self._slug and self._socket is not None:
+            return  # already watching this one
+        self.stop()
+        self._slug = slug
+        self._open()
+
+    def _open(self):
+        if not self._slug:
+            return
+        token = api_client.token
+        if not token:
+            return  # not logged in to the VDS yet -- nothing to authenticate the socket with
+        ws_base = api_client.base_url.replace("https://", "wss://").replace("http://", "ws://")
+        url = QUrl(f"{ws_base}/ws/{self._slug}?token={token}")
+
+        self._socket = QWebSocket()
+        self._socket.connected.connect(self._on_connected)
+        self._socket.disconnected.connect(self._on_disconnected)
+        self._socket.textMessageReceived.connect(self._on_message)
+        self._socket.errorOccurred.connect(self._on_error)
+        self._socket.open(url)
+
+    def _on_connected(self):
+        self._reconnect_delay_ms = 3000  # reset backoff after a successful connection
+        self.connection_state_changed.emit(True)
+
+    def _on_disconnected(self):
+        self.connection_state_changed.emit(False)
+        self._schedule_reconnect()
+
+    def _on_error(self, *_args):
+        # disconnected() usually follows a connection error too, but schedule a reconnect
+        # here as well in case it doesn't (e.g. the handshake itself was rejected).
+        self._schedule_reconnect()
+
+    def _schedule_reconnect(self):
+        if not self._slug:
+            return  # stop() was called -- we're not supposed to be watching anything
+        self._reconnect_timer.start(self._reconnect_delay_ms)
+        self._reconnect_delay_ms = min(self._reconnect_delay_ms * 2, 30000)
+
+    def _reconnect(self):
+        if self._slug:
+            self._open()
+
+    def _on_message(self, text):
+        try:
+            msg = json.loads(text)
+        except Exception:
+            return
+        if msg.get("type") == "sync" and msg.get("slug"):
+            self.sync_notified.emit(msg["slug"])
+
+    def stop(self):
+        """Stop watching entirely (e.g. the dashboard is closing)."""
+        self._reconnect_timer.stop()
+        self._slug = None
+        self._close_socket()
+
+    def _close_socket(self):
+        if self._socket is not None:
+            sock = self._socket
+            self._socket = None
+            try:
+                sock.disconnected.disconnect(self._on_disconnected)
+            except Exception:
+                pass
+            try:
+                sock.close()
+            except Exception:
+                pass
+            sock.deleteLater()
