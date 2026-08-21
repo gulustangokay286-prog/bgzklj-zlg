@@ -958,8 +958,11 @@ def assign_version_folder(slug: str, filename: str, folder_id: str):
 
     try:
         import threading
-        from cloud_sync import push_version_to_rtdb
-        threading.Thread(target=push_version_to_rtdb, args=(slug, filename, data), daemon=True).start()
+        from cloud_sync import push_version_to_rtdb, push_institution_to_rtdb
+        def _sync_bg():
+            push_version_to_rtdb(slug, filename, data)
+            push_institution_to_rtdb(slug)
+        threading.Thread(target=_sync_bg, daemon=True).start()
     except Exception:
         pass
     return True

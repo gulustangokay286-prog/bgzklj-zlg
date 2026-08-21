@@ -467,14 +467,27 @@ class APIClient:
 
     @staticmethod
     def _write_if_different(path: str, payload: dict) -> bool:
-        """Writes only when the content actually differs, atomically."""
+        """Writes only when remote content is actually newer or different, never reverts newer local changes."""
         import version_store
 
         try:
             if os.path.exists(path):
                 with open(path, "r", encoding="utf-8") as f:
                     existing = json.load(f)
-                if version_store.compute_data_hash(existing) == version_store.compute_data_hash(payload):
+
+                local_meta = existing.get("_version_meta", {}) if isinstance(existing, dict) else {}
+                remote_meta = payload.get("_version_meta", {}) if isinstance(payload, dict) else {}
+
+                local_ts = str(local_meta.get("last_modified") or local_meta.get("timestamp") or "")
+                remote_ts = str(remote_meta.get("last_modified") or remote_meta.get("timestamp") or "")
+
+                # If local file was modified more recently than remote, preserve local!
+                if local_ts and remote_ts and local_ts > remote_ts:
+                    return False
+
+                # If content hash and folder_id are identical, nothing to rewrite
+                if (version_store.compute_data_hash(existing) == version_store.compute_data_hash(payload)
+                        and local_meta.get("folder_id") == remote_meta.get("folder_id")):
                     return False
         except Exception:
             pass
