@@ -383,6 +383,18 @@ class APIClient:
         except Exception as exc:
             print(f"[APIClient] cleanup notice: {exc}")
 
+        base_dir = version_store._ensure_base()
+        existing_local = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))] if os.path.exists(base_dir) else []
+        remote_slugs = set(data.keys())
+        for l_slug in existing_local:
+            if l_slug not in remote_slugs:
+                try:
+                    import shutil
+                    shutil.rmtree(os.path.join(base_dir, l_slug), ignore_errors=True)
+                    synced += 1
+                except Exception:
+                    pass
+
         for slug, inst_obj in data.items():
             if not isinstance(inst_obj, dict):
                 continue
@@ -408,14 +420,43 @@ class APIClient:
                 synced += self._sync_from_index(slug, ver_dir, index)
                 continue
 
+            local_meta = version_store.get_institution_meta(slug)
+            local_tombstones = set(local_meta.get("tombstones", []) or [])
+
             # Legacy shape: full payloads inline.
+            remote_filenames = set()
             for v_key, roz in (inst_obj.get("versions") or {}).items():
                 if not isinstance(roz, dict):
                     continue
                 filename = (roz.get("_version_meta") or {}).get("filename") or _key_to_filename(str(v_key))
+
+                # NEVER restore tombstoned (deleted) versions!
+                if filename in local_tombstones:
+                    target = os.path.join(ver_dir, filename)
+                    if os.path.exists(target):
+                        try:
+                            os.remove(target)
+                            version_store.invalidate_version_summary(slug, filename)
+                        except OSError:
+                            pass
+                    continue
+
+                remote_filenames.add(filename)
                 if self._write_if_different(os.path.join(ver_dir, filename), roz):
                     version_store.invalidate_version_summary(slug, filename)
                     synced += 1
+
+            if remote_filenames:
+                for local_fn in os.listdir(ver_dir):
+                    if local_fn.endswith(".roz") and local_fn not in remote_filenames:
+                        target = os.path.join(ver_dir, local_fn)
+                        try:
+                            if time.time() - os.path.getmtime(target) > 10:
+                                os.remove(target)
+                                version_store.invalidate_version_summary(slug, local_fn)
+                                synced += 1
+                        except OSError:
+                            pass
 
         version_store.invalidate_cross_busy_cache()
         return True, f"Senkronizasyon tamamlandı ({len(data)} kurum, {synced} değişiklik).", synced

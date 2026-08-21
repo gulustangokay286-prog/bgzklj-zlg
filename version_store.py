@@ -19,24 +19,35 @@ def _institution_dir(slug: str) -> str:
 
 
 def _atomic_write_json(path: str, payload) -> bool:
-    """Writes JSON via a temp file + os.replace so a crash can't leave a half file.
-
-    Schedules are written on every grid edit and meta.json on every navigation. A
-    plain open(..., "w") truncates first, so an interruption anywhere between the
-    truncate and the final flush leaves a file that no longer parses — which is what
-    set_active_version's "Corrupted meta.json detected, resetting" branch exists to
-    clean up after. os.replace is atomic on both Windows and POSIX, so a reader sees
-    either the whole old file or the whole new one, never a partial write.
-    """
+    """Writes JSON via a temp file + os.replace so a crash can't leave a half file."""
     directory = os.path.dirname(os.path.abspath(path))
     os.makedirs(directory, exist_ok=True)
-    tmp_path = f"{path}.{os.getpid()}.tmp"
+    import time
+    tmp_path = f"{path}.{os.getpid()}_{int(time.time()*1000)}.tmp"
     try:
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp_path, path)
+
+        replaced = False
+        for attempt in range(5):
+            try:
+                os.replace(tmp_path, path)
+                replaced = True
+                break
+            except OSError:
+                time.sleep(0.02 * (attempt + 1))
+
+        if not replaced:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+                f.flush()
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except Exception:
+                pass
         return True
     except Exception as exc:
         print(f"[version_store] atomic write failed for {path}: {exc}")
@@ -1020,6 +1031,10 @@ def save_version(slug: str, data_store: dict, source: str = "manual", note: str 
 
     Pass allow_duplicate=True for a deliberate checkpoint the user asked for.
     """
+    orig_meta = data_store.get("_version_meta", {}) if isinstance(data_store, dict) else {}
+    if folder_id is None and orig_meta.get("folder_id"):
+        folder_id = orig_meta.get("folder_id")
+
     save_data = dict(data_store)
     if "atamalar" in save_data:
         save_data["atamalar"] = sanitize_atamalar(save_data["atamalar"])
@@ -1131,6 +1146,18 @@ def update_version_in_place(slug: str, filename: str, data_store: dict) -> bool:
 
     now = datetime.now()
     meta = save_data.setdefault("_version_meta", {})
+    if os.path.exists(filepath):
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                disk_meta = json.load(f).get("_version_meta", {})
+            if disk_meta.get("folder_id") and not meta.get("folder_id"):
+                meta["folder_id"] = disk_meta["folder_id"]
+            if disk_meta.get("note") and not meta.get("note"):
+                meta["note"] = disk_meta["note"]
+            if disk_meta.get("version_number") and not meta.get("version_number"):
+                meta["version_number"] = disk_meta["version_number"]
+        except Exception:
+            pass
     meta["last_modified"] = now.isoformat()
     meta["data_hash"] = new_hash
     meta.setdefault("filename", filename)
@@ -1348,8 +1375,26 @@ def load_version(slug: str, version_filename: str) -> dict:
 def delete_version(slug: str, version_filename: str):
     filepath = os.path.join(_versions_dir(slug), version_filename)
     if os.path.exists(filepath):
-        os.remove(filepath)
-        
+        try:
+            os.remove(filepath)
+        except OSError:
+            pass
+    invalidate_version_summary(slug, version_filename)
+
+    # Record tombstone in meta.json so cloud pull will never revive it
+    meta_path = os.path.join(_base_dir(), slug, "meta.json")
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            tombstones = meta.setdefault("tombstones", [])
+            if version_filename not in tombstones:
+                tombstones.append(version_filename)
+            _atomic_write_json(meta_path, meta)
+            _invalidate_meta_cache(slug)
+        except Exception:
+            pass
+
     try:
         import threading
         from cloud_sync import delete_version_from_rtdb

@@ -1796,15 +1796,15 @@ class AppleVersionRow(QFrame):
         
         # Delete / Remove Button
         btn_del = QPushButton("Sil")
-        btn_del.setFont(QFont("Segoe UI", 8))
+        btn_del.setFont(QFont("Segoe UI", 8, QFont.Bold))
         btn_del.setCursor(Qt.PointingHandCursor)
         btn_del.setToolTip("Versiyonu Sil")
         btn_del.setStyleSheet("""
             QPushButton {
-                background: transparent; color: #94A3B8; border: 1px solid #E2E8F0;
-                border-radius: 6px; padding: 4px 8px; min-height: 26px;
+                background: #FFF5F5; color: #DC2626; border: 1px solid #FECACA;
+                border-radius: 6px; padding: 4px 10px; min-height: 26px;
             }
-            QPushButton:hover { background: #FEF2F2; color: #DC2626; border-color: #FECACA; }
+            QPushButton:hover { background: #FEE2E2; color: #B91C1C; border-color: #FCA5A5; }
         """)
         btn_del.clicked.connect(lambda: self.action_requested.emit("delete", self.slug, self.filename))
         layout.addWidget(btn_del)
@@ -2969,11 +2969,7 @@ class HomeDashboard(QWidget):
                 parent=self
             )
             if dlg.exec() == QDialog.Accepted:
-                from save_dialog import run_apple_save_sequence
-                run_apple_save_sequence(self, duration_seconds=0.25, title="Versiyon Siliniyor", message=f"'{v_label}' yerel sistemden ve buluttan siliniyor...")
                 version_store.delete_version(slug, filename)
-                from cloud_sync import delete_version_from_rtdb
-                delete_version_from_rtdb(slug, filename, self.auth_data)
                 self._refresh_versions()
                 self._refresh_institutions()
                 

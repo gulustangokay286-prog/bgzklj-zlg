@@ -175,23 +175,37 @@ def run_apple_save_sequence(parent, duration_seconds=0.35,
         visible_ms = int(max(0.12, min(float(duration_seconds or 0.35), 0.7)) * 1000)
 
         def _dismiss():
-            fade_out = QPropertyAnimation(toast, b"windowOpacity", toast)
-            fade_out.setDuration(120)
-            fade_out.setStartValue(1.0)
-            fade_out.setEndValue(0.0)
-            fade_out.setEasingCurve(QEasingCurve.InCubic)
-
-            def _finish():
-                try:
-                    toast.close()
-                    toast.deleteLater()
-                finally:
+            try:
+                import shiboken6
+                if not shiboken6.isValid(toast):
                     if toast in _LIVE_TOASTS:
                         _LIVE_TOASTS.remove(toast)
+                    return
+            except Exception:
+                pass
+            try:
+                fade_out = QPropertyAnimation(toast, b"windowOpacity", toast)
+                fade_out.setDuration(120)
+                fade_out.setStartValue(1.0)
+                fade_out.setEndValue(0.0)
+                fade_out.setEasingCurve(QEasingCurve.InCubic)
 
-            fade_out.finished.connect(_finish)
-            fade_out.start()
-            toast._fade_out = fade_out  # keep a reference alive for the animation
+                def _finish():
+                    try:
+                        toast.close()
+                        toast.deleteLater()
+                    except Exception:
+                        pass
+                    finally:
+                        if toast in _LIVE_TOASTS:
+                            _LIVE_TOASTS.remove(toast)
+
+                fade_out.finished.connect(_finish)
+                fade_out.start()
+                toast._fade_out = fade_out  # keep a reference alive for the animation
+            except Exception:
+                if toast in _LIVE_TOASTS:
+                    _LIVE_TOASTS.remove(toast)
 
         QTimer.singleShot(visible_ms, _dismiss)
         toast._fade_in = fade_in

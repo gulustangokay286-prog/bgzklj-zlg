@@ -79,16 +79,27 @@ class UpdateChecker(QObject):
 
     # ── Worker ────────────────────────────────────────────────────────────
 
+    def _safe_emit(self, signal, *args):
+        try:
+            import shiboken6
+            if shiboken6.isValid(self):
+                signal.emit(*args)
+        except Exception:
+            try:
+                signal.emit(*args)
+            except Exception:
+                pass
+
     def _check(self, auto_download: bool):
         try:
             from api_client import api_client
             manifest = api_client.get_latest_release()
         except Exception as exc:
-            self.check_failed.emit(str(exc))
+            self._safe_emit(self.check_failed, str(exc))
             return
 
         if not manifest:
-            self.check_failed.emit("no-release")
+            self._safe_emit(self.check_failed, "no-release")
             return
 
         try:
@@ -97,28 +108,28 @@ class UpdateChecker(QObject):
             remote_build = 0
 
         if remote_build <= APP_BUILD:
-            self.check_failed.emit("up-to-date")
+            self._safe_emit(self.check_failed, "up-to-date")
             return
 
         self._manifest = manifest
         if not auto_download:
-            self.update_available.emit(manifest)
+            self._safe_emit(self.update_available, manifest)
             return
 
         url = manifest.get("url") or ""
         if not url:
-            self.check_failed.emit("no-package-url")
+            self._safe_emit(self.check_failed, "no-package-url")
             return
 
         try:
             path = self._download(url, manifest.get("sha256") or "")
         except Exception as exc:
-            self.check_failed.emit(f"download-failed: {exc}")
+            self._safe_emit(self.check_failed, f"download-failed: {exc}")
             return
 
         if path:
             self._staged_path = path
-            self.update_available.emit(manifest)
+            self._safe_emit(self.update_available, manifest)
 
     def _download(self, url: str, expected_sha: str):
         """Streams the package to disk, verifying it before it is trusted.
