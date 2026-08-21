@@ -2840,16 +2840,6 @@ class HomeDashboard(QWidget):
 
             self.ver_list_layout.addWidget(empty_box)
         else:
-            # 1. Separate Active and Older Versions
-            active_list = []
-            older_list = []
-
-            for v in versions:
-                if v["filename"] == active_ver:
-                    active_list.append(v)
-                else:
-                    older_list.append(v)
-
             def _wire(row):
                 row.selected.connect(self._on_version_selected)
                 row.double_clicked.connect(self._on_version_double_clicked)
@@ -2857,26 +2847,6 @@ class HomeDashboard(QWidget):
                 if row.filename == self._selected_version:
                     row.set_selected(True)
                 return row
-
-            # 1. Active Timetable Card at top
-            if active_list:
-                card, lay = self._create_version_group_card("Aktif Çizelge", "active", "Yayında", "#047857")
-                for v in active_list:
-                    lay.addWidget(_wire(AppleVersionRow(self._selected_slug, v, is_active=True)))
-                self.ver_list_layout.addWidget(card)
-
-            # 2. Older versions, grouped by folder (plus a "Klasörsüz" bucket for the rest).
-            # Every folder gets shown here — even a brand-new, still-empty one — so creating
-            # a folder is immediately visible instead of only appearing once something has
-            # been moved into it.
-            by_folder = {}
-            unfoldered = []
-            for v in older_list:
-                fid = v.get("folder_id")
-                if fid and fid in folder_names:
-                    by_folder.setdefault(fid, []).append(v)
-                else:
-                    unfoldered.append(v)
 
             def _add_group(title, icon, color, items, folder_id=None, show_folder_actions=False):
                 # A folder the user had open stays open across the rebuild, and one
@@ -2890,8 +2860,9 @@ class HomeDashboard(QWidget):
                     folder_id=folder_id, is_drop_target=True, show_folder_actions=show_folder_actions,
                 )
                 for v in items:
+                    is_act = (v["filename"] == active_ver)
                     group.content_lay.addWidget(
-                        _wire(AppleVersionRow(self._selected_slug, v, is_active=False))
+                        _wire(AppleVersionRow(self._selected_slug, v, is_active=is_act))
                     )
                 group.version_dropped.connect(
                     lambda slug, filename, fid=folder_id: self._on_version_dropped_on_folder(slug, filename, fid)
@@ -2901,12 +2872,34 @@ class HomeDashboard(QWidget):
                     group.delete_requested.connect(lambda fid=folder_id, name=title: self._on_folder_delete(fid, name))
                 self.ver_list_layout.addWidget(group)
 
-            for fid in folder_order:
-                _add_group(folder_names[fid], "folder", "#4F46E5", by_folder.get(fid, []), folder_id=fid, show_folder_actions=True)
+            if not folder_order:
+                # 1. No folders created yet: Show Active at top and History below
+                active_list = [v for v in versions if v["filename"] == active_ver]
+                older_list = [v for v in versions if v["filename"] != active_ver]
+                if active_list:
+                    card, lay = self._create_version_group_card("Aktif Çizelge", "active", "Yayında", "#047857")
+                    for v in active_list:
+                        lay.addWidget(_wire(AppleVersionRow(self._selected_slug, v, is_active=True)))
+                    self.ver_list_layout.addWidget(card)
+                if older_list:
+                    card_old, lay_old = self._create_version_group_card("Geçmiş Versiyonlar", "history", f"{len(older_list)} Versiyon", "#64748B")
+                    for v in older_list:
+                        lay_old.addWidget(_wire(AppleVersionRow(self._selected_slug, v, is_active=False)))
+                    self.ver_list_layout.addWidget(card_old)
+            else:
+                # 2. Folders exist: Group EVERY version (including active ones) into their folders or Klasörsüz!
+                by_folder = {fid: [] for fid in folder_order}
+                unfoldered = []
+                for v in versions:
+                    fid = v.get("folder_id")
+                    if fid and fid in folder_names:
+                        by_folder.setdefault(fid, []).append(v)
+                    else:
+                        unfoldered.append(v)
 
-            # Keep "Klasörsüz" visible (even empty) whenever folders exist, so it stays a
-            # valid drag target to take a version back out of a folder.
-            if unfoldered or folder_order:
+                for fid in folder_order:
+                    _add_group(folder_names[fid], "folder", "#4F46E5", by_folder.get(fid, []), folder_id=fid, show_folder_actions=True)
+
                 _add_group("Klasörsüz (Eski Sürümler)", "history", "#64748B", unfoldered, folder_id=None)
 
         self.ver_list_layout.addStretch(1)
