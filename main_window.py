@@ -218,7 +218,9 @@ class MainWindow(QMainWindow):
         self.institution_name = institution_name or ""
         self.version_filename = version_filename or ""
         self.go_home_requested = None  # Callback set by AppShell
-        
+        self._updater = None
+        self._update_check_was_manual = False
+
         title = "BGZ Ders Programı Yöneticisi"
         if institution_name:
             title = f"{institution_name} — {title}"
@@ -384,34 +386,108 @@ class MainWindow(QMainWindow):
             if show_message:
                 QMessageBox.warning(self, "Bulut Senkronizasyon", f"Bağlantı hatası: {e}")
 
+    def _ensure_updater(self):
+        """Creates the shared update checker, wiring it up exactly once."""
+        if getattr(self, "_updater", None) is not None:
+            return self._updater
+        from updater import UpdateChecker
+
+        self._updater = UpdateChecker(self)
+        self._update_check_was_manual = False
+        self._updater.update_available.connect(self._on_update_ready)
+        self._updater.download_progress.connect(self._on_update_progress)
+        self._updater.check_failed.connect(self._on_update_check_failed)
+        return self._updater
+
+    def start_background_update_checks(self):
+        """Checks at startup and hourly thereafter, downloading quietly in the
+        background so the user is only interrupted once the package is ready."""
+        from PySide6.QtCore import QTimer
+
+        updater = self._ensure_updater()
+        QTimer.singleShot(20_000, lambda: updater.check_async(auto_download=True))
+
+        self._update_timer = QTimer(self)
+        self._update_timer.timeout.connect(lambda: updater.check_async(auto_download=True))
+        self._update_timer.start(60 * 60 * 1000)
+
     def _act_check_updates(self):
-        import requests, webbrowser
+        """Menu action: check now, and say something either way."""
+        updater = self._ensure_updater()
+        self._update_check_was_manual = True
+        self.statusBar().showMessage("Güncellemeler denetleniyor...", 4000)
+        updater.check_async(auto_download=True)
+
+    def _on_update_progress(self, percent):
+        self.statusBar().showMessage(f"Güncelleme indiriliyor... %{percent}", 2000)
+
+    def _on_update_check_failed(self, reason):
+        if not getattr(self, "_update_check_was_manual", False):
+            return  # a background check that found nothing stays silent
+        self._update_check_was_manual = False
+        from updater import current_version_string
+
+        if reason == "up-to-date" or reason == "no-release":
+            QMessageBox.information(
+                self, "Güncelleme Kontrolü",
+                f"En güncel sürümü kullanıyorsunuz.\nSürüm: {current_version_string()}",
+            )
+        else:
+            QMessageBox.warning(
+                self, "Güncelleme Kontrolü",
+                f"Güncelleme sunucusuna ulaşılamadı.\n({reason})",
+            )
+
+    def _on_update_ready(self, manifest):
+        """The package is downloaded and its checksum verified."""
+        self._update_check_was_manual = False
+        from updater import install_staged_update, is_frozen
+
+        version = manifest.get("version", "?")
+        notes = manifest.get("notes") or "Bu sürüm için not girilmemiş."
+        package = self._updater.staged_package
+
+        if not package:
+            return
+
+        if not is_frozen():
+            QMessageBox.information(
+                self, "Güncelleme Hazır",
+                f"Sürüm {version} indirildi.\n\nKaynak koddan çalıştırdığınız için "
+                f"otomatik kurulum yapılmadı.\nPaket: {package}",
+            )
+            return
+
+        box = QMessageBox(self)
+        box.setWindowTitle("Güncelleme Hazır")
+        box.setText(f"Yeni sürüm indirildi: {version}")
+        box.setInformativeText(
+            f"Değişiklikler:\n{notes}\n\n"
+            "Uygulama kapatılıp güncellenecek ve yeniden açılacaktır. Şimdi kurulsun mu?"
+        )
+        box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        box.setDefaultButton(QMessageBox.Yes)
+
+        if box.exec() != QMessageBox.Yes:
+            self.statusBar().showMessage(
+                "Güncelleme hazır — uygulamayı kapattığınızda kurulacak.", 6000
+            )
+            return
+
+        # Save before the process is replaced, or unsaved grid edits are lost.
         try:
-            from api_client import api_client
-            base_url = getattr(api_client, 'base_url', 'https://chenki.net')
-            url = f"{base_url}/api/updates" if '/api' not in base_url else f"{base_url}/updates"
-        except Exception:
-            url = "https://chenki.net/api/updates"
-        try:
-            resp = requests.get(url, timeout=5)
-            if resp.status_code == 200 and resp.json():
-                update_info = resp.json()
-                ver = update_info.get("version", "2.5 Pro")
-                notes = update_info.get("notes", "Evden yayınlanan en güncel kodlar ve ekran geliştirmeleri.")
-                download_url = update_info.get("url")
-                
-                msg = QMessageBox(self)
-                msg.setWindowTitle("Evden Yayınlanan Güncellemeler")
-                msg.setText(f"Yeni Bir Güncelleme Yayınlandı! (Sürüm: {ver})")
-                msg.setInformativeText(f"Güncelleme Notları:\n{notes}\n\nYeni ekranları ve kodları şimdi indirmek istiyor musunuz?")
-                msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-                if msg.exec() == QMessageBox.Yes and download_url:
-                    webbrowser.open(download_url)
-                    self.statusBar().showMessage("Güncelleme bağlantısı açıldı...")
-            else:
-                QMessageBox.information(self, "Güncelleme Kontrolü", "Tebrikler! Şu an evden veya buluttan yayınlanan en güncel sürümü (v2.5 Pro) kullanıyorsunuz. Hiçbir eksik yok!")
-        except Exception as e:
-            QMessageBox.information(self, "Güncelleme Kontrolü", f"Tebrikler! Sisteminiz en güncel haldedir.\n(Bulut Notu: {e})")
+            self._save_new_version_with_folder_picker("Güncelleme öncesi kayıt", force=False)
+        except Exception as exc:
+            print(f"[update] pre-update save note: {exc}")
+
+        if install_staged_update(package, manifest):
+            from PySide6.QtWidgets import QApplication
+            QApplication.quit()
+        else:
+            QMessageBox.warning(
+                self, "Güncelleme",
+                "Güncelleme başlatılamadı. Lütfen uygulamayı yeniden başlatıp tekrar deneyin.",
+            )
 
     def cleanup(self):
         """Clean up background workers and resources before deletion."""
@@ -908,6 +984,13 @@ class MainWindow(QMainWindow):
         self._is_loading = False
         self._initial_hash = self._calc_data_hash()
         self._is_dirty = False
+
+        # Update checks start only once the editor is fully loaded, so nothing
+        # competes with the schedule for CPU while the window is opening.
+        try:
+            self.start_background_update_checks()
+        except Exception as exc:
+            print(f"[MainWindow] update check init note: {exc}")
 
     def _calc_data_hash(self):
         import hashlib, json

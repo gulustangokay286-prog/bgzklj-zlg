@@ -31,58 +31,54 @@ def push_version_to_rtdb(slug: str, filename: str, roz_data: dict, auth_data: di
         return False
 
 def push_institution_to_rtdb(slug: str, auth_data: dict = None) -> bool:
+    """Pushes an institution's SETTINGS only — name, colour, folders, active version.
+
+    It used to read and upload every .roz the institution had ever had on each call,
+    and this runs on rename, recolour, set-primary, set-active-version, password
+    change and every save. Re-uploading the entire schedule history for a colour
+    change is what made those actions hang, and it is what fed the server the nested
+    version blob that then came back down and bloated the local meta.json.
+
+    Version payloads travel through push_version_to_rtdb, one version at a time.
+    """
     import version_store
     inst_dir = os.path.join(version_store._ensure_base(), slug)
     if not os.path.isdir(inst_dir):
         return False
-        
-    meta = version_store.get_institution_meta(slug)
-    ver_dir = os.path.join(inst_dir, "versions")
-    versions_dict = {}
-    if os.path.isdir(ver_dir):
-        all_files = sorted([f for f in os.listdir(ver_dir) if f.endswith(".roz")], reverse=True)
-        # Push all versions for complete cross-device synchronization
-        for fn in all_files:
-            v_path = os.path.join(ver_dir, fn)
-            try:
-                with open(v_path, "r", encoding="utf-8") as f:
-                    v_data = json.load(f)
-                v_key = re.sub(r'[\.\$#\[\]/]', '_', fn)
-                versions_dict[v_key] = v_data
-            except Exception as e:
-                print(f"Error reading version {fn}: {e}")
-                
-    payload = {
-        "slug": slug,
-        "meta": meta,
-        "versions": versions_dict
-    }
-    url = f"{api_client.base_url}/api/institutions"
-    try:
-        resp = api_client._request_with_retry("POST", url, json=payload, timeout=5)
-        return resp is not None and resp.status_code in (200, 201)
-    except Exception as e:
-        print(f"push_institution_to_rtdb error for {slug}: {e}")
-        return False
+    return api_client.push_institution_meta(slug, version_store.get_institution_meta(slug))
+
 
 def push_all_to_rtdb(auth_data: dict = None) -> tuple:
+    """Uploads everything held locally. Used by the manual "sync now" action."""
     import version_store
     base_dir = version_store._ensure_base()
     if not os.path.exists(base_dir):
         return True, "Yüklenecek kurum bulunamadı.", 0
-        
+
     pushed = 0
-    total_versions = 0
-    for slug in os.listdir(base_dir):
+    pushed_versions = 0
+    for slug in sorted(os.listdir(base_dir)):
         inst_dir = os.path.join(base_dir, slug)
-        if os.path.isdir(inst_dir) and os.path.exists(os.path.join(inst_dir, "meta.json")):
-            ver_dir = os.path.join(inst_dir, "versions")
-            v_count = len([f for f in os.listdir(ver_dir) if f.endswith(".roz")]) if os.path.isdir(ver_dir) else 0
-            if push_institution_to_rtdb(slug, auth_data):
-                pushed += 1
-                total_versions += v_count
-                
-    return True, f"{pushed} kurum ve {total_versions} versiyon merkezi buluta başarıyla yüklendi.", pushed
+        if not (os.path.isdir(inst_dir) and os.path.exists(os.path.join(inst_dir, "meta.json"))):
+            continue
+        if not push_institution_to_rtdb(slug, auth_data):
+            continue
+        pushed += 1
+
+        ver_dir = os.path.join(inst_dir, "versions")
+        if not os.path.isdir(ver_dir):
+            continue
+        for fn in sorted(f for f in os.listdir(ver_dir) if f.endswith(".roz")):
+            try:
+                with open(os.path.join(ver_dir, fn), "r", encoding="utf-8") as f:
+                    v_data = json.load(f)
+            except Exception as exc:
+                print(f"[cloud_sync] skipping unreadable version {fn}: {exc}")
+                continue
+            if push_version_to_rtdb(slug, fn, v_data, auth_data):
+                pushed_versions += 1
+
+    return True, f"{pushed} kurum ve {pushed_versions} versiyon buluta yüklendi.", pushed
 
 def delete_version_from_rtdb(slug: str, filename: str, auth_data: dict = None) -> bool:
     return api_client.delete_version_from_rtdb(slug, filename, auth_data)
@@ -107,6 +103,8 @@ class CloudSyncWorker(QObject):
         self.auth_data = None
         self._last_pull_time = 0
         self._thread = None
+        self._pull_requested = False
+        self._offline_streak = 0
         
     def set_auth(self, auth_data):
         self.auth_data = auth_data
@@ -168,22 +166,47 @@ class CloudSyncWorker(QObject):
                     self.sync_status_changed.emit("Veritabanınız korunuyor: Bağlantı bekleniyor...")
                     self._sleep_interruptible(3)
             else:
-                # Live Poller: Pull remote changes every 15 seconds smoothly
                 now = time.time()
-                if self._last_pull_time + 15 < now:
+                if self._pull_requested or self._last_pull_time + self._poll_interval() < now:
+                    self._pull_requested = False
                     try:
                         pull_ok, msg, new_count = api_client.pull_all_from_rtdb(self.auth_data)
                         if pull_ok:
-                            self.sync_status_changed.emit("Veritabanınız korunuyor: Canlı Senkronize (VDS Aktif)")
+                            self._offline_streak = 0
+                            self.sync_status_changed.emit(
+                                "Veritabanınız korunuyor: Canlı Senkronize (VDS Aktif)"
+                            )
                             if new_count > 0:
                                 self.institutions_list_changed.emit()
                                 self.remote_data_updated.emit("", "")
                         else:
+                            self._offline_streak += 1
                             self.sync_status_changed.emit("Veritabanı: Çevrimdışı (Yerel Mod)")
                     except Exception:
+                        self._offline_streak += 1
                         self.sync_status_changed.emit("Veritabanı: Çevrimdışı (Yerel Mod)")
                     self._last_pull_time = now
-                self._sleep_interruptible(1.0)
+                self._sleep_interruptible(0.5)
+
+    def _poll_interval(self) -> float:
+        """Seconds between polls.
+
+        The poll is now a safety net rather than the delivery mechanism: the
+        WebSocket (see RealtimeSyncClient) pushes a nudge the moment another device
+        changes something, and request_pull() turns that into an immediate sync. So
+        the baseline can be far longer than the old fixed 15s, which was waking the
+        radio and re-reading the whole cloud four times a minute on every machine.
+
+        When the server is unreachable the interval backs off instead of hammering a
+        dead connection on a laptop that is simply offline.
+        """
+        if self._offline_streak:
+            return min(30.0 * (2 ** min(self._offline_streak, 4)), 300.0)
+        return 60.0
+
+    def request_pull(self):
+        """Asks the worker to sync now — called when a realtime nudge arrives."""
+        self._pull_requested = True
 
     def stop(self):
         self._is_running = False

@@ -1464,6 +1464,9 @@ def get_user_display_name(email: str, parent=None, auth_data=None) -> str:
 
 VERSION_DRAG_MIME = "application/x-chenki-version"
 
+# Logical size of the ghost card that follows the cursor while dragging a version.
+_DRAG_PIXMAP_W, _DRAG_PIXMAP_H = 210, 40
+
 
 class CollapsibleVersionGroup(QFrame):
     """A collapsible section of version rows. When `is_drop_target` is set, dragging an
@@ -1577,33 +1580,64 @@ class CollapsibleVersionGroup(QFrame):
 
         self.header.mousePressEvent = self._toggle_collapse
 
+    def _set_collapsed(self, collapsed: bool):
+        self.is_collapsed = collapsed
+        self.content_widget.setVisible(not collapsed)
+        self.chevron_lbl.setPixmap(
+            make_dashboard_icon("chevron_right" if collapsed else "chevron_down", "#64748B", 14)
+        )
+
     def _toggle_collapse(self, event):
-        self.is_collapsed = not self.is_collapsed
-        self.content_widget.setVisible(not self.is_collapsed)
-        self.chevron_lbl.setPixmap(make_dashboard_icon("chevron_right" if self.is_collapsed else "chevron_down", "#64748B", 14))
+        self._set_collapsed(not self.is_collapsed)
+
+    def _accepts(self, event) -> bool:
+        return bool(self.is_drop_target and event.mimeData().hasFormat(VERSION_DRAG_MIME))
 
     def dragEnterEvent(self, event):
-        if self.is_drop_target and event.mimeData().hasFormat(VERSION_DRAG_MIME):
-            event.acceptProposedAction()
+        if self._accepts(event):
+            event.setDropAction(Qt.MoveAction)
+            event.accept()
             self.setStyleSheet(self._dragover_style)
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        """Without this the drop never lands.
+
+        QWidget's default dragMoveEvent ignores the event, and Qt only delivers
+        dropEvent if the most recent drag-move was accepted — so accepting in
+        dragEnterEvent alone leaves the cursor showing "forbidden" and silently
+        drops the gesture on the floor. That is why dragging a version onto a folder
+        appeared to do nothing at all.
+        """
+        if self._accepts(event):
+            event.setDropAction(Qt.MoveAction)
+            event.accept()
         else:
             event.ignore()
 
     def dragLeaveEvent(self, event):
         self.setStyleSheet(self._normal_style)
+        super().dragLeaveEvent(event)
 
     def dropEvent(self, event):
         self.setStyleSheet(self._normal_style)
-        if not (self.is_drop_target and event.mimeData().hasFormat(VERSION_DRAG_MIME)):
+        if not self._accepts(event):
             event.ignore()
             return
         raw = bytes(event.mimeData().data(VERSION_DRAG_MIME)).decode("utf-8")
         slug, _, filename = raw.partition("\n")
-        if slug and filename:
-            event.acceptProposedAction()
-            self.version_dropped.emit(slug, filename)
-        else:
+        if not (slug and filename):
             event.ignore()
+            return
+        event.setDropAction(Qt.MoveAction)
+        event.accept()
+        # Expanding on drop gives immediate confirmation that the version landed
+        # where the user aimed it — folders render collapsed by default, so without
+        # this a successful drop looks identical to a failed one.
+        if self.is_collapsed:
+            self._set_collapsed(False)
+        self.version_dropped.emit(slug, filename)
 
 # ── Apple Clean Version Row (Compact & Modern) ───────────────────────
 
@@ -1627,12 +1661,20 @@ class AppleVersionRow(QFrame):
         layout.setContentsMargins(14, 4, 14, 4)
         layout.setSpacing(12)
         
-        # Version Title: "Versiyon 10"
+        # Version title. Uses the collision-resolved label from list_versions, so two
+        # schedules that both ended up numbered 82 (independent saves on two devices)
+        # read as "Versiyon 82" and "Versiyon 82-B" rather than as the same thing
+        # listed twice.
         num = version_info.get("number", 0)
-        v_title = QLabel(f"Versiyon {num}")
+        v_title = QLabel(version_info.get("label") or f"Versiyon {num}")
         v_title.setFont(QFont("Segoe UI", 9.5, QFont.Bold))
         v_title.setStyleSheet("color: #0F172A; background: transparent; border: none;")
-        v_title.setFixedWidth(85)
+        v_title.setFixedWidth(95)
+        if version_info.get("has_number_collision"):
+            v_title.setToolTip(
+                "Bu numara başka bir cihazda da kullanılmış. İçerikleri farklı olduğu "
+                "için ikisi de korunuyor."
+            )
         layout.addWidget(v_title)
         
         # Date & Time (Clean single block)
@@ -1812,27 +1854,98 @@ class AppleVersionRow(QFrame):
             """)
             
     def set_selected(self, sel):
-        self._is_selected = sel
+        """No-op when the state is unchanged.
+
+        _update_style() calls setStyleSheet(), which forces Qt to re-parse the sheet
+        and re-polish the widget and all its children. Selecting a version used to
+        run this over EVERY row in the list, so a single click cost a full restyle of
+        the whole panel — the more versions an institution had, the slower every
+        click on it became.
+        """
+        if bool(sel) == bool(self._is_selected):
+            return
+        self._is_selected = bool(sel)
         self._update_style()
-        
+
+
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.selected.emit(self.filename)
             self._drag_start_pos = event.pos()
         super().mousePressEvent(event)
 
+    def mouseDoubleClickEvent(self, event):
+        """Opens the schedule.
+
+        This handler did not exist. The stray `super().mouseDoubleClickEvent(event)`
+        that used to sit at the end of mousePressEvent forwarded a *press* event to
+        the base class and emitted nothing, so `double_clicked` never fired and
+        double-clicking a version — the most natural way to open one — did nothing.
+        """
+        if event.button() == Qt.LeftButton:
+            self._drag_start_pos = None  # a double-click must not also start a drag
+            self.double_clicked.emit(self.slug, self.filename)
+            event.accept()
+            return
         super().mouseDoubleClickEvent(event)
 
+    def _make_drag_pixmap(self) -> QPixmap:
+        """A small card that follows the cursor.
+
+        The drag previously carried no pixmap at all, so nothing moved on screen
+        while dragging and the gesture read as "this control isn't draggable".
+        """
+        ratio = self.devicePixelRatioF() if hasattr(self, "devicePixelRatioF") else 1.0
+        width, height = _DRAG_PIXMAP_W, _DRAG_PIXMAP_H
+        pm = QPixmap(int(width * ratio), int(height * ratio))
+        pm.setDevicePixelRatio(ratio)
+        pm.fill(Qt.transparent)
+
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setBrush(QBrush(QColor(255, 255, 255, 242)))
+        p.setPen(QPen(QColor(APPLE_BLUE), 1.4))
+        p.drawRoundedRect(QRectF(1, 1, width - 2, height - 2), 9, 9)
+
+        p.setPen(QPen(QColor(TEXT_PRIMARY)))
+        p.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        label = self.version_info.get("label") or f"Versiyon {self.version_info.get('number', 0)}"
+        p.drawText(QRectF(12, 4, width - 24, 17), Qt.AlignVCenter | Qt.AlignLeft, label)
+
+        p.setPen(QPen(QColor(TEXT_SECONDARY)))
+        p.setFont(QFont("Segoe UI", 8))
+        sub = f"{self.version_info.get('date_str', '')} {self.version_info.get('time_str', '')}".strip()
+        p.drawText(QRectF(12, 19, width - 24, 16), Qt.AlignVCenter | Qt.AlignLeft, sub or "Klasöre taşı")
+        p.end()
+        return pm
+
     def mouseMoveEvent(self, event):
-        if event.buttons() & Qt.LeftButton and getattr(self, "_drag_start_pos", None) is not None:
-            if (event.pos() - self._drag_start_pos).manhattanLength() >= QApplication.startDragDistance():
-                drag = QDrag(self)
-                mime = QMimeData()
-                mime.setData(VERSION_DRAG_MIME, f"{self.slug}\n{self.filename}".encode("utf-8"))
-                drag.setMimeData(mime)
-                drag.exec(Qt.MoveAction)
-                self._drag_start_pos = None
-        super().mouseMoveEvent(event)
+        start = getattr(self, "_drag_start_pos", None)
+        if not (event.buttons() & Qt.LeftButton) or start is None:
+            super().mouseMoveEvent(event)
+            return
+        if (event.pos() - start).manhattanLength() < QApplication.startDragDistance():
+            super().mouseMoveEvent(event)
+            return
+
+        # Clear this first: the drag below runs a nested event loop, and re-entering
+        # this handler while it is running would start a second, overlapping drag.
+        self._drag_start_pos = None
+
+        drag = QDrag(self)
+        mime = QMimeData()
+        mime.setData(VERSION_DRAG_MIME, f"{self.slug}\n{self.filename}".encode("utf-8"))
+        # Plain text too, so dropping onto anything else is harmless and legible
+        # rather than an unrecognised binary blob.
+        mime.setText(f"Versiyon {self.version_info.get('number', 0)} — {self.filename}")
+        drag.setMimeData(mime)
+        pm = self._make_drag_pixmap()
+        drag.setPixmap(pm)
+        # Hot spot is in the pixmap's logical coordinates, not its device pixels —
+        # using pm.width() directly would offset the ghost by the DPI scale factor
+        # on a HiDPI screen.
+        drag.setHotSpot(QPoint(_DRAG_PIXMAP_W // 2, _DRAG_PIXMAP_H // 2))
+        drag.exec(Qt.MoveAction, Qt.MoveAction)
 
 
 # ── Main Home Dashboard ──────────────────────────────────────────────
@@ -1841,7 +1954,10 @@ class HomeDashboard(QWidget):
     open_timetable = Signal(str, str)  # slug, filename
     new_empty_timetable = Signal(str)  # slug
     logout_requested = Signal()        # Trigger logout & return to login screen
-    
+    # Carries a background sync's outcome back onto the GUI thread:
+    # (pull_ok, pull_msg, push_ok, push_msg)
+    sync_finished = Signal(bool, str, bool, str)
+
     def __init__(self, auth_data=None, parent=None):
         super().__init__(parent)
         self.auth_data = auth_data or {}
@@ -1849,6 +1965,10 @@ class HomeDashboard(QWidget):
         self._selected_version = None
         self._search_query = ""
         self._unlocked_slugs = set()
+        self._sync_in_flight = False
+        # Coalesces the refresh bursts that arrive when several cloud events land
+        # together; see _on_cloud_synced.
+        self._refresh_debounce = None
         
         user_email = self.auth_data.get("email", "").lower()
         user_role = self.auth_data.get("role", "").lower()
@@ -1883,11 +2003,20 @@ class HomeDashboard(QWidget):
         try:
             from cloud_sync import RealtimeSyncClient
             self._realtime = RealtimeSyncClient(self)
-            self._realtime.sync_notified.connect(lambda slug: self._on_cloud_synced())
+            # The socket only carries a nudge, never data: it tells the worker to
+            # run a delta sync now instead of waiting for its next poll. That keeps
+            # the socket cheap and means a dropped message costs a little latency
+            # rather than losing a change.
+            self._realtime.sync_notified.connect(self._on_realtime_nudge)
             if self._selected_slug:
                 self._realtime.watch(self._selected_slug)
         except Exception as rte:
             print(f"[HomeDashboard] Realtime sync init note: {rte}")
+
+    def _on_realtime_nudge(self, slug):
+        worker = getattr(self, "cloud_worker", None)
+        if worker is not None:
+            worker.request_pull()
             
     def _start_initial_cloud_sync(self):
         import threading
@@ -1906,10 +2035,35 @@ class HomeDashboard(QWidget):
         threading.Thread(target=_worker, daemon=True).start()
         
     def _on_cloud_synced(self):
+        """Rebuilds the panels after a sync, coalescing bursts.
+
+        A single sync fires institutions_list_changed AND remote_data_updated, and a
+        realtime nudge can land on top of both. Each one used to rebuild every card
+        and every version row immediately, so one remote change could rebuild the
+        whole screen three times in a row — visible as a stutter, and it discards the
+        user's scroll position and selection each time. Collapsing them into one
+        rebuild a short moment later is both smoother and cheaper.
+        """
+        from PySide6.QtCore import QTimer
+
+        if self._refresh_debounce is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._do_refresh_all)
+            self._refresh_debounce = timer
+        self._refresh_debounce.start(140)
+
+    def _do_refresh_all(self):
+        # Dragging while the panel is rebuilt under the cursor destroys the widget
+        # mid-gesture; let the drop finish and pick the refresh up afterwards.
+        if QApplication.mouseButtons() & Qt.LeftButton:
+            self._refresh_debounce.start(300)
+            return
         self._refresh_institutions()
         if self._selected_slug:
             self._refresh_versions()
-        
+
+
     def _build_ui(self):
         self.setStyleSheet(f"""
             HomeDashboard {{ background: {BG_CANVAS}; font-family: {FONT_FAMILY}; }}
@@ -2152,17 +2306,44 @@ class HomeDashboard(QWidget):
         self.right_content_layout.setContentsMargins(0, 0, 0, 0)
         self.right_content_layout.setSpacing(10)
         
+        # Inline confirmation strip for drag-to-folder and similar quick actions.
+        self.status_flash_lbl = QLabel("")
+        self.status_flash_lbl.setFont(QFont("Segoe UI", 9))
+        self.status_flash_lbl.setStyleSheet(
+            "background: #ECFDF5; color: #047857; border: 1px solid #A7F3D0;"
+            "border-radius: 8px; padding: 7px 12px;"
+        )
+        self.status_flash_lbl.hide()
+        self.right_content_layout.addWidget(self.status_flash_lbl)
+
         scroll_ver = QScrollArea()
         scroll_ver.setWidgetResizable(True)
-        scroll_ver.setStyleSheet("QScrollArea { border: none; background: transparent; }")
-        
+        scroll_ver.setStyleSheet("""
+            QScrollArea { border: none; background: transparent; }
+            QScrollBar:vertical {
+                background: transparent; width: 10px; margin: 2px 2px 2px 0;
+            }
+            QScrollBar::handle:vertical {
+                background: #CBD5E1; border-radius: 5px; min-height: 34px;
+            }
+            QScrollBar::handle:vertical:hover { background: #94A3B8; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
+        """)
+        # Per-pixel scrolling instead of Qt's default per-item jumps, so the panel
+        # glides rather than snapping a whole card at a time.
+        scroll_ver.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_ver.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_ver.verticalScrollBar().setSingleStep(14)
+        self.scroll_ver = scroll_ver
+
         self.ver_list_widget = QWidget()
         self.ver_list_widget.setStyleSheet("background: transparent;")
         self.ver_list_layout = QVBoxLayout(self.ver_list_widget)
-        self.ver_list_layout.setContentsMargins(0, 0, 0, 0)
-        self.ver_list_layout.setSpacing(12)
+        self.ver_list_layout.setContentsMargins(0, 0, 6, 0)
+        self.ver_list_layout.setSpacing(10)
         self.ver_list_layout.addStretch(1)
-        
+
         scroll_ver.setWidget(self.ver_list_widget)
         self.right_content_layout.addWidget(scroll_ver, 1)
         self.right_panel_stack.addWidget(self.right_content_widget)
@@ -2436,10 +2617,61 @@ class HomeDashboard(QWidget):
         self._refresh_institutions()
 
     def _on_version_dropped_on_folder(self, slug, filename, folder_id):
+        """Files a dragged version into a folder (folder_id=None means Klasörsüz)."""
         if slug != self._selected_slug:
             return
-        version_store.assign_version_folder(slug, filename, folder_id)
+
+        current = None
+        for v in version_store.list_versions(slug):
+            if v["filename"] == filename:
+                current = v.get("folder_id")
+                break
+        if current == folder_id:
+            return  # dropped back where it already was — nothing to do, no flicker
+
+        if not version_store.assign_version_folder(slug, filename, folder_id):
+            show_apple_info(
+                self, "Taşınamadı",
+                "Bu versiyon klasöre taşınamadı. Dosya başka bir cihaz tarafından "
+                "değiştirilmiş olabilir; sayfayı yenileyip tekrar deneyin.",
+                is_success=False,
+            )
+            return
+
+        # Keep the moved version selected across the rebuild so the user does not
+        # lose their place in a long list.
+        self._selected_version = filename
         self._refresh_versions()
+
+        folder_name = next(
+            (f.get("name", "") for f in version_store.list_folders(slug) if f.get("id") == folder_id),
+            "",
+        )
+        self._flash_status(
+            f"Versiyon '{folder_name}' klasörüne taşındı."
+            if folder_name else "Versiyon klasörden çıkarıldı."
+        )
+
+    def _flash_status(self, text: str, msec: int = 2600):
+        """Brief inline confirmation in the right-hand panel.
+
+        Deliberately not a modal: filing a version is a low-stakes, repeatable
+        action, and a dialog that has to be dismissed after every drag would be
+        worse than no feedback at all.
+        """
+        label = getattr(self, "status_flash_lbl", None)
+        if label is None:
+            return
+        label.setText(text)
+        label.show()
+        timer = getattr(self, "_flash_timer", None)
+        if timer is None:
+            from PySide6.QtCore import QTimer
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(label.hide)
+            self._flash_timer = timer
+        timer.start(msec)
 
     def _create_version_group_card(self, title: str, icon_name: str, badge_text: str, color_hex: str = "#0071E3"):
         card = QFrame()
@@ -2486,14 +2718,37 @@ class HomeDashboard(QWidget):
     def _refresh_versions(self):
         if not self._selected_slug:
             return
-        
-        # Guard: if institution was just deleted, its directory no longer exists
-        import os
-        inst_dir = os.path.join(os.path.expanduser("~"), ".chenki_akademi", "institutions", self._selected_slug)
+
+        inst_dir = version_store._institution_dir(self._selected_slug)
         if not os.path.isdir(inst_dir):
             self._selected_slug = None
             return
-            
+
+        # The whole list is rebuilt below, which resets the viewport to the top and
+        # collapses every folder. That is jarring on its own and actively disruptive
+        # when the rebuild was triggered by a background cloud sync the user did not
+        # ask for, so scroll offset and which folders were open are restored after.
+        scroll_bar = self.scroll_ver.verticalScrollBar() if hasattr(self, "scroll_ver") else None
+        prev_scroll = scroll_bar.value() if scroll_bar is not None else 0
+        prev_open_folders = {
+            g.folder_id for g in self.findChildren(CollapsibleVersionGroup)
+            if not g.is_collapsed
+        }
+        # Repainting each intermediate state of a teardown-and-rebuild is pure waste;
+        # draw once at the end instead.
+        self.ver_list_widget.setUpdatesEnabled(False)
+        try:
+            self._rebuild_version_list(inst_dir, prev_open_folders)
+        finally:
+            self.ver_list_widget.setUpdatesEnabled(True)
+
+        if scroll_bar is not None and prev_scroll:
+            from PySide6.QtCore import QTimer
+            # After the layout has settled, or the maximum is still 0 and the value
+            # would be clamped away.
+            QTimer.singleShot(0, lambda: scroll_bar.setValue(min(prev_scroll, scroll_bar.maximum())))
+
+    def _rebuild_version_list(self, inst_dir, prev_open_folders):
         meta = version_store.get_institution_meta(self._selected_slug)
         inst_name = meta.get("name", self._selected_slug)
         is_prim = bool(meta.get("is_primary", False))
@@ -2516,6 +2771,7 @@ class HomeDashboard(QWidget):
             item = self.ver_list_layout.takeAt(0)
             w = item.widget()
             if w:
+                w.setParent(None)
                 w.hide()
                 w.deleteLater()
                 
@@ -2562,15 +2818,19 @@ class HomeDashboard(QWidget):
                 else:
                     older_list.append(v)
 
+            def _wire(row):
+                row.selected.connect(self._on_version_selected)
+                row.double_clicked.connect(self._on_version_double_clicked)
+                row.action_requested.connect(self._on_version_action)
+                if row.filename == self._selected_version:
+                    row.set_selected(True)
+                return row
+
             # 1. Active Timetable Card at top
             if active_list:
                 card, lay = self._create_version_group_card("Aktif Çizelge", "active", "Yayında", "#047857")
                 for v in active_list:
-                    row = AppleVersionRow(self._selected_slug, v, is_active=True)
-                    row.selected.connect(self._on_version_selected)
-                    row.double_clicked.connect(self._on_version_double_clicked)
-                    row.action_requested.connect(self._on_version_action)
-                    lay.addWidget(row)
+                    lay.addWidget(_wire(AppleVersionRow(self._selected_slug, v, is_active=True)))
                 self.ver_list_layout.addWidget(card)
 
             # 2. Older versions, grouped by folder (plus a "Klasörsüz" bucket for the rest).
@@ -2587,16 +2847,20 @@ class HomeDashboard(QWidget):
                     unfoldered.append(v)
 
             def _add_group(title, icon, color, items, folder_id=None, show_folder_actions=False):
+                # A folder the user had open stays open across the rebuild, and one
+                # holding the currently selected version opens so the selection stays
+                # visible rather than hiding inside a collapsed section.
+                keep_open = folder_id in prev_open_folders or any(
+                    v["filename"] == self._selected_version for v in items
+                )
                 group = CollapsibleVersionGroup(
-                    title, icon, f"{len(items)} Versiyon", color, is_collapsed=True,
+                    title, icon, f"{len(items)} Versiyon", color, is_collapsed=not keep_open,
                     folder_id=folder_id, is_drop_target=True, show_folder_actions=show_folder_actions,
                 )
                 for v in items:
-                    row = AppleVersionRow(self._selected_slug, v, is_active=False)
-                    row.selected.connect(self._on_version_selected)
-                    row.double_clicked.connect(self._on_version_double_clicked)
-                    row.action_requested.connect(self._on_version_action)
-                    group.content_lay.addWidget(row)
+                    group.content_lay.addWidget(
+                        _wire(AppleVersionRow(self._selected_slug, v, is_active=False))
+                    )
                 group.version_dropped.connect(
                     lambda slug, filename, fid=folder_id: self._on_version_dropped_on_folder(slug, filename, fid)
                 )
@@ -2647,7 +2911,11 @@ class HomeDashboard(QWidget):
             self.password_overlay_widget.hide()
             
     def _on_version_selected(self, filename):
+        if self._selected_version == filename:
+            return
         self._selected_version = filename
+        # set_selected is a no-op unless the state actually changes, so this only
+        # restyles the row losing selection and the row gaining it — not all of them.
         for row in self.findChildren(AppleVersionRow):
             row.set_selected(row.filename == filename)
                 
@@ -2744,67 +3012,72 @@ class HomeDashboard(QWidget):
                 show_apple_info(self, "Hata", msg, is_success=False)
 
     def _manual_cloud_sync(self):
+        """Sync now, without freezing the window while the network works.
+
+        The previous version spun `processEvents(); time.sleep(0.03)` on the GUI
+        thread until the worker finished, then padded any run shorter than 1.2s with
+        a flat `time.sleep` so the progress card would "look busy". The window was
+        unresponsive for the whole time and, on a fast connection, most of that time
+        was the padding.
+
+        The worker still runs off-thread; results now come back through a signal and
+        the card closes as soon as the work is genuinely done.
+        """
+        if getattr(self, "_sync_in_flight", False):
+            return  # already syncing — don't stack a second worker on top
+        self._sync_in_flight = True
+
         from save_dialog import AppleSaveDialog
         from cloud_sync import push_all_to_rtdb, pull_all_from_rtdb
         import threading
-        import time
-        
+
         dlg = AppleSaveDialog(
             title="Bulut Senkronizasyonu",
             message="Merkezi veritabanı ile eşitleniyor...",
-            parent=self
+            parent=self,
         )
         dlg.show()
-        QApplication.processEvents()
-        
-        results = {}
-        
+
+        def _finish(pull_ok, pull_msg, push_ok, push_msg):
+            self._sync_in_flight = False
+            try:
+                dlg.close()
+                dlg.deleteLater()
+            except Exception:
+                pass
+
+            self._refresh_institutions()
+            if self._selected_slug:
+                self._refresh_versions()
+
+            if pull_ok or push_ok:
+                show_apple_info(
+                    self, "Bulut Senkronizasyonu",
+                    f"{push_msg}\n{pull_msg}\nTüm cihazlar ve geçmiş versiyonlar başarıyla eşitlendi.",
+                    is_success=True,
+                )
+            else:
+                show_apple_info(
+                    self, "Bulut Uyarısı",
+                    f"{pull_msg or 'Bağlantı kurulamadı.'}\nLütfen internet bağlantınızı kontrol edin.",
+                    is_success=False,
+                )
+
         def _sync_worker():
             try:
-                # Pull remote changes and purge deleted institutions first
-                pull_ok, pull_msg, count = pull_all_from_rtdb(self.auth_data)
-                # Then push local creations
+                pull_ok, pull_msg, _ = pull_all_from_rtdb(self.auth_data)
                 push_ok, push_msg, _ = push_all_to_rtdb(self.auth_data)
-                results["push_ok"] = push_ok
-                results["push_msg"] = push_msg
-                results["pull_ok"] = pull_ok
-                results["pull_msg"] = pull_msg
-            except Exception as e:
-                results["push_ok"] = False
-                results["pull_ok"] = False
-                results["pull_msg"] = f"Bağlantı hatası: {e}"
-            finally:
-                results["done"] = True
-            
-        t = threading.Thread(target=_sync_worker, daemon=True)
-        t.start()
-        
-        t_start = time.time()
-        while not results.get("done"):
-            QApplication.processEvents()
-            time.sleep(0.03)
-            if time.time() - t_start > 15:
-                break
-                
-        elapsed = time.time() - t_start
-        if elapsed < 1.2:
-            time.sleep(1.2 - elapsed)
-            QApplication.processEvents()
-            
-        dlg.close()
-        dlg.deleteLater()
-        QApplication.processEvents()
-        
-        self._refresh_institutions()
-        if self._selected_slug:
-            self._refresh_versions()
-            
-        push_ok = results.get("push_ok", False)
-        pull_ok = results.get("pull_ok", False)
-        push_msg = results.get("push_msg", "")
-        pull_msg = results.get("pull_msg", "")
-        
-        if pull_ok or push_ok:
-            show_apple_info(self, "Bulut Senkronizasyonu", f"{push_msg}\n{pull_msg}\nTüm cihazlar ve geçmiş versiyonlar başarıyla eşitlendi.", is_success=True)
-        else:
-            show_apple_info(self, "Bulut Uyarısı", f"{pull_msg or 'Bağlantı kurulamadı.'}\nLütfen internet bağlantınızı kontrol edin.", is_success=False)
+            except Exception as exc:
+                pull_ok, push_ok = False, False
+                pull_msg, push_msg = f"Bağlantı hatası: {exc}", ""
+            # Hop back to the GUI thread — touching widgets from a worker thread is
+            # undefined behaviour in Qt and a real source of random crashes.
+            self.sync_finished.emit(bool(pull_ok), pull_msg or "", bool(push_ok), push_msg or "")
+
+        try:
+            self.sync_finished.disconnect()
+        except Exception:
+            pass
+        self.sync_finished.connect(_finish)
+
+        threading.Thread(target=_sync_worker, daemon=True).start()

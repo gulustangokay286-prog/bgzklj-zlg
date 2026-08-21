@@ -2,6 +2,7 @@
 version_store.py — Kurum, Versiyon, Şifreli Erişim ve Çapraz Çakışma Yönetim Modülü
 Her kurum bir klasör, her oto/manuel kayıt bir .roz versiyon dosyası.
 """
+import copy
 import os
 import json
 import re
@@ -11,6 +12,40 @@ from datetime import datetime
 
 def _base_dir():
     return os.path.join(os.path.expanduser("~"), ".chenki_akademi", "institutions")
+
+
+def _institution_dir(slug: str) -> str:
+    return os.path.join(_base_dir(), slug)
+
+
+def _atomic_write_json(path: str, payload) -> bool:
+    """Writes JSON via a temp file + os.replace so a crash can't leave a half file.
+
+    Schedules are written on every grid edit and meta.json on every navigation. A
+    plain open(..., "w") truncates first, so an interruption anywhere between the
+    truncate and the final flush leaves a file that no longer parses — which is what
+    set_active_version's "Corrupted meta.json detected, resetting" branch exists to
+    clean up after. os.replace is atomic on both Windows and POSIX, so a reader sees
+    either the whole old file or the whole new one, never a partial write.
+    """
+    directory = os.path.dirname(os.path.abspath(path))
+    os.makedirs(directory, exist_ok=True)
+    tmp_path = f"{path}.{os.getpid()}.tmp"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+        return True
+    except Exception as exc:
+        print(f"[version_store] atomic write failed for {path}: {exc}")
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+        return False
 
 def _ensure_base():
     d = _base_dir()
@@ -192,19 +227,32 @@ def sanitize_atamalar(atamalar: list) -> list:
 _cross_busy_cache = {}  # exclude_slug -> (monotonic_timestamp, result_dict)
 _CROSS_BUSY_CACHE_TTL = 4.0  # seconds
 
-def get_cross_institution_teacher_busy_slots(exclude_slug: str = None) -> dict:
-    """
-    Returns a dictionary of busy slots for teachers across all other institutions.
-    Key: (normalized_teacher_name, day_idx, period_idx)
-    Value: dict with conflict details
+def invalidate_cross_busy_cache():
+    """Drops the cross-institution conflict map. Called whenever a schedule is saved."""
+    _cross_busy_cache.clear()
 
-    This is called synchronously on EVERY single manual lesson placement (the cross-
-    institution conflict check in _on_lesson_dropped), and it fully re-reads and
-    re-parses every other institution's active schedule file from disk each time.
-    With more than one saved institution that made every single drag-drop feel slow
-    to settle. Cache the result briefly — cross-institution schedules don't change
-    fast enough for a few seconds of staleness to matter, but doing this disk work
-    on every drag tick does.
+def get_cross_institution_teacher_busy_slots(exclude_slug: str = None) -> dict:
+    """Busy slots for every teacher across all OTHER institutions.
+
+    Key:   (normalized_teacher_name, day_index, period_index)
+    Value: dict describing the clashing lesson.
+
+    main_window._on_lesson_dropped calls this synchronously on every single manual
+    lesson placement, and it reads and JSON-parses each other institution's entire
+    active schedule from disk. With a handful of institutions that is tens of
+    megabytes of parsing per drop, on the GUI thread, which is a large part of why
+    releasing a lesson felt like it froze.
+
+    A short TTL cache fixes that: cross-institution schedules are not being edited
+    from under you mid-drag, so a few seconds of staleness costs nothing, while the
+    disk work per drag is what actually hurt. save_db invalidates it explicitly, so
+    an edit here is reflected immediately rather than after the TTL.
+
+    NOTE: this module previously defined this function TWICE. The second definition
+    (further down the file) silently replaced this one at import time, so the cache
+    above was dead code that never ran. The two also returned different key names —
+    the caller reads "subject"/"class", which only the second version emitted. Both
+    naming schemes are emitted below so either caller shape keeps working.
     """
     import time as _time
     now = _time.monotonic()
@@ -213,54 +261,81 @@ def get_cross_institution_teacher_busy_slots(exclude_slug: str = None) -> dict:
         return cached[1]
 
     busy_slots = {}
-    institutions = list_institutions()
-    
-    for inst in institutions:
+
+    for inst in list_institutions():
         inst_slug = inst["slug"]
         if exclude_slug and inst_slug == exclude_slug:
             continue
-            
+
         active_ver = inst.get("active_version")
         if not active_ver:
             vers = list_versions(inst_slug, source_filter="all")
             if vers:
                 active_ver = vers[0]["filename"]
-                
         if not active_ver:
             continue
-            
+
         data = load_version(inst_slug, active_ver)
         if not data:
             continue
-            
-        grid = data.get("grid_placements", [])
+
         inst_name = inst.get("name", inst_slug)
-        
-        for item in grid:
+        periods = int((data.get("settings") or {}).get("periods", 8)) or 8
+
+        for item in data.get("grid_placements", []):
             t_name = (item.get("teacher_name") or item.get("teacher") or item.get("ogretmen") or "").strip()
             if not t_name:
                 continue
             norm_t = normalize_teacher_name(t_name)
-            day = int(item.get("day", item.get("col", 0)))
-            period = int(item.get("period", item.get("row", 0)))
-            dur = int(item.get("duration", 1))
+            if not norm_t:
+                continue
+
+            if "day" in item:
+                day = int(item.get("day") or 0)
+            else:
+                day = int(item.get("col", 0)) // periods
+            if "period" in item:
+                period = int(item.get("period") or 0)
+            elif "col" in item:
+                period = int(item.get("col", 0)) % periods
+            else:
+                period = int(item.get("row", 0))
+
+            dur = max(1, int(item.get("duration", 1) or 1))
             c_name = item.get("class_name") or item.get("class") or ""
-            s_name = item.get("subject_name") or item.get("subject") or ""
-            
+            s_name = item.get("subject_name") or item.get("subject") or "Ders"
+            clean_k = "".join(c for c in norm_t.lower() if c.isalnum())
+
             for off in range(dur):
                 slot_p = period + off
+                key = (norm_t, day, slot_p)
+                existing = busy_slots.get(key)
+                if existing is not None:
+                    # Same teacher already double-booked at this slot by another
+                    # institution: merge the names rather than hiding one of them.
+                    if inst_name not in existing["institution_name"]:
+                        existing["institution_name"] += f", {inst_name}"
+                    if c_name and c_name not in (existing.get("class") or ""):
+                        existing["class"] = f"{existing['class']} / {c_name}" if existing.get("class") else c_name
+                        existing["class_name"] = existing["class"]
+                    continue
+
                 slot_info = {
                     "institution_slug": inst_slug,
                     "institution_name": inst_name,
                     "teacher_name": t_name,
-                    "class_name": c_name,
+                    # Both key spellings: "subject"/"class" is what the conflict
+                    # dialog reads, "subject_name"/"class_name" matches the rest of
+                    # the data model.
+                    "subject": s_name,
                     "subject_name": s_name,
+                    "class": c_name,
+                    "class_name": c_name,
                     "version_filename": active_ver,
                     "day": day,
-                    "period": slot_p
+                    "period": slot_p,
                 }
-                busy_slots[(norm_t, day, slot_p)] = slot_info
-                clean_k = "".join(c for c in norm_t.lower() if c.isalnum())
+                busy_slots[key] = slot_info
                 busy_slots[(clean_k, day, slot_p)] = slot_info
 
     _cross_busy_cache[exclude_slug] = (now, busy_slots)
@@ -272,26 +347,33 @@ def _hash_password(password: str) -> str:
     salt = "chenki_akademi_secure_salt_2026"
     return hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
 
-def compute_data_hash(data_store: dict) -> str:
-    """Computes a deterministic hash of meaningful data fields for change detection.
+# Keys that change on every save without the schedule itself changing. Must match
+# sync_core.VOLATILE_KEYS on the VDS exactly, or the two sides disagree about what a
+# duplicate is and dedup silently stops working.
+_VOLATILE_KEYS = ("_version_meta", "_sync_meta", "last_modified", "data_hash")
 
-    This runs synchronously on the UI thread on every single grid edit (via
-    update_version_in_place -> save_db), so it must stay cheap. A shallow copy is
-    enough to safely drop the volatile "_version_meta" key before serializing —
-    json.dumps only reads the nested structures, it never mutates them — so the
-    previous copy.deepcopy() (which walks and clones the entire schedule twice per
-    save: once here, once again for the on-disk comparison value) was pure overhead
-    and a meaningful contributor to the "slow to settle after every drag" feel.
+
+def compute_data_hash(data_store: dict) -> str:
+    """Deterministic content hash used for change detection AND duplicate detection.
+
+    Byte-for-byte identical to the server's sync_core.canonical_hash, so a version
+    the client considers a duplicate is one the server will fold together too.
+
+    Runs on the GUI thread on every grid edit (save_db -> update_version_in_place),
+    so it stays a shallow filter plus one json.dumps: json.dumps only reads the
+    nested structures, so there is no need to deep-copy them first.
     """
-    d = dict(data_store) if data_store else {}
-    # Remove volatile metadata fields that change every save
-    d.pop("_version_meta", None)
-    # Sort keys for deterministic serialization
+    if not data_store:
+        return hashlib.sha256(b"").hexdigest()
+    stripped = {k: v for k, v in data_store.items() if k not in _VOLATILE_KEYS}
     try:
-        canonical = json.dumps(d, sort_keys=True, ensure_ascii=False, default=str)
-        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+        canonical = json.dumps(
+            stripped, sort_keys=True, ensure_ascii=False,
+            separators=(",", ":"), default=str,
+        )
     except Exception:
-        return ""
+        canonical = repr(sorted(stripped.keys()))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 # ── Device Password Cache ────────────────────────────────────────────
 
@@ -408,7 +490,7 @@ INSTITUTION_COLORS = [
 ]
 
 def touch_institution_timestamp(slug: str) -> str:
-    """Updates last_modified and last_updated_str in meta.json to current datetime. Returns formatted string."""
+    """Stamps meta.json with the current time. Returns the display string."""
     meta_path = os.path.join(_base_dir(), slug, "meta.json")
     now = datetime.now()
     upd_str = now.strftime("%d %b %H:%M")
@@ -418,8 +500,9 @@ def touch_institution_timestamp(slug: str) -> str:
                 meta = json.load(f)
             meta["last_modified"] = now.isoformat()
             meta["last_updated_str"] = upd_str
-            with open(meta_path, "w", encoding="utf-8") as f:
-                json.dump(meta, f, ensure_ascii=False, indent=2)
+            meta.pop("versions", None)  # never let version payloads settle in here
+            _atomic_write_json(meta_path, meta)
+            _invalidate_meta_cache(slug)
         except Exception:
             pass
     return upd_str
@@ -650,15 +733,65 @@ def delete_institution(slug: str):
     except Exception:
         pass
 
+# slug -> (mtime_ns, size, meta_dict). get_institution_meta is called on nearly every
+# code path (list_institutions, get_active_version, has_institution_password,
+# touch_institution_timestamp, each dashboard card...), so a single refresh reads and
+# parses the same meta.json dozens of times.
+_meta_cache = {}
+
+
+def _invalidate_meta_cache(slug: str = None):
+    if slug:
+        _meta_cache.pop(slug, None)
+    else:
+        _meta_cache.clear()
+
+
 def get_institution_meta(slug: str) -> dict:
+    """The institution's meta.json.
+
+    Returns a fresh copy each call: callers mutate what they get back (adding
+    folders, setting active_version) and handing out the cached dict would let one
+    caller's edit leak into everyone else's read.
+    """
+    if not slug:
+        return {}
     meta_path = os.path.join(_base_dir(), slug, "meta.json")
-    if os.path.exists(meta_path):
+    try:
+        stat = os.stat(meta_path)
+        signature = (stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        _meta_cache.pop(slug, None)
+        return {}
+
+    cached = _meta_cache.get(slug)
+    if cached is not None and cached[0] == signature:
+        return copy.deepcopy(cached[1])
+
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception:
+        return {}
+    if not isinstance(meta, dict):
+        return {}
+
+    # Defence in depth against the bug that bloated these files: the server used to
+    # return the whole version history nested inside "meta", and the client wrote it
+    # straight back out here. Drop it on read so an already-damaged install recovers
+    # instead of carrying megabytes around forever.
+    if "versions" in meta:
+        meta.pop("versions", None)
         try:
-            with open(meta_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, ensure_ascii=False, indent=2)
+            stat = os.stat(meta_path)
+            signature = (stat.st_mtime_ns, stat.st_size)
         except Exception:
-            return {}
-    return {}
+            pass
+
+    _meta_cache[slug] = (signature, meta)
+    return copy.deepcopy(meta)
 
 # ── Version Folders ──────────────────────────────────────────────────
 # Folders group saved versions under a user-given name (e.g. "Yaz Çizelgesi").
@@ -798,7 +931,7 @@ def delete_folder(slug: str, folder_id: str) -> int:
     return deleted
 
 def assign_version_folder(slug: str, filename: str, folder_id: str):
-    """Moves an already-saved version into (or out of, if folder_id is None) a folder."""
+    """Moves an already-saved version into a folder (folder_id=None takes it out)."""
     if not slug or not filename:
         return False
     filepath = os.path.join(_versions_dir(slug), filename)
@@ -810,12 +943,18 @@ def assign_version_folder(slug: str, filename: str, folder_id: str):
     except Exception:
         return False
 
-    data.setdefault("_version_meta", {})["folder_id"] = folder_id
-    try:
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception:
+    meta = data.setdefault("_version_meta", {})
+    meta["folder_id"] = folder_id
+    # Bump last_modified so the change wins the reconciliation in the cloud pull.
+    # Without this the pull compares an unchanged last_modified against the server's
+    # copy, decides nothing happened, and silently overwrites the file — putting the
+    # version straight back into the folder it was just dragged out of.
+    meta["last_modified"] = datetime.now().isoformat()
+
+    if not _atomic_write_json(filepath, data):
         return False
+
+    invalidate_version_summary(slug, filename)
 
     try:
         import threading
@@ -841,8 +980,71 @@ def _next_version_number(slug: str) -> int:
             max_num = max(max_num, int(m.group(1)))
     return max_num + 1
 
-def save_version(slug: str, data_store: dict, source: str = "manual", note: str = "", folder_id: str = None) -> str:
-    """Saves a new version. Returns the version filename."""
+def find_version_by_content(slug: str, data_store: dict) -> str:
+    """Filename of an existing version holding identical content, or "".
+
+    Compares the same canonical hash the VDS uses, so client and server agree on
+    what counts as a duplicate.
+    """
+    target = compute_data_hash(data_store)
+    if not target:
+        return ""
+    ver_dir = _versions_dir(slug)
+    if not os.path.isdir(ver_dir):
+        return ""
+    for fn in sorted(os.listdir(ver_dir)):
+        if not fn.endswith(".roz"):
+            continue
+        try:
+            with open(os.path.join(ver_dir, fn), "r", encoding="utf-8") as f:
+                existing = json.load(f)
+        except Exception:
+            continue
+        if compute_data_hash(existing) == target:
+            return fn
+    return ""
+
+
+def save_version(slug: str, data_store: dict, source: str = "manual", note: str = "",
+                 folder_id: str = None, allow_duplicate: bool = False) -> str:
+    """Saves a new version and returns its filename.
+
+    If an existing version already holds byte-identical content, that one is
+    returned instead of writing a second copy. Saving twice without changing
+    anything — closing the editor, pressing save, coming back via Ana Sayfa, each of
+    which triggers a save — was creating a fresh v-numbered file every time, which is
+    where the run of near-identical "Versiyon 12, 13, 14" entries came from.
+
+    Pass allow_duplicate=True for a deliberate checkpoint the user asked for.
+    """
+    save_data = dict(data_store)
+    if "atamalar" in save_data:
+        save_data["atamalar"] = sanitize_atamalar(save_data["atamalar"])
+    save_data.pop("_version_meta", None)
+
+    if not allow_duplicate:
+        twin = find_version_by_content(slug, save_data)
+        if twin:
+            # Refresh the note/folder on the existing version rather than cloning it.
+            if note or folder_id:
+                try:
+                    twin_path = os.path.join(_versions_dir(slug), twin)
+                    with open(twin_path, "r", encoding="utf-8") as f:
+                        existing = json.load(f)
+                    meta = existing.setdefault("_version_meta", {})
+                    if note:
+                        meta["note"] = note
+                    if folder_id:
+                        meta["folder_id"] = folder_id
+                    with open(twin_path, "w", encoding="utf-8") as f:
+                        json.dump(existing, f, ensure_ascii=False, indent=2)
+                    invalidate_version_summary(slug, twin)
+                except Exception:
+                    pass
+            set_active_version(slug, twin)
+            touch_institution_timestamp(slug)
+            return twin
+
     ver_dir = _versions_dir(slug)
     num = _next_version_number(slug)
     now = datetime.now()
@@ -851,28 +1053,25 @@ def save_version(slug: str, data_store: dict, source: str = "manual", note: str 
     filename = f"v{num:03d}_{ts}_{src_tag}.roz"
     filepath = os.path.join(ver_dir, filename)
 
-    # Embed version metadata into the data_store copy
-    save_data = dict(data_store)
-    if "atamalar" in save_data:
-        save_data["atamalar"] = sanitize_atamalar(save_data["atamalar"])
-
     save_data["_version_meta"] = {
         "version_number": num,
         "timestamp": now.isoformat(),
+        "last_modified": now.isoformat(),
         "source": src_tag,
         "note": note,
         "filename": filename,
         "folder_id": folder_id,
+        "data_hash": compute_data_hash(save_data),
     }
-    
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(save_data, f, ensure_ascii=False, indent=2)
-    
-    # Auto-set as active and update institution timestamp
+
+    _atomic_write_json(filepath, save_data)
+    invalidate_version_summary(slug, filename)
+    _last_written_hash[(slug, filename)] = save_data["_version_meta"]["data_hash"]
+    invalidate_cross_busy_cache()
+
     set_active_version(slug, filename)
     touch_institution_timestamp(slug)
-    
-    # Push to RTDB and create rolling backup in background thread
+
     try:
         import threading
         from cloud_sync import push_version_to_rtdb
@@ -881,7 +1080,7 @@ def save_version(slug: str, data_store: dict, source: str = "manual", note: str 
         threading.Thread(target=database.create_database_backup, args=(slug, "auto_save"), daemon=True).start()
     except Exception:
         pass
-        
+
     return filename
 
 def update_version_in_place(slug: str, filename: str, data_store: dict) -> bool:
@@ -897,102 +1096,183 @@ def update_version_in_place(slug: str, filename: str, data_store: dict) -> bool:
     if "atamalar" in save_data:
         save_data["atamalar"] = sanitize_atamalar(save_data["atamalar"])
 
-    # Hash-based change detection: skip write if data hasn't changed
     new_hash = compute_data_hash(save_data)
-    if os.path.exists(filepath) and new_hash:
-        try:
-            with open(filepath, "r", encoding="utf-8") as f:
-                existing_data = json.load(f)
-            old_hash = compute_data_hash(existing_data)
-            if old_hash == new_hash:
-                # Data unchanged — no write, no push, no version inflation
+
+    # Change detection.
+    #
+    # This runs on the GUI thread on every grid edit, and the previous version
+    # answered "did anything change?" by reading the whole .roz back off disk and
+    # re-hashing it — a full json.load plus a full json.dumps of the entire
+    # schedule, on top of the json.dumps already done for new_hash. Three full
+    # passes over the data per lesson drop is a large part of why releasing a lesson
+    # stuttered.
+    #
+    # We wrote that file ourselves, so remembering the hash we last wrote answers
+    # the same question for free. The on-disk read stays as the fallback for the
+    # first save after launch, when we have nothing remembered yet.
+    cache_key = (slug, filename)
+    if new_hash:
+        remembered = _last_written_hash.get(cache_key)
+        if remembered is not None:
+            if remembered == new_hash:
                 return True
-        except Exception:
-            pass
-        
+        elif os.path.exists(filepath):
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    existing_data = json.load(f)
+                if compute_data_hash(existing_data) == new_hash:
+                    _last_written_hash[cache_key] = new_hash
+                    return True
+            except Exception:
+                pass
+
     now = datetime.now()
-    if "_version_meta" not in save_data:
-        save_data["_version_meta"] = {}
-    save_data["_version_meta"]["last_modified"] = now.isoformat()
-    save_data["_version_meta"]["data_hash"] = new_hash
-        
-    try:
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(save_data, f, ensure_ascii=False, indent=2)
-            
-        touch_institution_timestamp(slug)
-            
-        # Push to RTDB and trigger backup in background thread
-        try:
-            import threading
-            from cloud_sync import push_version_to_rtdb
-            import database
-            threading.Thread(target=push_version_to_rtdb, args=(slug, filename, save_data), daemon=True).start()
-            threading.Thread(target=database.create_database_backup, args=(slug, "in_place_update"), daemon=True).start()
-        except Exception:
-            pass
-        return True
-    except Exception as e:
-        print(f"[version_store] update_version_in_place error: {e}")
+    meta = save_data.setdefault("_version_meta", {})
+    meta["last_modified"] = now.isoformat()
+    meta["data_hash"] = new_hash
+    meta.setdefault("filename", filename)
+
+    if not _atomic_write_json(filepath, save_data):
+        _last_written_hash.pop(cache_key, None)
         return False
 
+    # Order matters: invalidate_version_summary also clears the remembered hash, so
+    # record what we just wrote AFTER it, not before.
+    invalidate_version_summary(slug, filename)
+    _last_written_hash[cache_key] = new_hash
+    invalidate_cross_busy_cache()
+    touch_institution_timestamp(slug)
+
+    try:
+        import threading
+        from cloud_sync import push_version_to_rtdb
+        import database
+        threading.Thread(target=push_version_to_rtdb, args=(slug, filename, save_data), daemon=True).start()
+        threading.Thread(target=database.create_database_backup, args=(slug, "in_place_update"), daemon=True).start()
+    except Exception:
+        pass
+    return True
+
+# filepath -> (mtime, size, parsed_summary_dict)
+#
+# list_versions() has to look inside each .roz for its note, folder and hour counts,
+# which meant fully JSON-parsing every schedule an institution has ever had — on the
+# GUI thread, on every dashboard refresh, and refreshes happen on institution
+# select, on each cloud poll, after every save and after every folder change. An
+# institution with 60 versions of a real timetable is tens of megabytes of parsing
+# per click, which is the bulk of the "Anasayfa is unusable" complaint.
+#
+# The file name and mtime identify the content completely (versions are rewritten in
+# place, never appended), so a cache keyed on (mtime, size) is exact rather than
+# merely probable — a stale entry is impossible without the file changing.
+_version_summary_cache = {}
+_VERSION_SUMMARY_CACHE_MAX = 4000
+
+
+def _version_summary(filepath: str) -> dict:
+    """Note, folder and hour counts for one .roz, parsed at most once per revision."""
+    try:
+        stat = os.stat(filepath)
+        signature = (stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        return {"note": "", "folder_id": None, "total_hours": 0,
+                "placed_hours": 0, "unplaced_hours": 0, "size_kb": 0.0}
+
+    cached = _version_summary_cache.get(filepath)
+    if cached is not None and cached[0] == signature:
+        return cached[1]
+
+    summary = {"note": "", "folder_id": None, "total_hours": 0,
+               "placed_hours": 0, "unplaced_hours": 0,
+               "size_kb": round(stat.st_size / 1024, 1)}
+    try:
+        with open(filepath, "r", encoding="utf-8") as fh:
+            d = json.load(fh)
+        v_meta = d.get("_version_meta", {}) or {}
+        summary["note"] = v_meta.get("note", "") or ""
+        summary["folder_id"] = v_meta.get("folder_id")
+        placed = sum(int(p.get("duration", 1) or 1) for p in d.get("grid_placements", []))
+        total = sum(int(a.get("duration", 2) or 2) for a in d.get("atamalar", []))
+        summary["placed_hours"] = placed
+        summary["total_hours"] = total
+        summary["unplaced_hours"] = max(0, total - placed)
+    except Exception:
+        pass
+
+    if len(_version_summary_cache) > _VERSION_SUMMARY_CACHE_MAX:
+        _version_summary_cache.clear()
+    _version_summary_cache[filepath] = (signature, summary)
+    return summary
+
+
+# (slug, filename) -> hash of what THIS process last wrote to that file. Lets
+# update_version_in_place answer "has anything changed?" without re-reading and
+# re-hashing the whole schedule from disk on every single grid edit.
+_last_written_hash = {}
+
+
+def invalidate_version_summary(slug: str = None, filename: str = None):
+    """Forgets cached data for a version file. Call after ANY write to it.
+
+    This also drops the remembered content hash, which matters most when the writer
+    was someone else — a cloud pull replacing the file, say. Keeping a stale hash
+    there would make the next local save believe its data already matched what is on
+    disk and skip the write entirely, silently losing the user's edit.
+    """
+    if slug and filename:
+        _version_summary_cache.pop(os.path.join(_versions_dir(slug), filename), None)
+        _last_written_hash.pop((slug, filename), None)
+    elif slug:
+        prefix = _versions_dir(slug)
+        for key in [k for k in _version_summary_cache if k.startswith(prefix)]:
+            _version_summary_cache.pop(key, None)
+        for key in [k for k in _last_written_hash if k[0] == slug]:
+            _last_written_hash.pop(key, None)
+    else:
+        _version_summary_cache.clear()
+        _last_written_hash.clear()
+
+
+_VERSION_FILENAME_RE = re.compile(
+    r"v(\d+)_(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})_(auto|manual)\.roz"
+)
+
+
 def list_versions(slug: str, source_filter: str = "all") -> list:
-    """Returns list of version dicts sorted newest-first, optionally filtered by source ('all', 'auto', 'manual')."""
+    """Version dicts, newest first, optionally filtered by source ('all'/'auto'/'manual')."""
     ver_dir = _versions_dir(slug)
-    versions = []
     if not os.path.exists(ver_dir):
         return []
 
     folders_by_id = {f.get("id"): f.get("name", "") for f in list_folders(slug)}
-
+    versions = []
 
     for f in sorted(os.listdir(ver_dir), reverse=True):
         if not f.endswith(".roz"):
             continue
         filepath = os.path.join(ver_dir, f)
-        
-        # Parse info from filename: v001_2026-08-17_15-30-00_auto.roz
-        m = re.match(r"v(\d+)_(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})_(auto|manual)\.roz", f)
+
+        # v001_2026-08-17_15-30-00_auto.roz
+        m = _VERSION_FILENAME_RE.match(f)
         if m:
             num = int(m.group(1))
-            date_str = m.group(2)
-            time_str = m.group(3).replace("-", ":")
             source = m.group(4)
             try:
-                dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M:%S")
+                dt = datetime.strptime(
+                    f"{m.group(2)} {m.group(3).replace('-', ':')}", "%Y-%m-%d %H:%M:%S"
+                )
             except Exception:
                 dt = datetime.fromtimestamp(os.path.getmtime(filepath))
         else:
             num = 0
             source = "manual"
             dt = datetime.fromtimestamp(os.path.getmtime(filepath))
-        
+
         if source_filter != "all" and source != source_filter:
             continue
-            
-        size_kb = os.path.getsize(filepath) / 1024
-        
-        note = ""
-        total_hours = 0
-        placed_hours = 0
-        unplaced_hours = 0
-        folder_id = None
-        try:
-            with open(filepath, "r", encoding="utf-8") as fh:
-                d = json.load(fh)
-                v_meta = d.get("_version_meta", {})
-                note = v_meta.get("note", "")
-                folder_id = v_meta.get("folder_id")
 
-                # Compute stats
-                placements = d.get("grid_placements", [])
-                placed_hours = sum(p.get("duration", 1) for p in placements)
-
-                atamalar = d.get("atamalar", [])
-                total_hours = sum(a.get("duration", 2) for a in atamalar)
-                unplaced_hours = max(0, total_hours - placed_hours)
-        except Exception:
-            pass
+        summary = _version_summary(filepath)
+        folder_id = summary["folder_id"]
 
         versions.append({
             "filename": f,
@@ -1004,16 +1284,49 @@ def list_versions(slug: str, source_filter: str = "all") -> list:
             "month_key": dt.strftime("%Y-%m"),
             "month_label": _turkish_month(dt),
             "source": source,
-            "size_kb": round(size_kb, 1),
-            "note": note,
-            "total_hours": total_hours,
-            "placed_hours": placed_hours,
-            "unplaced_hours": unplaced_hours,
+            "size_kb": summary["size_kb"],
+            "note": summary["note"],
+            "total_hours": summary["total_hours"],
+            "placed_hours": summary["placed_hours"],
+            "unplaced_hours": summary["unplaced_hours"],
             "folder_id": folder_id,
             "folder_name": folders_by_id.get(folder_id, ""),
         })
-    
+
+    _assign_display_labels(versions)
     return versions
+
+
+def _assign_display_labels(versions: list):
+    """Gives every version a label that is unique within its institution.
+
+    Version numbers are allocated as (highest local number + 1), which is only
+    unique per machine. Two devices editing the same institution offline both mint
+    "v082", then sync — and both machines end up holding two genuinely different
+    schedules that the home screen labels "Versiyon 82". That reads as a duplicate
+    even though the content differs, and it is a large part of what "duplicated
+    versions" looks like from the outside.
+
+    Renumbering the files would break the folder assignments and cloud identities
+    that reference them, so the collision is resolved at display time instead: the
+    oldest keeps the plain number, later ones get a letter — "Versiyon 82", then
+    "Versiyon 82-B", "Versiyon 82-C".
+    """
+    by_number = {}
+    for v in versions:
+        by_number.setdefault(v["number"], []).append(v)
+
+    for number, group in by_number.items():
+        if len(group) == 1:
+            group[0]["label"] = f"Versiyon {number}"
+            group[0]["has_number_collision"] = False
+            continue
+        # Oldest first, so the version the user has known longest keeps the bare number.
+        group.sort(key=lambda v: v["datetime"])
+        for index, v in enumerate(group):
+            suffix = "" if index == 0 else f"-{chr(ord('B') + index - 1)}"
+            v["label"] = f"Versiyon {number}{suffix}"
+            v["has_number_collision"] = True
 
 def load_version(slug: str, version_filename: str) -> dict:
     """Loads a version's data_store."""
@@ -1092,15 +1405,15 @@ def set_active_version(slug: str, version_filename: str):
     except Exception as e:
         print(f"[version_store] Corrupted meta.json detected, resetting. Error: {e}")
         meta = {"name": slug}
-        
-    try:
-        meta["active_version"] = version_filename
-        with open(meta_path, "w", encoding="utf-8") as f:
-            json.dump(meta, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"[version_store] set_active_version write error: {e}")
+
+    if meta.get("active_version") == version_filename:
+        return  # already active — skip the write and the cloud push entirely
+
+    meta["active_version"] = version_filename
+    if not _atomic_write_json(meta_path, meta):
         return
-            
+    _invalidate_meta_cache(slug)
+
     try:
         import threading
         import cloud_sync
@@ -1127,80 +1440,6 @@ def ensure_institution_has_version(slug: str) -> str:
         "grid_placements": [], "kisitlamalar": {},
     }
     return save_version(slug, empty_data, source="manual", note="Başlangıç çizelgesi")
-
-# ── Cross-Institution Teacher Conflict Checker ──────────────────────
-
-def get_cross_institution_teacher_busy_slots(exclude_slug: str = None) -> dict:
-    """
-    Scans all other institutions' active versions and builds a collision map.
-    Returns:
-        { (normalized_teacher_name, day, period): {
-            "institution_name": str,
-            "institution_slug": str,
-            "teacher_name": str,
-            "subject": str,
-            "class": str,
-            "day": int,
-            "period": int
-        }}
-    """
-    institutions = list_institutions()
-    busy_slots = {}
-    
-    for inst in institutions:
-        slug = inst["slug"]
-        if exclude_slug and slug == exclude_slug:
-            continue
-            
-        active_ver = get_active_version(slug)
-        if not active_ver:
-            continue
-            
-        data = load_version(slug, active_ver)
-        if not data:
-            continue
-            
-        placements = data.get("grid_placements", [])
-        settings = data.get("settings", {})
-        periods = int(settings.get("periods", 8))
-        
-        for p in placements:
-            t_raw = p.get("teacher_name") or p.get("teacher") or ""
-            if not t_raw:
-                continue
-                
-            t_norm = normalize_teacher_name(t_raw)
-            if not t_norm:
-                continue
-                
-            day = int(p.get("day") if "day" in p else (p.get("col", 0) // periods))
-            period = int(p.get("period") if "period" in p else (p.get("col", 0) % periods if "col" in p else p.get("row", 0)))
-            dur = int(p.get("duration", 1))
-            subj = p.get("subject_name") or p.get("subject") or "Ders"
-            cls = p.get("class_name") or p.get("class") or ""
-            
-            for ext in range(dur):
-                slot_key = (t_norm, day, period + ext)
-                if slot_key in busy_slots:
-                    prev = busy_slots[slot_key]
-                    prev_inst = prev.get("institution_name", "")
-                    if inst["name"] not in prev_inst:
-                        prev["institution_name"] = f"{prev_inst}, {inst['name']}"
-                    prev_cls = prev.get("class", "")
-                    if cls and cls not in prev_cls:
-                        prev["class"] = f"{prev_cls} / {cls}" if prev_cls else cls
-                else:
-                    busy_slots[slot_key] = {
-                        "institution_name": inst["name"],
-                        "institution_slug": slug,
-                        "teacher_name": t_raw,
-                        "subject": subj,
-                        "class": cls,
-                        "day": day,
-                        "period": period + ext
-                    }
-                
-    return busy_slots
 
 # ── Master Data Clone / Import ───────────────────────────────────────
 
