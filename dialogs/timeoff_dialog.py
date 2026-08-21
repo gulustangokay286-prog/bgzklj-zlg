@@ -305,10 +305,29 @@ class TimeoffDialog(QDialog):
                 for p in range(self.periods):
                     st = self.timeoff_data[d][p]
                     self.data_store["kisitlamalar"][ent_name][f"{d},{p}"] = (st > 0)
+
+        # Both of these calls were wrong, and because they shared one try/except the
+        # first failure skipped the second silently:
+        #   * trigger_save_db lives in database.py, not version_store, so importing
+        #     it from there raised ImportError and nothing below ever ran;
+        #   * save_global_kisitlamalar takes (institution_slug, kisitlamalar) and was
+        #     being called with a single argument.
+        # The constraints survived only because master_data_dialog happens to call
+        # trigger_save_db itself afterwards; the cross-institution copy was never
+        # written at all.
         try:
-            from version_store import trigger_save_db, save_global_kisitlamalar
+            from database import trigger_save_db
             trigger_save_db(self, self.data_store)
-            save_global_kisitlamalar(self.data_store["kisitlamalar"])
         except Exception as e:
-            print(f"[TIMEOFF_SAVE_ERR] {e}")
+            print(f"[TIMEOFF_SAVE_ERR] local save failed: {e}")
+
+        try:
+            from version_store import save_global_kisitlamalar
+            inst_slug = self.data_store.get("settings", {}).get(
+                "institution_slug", "bogazici_egitim_kurumlari"
+            )
+            save_global_kisitlamalar(inst_slug, self.data_store["kisitlamalar"])
+        except Exception as e:
+            print(f"[TIMEOFF_SAVE_ERR] global constraint save failed: {e}")
+
         self.accept()

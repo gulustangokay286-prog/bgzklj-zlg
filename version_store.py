@@ -737,6 +737,19 @@ def delete_institution(slug: str):
     if os.path.isdir(inst_dir):
         shutil.rmtree(inst_dir)
         
+    tomb_file = os.path.join(_base_dir(), "deleted_institutions.json")
+    try:
+        tomb = []
+        if os.path.exists(tomb_file):
+            with open(tomb_file, "r", encoding="utf-8") as f:
+                tomb = json.load(f)
+        if slug not in tomb:
+            tomb.append(slug)
+        with open(tomb_file, "w", encoding="utf-8") as f:
+            json.dump(tomb, f)
+    except Exception:
+        pass
+        
     try:
         import threading
         import cloud_sync
@@ -927,9 +940,13 @@ def delete_folder(slug: str, folder_id: str) -> int:
         return deleted
     meta["folders"] = new_folders
 
+    tomb = meta.setdefault("deleted_folders", [])
+    if folder_id not in tomb:
+        tomb.append(folder_id)
+
     try:
-        with open(meta_path, "w", encoding="utf-8") as f:
-            json.dump(meta, f, ensure_ascii=False, indent=2)
+        _atomic_write_json(meta_path, meta)
+        _invalidate_meta_cache(slug)
     except Exception:
         pass
 

@@ -86,6 +86,122 @@ def _build_teacher_timeoff_map(data_store: dict) -> dict:
     return blocked
 
 
+# A cell the user has explicitly closed in the Zaman Tablosu screen. It is put into
+# the working grid before scheduling starts, so every existing "is this cell free?"
+# check treats it as occupied and nothing can be placed there — including the filler
+# pass, which is what was painting over closed periods.
+BLOCKED_CELL = {
+    "subject": None,
+    "teacher": "",
+    "block_id": "__blocked__",
+    "is_blocked": True,
+    "block_start": -1,
+}
+
+
+def _entity_timeoff_states(entity: dict, name: str, kisitlamalar: dict) -> dict:
+    """Reads one entity's closed/avoid slots from BOTH places they are stored.
+
+    TimeoffDialog writes the matrix twice: as entity["timeoff"][day][period] holding
+    2=open / 0=closed / 1=avoid, and as data_store["kisitlamalar"][name]["d,p"]
+    holding True=open / False=closed. Either copy can be the stale one depending on
+    how the schedule was created or synced, so both are read and anything marked
+    closed in either is treated as closed.
+
+    Returns {(day, period): 0 or 1}; slots that are open are simply absent.
+    """
+    states = {}
+
+    toff = entity.get("timeoff") or []
+    for d_idx, day_slots in enumerate(toff):
+        if not isinstance(day_slots, list):
+            continue
+        for p_idx, val in enumerate(day_slots):
+            try:
+                val = int(val)
+            except (TypeError, ValueError):
+                continue
+            if val == 0:
+                states[(d_idx, p_idx)] = 0
+            elif val == 1:
+                states.setdefault((d_idx, p_idx), 1)
+
+    entry = (kisitlamalar or {}).get(name)
+    if isinstance(entry, dict):
+        for key, is_open in entry.items():
+            try:
+                d_str, p_str = str(key).split(",")
+                slot = (int(d_str), int(p_str))
+            except (ValueError, TypeError):
+                continue
+            if not is_open:
+                states[slot] = 0
+
+    return states
+
+
+def _build_class_timeoff_map(data_store: dict) -> tuple:
+    """Closed and avoid slots per CLASS.
+
+    The scheduler only ever built this for teachers. Class constraints — closing
+    e.g. periods 5-8 for a class so it goes home early — were read by nothing, so
+    the auto-scheduler happily filled them in and the user's setting appeared to do
+    nothing at all.
+
+    Returns (blocked, avoid): both {class_name: {(day, period), ...}}.
+    """
+    blocked = defaultdict(set)
+    avoid = defaultdict(set)
+    kisitlamalar = data_store.get("kisitlamalar") or {}
+
+    for cls in data_store.get("siniflar", []):
+        if not isinstance(cls, dict):
+            continue
+        name = (cls.get("ad") or cls.get("name") or "").strip()
+        if not name:
+            continue
+        for slot, state in _entity_timeoff_states(cls, name, kisitlamalar).items():
+            if state == 0:
+                blocked[name].add(slot)
+            else:
+                avoid[name].add(slot)
+
+    return dict(blocked), dict(avoid)
+
+
+def _resolve_class_slots(class_name: str, slot_map: dict) -> set:
+    """Finds a class's slots in a map keyed by however the name was written.
+
+    Class names reach the scheduler in several spellings ("9A", "9-A", "9 A"), and a
+    constraint that silently fails to match is exactly the bug this map exists to
+    fix, so three passes are tried in decreasing strictness.
+
+    The last one uses normalize_clean rather than matches_class because
+    matches_class deliberately rewrites "-" to "/" (it treats a dash as a combined-
+    class separator), which makes it consider "9-A" and "9A" different. That rule is
+    right for assignment matching and must not be changed, but for looking up a
+    class's own constraints the looser comparison is what the user means.
+    """
+    if not class_name or not slot_map:
+        return set()
+
+    direct = slot_map.get(class_name)
+    if direct:
+        return set(direct)
+
+    for key, slots in slot_map.items():
+        if matches_class(key, class_name) or matches_class(class_name, key):
+            return set(slots)
+
+    target = normalize_clean(class_name)
+    if target:
+        for key, slots in slot_map.items():
+            if normalize_clean(key) == target:
+                return set(slots)
+
+    return set()
+
+
 def _build_cross_institution_map(institution_slug: str) -> dict:
     occupied = defaultdict(set)
     try:
@@ -150,6 +266,7 @@ class AutoSchedulerWorker(QThread):
             return
 
         teacher_timeoff = _build_teacher_timeoff_map(self.data_store)
+        class_blocked_map, class_avoid_map = _build_class_timeoff_map(self.data_store)
         cross_inst_map = _build_cross_institution_map(self.institution_slug) if self.institution_slug else {}
 
         # Collect classes
@@ -225,8 +342,29 @@ class AutoSchedulerWorker(QThread):
                     for off in range(dur):
                         global_teacher_busy[t].add((d, per + off))
 
+        # Resolve each class's closed/avoid slots once, up front.
+        blocked_by_class = {}
+        avoid_by_class = {}
+        for cn in classes_to_schedule:
+            blocked_by_class[cn] = {
+                (d, p) for (d, p) in _resolve_class_slots(cn, class_blocked_map)
+                if 0 <= d < D and 0 <= p < P
+            }
+            avoid_by_class[cn] = {
+                (d, p) for (d, p) in _resolve_class_slots(cn, class_avoid_map)
+                if 0 <= d < D and 0 <= p < P
+            }
+
+        total_blocked = sum(len(s) for s in blocked_by_class.values())
+        if total_blocked:
+            print(f"[AutoScheduler] {total_blocked} closed slot(s) will be left empty "
+                  f"across {sum(1 for s in blocked_by_class.values() if s)} class(es)")
+
         # ── CLASS-BY-CLASS SCHEDULING ─────────────────────────────────
-        total_target = len(classes_to_schedule) * D * P
+        # Closed slots are not part of the target. Counting them made the scheduler
+        # believe it had failed to reach a full grid and keep retrying all 50
+        # attempts, and it is what drove the filler pass to paint over them.
+        total_target = len(classes_to_schedule) * D * P - total_blocked
 
         best_result = None
         best_score = -1
@@ -244,9 +382,19 @@ class AutoSchedulerWorker(QThread):
             attempt_placed = 0
             
             for cn in classes_to_schedule:
-                # grid[day][period] = None or placement_dict
+                # grid[day][period] = None (free) | BLOCKED_CELL (closed) | placement
                 grid = [[None for _ in range(P)] for _ in range(D)]
-                
+
+                # Seed the closed cells BEFORE anything is placed. Every pass below
+                # already tests "is this cell None?" to decide whether a slot is
+                # free, so occupying closed cells up front makes all of them —
+                # including the filler pass that caused this bug — leave those
+                # periods alone, with no extra check to forget in one branch.
+                cls_blocked = blocked_by_class.get(cn, set())
+                cls_avoid = avoid_by_class.get(cn, set())
+                for (bd, bp) in cls_blocked:
+                    grid[bd][bp] = BLOCKED_CELL
+
                 blocks = list(class_blocks.get(cn, []))
                 random.shuffle(blocks)
                 # Sort: bigger blocks first for better distribution
@@ -301,8 +449,16 @@ class AutoSchedulerWorker(QThread):
                                 for off in range(dur):
                                     if (d, p + off) in cross_inst_map[t]:
                                         cross_pen = 100
-                            
-                            score = same_subj_day * 1000 + p + cross_pen + random.random() * 0.1
+
+                            # "Tercih edilmez" (yellow ?) is a soft constraint: usable,
+                            # but only once genuinely preferred slots are exhausted.
+                            avoid_pen = 0
+                            if cls_avoid:
+                                avoid_pen = 500 * sum(
+                                    1 for off in range(dur) if (d, p + off) in cls_avoid
+                                )
+
+                            score = same_subj_day * 1000 + p + cross_pen + avoid_pen + random.random() * 0.1
                             candidates.append((score, d, p))
                     
                     if candidates:
@@ -454,7 +610,9 @@ class AutoSchedulerWorker(QThread):
                     p = 0
                     while p < P:
                         cell = grid[d][p]
-                        if cell is None:
+                        if cell is None or cell.get("is_blocked"):
+                            # A closed period produces no placement record at all, so
+                            # it stays visibly empty on the grid.
                             p += 1
                             continue
                         # Find span of same block_id (strictly max 2 hours per block)

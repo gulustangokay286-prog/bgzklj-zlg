@@ -384,10 +384,20 @@ class APIClient:
             print(f"[APIClient] cleanup notice: {exc}")
 
         base_dir = version_store._ensure_base()
+        
+        del_inst = []
+        tomb_file = os.path.join(base_dir, "deleted_institutions.json")
+        try:
+            if os.path.exists(tomb_file):
+                with open(tomb_file, "r", encoding="utf-8") as f:
+                    del_inst = json.load(f)
+        except Exception:
+            pass
+            
         existing_local = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))] if os.path.exists(base_dir) else []
         remote_slugs = set(data.keys())
         for l_slug in existing_local:
-            if l_slug not in remote_slugs:
+            if l_slug not in remote_slugs or l_slug in del_inst:
                 try:
                     import shutil
                     shutil.rmtree(os.path.join(base_dir, l_slug), ignore_errors=True)
@@ -396,6 +406,12 @@ class APIClient:
                     pass
 
         for slug, inst_obj in data.items():
+            if slug in del_inst:
+                try:
+                    self.delete_institution_from_rtdb(slug)
+                except Exception:
+                    pass
+                continue
             if not isinstance(inst_obj, dict):
                 continue
             inst_dir = os.path.join(base_dir, slug)
@@ -559,11 +575,24 @@ class APIClient:
 
         local_folders = {f.get("id"): f for f in local_meta.get("folders", []) if isinstance(f, dict) and f.get("id")}
         remote_folders = {f.get("id"): f for f in remote_meta.get("folders", []) if isinstance(f, dict) and f.get("id")}
-        combined = dict(remote_folders)
+        deleted_folders = set(local_meta.get("deleted_folders", []))
+        
+        combined = {}
+        for fid, folder in remote_folders.items():
+            if fid not in deleted_folders:
+                combined[fid] = folder
+                
         for fid, folder in local_folders.items():
-            combined.setdefault(fid, folder)
+            if fid not in deleted_folders:
+                combined.setdefault(fid, folder)
+                
         if combined:
             merged["folders"] = list(combined.values())
+        else:
+            merged["folders"] = []
+            
+        if deleted_folders:
+            merged["deleted_folders"] = list(deleted_folders)
 
         version_store._atomic_write_json(meta_path, merged)
         version_store._invalidate_meta_cache(os.path.basename(inst_dir.rstrip(os.sep)))
