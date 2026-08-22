@@ -119,7 +119,8 @@ class ThinProgressBar(QWidget):
 class HighTechSplashScreen(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setWindowFlags(Qt.SplashScreen | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_DeleteOnClose, True)
         self.setStyleSheet("background-color: #FFFFFF;")
         
         self.is_valid_token = False
@@ -164,9 +165,6 @@ class HighTechSplashScreen(QDialog):
         self.tip_label.setStyleSheet("color: #94A3B8; background: transparent;")
         self.tip_label.setAlignment(Qt.AlignCenter)
         
-        self.opacity_effect = QGraphicsOpacityEffect(self.tip_label)
-        self.tip_label.setGraphicsEffect(self.opacity_effect)
-        
         layout.addWidget(self.tip_label, 0, Qt.AlignCenter)
         layout.addStretch(1)
 
@@ -198,25 +196,8 @@ class HighTechSplashScreen(QDialog):
         self.tip_timer.start(1200)
         
     def _next_tip(self):
-        self.current_tip_index += 1
-        if self.current_tip_index < len(self.tips):
-            # Fade out
-            self.fade_out = QPropertyAnimation(self.opacity_effect, b"opacity")
-            self.fade_out.setDuration(200)
-            self.fade_out.setStartValue(1.0)
-            self.fade_out.setEndValue(0.0)
-            self.fade_out.finished.connect(self._change_tip_text)
-            self.fade_out.start()
-
-    def _change_tip_text(self):
-        if self.current_tip_index < len(self.tips):
-            self.tip_label.setText(self.tips[self.current_tip_index])
-            # Fade in
-            self.fade_in = QPropertyAnimation(self.opacity_effect, b"opacity")
-            self.fade_in.setDuration(200)
-            self.fade_in.setStartValue(0.0)
-            self.fade_in.setEndValue(1.0)
-            self.fade_in.start()
+        self.current_tip_index = (self.current_tip_index + 1) % len(self.tips)
+        self.tip_label.setText(self.tips[self.current_tip_index])
 
     def _run_auth_check(self):
         try:
@@ -229,4 +210,11 @@ class HighTechSplashScreen(QDialog):
             print(f"[Splash] auth check note: {e}")
 
     def _finish(self):
-        QTimer.singleShot(100, self.accept)
+        try:
+            if hasattr(self, "tip_timer") and self.tip_timer:
+                self.tip_timer.stop()
+        except Exception:
+            pass
+        self.hide()
+        self.close()
+        self.accept()

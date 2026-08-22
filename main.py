@@ -376,10 +376,14 @@ def main():
     from splash_screen import HighTechSplashScreen
     splash = HighTechSplashScreen()
     splash.exec()
-
-    # The splash screen validates and loads the token in the background.
-    from api_client import api_client
     auth_data = splash.auth_data
+    try:
+        splash.hide()
+        splash.close()
+        splash.deleteLater()
+    except Exception:
+        pass
+    app.processEvents()
     if not auth_data:
         ok, auto_auth = api_client.auto_authenticate()
         if ok and auto_auth:
