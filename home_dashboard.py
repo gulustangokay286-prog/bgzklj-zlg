@@ -8,8 +8,8 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QFrame, QSplitter, QInputDialog, QMessageBox,
-    QLineEdit, QDialog, QCheckBox, QGraphicsDropShadowEffect, QGraphicsBlurEffect,
-    QStackedLayout, QMenu, QSizePolicy
+    QLineEdit, QDialog, QCheckBox,
+    QMenu, QSizePolicy
 )
 from PySide6.QtCore import Qt, Signal, QSize, QRectF, QPoint, QMimeData, QEvent
 from PySide6.QtGui import (
@@ -159,32 +159,22 @@ def make_apple_lock_badge(size: int = 44) -> QPixmap:
 # ── Dialogs: Password Prompt, Set Password & Modern Apple White Alerts ─
 
 class PasswordOverlayContainer(QWidget):
-    """Clean opaque background that completely prevents underlying stacked pages from bleeding through."""
+    """Clean opaque background styled purely via CSS – no paintEvent override."""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setAutoFillBackground(True)
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.fillRect(self.rect(), QColor("#F8FAFC"))
-        p.end()
+        self.setStyleSheet("background: #F8FAFC;")
 
 class PasswordCardWidget(QFrame):
-    """Pure white Apple style security card that natively paints with QPainter to prevent macOS black box rendering."""
+    """Pure white Apple style security card styled via CSS – no paintEvent/QPainter to avoid macOS Cocoa black-box bug."""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setAutoFillBackground(True)
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        p.setBrush(QBrush(QColor("#FFFFFF")))
-        p.setPen(QPen(QColor("#CBD5E1"), 1.2))
-        r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
-        p.drawRoundedRect(r, 16, 16)
-        p.end()
+        self.setStyleSheet("""
+            PasswordCardWidget {
+                background: #FFFFFF;
+                border: 1px solid #CBD5E1;
+                border-radius: 16px;
+            }
+        """)
 
 class AppleInfoDialog(QDialog):
     def __init__(self, title: str, message: str, is_success: bool = True, parent=None):
@@ -2328,9 +2318,11 @@ class HomeDashboard(QWidget):
 
         self.right_panel_layout.addLayout(right_hdr)
         
-        # Versions Stack Container
-        self.right_panel_stack = QStackedLayout()
-        self.right_panel_layout.addLayout(self.right_panel_stack, 1)
+        # Versions container – plain QVBoxLayout with visibility toggling
+        # (QStackedLayout causes macOS Cocoa to render hidden widget backing
+        #  stores as solid black rectangles, so we avoid it entirely.)
+        self.right_panel_body = QVBoxLayout()
+        self.right_panel_layout.addLayout(self.right_panel_body, 1)
         
         # Normal Versions List View
         self.right_content_widget = QWidget()
@@ -2378,7 +2370,7 @@ class HomeDashboard(QWidget):
 
         scroll_ver.setWidget(self.ver_list_widget)
         self.right_content_layout.addWidget(scroll_ver, 1)
-        self.right_panel_stack.addWidget(self.right_content_widget)
+        self.right_panel_body.addWidget(self.right_content_widget)
         
         # Password Protection Overlay Widget (Ultra-clean modern card)
         self.password_overlay_widget = PasswordOverlayContainer()
@@ -2457,7 +2449,7 @@ class HomeDashboard(QWidget):
         
         overlay_layout.addWidget(self.pwd_card)
         self.password_overlay_widget.hide()
-        self.right_panel_stack.addWidget(self.password_overlay_widget)
+        self.right_panel_body.addWidget(self.password_overlay_widget)
         
         main_hbox.addWidget(right_panel, 1) # right panel gets stretch
         root.addLayout(main_hbox, 1)
@@ -2477,7 +2469,7 @@ class HomeDashboard(QWidget):
             version_store.save_device_password_cache(self._selected_slug, pwd)
             self.pwd_err_lbl.hide()
             self.pwd_card_input.clear()
-            self.right_panel_stack.setCurrentWidget(self.right_content_widget)
+            self.right_content_widget.show()
             self.btn_new_empty.setEnabled(True)
             self._refresh_versions()
         else:
@@ -2912,15 +2904,15 @@ class HomeDashboard(QWidget):
                 }
             """)
             self.btn_new_empty.setEnabled(False)
-            self.right_panel_stack.setCurrentWidget(self.password_overlay_widget)
+            self.right_content_widget.hide()
             self.password_overlay_widget.show()
             # Retain focus if search input is being used
             if not self.search_input.hasFocus():
                 self.pwd_card_input.setFocus()
         else:
             self.btn_new_empty.setEnabled(True)
-            self.right_panel_stack.setCurrentWidget(self.right_content_widget)
             self.password_overlay_widget.hide()
+            self.right_content_widget.show()
             
     def _on_version_selected(self, filename):
         if self._selected_version == filename:
