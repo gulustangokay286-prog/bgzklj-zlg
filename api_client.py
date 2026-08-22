@@ -189,12 +189,58 @@ class APIClient:
     def is_admin(self):
         return self.get_current_role() == "admin"
 
-    def ensure_authenticated(self) -> bool:
-        """True when a usable server token is held.
+    def get_stored_auth_data(self) -> dict:
+        """Returns the full stored token/auth dictionary if available, else None."""
+        try:
+            with open(_get_token_file_path(), "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict) and (data.get("access_token") or data.get("email")):
+                    return data
+        except Exception:
+            pass
+        return None
 
-        Never falls back to built-in credentials; if the stored token is gone the
-        user is asked to sign in again, which is the only correct outcome.
+    def auto_authenticate(self) -> tuple:
+        """Tries to authenticate using stored token or stored credentials.
+        Returns (success: bool, auth_data: dict).
         """
+        stored = self.get_stored_auth_data()
+        if not stored:
+            return False, None
+
+        tok = stored.get("access_token")
+        email = stored.get("email")
+        password = stored.get("_refresh")
+
+        # Test existing token against server
+        if tok and not str(tok).startswith("local_") and not stored.get("is_local"):
+            self.token = tok
+            try:
+                resp = self.session.get(
+                    f"{self.base_url}/api/institutions",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    timeout=5
+                )
+                if resp.status_code == 200:
+                    return True, stored
+            except Exception:
+                # Network might be slow/offline, trust valid non-local stored token
+                return True, stored
+
+        # Token expired or missing, try silent login with stored credentials
+        if email and password:
+            ok, res = self.login(email, password)
+            if ok and isinstance(res, dict):
+                return True, res
+
+        # Offline / local account fallback
+        if stored.get("is_offline") or stored.get("is_local"):
+            return True, stored
+
+        return False, None
+
+    def ensure_authenticated(self) -> bool:
+        """True when a usable server token is held."""
         if self.token and not str(self.token).startswith("local_"):
             return True
         with _AUTH_LOCK:
@@ -203,10 +249,8 @@ class APIClient:
             self.token = self.load_token()
             if self.token:
                 return True
-            email, password = self._stored_credentials()
-            if email and password:
-                ok, _ = self.login(email, password)
-                return bool(ok and self.token)
+            ok, auth = self.auto_authenticate()
+            return bool(ok and self.token)
         return False
 
     def get_headers(self):

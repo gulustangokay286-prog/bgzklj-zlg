@@ -363,11 +363,15 @@ def main():
     splash = HighTechSplashScreen()
     splash.exec()
 
-    # The splash screen validates the token in the background.
+    # The splash screen validates and loads the token in the background.
     from api_client import api_client
-    if splash.is_valid_token or api_client.token:
-        auth_data = splash.auth_data or ({"access_token": api_client.token} if api_client.token else None)
-    else:
+    auth_data = splash.auth_data
+    if not auth_data:
+        ok, auto_auth = api_client.auto_authenticate()
+        if ok and auto_auth:
+            auth_data = auto_auth
+
+    if not auth_data:
         login = LoginDialog(logo_path if os.path.exists(logo_path) else None)
         if login.exec() != LoginDialog.Accepted:
             sys.exit(0)

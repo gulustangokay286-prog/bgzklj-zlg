@@ -98,6 +98,8 @@ class HighTechSplashScreen(QDialog):
         
         self.is_valid_token = False
         self.auth_data = None
+        self._auth_thread = None
+        self._auth_done = False
         
         self.tips = [
             "İpucu: Sınıf çakışmalarını önlemek için algoritma binlerce kombinasyonu değerlendirir.",
@@ -111,7 +113,7 @@ class HighTechSplashScreen(QDialog):
         self.showFullScreen()
         
         # Start operations
-        QTimer.singleShot(100, self._run_auth_check)
+        self._run_auth_check()
         self._start_progress_animation()
         self._start_tip_cycle()
 
@@ -147,13 +149,13 @@ class HighTechSplashScreen(QDialog):
         self.anim_group = QParallelAnimationGroup(self)
         
         anim_logo = QPropertyAnimation(self.logo_widget, b"progress")
-        anim_logo.setDuration(600)
+        anim_logo.setDuration(700)
         anim_logo.setStartValue(0.0)
         anim_logo.setEndValue(1.0)
         anim_logo.setEasingCurve(QEasingCurve.OutQuad)
         
         anim_bar = QPropertyAnimation(self.progress_bar, b"progress")
-        anim_bar.setDuration(600)
+        anim_bar.setDuration(700)
         anim_bar.setStartValue(0.0)
         anim_bar.setEndValue(1.0)
         anim_bar.setEasingCurve(QEasingCurve.OutQuad)
@@ -194,15 +196,26 @@ class HighTechSplashScreen(QDialog):
         def check():
             from api_client import api_client
             try:
-                if api_client.ensure_authenticated():
-                    resp = api_client._request_with_retry("GET", f"{api_client.base_url}/api/institutions", timeout=8)
-                    if resp and resp.status_code == 200:
-                        self.is_valid_token = True
-                        self.auth_data = {"access_token": api_client.token}
-            except Exception:
-                pass
-        threading.Thread(target=check, daemon=True).start()
+                ok, auth = api_client.auto_authenticate()
+                if ok and auth:
+                    self.is_valid_token = True
+                    self.auth_data = auth
+                    try:
+                        api_client.pull_all_from_rtdb(auth)
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"[Splash] auto-auth error: {e}")
+            finally:
+                self._auth_done = True
+
+        self._auth_thread = threading.Thread(target=check, daemon=True)
+        self._auth_thread.start()
 
     def _finish(self):
-        # A tiny delay after logo reaches 100% before closing
-        QTimer.singleShot(400, self.accept)
+        def _check_and_close():
+            if self._auth_thread and self._auth_thread.is_alive() and not self._auth_done:
+                self._auth_thread.join(timeout=1.5)
+            self.accept()
+
+        QTimer.singleShot(250, _check_and_close)
