@@ -158,6 +158,34 @@ def make_apple_lock_badge(size: int = 44) -> QPixmap:
 
 # ── Dialogs: Password Prompt, Set Password & Modern Apple White Alerts ─
 
+class PasswordOverlayContainer(QWidget):
+    """Clean opaque background that completely prevents underlying stacked pages from bleeding through."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setAutoFillBackground(True)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor("#F8FAFC"))
+        p.end()
+
+class PasswordCardWidget(QFrame):
+    """Pure white Apple style security card that natively paints with QPainter to prevent macOS black box rendering."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setAutoFillBackground(True)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setBrush(QBrush(QColor("#FFFFFF")))
+        p.setPen(QPen(QColor("#CBD5E1"), 1.2))
+        r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        p.drawRoundedRect(r, 16, 16)
+        p.end()
+
 class AppleInfoDialog(QDialog):
     def __init__(self, title: str, message: str, is_success: bool = True, parent=None):
         super().__init__(parent)
@@ -2358,23 +2386,15 @@ class HomeDashboard(QWidget):
         self.right_panel_stack.addWidget(self.right_content_widget)
         
         # Password Protection Overlay Widget (Ultra-clean modern card)
-        self.password_overlay_widget = QWidget()
-        self.password_overlay_widget.setStyleSheet("background: #F8FAFC;")
+        self.password_overlay_widget = PasswordOverlayContainer()
         overlay_layout = QVBoxLayout(self.password_overlay_widget)
         overlay_layout.setAlignment(Qt.AlignCenter)
         overlay_layout.setContentsMargins(0, 0, 0, 0)
         
         # Modal Floating Card (Centered)
-        self.pwd_card = QFrame()
+        self.pwd_card = PasswordCardWidget()
         self.pwd_card.setObjectName("pwdCard")
         self.pwd_card.setFixedSize(480, 350)
-        self.pwd_card.setStyleSheet("""
-            QFrame#pwdCard {
-                background-color: #FFFFFF;
-                border: 1px solid #CBD5E1;
-                border-radius: 16px;
-            }
-        """)
         
         c_layout = QVBoxLayout(self.pwd_card)
         c_layout.setContentsMargins(40, 30, 40, 30)
