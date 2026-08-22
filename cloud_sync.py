@@ -109,6 +109,8 @@ class CloudSyncWorker(QObject):
         self._thread = None
         self._pull_requested = False
         self._offline_streak = 0
+        # Set to break the idle sleep the moment there is something to do.
+        self._wake = threading.Event()
         
     def set_auth(self, auth_data):
         self.auth_data = auth_data
@@ -122,6 +124,9 @@ class CloudSyncWorker(QObject):
                 "data": data,
                 "timestamp": time.time()
             })
+        # Send it now rather than after the current idle sleep, so a change made here
+        # reaches other devices as fast as one made elsewhere reaches this one.
+        self._wake.set()
             
     def start(self):
         if self._thread is None or not self._thread.is_alive():
@@ -130,9 +135,15 @@ class CloudSyncWorker(QObject):
             self._thread.start()
 
     def _sleep_interruptible(self, seconds):
-        end_time = time.time() + seconds
-        while self._is_running and time.time() < end_time:
-            time.sleep(0.05)
+        """Sleeps, but wakes the instant a pull is requested or the worker stops.
+
+        This used to poll a flag every 50ms, so a realtime nudge could sit unnoticed
+        for up to half a second before the loop looked at it — on top of the network
+        round trip. An Event wakes immediately and burns no CPU while idle, which
+        matters on the low-end machines this app runs on.
+        """
+        self._wake.wait(timeout=seconds)
+        self._wake.clear()
 
     def _safe_emit(self, signal, *args):
         if not getattr(self, "_is_running", True):
@@ -214,25 +225,31 @@ class CloudSyncWorker(QObject):
     def _poll_interval(self) -> float:
         """Seconds between polls.
 
-        The poll is now a safety net rather than the delivery mechanism: the
-        WebSocket (see RealtimeSyncClient) pushes a nudge the moment another device
-        changes something, and request_pull() turns that into an immediate sync. So
-        the baseline can be far longer than the old fixed 15s, which was waking the
-        radio and re-reading the whole cloud four times a minute on every machine.
+        Was 60s, and had to be: each poll pulled the entire cloud (11.59 MB, ~7s),
+        so anything faster kept the app permanently busy downloading. That is what
+        made changes take a minute to cross between devices — or appear only after a
+        logout/login, which forces a fresh pull.
 
-        When the server is unreachable the interval backs off instead of hammering a
-        dead connection on a laptop that is simply offline.
+        With /api/sync/index a poll is ~27 KB and ~0.5s, so 3 seconds is affordable
+        and the app feels live even if the WebSocket is blocked by a firewall. When
+        the socket IS connected its nudge triggers an immediate pull, so this is just
+        the safety net.
+
+        The backoff on failure stays: a laptop that is simply offline should not
+        hammer a dead connection every three seconds.
         """
         if self._offline_streak:
-            return min(30.0 * (2 ** min(self._offline_streak, 4)), 300.0)
-        return 60.0
+            return min(10.0 * (2 ** min(self._offline_streak, 5)), 300.0)
+        return 3.0
 
     def request_pull(self):
         """Asks the worker to sync now — called when a realtime nudge arrives."""
         self._pull_requested = True
+        self._wake.set()
 
     def stop(self):
         self._is_running = False
+        self._wake.set()  # don't make shutdown wait out the current sleep
 
 
 # ── Real-time push notifications (WebSocket) ──────────────────────────
@@ -254,7 +271,9 @@ class RealtimeSyncClient(QObject):
         self._reconnect_timer = QTimer(self)
         self._reconnect_timer.setSingleShot(True)
         self._reconnect_timer.timeout.connect(self._reconnect)
-        self._reconnect_delay_ms = 3000
+        # Starts at 1s rather than 3s: the common cause of a first-attempt failure is
+        # the auth token not being written yet, which resolves in well under a second.
+        self._reconnect_delay_ms = 1000
 
     def watch(self, slug: str):
         """Start (or switch to) watching this institution's slug for live changes."""
@@ -269,9 +288,14 @@ class RealtimeSyncClient(QObject):
     def _open(self):
         if not self._slug:
             return
-        token = api_client.token
+        token = api_client.token or api_client.load_token()
         if not token:
-            return  # not logged in to the VDS yet -- nothing to authenticate the socket with
+            # No usable token YET. This used to just return, permanently — nothing
+            # rescheduled the attempt, so if the socket was opened a moment before
+            # the token landed on disk, realtime stayed dead for the whole session
+            # and only the poll loop kept working. Retry instead.
+            self._schedule_reconnect()
+            return
         ws_base = api_client.base_url.replace("https://", "wss://").replace("http://", "ws://")
         url = QUrl(f"{ws_base}/ws/{self._slug}?token={token}")
 
@@ -283,8 +307,12 @@ class RealtimeSyncClient(QObject):
         self._socket.open(url)
 
     def _on_connected(self):
-        self._reconnect_delay_ms = 3000  # reset backoff after a successful connection
+        self._reconnect_delay_ms = 1000  # reset backoff after a successful connection
         self.connection_state_changed.emit(True)
+        # Sync straight away. While the socket was down this device heard about
+        # nothing, so the first thing to do once it is back is find out what it
+        # missed — otherwise a change made during the outage waits for the next poll.
+        self.sync_notified.emit(self._slug or "")
 
     def _on_disconnected(self):
         self.connection_state_changed.emit(False)

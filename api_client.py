@@ -64,6 +64,7 @@ class APIClient:
         self.base_url = BASE_URL.rstrip("/")
         self.token = self.load_token()
         self._local = threading.local()
+        self._supports_index = None  # probed once, then remembered
         self._supports_delta = None  # probed once, then remembered
 
     # ── Session ───────────────────────────────────────────────────────────
@@ -293,14 +294,128 @@ class APIClient:
     def pull_all_from_rtdb(self, auth_data=None):
         """Brings local storage in line with the VDS.
 
-        Prefers the incremental /api/sync/delta endpoint and falls back to the full
-        /api/institutions listing against an older server.
+        Order of preference:
+          1. /api/sync/index  — a hash-only listing, ~27 KB. Only versions whose
+             hash differs are downloaded.
+          2. /api/sync/delta  — the v3 rewrite's cursor-based endpoint.
+          3. /api/institutions — the full 11.59 MB dump, for an old server.
+
+        The first is what makes live sync possible at all: polling the third took
+        6.8 seconds and 11.59 MB per cycle, so the poll had to be spaced a minute
+        apart, and a change on one device took up to a minute to reach another.
         """
+        if self._supports_index is not False:
+            result = self._pull_index()
+            if result is not None:
+                return result
         if self._supports_delta is not False:
             result = self._pull_delta()
             if result is not None:
                 return result
         return self._pull_full()
+
+    def _pull_index(self):
+        """Hash-based incremental sync. Returns None if the server has no index."""
+        resp = self._request_with_retry(
+            "GET", f"{self.base_url}/api/sync/index", timeout=30
+        )
+        if resp is None:
+            return False, "Sunucuya ulaşılamadı.", 0
+        if resp.status_code == 404:
+            self._supports_index = False
+            return None  # older server — fall through to the next strategy
+        if resp.status_code != 200:
+            return False, f"Buluttan veri çekilemedi (HTTP {resp.status_code})", 0
+
+        try:
+            payload = resp.json()
+        except Exception as exc:
+            return False, f"Sunucu yanıtı okunamadı ({exc})", 0
+        if not isinstance(payload, dict):
+            return True, "Bulutta kayıtlı kurum bulunamadı.", 0
+
+        self._supports_index = True
+
+        import version_store
+
+        base_dir = version_store._ensure_base()
+        changed = 0
+        cloud_slugs = set(payload.keys())
+
+        # Institutions the server no longer has.
+        try:
+            for item in os.listdir(base_dir):
+                path = os.path.join(base_dir, item)
+                if (os.path.isdir(path) and item not in cloud_slugs
+                        and item not in ("backups", "temp", "cache")):
+                    shutil.rmtree(path, ignore_errors=True)
+                    changed += 1
+        except Exception as exc:
+            print(f"[APIClient] cleanup notice: {exc}")
+
+        for slug, obj in payload.items():
+            if not isinstance(obj, dict):
+                continue
+            inst_dir = os.path.join(base_dir, slug)
+            ver_dir = os.path.join(inst_dir, "versions")
+            os.makedirs(ver_dir, exist_ok=True)
+
+            self._merge_meta(inst_dir, _strip_versions(obj.get("meta") or {}))
+
+            # The server records a tombstone under the URL-escaped version KEY
+            # ("v002_x_manual_roz"), while everything local is keyed by FILENAME
+            # ("v002_x_manual.roz"). Merging the raw keys stored entries that matched
+            # no file, so enforce_tombstones found nothing to delete and a version
+            # removed on one device never disappeared on the others.
+            # _key_to_filename is idempotent, so already-correct names pass through.
+            server_tombstones = [
+                _key_to_filename(t) for t in (obj.get("tombstones", []) or []) if t
+            ]
+            if server_tombstones:
+                version_store.merge_tombstones(slug, server_tombstones)
+            changed += version_store.enforce_tombstones(slug)
+
+            local_tombstones = version_store.list_tombstones(slug)
+
+            for entry in obj.get("index", []) or []:
+                filename = entry.get("filename")
+                key = entry.get("key")
+                if not (filename and key):
+                    continue
+                if filename in local_tombstones:
+                    # Deleted here. Re-assert it rather than downloading it back.
+                    version_store.queue_cloud_delete(slug, filename)
+                    continue
+
+                target = os.path.join(ver_dir, filename)
+                remote_hash = entry.get("hash") or ""
+
+                if os.path.exists(target) and remote_hash:
+                    try:
+                        with open(target, "r", encoding="utf-8") as f:
+                            local = json.load(f)
+                        if version_store.compute_data_hash(local) == remote_hash:
+                            continue  # identical — the common case, costs nothing
+                    except Exception:
+                        pass
+
+                body = self._request_with_retry(
+                    "GET", f"{self.base_url}/api/sync/{slug}/{key}", timeout=40
+                )
+                if body is None or body.status_code != 200:
+                    continue
+                try:
+                    roz = body.json()
+                except Exception:
+                    continue
+                if isinstance(roz, dict) and self._write_if_different(target, roz):
+                    version_store.invalidate_version_summary(slug, filename)
+                    changed += 1
+
+        version_store.invalidate_cross_busy_cache()
+        if changed:
+            return True, f"Senkronizasyon tamamlandı ({changed} değişiklik).", changed
+        return True, "Her şey güncel.", 0
 
     def _pull_delta(self):
         """Incremental sync. Returns None if the server has no delta endpoint."""
@@ -478,7 +593,10 @@ class APIClient:
             # Tombstones tell us which local files to drop. Record them locally too,
             # so this device keeps refusing the version even if the server later
             # forgets (an older build, or a purge of old tombstones).
-            server_tombstones = inst_obj.get("tombstones", []) or []
+            # Normalise version KEYs to FILENAMEs — see the note in _pull_index.
+            server_tombstones = [
+                _key_to_filename(t) for t in (inst_obj.get("tombstones", []) or []) if t
+            ]
             if server_tombstones:
                 version_store.merge_tombstones(slug, server_tombstones)
             for filename in server_tombstones:

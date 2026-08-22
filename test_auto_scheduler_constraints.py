@@ -111,12 +111,19 @@ def occupied_slots(placements, class_name):
 def run():
     _app = QApplication.instance() or QApplication(sys.argv)
 
-    print("\n[temel: kısıt yokken grid dolar]")
+    # Her sınıfa atanan gerçek ders saati: 6+4+4+4 = 18.
+    # Planlayıcı artık boş hücreleri uydurma derslerle DOLDURMUYOR; sadece gerçekten
+    # atanmış saatleri yerleştiriyor. Dolayısıyla ölçüt "grid doldu mu" değil,
+    # "atanan saatlerin hepsi yerleşti mi" olmalı.
+    REAL_HOURS = 18
+
+    print("\n[temel: kısıt yokken tüm gerçek saatler yerleşir]")
     result = run_scheduler(build_store())
     placements = result.get("placements", [])
     check("plan üretildi", bool(placements), str(result.get("error", "")))
     base_9a = occupied_slots(placements, "9A")
-    check("kısıt yokken 9A neredeyse tamamen dolu", len(base_9a) >= 35, f"{len(base_9a)}/40")
+    check("9A'nın atanan tüm saatleri yerleşti", len(base_9a) == REAL_HOURS,
+          f"{len(base_9a)}/{REAL_HOURS}")
 
     print("\n[asıl hata: 5-6-7-8. saatler kapalı (timeoff matrisi)]")
     # Kullanıcının yaptığı: Zaman Tablosu ekranında 5-8. saatleri kapatmak.
@@ -130,12 +137,17 @@ def run():
     violations = sorted(s for s in slots_9a if s[1] in closed)
     check("kapatılan saatlere HİÇ ders konmadı", not violations,
           f"{len(violations)} ihlal, ilk 5: {violations[:5]}")
-    check("açık saatler yine de dolduruldu", len(slots_9a) >= 15, f"{len(slots_9a)}/20")
+    # 4 gün × 4 açık saat = 20 hücre; 18 saatin hepsi buraya sığmalı.
+    check("tüm gerçek saatler açık saatlere sığdırıldı", len(slots_9a) == REAL_HOURS,
+          f"{len(slots_9a)}/{REAL_HOURS}")
 
-    # Aynı çizelgedeki diğer sınıf etkilenmemeli.
+    # Kısıt yalnızca 9A'ya konuldu: 9B'nin kapasitesi hiç azalmamalı.
     slots_9b = occupied_slots(placements, "9B")
-    check("kısıtsız sınıf (9B) etkilenmedi", any(s[1] in closed for s in slots_9b),
-          "9B de boş kaldı — kısıt yanlış sınıfa uygulanmış olabilir")
+    check("kısıtsız sınıf (9B) tüm saatlerini yerleştirdi", len(slots_9b) == REAL_HOURS,
+          f"{len(slots_9b)}/{REAL_HOURS} — kısıt yanlış sınıfa sızmış olabilir")
+    check("9B kapalı saatleri kullanmakta serbest",
+          not set(range(8)).isdisjoint({s[1] for s in slots_9b}),
+          "9B hiçbir saate yerleşememiş")
 
     print("\n[boşluk doldurma adımı da kısıtlara uyuyor]")
     # Asıl kabahatli buydu: her boş hücreyi dolduruyordu.
@@ -171,7 +183,8 @@ def run():
     slots_9a = occupied_slots(result.get("placements", []), "9A")
     check("kapalı gün tamamen boş kaldı", not any(s[0] == 4 for s in slots_9a),
           f"Cuma'da {sum(1 for s in slots_9a if s[0] == 4)} ders var")
-    check("diğer günler dolduruldu", len(slots_9a) >= 28, f"{len(slots_9a)}/32")
+    check("gerçek saatler kalan 4 güne sığdırıldı", len(slots_9a) == REAL_HOURS,
+          f"{len(slots_9a)}/{REAL_HOURS}")
 
     print("\n['tercih edilmez' yumuşak kısıt: yasak değil ama son tercih]")
     store = build_store(class_timeoff={"9A": make_timeoff(avoid_periods=(6, 7))})

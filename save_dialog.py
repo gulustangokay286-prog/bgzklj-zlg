@@ -149,65 +149,47 @@ def run_apple_save_sequence(parent, duration_seconds=0.35,
                             title="Değişiklikler Kaydediliyor",
                             message="Veritabanı ve bulut senkronizasyonu yapılıyor...",
                             **_ignored):
-    """Shows a self-dismissing confirmation card and returns immediately.
+    """Reports progress in the status bar. Opens no window.
 
-    Signature is unchanged so the 13 existing call sites keep working, but
-    `duration_seconds` now only controls how long the card stays on screen after
-    the caller has moved on — it never delays the caller.
+    This used to put a 420x120 frameless, translucent, always-on-top card in the
+    dead centre of the screen on every save, every navigation, every close — 13 call
+    sites in all. Users saw it as "a square in the middle of the screen", on every
+    platform, because that is exactly what it is: a borderless rectangle that
+    appears over whatever they were looking at.
+
+    It existed to cover a wait that no longer happens. The work it was hiding —
+    saving a version, returning to the dashboard, syncing — now completes in
+    milliseconds, so there is nothing to show progress for. Feedback goes to the
+    status bar instead, where it is visible without covering anything and without
+    stealing focus.
+
+    The signature is unchanged so all 13 call sites keep working untouched, and
+    `duration_seconds` now only controls how long the status message lingers.
     """
     try:
-        toast = AppleSaveDialog(title, message, parent=parent, show_spinner=False)
-        toast.setWindowOpacity(0.0)
-        toast.show()
-        toast.raise_()
-
-        fade_in = QPropertyAnimation(toast, b"windowOpacity", toast)
-        fade_in.setDuration(90)
-        fade_in.setStartValue(0.0)
-        fade_in.setEndValue(1.0)
-        fade_in.setEasingCurve(QEasingCurve.OutCubic)
-        fade_in.start()
-
-        _LIVE_TOASTS.append(toast)
-
-        # Cap the on-screen time: some callers asked for 1.2s, which is long enough
-        # to feel like the app is stuck even when it is fully responsive underneath.
-        visible_ms = int(max(0.12, min(float(duration_seconds or 0.35), 0.7)) * 1000)
-
-        def _dismiss():
+        window = None
+        if parent is not None:
             try:
-                import shiboken6
-                if not shiboken6.isValid(toast):
-                    if toast in _LIVE_TOASTS:
-                        _LIVE_TOASTS.remove(toast)
-                    return
+                window = parent.window()
             except Exception:
-                pass
+                window = None
+
+        bar = None
+        if window is not None and hasattr(window, "statusBar"):
             try:
-                fade_out = QPropertyAnimation(toast, b"windowOpacity", toast)
-                fade_out.setDuration(120)
-                fade_out.setStartValue(1.0)
-                fade_out.setEndValue(0.0)
-                fade_out.setEasingCurve(QEasingCurve.InCubic)
-
-                def _finish():
-                    try:
-                        toast.close()
-                        toast.deleteLater()
-                    except Exception:
-                        pass
-                    finally:
-                        if toast in _LIVE_TOASTS:
-                            _LIVE_TOASTS.remove(toast)
-
-                fade_out.finished.connect(_finish)
-                fade_out.start()
-                toast._fade_out = fade_out  # keep a reference alive for the animation
+                bar = window.statusBar()
             except Exception:
-                if toast in _LIVE_TOASTS:
-                    _LIVE_TOASTS.remove(toast)
+                bar = None
 
-        QTimer.singleShot(visible_ms, _dismiss)
-        toast._fade_in = fade_in
+        if bar is not None:
+            text = f"{title} — {message}" if message else title
+            bar.showMessage(text.replace("\n", " "), int(max(0.5, float(duration_seconds or 0.35)) * 1000))
+            return
+
+        # No status bar (the dashboard is a plain QWidget). Its own inline strip is
+        # the right place; falling back to silence is still better than a window.
+        flash = getattr(window, "_flash_status", None) or getattr(parent, "_flash_status", None)
+        if callable(flash):
+            flash(title)
     except Exception as exc:
         print("[run_apple_save_sequence] note:", exc)
