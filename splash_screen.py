@@ -120,7 +120,12 @@ class HighTechSplashScreen(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.SplashScreen | Qt.FramelessWindowHint)
-        self.setAttribute(Qt.WA_DeleteOnClose, True)
+        # NOT WA_DeleteOnClose: this dialog is driven by exec(), and the caller reads
+        # auth_data off it afterwards. Self-deleting on close meant the object died
+        # inside its own finish handler while the modal loop was still unwinding, which
+        # is what stranded the full-screen splash surface on screen. main.py owns the
+        # lifetime and disposes of it once exec() has returned.
+        self.setAttribute(Qt.WA_DeleteOnClose, False)
         self.setStyleSheet("background-color: #FFFFFF;")
         
         self.is_valid_token = False
@@ -137,7 +142,8 @@ class HighTechSplashScreen(QDialog):
         self.current_tip_index = 0
         
         self._build_ui()
-        self.showFullScreen()
+        self.setFixedSize(600, 400)
+        self.show()
         
         # Start operations
         self._run_auth_check()
@@ -210,11 +216,21 @@ class HighTechSplashScreen(QDialog):
             print(f"[Splash] auth check note: {e}")
 
     def _finish(self):
-        try:
-            if hasattr(self, "tip_timer") and self.tip_timer:
-                self.tip_timer.stop()
-        except Exception:
-            pass
-        self.hide()
-        self.close()
+        """Ends the modal loop — and nothing else.
+
+        This used to run hide() -> close() -> accept(). With WA_DeleteOnClose set (it
+        no longer is, see __init__), close() destroyed the C++ object, so accept() then
+        ran against a half-destroyed window and left the native macOS window orphaned:
+        the full-screen splash surface stayed on screen as a grey rectangle that
+        nothing owned any more and nothing could close.
+
+        accept() alone returns from exec(); the caller then disposes of the dialog.
+        """
+        for attr in ("tip_timer", "anim_group"):
+            obj = getattr(self, attr, None)
+            if obj is not None:
+                try:
+                    obj.stop()
+                except Exception:
+                    pass
         self.accept()
