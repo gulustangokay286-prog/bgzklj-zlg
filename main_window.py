@@ -2691,7 +2691,6 @@ class MainWindow(QMainWindow):
                     return False
 
         try:
-            self.save_db(sync_from_grid=True)
             new_vf = version_store.save_version(slug, self.data_store, source="manual", note=note, folder_id=folder_id)
             self.version_filename = new_vf
             self.current_roz_path = os.path.join(version_store._base_dir(), slug, "versions", new_vf)

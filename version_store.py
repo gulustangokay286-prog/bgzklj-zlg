@@ -1231,13 +1231,15 @@ def _version_summary(filepath: str) -> dict:
 
     summary = {"note": "", "folder_id": None, "total_hours": 0,
                "placed_hours": 0, "unplaced_hours": 0,
-               "size_kb": round(stat.st_size / 1024, 1)}
+               "size_kb": round(stat.st_size / 1024, 1),
+               "last_modified": None}
     try:
         with open(filepath, "r", encoding="utf-8") as fh:
             d = json.load(fh)
         v_meta = d.get("_version_meta", {}) or {}
         summary["note"] = v_meta.get("note", "") or ""
         summary["folder_id"] = v_meta.get("folder_id")
+        summary["last_modified"] = v_meta.get("last_modified")
         placed = sum(int(p.get("duration", 1) or 1) for p in d.get("grid_placements", []))
         total = sum(int(a.get("duration", 2) or 2) for a in d.get("atamalar", []))
         summary["placed_hours"] = placed
@@ -1305,27 +1307,46 @@ def list_versions(slug: str, source_filter: str = "all") -> list:
             continue
         filepath = os.path.join(ver_dir, f)
 
+        summary = _version_summary(filepath)
+        folder_id = summary["folder_id"]
+        
+        last_mod = summary.get("last_modified")
+
         # v001_2026-08-17_15-30-00_auto.roz
         m = _VERSION_FILENAME_RE.match(f)
         if m:
             num = int(m.group(1))
             source = m.group(4)
-            try:
-                dt = datetime.strptime(
-                    f"{m.group(2)} {m.group(3).replace('-', ':')}", "%Y-%m-%d %H:%M:%S"
-                )
-            except Exception:
-                dt = datetime.fromtimestamp(os.path.getmtime(filepath))
+            if last_mod:
+                try:
+                    dt = datetime.fromisoformat(last_mod)
+                except Exception:
+                    try:
+                        dt = datetime.strptime(
+                            f"{m.group(2)} {m.group(3).replace('-', ':')}", "%Y-%m-%d %H:%M:%S"
+                        )
+                    except Exception:
+                        dt = datetime.fromtimestamp(os.path.getmtime(filepath))
+            else:
+                try:
+                    dt = datetime.strptime(
+                        f"{m.group(2)} {m.group(3).replace('-', ':')}", "%Y-%m-%d %H:%M:%S"
+                    )
+                except Exception:
+                    dt = datetime.fromtimestamp(os.path.getmtime(filepath))
         else:
             num = 0
             source = "manual"
-            dt = datetime.fromtimestamp(os.path.getmtime(filepath))
+            if last_mod:
+                try:
+                    dt = datetime.fromisoformat(last_mod)
+                except Exception:
+                    dt = datetime.fromtimestamp(os.path.getmtime(filepath))
+            else:
+                dt = datetime.fromtimestamp(os.path.getmtime(filepath))
 
         if source_filter != "all" and source != source_filter:
             continue
-
-        summary = _version_summary(filepath)
-        folder_id = summary["folder_id"]
 
         versions.append({
             "filename": f,
