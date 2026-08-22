@@ -372,46 +372,14 @@ def main():
         logo_candidate = os.path.join(os.path.dirname(os.path.abspath(__file__)), "11.png")
     logo_path = logo_candidate if os.path.exists(logo_candidate) else icon_path
 
-    from splash_screen import HighTechSplashScreen
-    splash = HighTechSplashScreen()
-    splash.exec()
-    auth_data = splash.auth_data
-    # Tear the splash down in one pass, in order: leave the screen, drop the native
-    # window, then release the object. The previous hide/close/deleteLater ran on top
-    # of the dialog having already deleted itself (WA_DeleteOnClose), so the calls hit
-    # a dead object and the macOS window it owned was never released — that stranded
-    # surface is the grey rectangle that stayed in the middle of the screen.
+    auth_data = None
     try:
-        splash.hide()
-        # destroy() releases the underlying platform window immediately. deleteLater()
-        # only queues the C++ object for deletion, and on macOS the NSWindow could
-        # outlive that queue entirely — leaving a grey surface sitting on the desktop
-        # that belonged to no widget, so it never moved with the app and never went
-        # away when the app was minimised.
-        splash.destroy(True, True)
-        splash.setParent(None)
-        splash.deleteLater()
+        from api_client import api_client as _api
+        ok, auto_auth = _api.auto_authenticate()
+        if ok and auto_auth:
+            auth_data = auto_auth
     except Exception as exc:
-        print(f"[main] splash teardown note: {exc}")
-    splash = None
-    app.processEvents()
-    # processEvents() does NOT run deferred deletions, so deleteLater() alone left the
-    # splash object — and its native window — alive until some later event loop turn
-    # that never came. Flush the DeferredDelete queue explicitly.
-    from PySide6.QtCore import QEvent
-    app.sendPostedEvents(None, QEvent.DeferredDelete)
-    app.processEvents()
-    if not auth_data:
-        # api_client was never imported at module level here, so this raised NameError
-        # on every start where the splash came back without a session — taking the
-        # whole startup down instead of falling through to the login dialog.
-        try:
-            from api_client import api_client as _api
-            ok, auto_auth = _api.auto_authenticate()
-            if ok and auto_auth:
-                auth_data = auto_auth
-        except Exception as exc:
-            print(f"[main] auto authenticate note: {exc}")
+        print(f"[main] auto authenticate note: {exc}")
 
     if not auth_data:
         login = LoginDialog(logo_path if os.path.exists(logo_path) else None)
