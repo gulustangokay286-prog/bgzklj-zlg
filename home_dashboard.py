@@ -1138,32 +1138,47 @@ class AppleInstitutionCard(QFrame):
         self._update_style()
     
     def _update_style(self):
+        c = QColor(self.inst_color) if self.inst_color else QColor("#0071E3")
+        r, g, b = c.red(), c.green(), c.blue()
+        
         if self._selected:
-            self.setStyleSheet("""
-                AppleInstitutionCard {
-                    background: #F0F6FF;
-                    border: 1px solid #D0E1FD;
+            self.setStyleSheet(f"""
+                AppleInstitutionCard {{
+                    background: rgba({r}, {g}, {b}, 0.08);
+                    border: 1px solid rgba({r}, {g}, {b}, 0.28);
                     border-radius: 8px;
-                }
+                }}
             """)
-            self.name_lbl.setStyleSheet("color: #1D4ED8; font-weight: bold; background: transparent; border: none;")
-            self.sub_lbl.setStyleSheet("color: #3B82F6; background: transparent; border: none;")
-            self.icon_lbl.setPixmap(make_3d_institution_icon(self.inst_name, "#2563EB", 28))
+            self.name_lbl.setStyleSheet(f"color: {self.inst_color}; font-weight: bold; background: transparent; border: none;")
+            self.sub_lbl.setStyleSheet(f"color: rgba({r}, {g}, {b}, 0.85); background: transparent; border: none;")
+            self.icon_lbl.setPixmap(make_3d_institution_icon(self.inst_name, self.inst_color, 28))
         else:
-            self.setStyleSheet("""
-                AppleInstitutionCard {
+            self.setStyleSheet(f"""
+                AppleInstitutionCard {{
                     background: transparent;
                     border: 1px solid transparent;
                     border-radius: 8px;
-                }
-                AppleInstitutionCard:hover {
-                    background: #F8FAFC;
-                    border: 1px solid #E2E8F0;
-                }
+                }}
+                AppleInstitutionCard:hover {{
+                    background: rgba({r}, {g}, {b}, 0.05);
+                    border: 1px solid rgba({r}, {g}, {b}, 0.18);
+                }}
             """)
             self.name_lbl.setStyleSheet("color: #334155; font-weight: 500; background: transparent; border: none;")
             self.sub_lbl.setStyleSheet("color: #94A3B8; background: transparent; border: none;")
             self.icon_lbl.setPixmap(make_3d_institution_icon(self.inst_name, "#64748B", 28))
+            
+    def enterEvent(self, event):
+        if not self._selected:
+            self.icon_lbl.setPixmap(make_3d_institution_icon(self.inst_name, self.inst_color, 28))
+            self.name_lbl.setStyleSheet(f"color: {self.inst_color}; font-weight: 600; background: transparent; border: none;")
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        if not self._selected:
+            self.icon_lbl.setPixmap(make_3d_institution_icon(self.inst_name, "#64748B", 28))
+            self.name_lbl.setStyleSheet("color: #334155; font-weight: 500; background: transparent; border: none;")
+        super().leaveEvent(event)
             
     def set_selected(self, selected):
         self._selected = selected
@@ -1225,7 +1240,9 @@ class AppleInstitutionCard(QFrame):
             if dlg.exec() == QDialog.Accepted:
                 new_color = dlg.get_color()
                 if new_color:
+                    self.inst_color = new_color
                     version_store.set_institution_color(self.slug, new_color)
+                    self._update_style()
                     self._notify_parent_refresh()
         elif act_pwd and action == act_pwd:
             dlg = SetPasswordDialog(self.inst_name, has_current=self.has_password, parent=self)
