@@ -1654,24 +1654,27 @@ class DropTableWidget(QTableWidget):
         orig_r = lesson_info.get("origin_row", -1)
         orig_c = lesson_info.get("origin_col", -1)
 
-        # CRITICAL: If ANY cell in [col, col + dur - 1] is OCCUPIED, DO NOT SHOW PREVIEW!
+        # Is the target occupied? This used to bail out and hide the preview entirely,
+        # back when dropping onto a taken slot was refused. Dropping there now swaps the
+        # two lessons, so hiding the preview removed the feedback exactly where the user
+        # needs it most — they could not see which cell they were about to land on.
+        # The preview is still drawn; it is just flagged so it can be rendered as a swap.
+        occupied = False
         for off in range(dur):
             chk_c = col + off
             if is_move and row == orig_r and (orig_c <= chk_c < orig_c + dur):
-                continue # moving from itself is allowed
+                continue  # moving from itself is allowed
 
-            # 1. Check table item
             cell_item = self.item(row, chk_c)
             if cell_item and cell_item.text().strip():
-                self._clear_preview_targeted()
-                return
+                occupied = True
+                break
 
-            # 2. Check in-memory _placed_lessons
             if grid and hasattr(grid, "_placed_lessons") and (row, chk_c) in grid._placed_lessons:
                 pl = grid._placed_lessons[(row, chk_c)]
                 if pl and (pl.get("subject_name") or pl.get("subject")):
-                    self._clear_preview_targeted()
-                    return
+                    occupied = True
+                    break
 
         subj = lesson_info.get("subject_name") or lesson_info.get("subject") or ""
 
@@ -1681,7 +1684,9 @@ class DropTableWidget(QTableWidget):
         # color lookup + dict rebuild on every single mouse-move event, dozens of times
         # a second, even while hovering the exact same cell.
         prev = self._drag_preview_info
-        if prev and prev.get("row") == row and prev.get("col") == col and prev.get("duration") == dur and prev.get("subject_name") == subj:
+        if (prev and prev.get("row") == row and prev.get("col") == col
+                and prev.get("duration") == dur and prev.get("subject_name") == subj
+                and prev.get("is_swap") == occupied):
             return
 
         teacher = lesson_info.get("teacher_name") or lesson_info.get("teacher") or ""
@@ -1703,7 +1708,10 @@ class DropTableWidget(QTableWidget):
             "class_name": cls,
             "color": color,
             "is_combined": bool(lesson_info.get("is_combined") or ("+" in cls or "," in cls or "&" in cls)),
-            "combined_classes": lesson_info.get("combined_classes", [])
+            "combined_classes": lesson_info.get("combined_classes", []),
+            # Target already holds a lesson: the drop will exchange the two, so the
+            # preview is drawn differently to say so before the user lets go.
+            "is_swap": occupied,
         }
 
         old_rect = self._preview_rect(prev)
@@ -1733,12 +1741,36 @@ class DropTableWidget(QTableWidget):
 
         The drag pixmap's top-left sits at cursor - grab offset, so that corner (nudged
         slightly inward, off the grid line) is the cell the user sees the block covering.
+
+        The result is CLAMPED into the viewport. Subtracting the grab offset can push
+        the anchor off the top or left edge — grabbing a card anywhere below its middle
+        is enough, since a row is only ~30px tall — and rowAt()/columnAt() answer -1 for
+        a point outside the widget. dragMoveEvent read that as "no cell here" and
+        ignored the event, which is what put the forbidden cursor on the pointer and
+        made dropping onto another lesson impossible.
         """
         dx = int((lesson_info or {}).get("grab_dx", 0) or 0)
         dy = int((lesson_info or {}).get("grab_dy", 0) or 0)
         if not dx and not dy:
             return pos
-        return pos - QPoint(dx, dy) + QPoint(4, 4)
+
+        anchor = pos - QPoint(dx, dy) + QPoint(4, 4)
+        bounds = self.viewport().rect()
+        x = min(max(anchor.x(), bounds.left() + 2), bounds.right() - 2)
+        y = min(max(anchor.y(), bounds.top() + 2), bounds.bottom() - 2)
+        return QPoint(x, y)
+
+    def _cell_at(self, point):
+        """(row, col) under a viewport point, or (-1, -1).
+
+        itemAt() returns None for a cell with no QTableWidgetItem, and for the
+        non-anchor half of a merged (spanned) block, so rowAt/columnAt are the
+        reliable fallback.
+        """
+        item = self.itemAt(point)
+        if item is not None:
+            return item.row(), item.column()
+        return self.rowAt(point.y()), self.columnAt(point.x())
 
     def dragMoveEvent(self, event):
         if event.mimeData().hasFormat("application/x-lesson"):
@@ -1748,14 +1780,17 @@ class DropTableWidget(QTableWidget):
             except Exception:
                 lesson_info = {}
 
-            anchor = self._drop_anchor(event.pos(), lesson_info)
-            item = self.itemAt(anchor)
-            r = self.row(item) if item else self.rowAt(anchor.y())
-            c = self.column(item) if item else self.columnAt(anchor.x())
+            r, c = self._cell_at(self._drop_anchor(event.pos(), lesson_info))
+            if r < 0 or c < 0:
+                # Last resort: the raw cursor position always sits inside the grid
+                # while dragging over it, so this keeps the drop enabled instead of
+                # showing a forbidden cursor.
+                r, c = self._cell_at(event.pos())
 
             if r >= 0 and c >= 0:
                 self.set_drag_preview(r, c, lesson_info)
-                event.acceptProposedAction()
+                event.setDropAction(Qt.MoveAction)
+                event.accept()
             else:
                 self.clear_drag_preview()
                 event.ignore()
@@ -1771,10 +1806,9 @@ class DropTableWidget(QTableWidget):
             except Exception:
                 lesson_info = {}
                 
-            anchor = self._drop_anchor(event.pos(), lesson_info)
-            item = self.itemAt(anchor)
-            row = self.row(item) if item else self.rowAt(anchor.y())
-            col = self.column(item) if item else self.columnAt(anchor.x())
+            row, col = self._cell_at(self._drop_anchor(event.pos(), lesson_info))
+            if row < 0 or col < 0:
+                row, col = self._cell_at(event.pos())
 
             if row >= 0 and col >= 0 and lesson_info:
                 teacher = lesson_info.get("teacher", "")
@@ -1820,14 +1854,21 @@ class DropTableWidget(QTableWidget):
                     painter = QPainter(self.viewport())
                     painter.setRenderHint(QPainter.Antialiasing, True)
                     
+                    is_swap = bool(preview.get("is_swap"))
                     base_color = QColor(preview.get("color") or "#3B82F6")
-                    fill_color = QColor(base_color.red(), base_color.green(), base_color.blue(), 145)
+                    if is_swap:
+                        # Amber, solid outline: the target already holds a lesson and
+                        # letting go will exchange the two. Distinct from the ordinary
+                        # dashed preview of an empty landing spot.
+                        fill_color = QColor(245, 158, 11, 150)
+                        pen = QPen(QColor("#B45309"), 2.5, Qt.SolidLine)
+                    else:
+                        fill_color = QColor(base_color.red(), base_color.green(), base_color.blue(), 145)
+                        pen = QPen(QColor(base_color.darker(130)), 2, Qt.DashLine)
                     painter.setBrush(QBrush(fill_color))
-                    
-                    pen = QPen(QColor(base_color.darker(130)), 2, Qt.DashLine)
                     painter.setPen(pen)
                     painter.drawRoundedRect(union_rect.adjusted(1, 1, -1, -1), 4, 4)
-                    
+
                     display_mode = getattr(grid, "current_view_mode", "classes") if grid else "classes"
                     s_name = preview.get("subject_name", "")
                     c_name = preview.get("class_name", "")
@@ -1835,10 +1876,13 @@ class DropTableWidget(QTableWidget):
                         main_txt = c_name or s_name
                     else:
                         main_txt = get_subject_abbr(s_name) if s_name else c_name
-                        
+
                     if dur > 1:
                         main_txt += f" ({dur}h)"
-                        
+                    if is_swap:
+                        main_txt = f"⇄ {main_txt}"
+
+
                     painter.setFont(QFont("Segoe UI", 9, QFont.Bold))
                     painter.setPen(QColor("#000000"))
                     painter.drawText(union_rect, Qt.AlignCenter, main_txt)

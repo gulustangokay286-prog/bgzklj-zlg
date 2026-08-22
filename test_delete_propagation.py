@@ -130,7 +130,10 @@ def run():
     check("sunucu erişilemezken kuyruk korunuyor",
           confirmed == 0 and version_store.pending_delete_count() == 1,
           f"confirmed={confirmed}, pending={version_store.pending_delete_count()}")
-    check("yine de denendi", len(calls) == 1, str(calls))
+    # En az bir deneme yapilmis olmali. Kesin sayi verilemez: queue_cloud_delete
+    # arka planda da bir flush tetikliyor, yani ayni silme birden fazla kez
+    # denenebilir — zaten kuyrugun amaci bu.
+    check("yine de denendi", len(calls) >= 1, str(calls))
 
     fake.api_client = _WorkingClient()
     confirmed = version_store.flush_pending_deletes()

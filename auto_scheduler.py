@@ -178,6 +178,230 @@ def _build_teacher_timeoff_map(data_store: dict, institution_slug: str = None, i
 # the working grid before scheduling starts, so every existing "is this cell free?"
 # check treats it as occupied and nothing can be placed there — including the filler
 # pass, which is what was painting over closed periods.
+def _match_slot(open_classes, slot, grids, leftover_blocks, teacher_busy,
+                teacher_timeoff, cross_inst_map, periods):
+    """Fills ONE hour with as many classes as is mathematically possible.
+
+    Maximum bipartite matching between the classes still empty at this hour and the
+    teachers who can work it. A class may be matched to any teacher named by a lesson
+    it still owes; a teacher may take at most one class in the hour.
+
+    Placing lessons greedily — first class gets the first teacher that fits — throws
+    away hours that were placeable, because a teacher handed to an early class can be
+    the only option left for a later one. When a school's assignments exactly fill its
+    open slots, every hour lost that way is a hole that can never be filled again.
+
+    Kuhn's algorithm: for each class, walk an augmenting path that re-seats already
+    matched classes onto other teachers if that frees one up. Optimal for a single
+    hour, and at this size (a handful of classes, a couple dozen teachers) instant.
+
+    Returns {class_name: (block, subject, teacher_display_name)}.
+    """
+    d, p = slot
+
+    def _teacher_free(display_name):
+        key = norm_teacher(display_name)
+        if not key:
+            return False  # a lesson with no named teacher cannot be scheduled here
+        if slot in teacher_busy.get(key, ()):
+            return False
+        if slot in teacher_timeoff.get(key, ()):
+            return False
+        if key in cross_inst_map and slot in cross_inst_map[key]:
+            return False
+        return True
+
+    # class -> [(teacher_key, block, subject, display_name), ...]
+    options = {}
+    for cn in open_classes:
+        grid = grids.get(cn)
+        entries = []
+        seen_keys = set()
+        for blk in (leftover_blocks.get(cn) or []):
+            display = blk.get("teacher") or ""
+            key = norm_teacher(display)
+            if not key or key in seen_keys:
+                continue
+            if not _teacher_free(display):
+                continue
+            # Avoid stacking the same subject next to itself when there is a choice;
+            # this is a preference, applied by ordering, never a veto.
+            prev_subj = grid[d][p - 1]["subject"] if (p > 0 and grid[d][p - 1]) else None
+            next_subj = grid[d][p + 1]["subject"] if (p + 1 < periods and grid[d][p + 1]) else None
+            repeats = blk["subject"] in (prev_subj, next_subj)
+            entries.append((repeats, key, blk, blk["subject"], display))
+            seen_keys.add(key)
+        if entries:
+            entries.sort(key=lambda e: e[0])  # non-repeating subjects first
+            options[cn] = [(k, b, s, n) for _r, k, b, s, n in entries]
+
+    if not options:
+        return {}
+
+    teacher_to_class = {}
+
+    def _augment(cn, visited):
+        for key, blk, subject, display in options.get(cn, ()):
+            if key in visited:
+                continue
+            visited.add(key)
+            holder = teacher_to_class.get(key)
+            if holder is None or _augment(holder[0], visited):
+                teacher_to_class[key] = (cn, blk, subject, display)
+                return True
+        return False
+
+    # Fewest options first: a class with only one possible teacher must be seated
+    # before a flexible one takes that teacher away.
+    for cn in sorted(options, key=lambda c: len(options[c])):
+        _augment(cn, set())
+
+    return {
+        cn: (blk, subject, display)
+        for cn, blk, subject, display in teacher_to_class.values()
+    }
+
+
+def analyse_teacher_capacity(class_blocks, blocked_by_class, teacher_timeoff,
+                             cross_inst_map, D, P):
+    """Which teachers are assigned more hours than they can physically work.
+
+    This is almost always the real reason a week will not fill, and it is invisible
+    from the assignment screen: that screen shows hours per CLASS, and a class can
+    look perfectly balanced (20 hours assigned, 20 open) while the schedule is still
+    impossible.
+
+    The limit is per TEACHER. A teacher can be in one class at a time, so their
+    ceiling is the number of hours where they are free AND at least one of their
+    classes is open. Assign more than that and the surplus cannot be placed by any
+    algorithm — no amount of searching creates an hour that does not exist.
+
+    Returns a list of dicts, worst first, each naming the teacher, the hours assigned
+    to them, the hours actually available, and the shortfall.
+    """
+    # teacher -> hours assigned, and which classes they teach
+    hours = defaultdict(int)
+    classes_of = defaultdict(set)
+    display_of = {}
+    for cn, blocks in class_blocks.items():
+        for blk in blocks:
+            name = blk.get("teacher") or ""
+            key = norm_teacher(name)
+            if not key:
+                continue
+            hours[key] += int(blk.get("duration", 1) or 1)
+            classes_of[key].add(cn)
+            display_of.setdefault(key, name)
+
+    report = []
+    for key, assigned in hours.items():
+        # Hours this teacher could actually teach: free for them, and at least one
+        # of their own classes is open then.
+        usable = set()
+        for cn in classes_of[key]:
+            shut = blocked_by_class.get(cn, set())
+            for d in range(D):
+                for p in range(P):
+                    slot = (d, p)
+                    if slot in shut:
+                        continue
+                    if slot in teacher_timeoff.get(key, ()):
+                        continue
+                    if key in cross_inst_map and slot in cross_inst_map[key]:
+                        continue
+                    usable.add(slot)
+        available = len(usable)
+        if assigned > available:
+            report.append({
+                "teacher": display_of.get(key, key),
+                "assigned": assigned,
+                "available": available,
+                "shortfall": assigned - available,
+                "classes": sorted(classes_of[key]),
+            })
+
+    report.sort(key=lambda r: -r["shortfall"])
+    return report
+
+
+def _reserve_scarce_hours(classes, grids, pending_by_class, teacher_busy,
+                          teacher_timeoff, cross_inst_map, teacher_pool, D, P):
+    """Fills the hours with the fewest available teachers, before anything else.
+
+    A week's fill rate is capped by its tightest hours, not its average. When only
+    five teachers can work Friday first period but nine classes are open then, four
+    of those cells can never be filled — and if one of those five teachers has
+    already been booked into an hour where six others could have covered, a fifth
+    cell is lost too, for no reason.
+
+    So the tight hours are claimed first, matched optimally across every class at
+    once. Hours with plenty of slack are left to the ordinary block placement, which
+    keeps multi-hour lessons contiguous.
+
+    Only hours where availability is genuinely short are touched; everything else is
+    left alone so this does not fragment lessons that could have been placed as
+    proper 2-hour blocks.
+    """
+    # How many teachers can work each hour at all.
+    availability = {}
+    for d in range(D):
+        for p in range(P):
+            slot = (d, p)
+            free = 0
+            for tk in teacher_pool:
+                if slot in teacher_timeoff.get(tk, ()):
+                    continue
+                if tk in cross_inst_map and slot in cross_inst_map[tk]:
+                    continue
+                free += 1
+            availability[slot] = free
+
+    def _open_classes(slot):
+        d, p = slot
+        return [
+            cn for cn in classes
+            if grids.get(cn) is not None
+            and grids[cn][d][p] is None
+            and pending_by_class.get(cn)
+        ]
+
+    # Only the hours that are actually contended: fewer teachers free than classes
+    # needing one. Sorted tightest-first so the very scarcest is served before an
+    # hour that merely happens to be a little short.
+    tight = []
+    for slot, free in availability.items():
+        needed = len(_open_classes(slot))
+        if needed and free < needed:
+            tight.append((free - needed, free, slot))
+    if not tight:
+        return
+    tight.sort()
+
+    for _deficit, _free, slot in tight:
+        open_here = _open_classes(slot)
+        if not open_here:
+            continue
+        matched = _match_slot(
+            open_here, slot, grids, pending_by_class,
+            teacher_busy, teacher_timeoff, cross_inst_map, P,
+        )
+        d, p = slot
+        for cn, (blk, subject, teacher) in matched.items():
+            grids[cn][d][p] = {
+                "subject": subject, "teacher": teacher,
+                "block_id": f"tight_{_uuid.uuid4().hex[:8]}",
+                "is_combined": False, "block_start": p, "is_filler": False,
+            }
+            tk = norm_teacher(teacher)
+            if tk:
+                teacher_busy[tk].add(slot)
+            pending = pending_by_class.get(cn) or []
+            if blk["duration"] > 1:
+                blk["duration"] -= 1
+            elif blk in pending:
+                pending.remove(blk)
+
+
 BLOCKED_CELL = {
     "subject": None,
     "teacher": "",
@@ -553,7 +777,11 @@ class AutoSchedulerWorker(QThread):
 
             grids = {}
             leftover_blocks = {}
+            pending_by_class = {}
 
+            # PHASE 0 — build every class's grid and block list up front, so the
+            # scarce-hour pass below can see all classes at once instead of one at a
+            # time.
             for cn in attempt_classes:
                 # grid[day][period] = None (free) | BLOCKED_CELL (closed) | placement
                 grid = [[None for _ in range(P)] for _ in range(D)]
@@ -563,18 +791,41 @@ class AutoSchedulerWorker(QThread):
                 # free, so occupying closed cells up front makes all of them —
                 # including the filler pass that caused this bug — leave those
                 # periods alone, with no extra check to forget in one branch.
-                cls_blocked = blocked_by_class.get(cn, set())
-                cls_avoid = avoid_by_class.get(cn, set())
-                for (bd, bp) in cls_blocked:
+                for (bd, bp) in blocked_by_class.get(cn, set()):
                     grid[bd][bp] = BLOCKED_CELL
+                grids[cn] = grid
 
                 blocks = list(class_blocks.get(cn, []))
                 random.shuffle(blocks)
                 # Sort: bigger blocks first for better distribution
                 blocks.sort(key=lambda b: (-b["duration"], random.random()))
-                
+                pending_by_class[cn] = blocks
+
+            # PHASE 0.5 — claim the SCARCE hours first.
+            #
+            # Some hours have far fewer available teachers than open classes (here,
+            # Thursday/Friday mornings: 9 classes open, 5-8 teachers free). Those
+            # hours are the binding constraint on how full the week can get. Filling
+            # classes one after another let whichever class went first spend a scarce
+            # teacher's only free hour on an hour that had plenty of alternatives,
+            # and the cell that teacher could have covered was then unfillable —
+            # permanently, because the assignments exactly match the open slots.
+            #
+            # Reserving the tight hours up front, with an optimal matching across all
+            # classes at once, spends each scarce teacher where they are irreplaceable.
+            _reserve_scarce_hours(
+                attempt_classes, grids, pending_by_class, attempt_teacher_busy,
+                teacher_timeoff, cross_inst_map, teacher_pool, D, P,
+            )
+
+            # PHASE 1 — place each class's remaining blocks.
+            for cn in attempt_classes:
+                grid = grids[cn]
+                cls_avoid = avoid_by_class.get(cn, set())
+                blocks = pending_by_class[cn]
+
                 unplaced = []
-                
+
                 for blk in blocks:
                     dur = blk["duration"]
                     t = blk["teacher"]
@@ -741,7 +992,15 @@ class AutoSchedulerWorker(QThread):
             # and covered by another teacher of the same subject when the assigned one
             # is unavailable. Closed hours are never opened and nobody is booked into
             # two classes at once.
-            if True:
+            # Repeat until a whole sweep places nothing new.
+            #
+            # One sweep is not enough: filling an hour frees a teacher's OTHER hours
+            # from contention, which can make an hour that was impossible earlier in
+            # the same sweep possible now. Stopping after a single pass left hours on
+            # the table that the very next pass could have taken. The loop is bounded
+            # so a pathological case cannot spin.
+            for _sweep in range(8):
+                placed_this_sweep = 0
                 slot_order = sorted(
                     ((d, p) for d in range(D) for p in range(P)),
                     key=lambda dp: sum(
@@ -750,6 +1009,55 @@ class AutoSchedulerWorker(QThread):
                     )
                 )
                 for (d, p) in slot_order:
+                    # Fill this hour with a MAXIMUM BIPARTITE MATCHING between the
+                    # classes that are still empty here and the teachers who can work
+                    # it, rather than walking the classes in order and giving each the
+                    # first teacher that fits.
+                    #
+                    # Greedy order loses hours that were placeable: hand teacher X to
+                    # the first class that can use them and a later class for which X
+                    # was the ONLY option is left with a hole, even though a different
+                    # assignment of the same teachers would have filled both. With the
+                    # assignments matching the open slots exactly (180 hours, 180 open
+                    # cells) every such loss is a cell that can never be recovered, and
+                    # that is what kept the result stuck around 134/180.
+                    #
+                    # Kuhn's augmenting-path algorithm is optimal for one hour and, at
+                    # this size (≈9 classes × ≈21 teachers), effectively instant.
+                    open_here = []
+                    for cn in attempt_classes:
+                        grid = grids.get(cn)
+                        if grid is None or grid[d][p] is not None:
+                            continue
+                        if leftover_blocks.get(cn):
+                            open_here.append(cn)
+
+                    if open_here:
+                        matched = _match_slot(
+                            open_here, (d, p), grids, leftover_blocks,
+                            attempt_teacher_busy, teacher_timeoff, cross_inst_map, P,
+                        )
+                        for cn, (blk, subject, teacher) in matched.items():
+                            grid = grids[cn]
+                            grid[d][p] = {
+                                "subject": subject, "teacher": teacher,
+                                "block_id": f"late_{_uuid.uuid4().hex[:8]}",
+                                "is_combined": False, "block_start": p,
+                                "is_filler": False,
+                            }
+                            tk_fill = norm_teacher(teacher)
+                            if tk_fill:
+                                attempt_teacher_busy[tk_fill].add((d, p))
+                            pending_list = leftover_blocks.get(cn) or []
+                            if blk["duration"] > 1:
+                                blk["duration"] -= 1
+                            elif blk in pending_list:
+                                pending_list.remove(blk)
+                            placed_this_sweep += 1
+
+                    # Anything still empty at this hour genuinely had no free assigned
+                    # teacher; the per-class loop below only handles the leftovers the
+                    # matching could not reach.
                     fill_classes = list(attempt_classes)
                     random.shuffle(fill_classes)
                     for cn in fill_classes:
@@ -776,14 +1084,21 @@ class AutoSchedulerWorker(QThread):
                                 return False
                             return True
 
-                        def _cover(subject):
-                            cands = list(subject_teachers.get(subject, []))
-                            cands += [n for n in teacher_subjects if n not in cands]
-                            cands.sort(key=lambda n: teacher_capacity.get(norm_teacher(n), 0))
-                            for cand_t in cands:
-                                if _free(cand_t):
-                                    return cand_t
-                            return None
+                        # NOTE: there used to be a _cover() here that, when the
+                        # assigned teacher was busy, substituted somebody else — and
+                        # its candidate list was
+                        #     subject_teachers[subject] + EVERY OTHER TEACHER
+                        # so once the handful of real candidates were also busy it
+                        # would hand the lesson to whoever happened to be free. That
+                        # is why one teacher turned up across six unrelated subjects
+                        # (Coğrafya, Fizik, Matematik, Türkçe...), why Edebiyat was
+                        # shown under teachers who do not teach it, and why the grid
+                        # disagreed with the Ders ve Öğretmen Atama Paneli.
+                        #
+                        # A timetable naming the wrong teacher is worse than an empty
+                        # cell: it is confidently wrong, and it gets printed and handed
+                        # out. The lesson now stays owed and drops into the
+                        # "yerleştirilmeyenler" dock for the user to place by hand.
 
                         # Prefer a subject that does not repeat the neighbouring hour,
                         # but never leave an owed lesson unplaced just to avoid a repeat.
@@ -792,7 +1107,10 @@ class AutoSchedulerWorker(QThread):
                             for idx, blk in enumerate(pending):
                                 if not relaxed and blk["subject"] in (prev_subj, next_subj):
                                     continue
-                                cover_t = blk["teacher"] if _free(blk["teacher"]) else _cover(blk["subject"])
+                                # Only ever the teacher this class's assignment names.
+                                if not _free(blk["teacher"]):
+                                    continue
+                                cover_t = blk["teacher"]
                                 if cover_t:
                                     choice = (blk["subject"], cover_t)
                                     # One cell covers one hour; a 2-hour lesson keeps the
@@ -817,6 +1135,10 @@ class AutoSchedulerWorker(QThread):
                         tk_fill = norm_teacher(t)
                         if tk_fill:
                             attempt_teacher_busy[tk_fill].add((d, p))
+                        placed_this_sweep += 1
+
+                if not placed_this_sweep:
+                    break  # a full sweep changed nothing; further sweeps cannot either
 
             # ── CONVERT PHASE ─────────────────────────────────────────
             for cn in attempt_classes:
@@ -928,6 +1250,24 @@ class AutoSchedulerWorker(QThread):
                 print(f"    gün {u['day'] + 1}, {u['period'] + 1}. saat: "
                       f"{u['classes']} sınıf açık ama {u['teachers']} öğretmen müsait")
 
+        # Why the week cannot fill, in the terms the user can act on.
+        #
+        # The assignment screen shows hours per CLASS, so a class can look perfectly
+        # balanced — 20 assigned, 20 open — while the week is still impossible,
+        # because the real limit is per TEACHER: one teacher, one class at a time.
+        # Assign someone 28 hours when their classes are only open 20 and 8 of those
+        # hours cannot exist, no matter how long the scheduler searches.
+        capacity_problems = analyse_teacher_capacity(
+            class_blocks, blocked_by_class, teacher_timeoff, cross_inst_map, D, P,
+        )
+        if capacity_problems:
+            impossible = sum(c["shortfall"] for c in capacity_problems)
+            print(f"[AutoScheduler] {impossible} saat HİÇBİR ŞEKİLDE yerleşemez — "
+                  f"öğretmenlere müsait olduklarından fazla ders atanmış:")
+            for c in capacity_problems[:6]:
+                print(f"    {c['teacher']}: {c['assigned']} saat atanmış, "
+                      f"{c['available']} saat müsait -> {c['shortfall']} saat fazla")
+
         # What could not be placed, grouped for the post-run report.
         unplaced_summary = []
         for cn, blks in (best_leftovers or {}).items():
@@ -960,6 +1300,7 @@ class AutoSchedulerWorker(QThread):
             "constraint_violations": best_violations or [],
             "understaffed_slots": understaffed,
             "unplaced_summary": unplaced_summary,
+            "capacity_problems": capacity_problems,
             "elapsed_seconds": round(elapsed, 2)
         })
 

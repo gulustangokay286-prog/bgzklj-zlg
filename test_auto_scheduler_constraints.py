@@ -203,6 +203,54 @@ def run():
     check("total_hours kapalı saatler düşülerek hesaplandı",
           result.get("total_hours") == 60, str(result.get("total_hours")))
 
+    print("\n[gridde SADECE atanan öğretmen görünür]")
+    # Planlayıcı, atanan öğretmen doluysa BAŞKA bir öğretmeni o derse yazıyordu ve
+    # aday listesi "o dersi verenler + OKULDAKİ HERKES" idi. Sonuç: tek bir öğretmen
+    # altı alakasız derste görünüyor, grid atama paneliyle çelişiyordu. Yanlış
+    # öğretmen yazan bir çizelge, boş hücreden daha kötüdür — basılıp dağıtılıyor.
+    store = build_store()
+    # Öğretmenleri meşgul edip yedeğe düşmeye zorlayalım: herkes 0-3. saatlerde kapalı.
+    for t in store["ogretmenler"]:
+        t["timeoff"] = make_timeoff(closed_periods=(0, 1, 2, 3))
+    result = run_scheduler(store)
+    placements = result.get("placements", [])
+
+    expected = {}
+    for a in store["atamalar"]:
+        expected.setdefault(
+            (a["class"].upper(), a["subject"].upper()), set()
+        ).add(a["teacher"].upper())
+
+    wrong = []
+    for p in placements:
+        cls = (p.get("class_name") or p.get("class") or "").upper()
+        sub = (p.get("subject_name") or p.get("subject") or "").upper()
+        tea = (p.get("teacher_name") or p.get("teacher") or "").upper()
+        allowed = expected.get((cls, sub))
+        if allowed is None or tea not in allowed:
+            wrong.append((cls, sub, tea, allowed))
+
+    check("hiçbir derse atanmamış öğretmen yazılmadı", not wrong,
+          f"{len(wrong)} hata, ilk: {wrong[:2]}")
+
+    # Bir öğretmen yalnızca kendi atandığı derslerde görünmeli.
+    t_subjects = {}
+    for p in placements:
+        tea = (p.get("teacher_name") or p.get("teacher") or "").upper()
+        sub = (p.get("subject_name") or p.get("subject") or "").upper()
+        if tea:
+            t_subjects.setdefault(tea, set()).add(sub)
+    allowed_subjects = {}
+    for a in store["atamalar"]:
+        allowed_subjects.setdefault(a["teacher"].upper(), set()).add(a["subject"].upper())
+    spread = [(t, s, allowed_subjects.get(t, set()))
+              for t, s in t_subjects.items() if not s <= allowed_subjects.get(t, set())]
+    check("öğretmenler kendi dersleri dışına taşmadı", not spread, str(spread[:2]))
+
+    # Yerleştirilemeyen ders uydurma öğretmenle DOLDURULMAMALI.
+    fillers = [p for p in placements if p.get("is_filler")]
+    check("uydurma (filler) ders üretilmedi", not fillers, f"{len(fillers)} filler")
+
     print("\n[yardımcı fonksiyonlar]")
     blocked, avoid = auto_scheduler._build_class_timeoff_map(
         build_store(class_timeoff={"9A": make_timeoff(closed_periods=(4,), avoid_periods=(5,))})

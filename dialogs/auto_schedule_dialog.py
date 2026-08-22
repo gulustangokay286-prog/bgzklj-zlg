@@ -1010,7 +1010,55 @@ class AutoScheduleDialog(QDialog):
                 })
                 
         self.data_store["grid_placements"] = new_placements
-        
+
+        # Everything the scheduler could not place drops into the dock automatically,
+        # each card carrying the reason it was blocked.
+        #
+        # Previously these hours just vanished: the grid came back with holes and the
+        # owed lessons existed only in a console line nobody sees. The user had no way
+        # to place them by hand, because there was nothing to drag. Now they are all
+        # sitting at the bottom, and dropping one explains the clash and offers to
+        # override it (see _on_lesson_dropped).
+        import uuid as _uuid_unplaced
+
+        leftovers = result.get("unplaced_summary", []) or []
+        if leftovers:
+            existing = self.data_store.setdefault("loose_unplaced_cards", [])
+            # Drop any card this run already produced, so re-running does not stack
+            # duplicates of the same owed lesson.
+            existing[:] = [c for c in existing if not c.get("from_scheduler")]
+
+            capacity = {c["teacher"]: c for c in (result.get("capacity_problems", []) or [])}
+            for item in leftovers:
+                subject = item.get("subject", "")
+                teacher = item.get("teacher", "")
+                cls = item.get("class", "")
+                cap = capacity.get(teacher)
+                if cap:
+                    reason = (f"{teacher} öğretmenine {cap['assigned']} saat ders atanmış "
+                              f"ama müsait olduğu saat {cap['available']}. "
+                              f"Bu ders sığmadığı için yerleştirilemedi.")
+                else:
+                    reason = (f"{teacher} öğretmeninin müsait olduğu saatlerde "
+                              f"{cls} sınıfının boş yeri kalmadı.")
+                for _ in range(max(1, int(item.get("hours", 1) or 1))):
+                    existing.append({
+                        "id": f"loose_{_uuid_unplaced.uuid4().hex[:8]}",
+                        "subject_name": subject, "subject": subject,
+                        "teacher_name": teacher, "teacher": teacher,
+                        "class_name": cls, "class": cls,
+                        "duration": 1,
+                        "color": get_subject_color(subject) if subject else "#94A3B8",
+                        "is_filler": False,
+                        "is_combined": False,
+                        "combined_classes": [],
+                        "from_scheduler": True,
+                        "blocked_reason": reason,
+                    })
+            # The dock hides itself when the grid "looks complete"; these cards are
+            # exactly the case where it must not.
+            self.data_store["suppress_unplaced_dock"] = False
+
         p = self.parent()
         if p:
             if hasattr(p, "save_db"):
@@ -1037,7 +1085,9 @@ class AutoScheduleDialog(QDialog):
         self._pending_violations = result.get("constraint_violations", [])
         self._result_summary = {
             "total_hrs": total_hrs,
-            "target_hrs": target_hrs
+            "target_hrs": target_hrs,
+            "capacity_problems": result.get("capacity_problems", []),
+            "unplaced_summary": result.get("unplaced_summary", []),
         }
         
         self.accept()
@@ -1076,6 +1126,68 @@ class AutoScheduleDialog(QDialog):
             def show_warning():
                 QMessageBox.warning(parent, "Kısıtlama Bildirimi", msg, QMessageBox.Ok)
             QTimer.singleShot(100, show_warning)
+        elif parent and total_hrs < target_hrs and summary.get("unplaced_summary"):
+            # The week did not fill and we know exactly why. Without this the user is
+            # left staring at empty cells with no way to tell whether the scheduler
+            # gave up or the schedule is genuinely impossible — and the assignment
+            # screen cannot show it, because it counts hours per CLASS while the limit
+            # that actually binds is per TEACHER.
+            # Report what ACTUALLY could not be placed, grouped by teacher, rather
+            # than a theoretical bound: these are the real leftover hours, so the
+            # numbers add up to the empty cells the user is looking at.
+            unplaced = summary["unplaced_summary"]
+            by_teacher = {}
+            for u in unplaced:
+                name = u.get("teacher") or "(öğretmensiz)"
+                entry = by_teacher.setdefault(name, {"hours": 0, "classes": set()})
+                entry["hours"] += int(u.get("hours", 0) or 0)
+                if u.get("class"):
+                    entry["classes"].add(u["class"])
+            ranked = sorted(by_teacher.items(), key=lambda kv: -kv[1]["hours"])
+            missing = sum(v["hours"] for v in by_teacher.values())
+
+            # Where available, pair each teacher with how many hours they can actually
+            # work — that is the number that explains the shortfall.
+            capacity = {c["teacher"]: c for c in summary.get("capacity_problems", [])}
+
+            lines = [
+                f"Çizelge oluşturuldu: {total_hrs}/{target_hrs} saat yerleşti.",
+                "",
+                f"{missing} saat yerleştirilemedi.",
+                "",
+                "Sebep: bir öğretmen aynı anda yalnızca tek sınıfta olabilir.",
+                "Aşağıdaki öğretmenlerin dersleri, müsait oldukları saatlere sığmıyor:",
+                "",
+            ]
+            for name, info in ranked[:8]:
+                cap = capacity.get(name)
+                detail = ""
+                if cap:
+                    detail = (f"  (toplam {cap['assigned']} saat atanmış, "
+                              f"{cap['available']} saat müsait)")
+                cls_list = ", ".join(sorted(info["classes"])[:4])
+                if len(info["classes"]) > 4:
+                    cls_list += f" +{len(info['classes']) - 4}"
+                lines.append(f"   • {name}: {info['hours']} saat açıkta{detail}")
+                if cls_list:
+                    lines.append(f"       etkilenen sınıflar: {cls_list}")
+            if len(ranked) > 8:
+                lines.append(f"   ... ve {len(ranked) - 8} öğretmen daha.")
+            lines += [
+                "",
+                "Çözüm için şunlardan biri:",
+                "   1) Bu öğretmenlerin Zaman Tablosunda kapalı saatlerini açın,",
+                "   2) sınıfların kapalı ders saatlerini açın (örn. 5-8. saatler),",
+                "   3) veya bu derslerin bir kısmını başka bir öğretmene atayın.",
+                "",
+                "Yerleşemeyen dersler 'Yerleştirilmeyenler' listesinde duruyor;",
+                "oradan sürükleyerek elle de yerleştirebilirsiniz.",
+            ]
+            msg = "\n".join(lines)
+
+            def show_capacity():
+                QMessageBox.information(parent, "Çizelge Neden Dolmadı?", msg, QMessageBox.Ok)
+            QTimer.singleShot(100, show_capacity)
         elif parent and total_hrs > 0:
             if hasattr(parent, "statusBar"):
                 parent.statusBar().showMessage(f"Otomatik çizelge oluşturuldu! ({total_hrs}/{target_hrs} saat yerleştirildi)", 5000)

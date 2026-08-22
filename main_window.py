@@ -692,6 +692,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Görünüm güncellendi: {entity_name}")
         self._restore_grid_placements(view_type, entity_name)
         self._refresh_tree(view_type=view_type, target_entity=entity_name)
+        self._refresh_unplaced_lessons(target_entity=entity_name)
 
     # ── Ribbon ────────────────────────────────────────────────────────────────
     def _build_ribbon(self):
@@ -1906,18 +1907,6 @@ class MainWindow(QMainWindow):
             if remaining_hours <= 0:
                 continue
 
-            # Capacity constraint: if the class has no free open slots remaining on the grid,
-            # do not emit extra ghost cards into the dock!
-            c_key = format_tr_name(c_name.strip().split("(")[0].strip())
-            if display_mode == "classes" and c_key in class_free_slots:
-                avail_slots = class_free_slots[c_key]
-                if avail_slots <= 0:
-                    continue
-                remaining_hours = min(remaining_hours, avail_slots)
-                if remaining_hours <= 0:
-                    continue
-                class_free_slots[c_key] -= remaining_hours
-                
             # Group placed slots into contiguous blocks for block-matching
             matched_slots.sort(key=lambda x: (x["day"], x["period"]))
             placed_blocks = []
@@ -1984,24 +1973,6 @@ class MainWindow(QMainWindow):
                     "is_combined": is_comb,
                     "combined_classes": list(target_classes) if is_comb else []
                 })
-                
-        # Right after an auto-plan the computed "still owed" hours above are dropped:
-        # whatever could not be scheduled was already spelled out in the post-run report
-        # (teacher shortage at specific hours), so repeating it as a pile of draggable
-        # cards just makes the dock look like unfinished work. Cards the user creates by
-        # deleting a lesson off the grid are added below and always show.
-        if self.data_store.get("suppress_unplaced_dock"):
-            # Adding or editing assignments afterwards is the user asking for more
-            # lessons, so the dock has to start reporting again from that point on.
-            baseline = self.data_store.get("suppress_unplaced_baseline")
-            current = sum(
-                int(a.get("duration") or a.get("hours") or 1) for a in atamalar
-            )
-            if baseline is not None and current != baseline:
-                self.data_store["suppress_unplaced_dock"] = False
-                self.data_store.pop("suppress_unplaced_baseline", None)
-            else:
-                unplaced = []
 
         # Loose cards: anything removed straight off the grid (see _delete_lesson_at) shows up
         # here directly and unconditionally, scoped to the same class/teacher as everything
@@ -2023,7 +1994,11 @@ class MainWindow(QMainWindow):
                 "class_name": lc.get("class_name", ""),
                 "duration": lc.get("duration", 1),
                 "is_combined": lc.get("is_combined", False),
-                "combined_classes": lc.get("combined_classes", [])
+                "combined_classes": lc.get("combined_classes", []),
+                # Why the scheduler could not place it. Carried through to the card so
+                # dropping it can explain the clash and offer to override, instead of
+                # the lesson silently going missing with no way to find out why.
+                "blocked_reason": lc.get("blocked_reason", ""),
             })
 
         has_assignments = bool(scoped_atamalar) if target_entity else bool(atamalar)
@@ -2305,6 +2280,32 @@ class MainWindow(QMainWindow):
                 return True
             return False
             
+        # What to do with a lesson that was already sitting in the target slot.
+        # Exactly one of these is ever set, and neither means "delete it":
+        #   pending_swap      -> send it back to where the dragged lesson came from
+        #   pending_displaced -> return it to the unplaced dock, still re-placeable
+        pending_swap = None
+        pending_displaced = None
+        # Recorded on the placement so the grid can flag it, rather than blocking it.
+        has_teacher_conflict = False
+
+        # If this card came from the dock because the scheduler could not place it,
+        # carry the reason into the constraint dialogs below — otherwise the user is
+        # asked "override this restriction?" with no idea why the lesson ended up in
+        # the dock in the first place.
+        _blocked_note = ""
+        _incoming_id = lesson_info.get("lesson_id", "")
+        if isinstance(_incoming_id, str) and _incoming_id.startswith("loose_"):
+            _src = next(
+                (lc for lc in self.data_store.get("loose_unplaced_cards", [])
+                 if lc.get("id") == _incoming_id),
+                None,
+            )
+            if _src and _src.get("blocked_reason"):
+                _blocked_note = (
+                    f"<br><br><i>Bu ders neden listede:<br>{_src['blocked_reason']}</i>"
+                )
+
         # ── 1. KESİN KONTROL: Sınıf Çizelgesi Dolu mu?
         target_check_classes = combined_classes if (is_comb and combined_classes) else [cls_name] if cls_name else []
         if target_check_classes:
@@ -2331,19 +2332,44 @@ class MainWindow(QMainWindow):
                 occ_s = class_occupied.get("subject_name") or class_occupied.get("subject") or "Ders"
                 occ_t = class_occupied.get("teacher_name") or class_occupied.get("teacher") or "Öğretmen"
                 occ_c = class_occupied.get("class_name") or class_occupied.get("class") or cls_name
-                ret = QMessageBox.warning(
-                    self, "Sınıf Çizelgesi Dolu",
-                    f"⚠️ <b>Bu Saatte Sınıf Zaten Dolu!</b><br><br>"
-                    f"<b>{occ_c}</b> sınıfının <b>{day_name}</b> günü <b>{period_idx+1}. ders saatinde</b> "
-                    f"zaten <b>{occ_s}</b> ({occ_t}) dersi bulunmaktadır.<br><br>"
-                    f"Mevcut dersi kaldırıp yeni dersi yerleştirmek istiyor musunuz?",
-                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-                )
-                if ret != QMessageBox.Yes:
-                    self.statusBar().showMessage(f"İptal edildi: {cls_name} sınıfının {day_name} {period_idx+1}. saati zaten dolu!")
-                    return
-                # Remove existing lesson
-                self._remove_placement_by_data(class_occupied)
+
+                # Dropping one lesson onto another used to DELETE the one already
+                # there. That is almost never what the user meant: the ordinary
+                # reason to drag a lesson onto an occupied slot is to exchange the
+                # two, and losing a lesson because of it is destructive and hard to
+                # undo. Nothing is removed here any more.
+                #
+                # Dragged from elsewhere on the grid -> swap the two lessons.
+                # Dragged in from the dock -> the displaced lesson goes BACK to the
+                # dock, where it can be re-placed, instead of disappearing.
+                occ_dur = int(class_occupied.get("duration", 1) or 1)
+
+                if is_move and orig_c >= 0 and occ_dur == duration:
+                    ret = QMessageBox.question(
+                        self, "Dersleri Yer Değiştir",
+                        f"<b>{occ_c}</b> sınıfının <b>{day_name}</b> günü "
+                        f"<b>{period_idx+1}. saatinde</b> <b>{occ_s}</b> ({occ_t}) dersi var.<br><br>"
+                        f"İki dersin yerini değiştirmek istiyor musunuz?<br>"
+                        f"<i>Hiçbir ders silinmez — sadece yerleri takas edilir.</i>",
+                        QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+                    )
+                    if ret != QMessageBox.Yes:
+                        self.statusBar().showMessage("Yer değiştirme iptal edildi.")
+                        return
+                    pending_swap = class_occupied
+                else:
+                    ret = QMessageBox.question(
+                        self, "Bu Saat Dolu",
+                        f"<b>{occ_c}</b> sınıfının <b>{day_name}</b> günü "
+                        f"<b>{period_idx+1}. saatinde</b> zaten <b>{occ_s}</b> ({occ_t}) dersi var.<br><br>"
+                        f"Yeni ders buraya yerleştirilsin mi?<br>"
+                        f"<i>Mevcut ders silinmez; yerleştirilmeyenler listesine geri döner.</i>",
+                        QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+                    )
+                    if ret != QMessageBox.Yes:
+                        self.statusBar().showMessage(f"İptal edildi: {cls_name} — {day_name} {period_idx+1}. saat dolu.")
+                        return
+                    pending_displaced = class_occupied
 
         # ── 2. KONTROL: Öğretmen Kapalı/Kısıtlı Saat Kontrolü
         kisitlamalar = self.data_store.get("kisitlamalar", {})
@@ -2358,11 +2384,16 @@ class MainWindow(QMainWindow):
                     check_p = period_idx + ext
                     if day_idx < len(c_timeoff) and check_p < len(c_timeoff[day_idx]):
                         if c_timeoff[day_idx][check_p] == 0:
+                            # Default is Yes: the user is placing this by hand,
+                            # deliberately, and usually because they are fixing exactly
+                            # this problem. Making them fight the dialog every time was
+                            # the wrong default.
                             ret = QMessageBox.warning(
                                 self, "Sınıf Kısıtlama Uyarısı",
                                 f"⚠️ <b>'{chk_c}'</b> sınıfının <b>{day_name}</b> günü <b>{check_p+1}. ders saati</b> 'KAPALI' olarak kısıtlanmıştır.<br><br>"
-                                "Yine de kısıtlamayı yok sayıp bu dersi yerleştirmek istiyor musunuz?",
-                                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+                                "Yine de kısıtlamayı yok sayıp bu dersi yerleştirmek istiyor musunuz?"
+                                + _blocked_note,
+                                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
                             )
                             if ret != QMessageBox.Yes:
                                 self.statusBar().showMessage(f"İptal edildi: {chk_c} - {day_name} {check_p+1}. saat kapalı!")
@@ -2383,8 +2414,9 @@ class MainWindow(QMainWindow):
                     ret = QMessageBox.warning(
                         self, "Kısıtlama Uyarısı",
                         f"⚠️ <b>'{teacher}'</b> öğretmeninin <b>{day_name}</b> günü <b>{check_p+1}. ders saatinde</b> 'ÇALIŞAMAZ / KAPALI' kısıtlaması bulunmaktadır.<br><br>"
-                        "Yine de kısıtlamayı yok sayıp bu dersi yerleştirmek istiyor musunuz?",
-                        QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+                        "Yine de kısıtlamayı yok sayıp bu dersi yerleştirmek istiyor musunuz?"
+                        + _blocked_note,
+                        QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
                     )
                     if ret != QMessageBox.Yes:
                         self.statusBar().showMessage(f"İptal edildi: {teacher} - {day_name} {check_p+1}. saat kapalı!")
@@ -2396,8 +2428,9 @@ class MainWindow(QMainWindow):
                         ret = QMessageBox.warning(
                             self, "Öğretmen Kısıtlama Uyarısı",
                             f"⚠️ <b>'{teacher}'</b> öğretmeninin <b>{day_name}</b> günü <b>{check_p+1}. ders saati</b> 'KAPALI' olarak kısıtlanmıştır.<br><br>"
-                            "Yine de kısıtlamayı yok sayıp bu dersi yerleştirmek istiyor musunuz?",
-                            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+                            "Yine de kısıtlamayı yok sayıp bu dersi yerleştirmek istiyor musunuz?"
+                            + _blocked_note,
+                            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
                         )
                         if ret != QMessageBox.Yes:
                             self.statusBar().showMessage(f"İptal edildi: {teacher} - {day_name} {check_p+1}. saat kapalı!")
@@ -2433,19 +2466,24 @@ class MainWindow(QMainWindow):
             if teacher_occupied:
                 occ_s = teacher_occupied.get("subject_name") or teacher_occupied.get("subject") or "Ders"
                 occ_c = teacher_occupied.get("class_name") or teacher_occupied.get("class") or "Başka Sınıf"
+                # A teacher clash is a WARNING, not a veto, and it certainly is not a
+                # reason to delete the other class's lesson. The user is arranging a
+                # timetable by hand and knows what they are doing; the previous
+                # behaviour silently removed a lesson from a completely different
+                # class to make room, which is data loss triggered by a drag.
                 ret = QMessageBox.warning(
                     self, "Öğretmen Çakışması",
-                    f"⚠️ <b>Öğretmen Çakışması!</b><br><br>"
-                    f"<b>{teacher}</b> öğretmeninin <b>{day_name}</b> günü <b>{period_idx+1}. ders saatinde</b> "
-                    f"<b>{occ_c}</b> sınıfında <b>{occ_s}</b> dersi bulunmaktadır.<br><br>"
-                    f"Öğretmen aynı anda iki farklı sınıfa ders veremez. Mevcut dersi kaldırıp bunu yerleştirmek istiyor musunuz?",
-                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+                    f"⚠️ <b>{teacher}</b> öğretmeni <b>{day_name}</b> günü "
+                    f"<b>{period_idx+1}. saatte</b> zaten <b>{occ_c}</b> sınıfında "
+                    f"<b>{occ_s}</b> dersinde görünüyor.<br><br>"
+                    f"Yine de yerleştirilsin mi?<br>"
+                    f"<i>Hiçbir ders silinmez. Çakışma kalır — daha sonra düzenlemeyi unutmayın.</i>",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
                 )
                 if ret != QMessageBox.Yes:
-                    self.statusBar().showMessage(f"Engellendi: {teacher} hocanın {day_name} {period_idx+1}. saati dolu!")
+                    self.statusBar().showMessage(f"İptal edildi: {teacher} — {day_name} {period_idx+1}. saat.")
                     return
-                # Remove existing lesson
-                self._remove_placement_by_data(teacher_occupied)
+                has_teacher_conflict = True
 
         # ── 3.5. KESİN KONTROL: Çapraz Kurum Öğretmen Çakışması Kontrolü
         if teacher:
@@ -2536,14 +2574,59 @@ class MainWindow(QMainWindow):
         # ── 4. TÜM KONTROLLER BAŞARILI: Atomik ve Güvenli Yerleşim
         self.mark_dirty()
         self._push_undo_state()
-        
+
+        # A lesson that was in the way is MOVED, never deleted. Snapshot it before the
+        # origin is cleared below, because a swap needs to know where to send it.
+        swap_payload = None
+        if pending_swap is not None:
+            swap_payload = dict(pending_swap)
+
         # Eğer taşıma (move) ise eski konumu grid_placements'tan sil
         if is_move and orig_c >= 0:
             self.data_store["grid_placements"] = [
                 p for p in self.data_store.get("grid_placements", [])
                 if not is_origin_placement(p)
             ]
-            
+
+        # Take the displaced lesson off the grid — it is about to be re-added either
+        # at the origin slot (swap) or in the dock (displaced).
+        if pending_swap is not None or pending_displaced is not None:
+            victim = pending_swap if pending_swap is not None else pending_displaced
+            v_block = victim.get("block_id")
+            v_day = int(victim.get("day") if "day" in victim else victim.get("col", 0))
+            v_per = int(victim.get("period") if "period" in victim else victim.get("row", 0))
+            v_cls = (victim.get("class_name") or victim.get("class") or "").strip()
+
+            def _is_victim(p):
+                if v_block and p.get("block_id") == v_block:
+                    return True
+                p_d = int(p.get("day") if "day" in p else p.get("col", 0))
+                p_p = int(p.get("period") if "period" in p else p.get("row", 0))
+                p_c = (p.get("class_name") or p.get("class") or "").strip()
+                return p_d == v_day and p_p == v_per and p_c == v_cls
+
+            self.data_store["grid_placements"] = [
+                p for p in self.data_store.get("grid_placements", []) if not _is_victim(p)
+            ]
+
+            if pending_displaced is not None:
+                # Back to the dock as a loose, re-placeable card rather than deleted.
+                import uuid as _uuid_d
+                self.data_store.setdefault("loose_unplaced_cards", []).append({
+                    "id": f"loose_{_uuid_d.uuid4().hex[:8]}",
+                    "subject_name": victim.get("subject_name") or victim.get("subject") or "",
+                    "subject": victim.get("subject_name") or victim.get("subject") or "",
+                    "teacher_name": victim.get("teacher_name") or victim.get("teacher") or "",
+                    "teacher": victim.get("teacher_name") or victim.get("teacher") or "",
+                    "class_name": v_cls, "class": v_cls,
+                    "duration": int(victim.get("duration", 1) or 1),
+                    "color": victim.get("color", ""),
+                    "is_filler": bool(victim.get("is_filler", False)),
+                    "is_combined": bool(victim.get("is_combined", False)),
+                    "combined_classes": list(victim.get("combined_classes", []) or []),
+                })
+
+
         # Yeni yerleşimi ekle (her saat bloğu için)
         # block_id: aynı yerleştirme operasyonundan gelen tüm saatler aynı ID'yi paylaşır
         import uuid as _uuid
@@ -2599,8 +2682,46 @@ class MainWindow(QMainWindow):
                     "is_combined": is_comb,
                     "combined_classes": list(combined_classes) if combined_classes else [],
                     "block_id": _block_id,
-                    "is_filler": _is_filler_drop
+                    "is_filler": _is_filler_drop,
+                    # Placed despite a teacher clash the user chose to accept. Kept on
+                    # the record so it can be reviewed later instead of being silently
+                    # "resolved" by deleting somebody else's lesson.
+                    "has_conflict": has_teacher_conflict,
                 })
+
+        # Second half of the swap: the lesson that was in the target slot now takes
+        # the slot the dragged lesson just left. Done AFTER the new placement so it
+        # cannot be filtered out by the target-slot clearing loop above.
+        if swap_payload is not None and orig_day >= 0 and orig_per >= 0:
+            import uuid as _uuid_s
+            swap_block = str(_uuid_s.uuid4())[:12]
+            swap_dur = int(swap_payload.get("duration", 1) or 1)
+            swap_classes = (
+                list(swap_payload.get("combined_classes", []) or [])
+                if swap_payload.get("is_combined")
+                else [(swap_payload.get("class_name") or swap_payload.get("class") or "").strip()]
+            )
+            for ext in range(swap_dur):
+                for s_cls in swap_classes:
+                    if not s_cls:
+                        continue
+                    self.data_store.setdefault("grid_placements", []).append({
+                        "day": orig_day, "period": orig_per + ext,
+                        "row": orig_per + ext, "col": orig_day,
+                        "class_name": s_cls, "class": s_cls,
+                        "teacher_name": swap_payload.get("teacher_name") or swap_payload.get("teacher") or "",
+                        "teacher": swap_payload.get("teacher_name") or swap_payload.get("teacher") or "",
+                        "subject_name": swap_payload.get("subject_name") or swap_payload.get("subject") or "",
+                        "subject": swap_payload.get("subject_name") or swap_payload.get("subject") or "",
+                        "duration": 1,
+                        "locked": bool(swap_payload.get("locked", False)),
+                        "is_manual": True,
+                        "color": swap_payload.get("color", ""),
+                        "is_combined": bool(swap_payload.get("is_combined", False)),
+                        "combined_classes": list(swap_payload.get("combined_classes", []) or []),
+                        "block_id": swap_block,
+                        "is_filler": bool(swap_payload.get("is_filler", False)),
+                    })
 
         if "auto_schedule_results" in self.data_store:
             self.data_store["auto_schedule_results"] = list(self.data_store.get("grid_placements", []))
@@ -2619,7 +2740,21 @@ class MainWindow(QMainWindow):
         # Debounce tree refresh to ensure 0ms instant UI drop response
         from PySide6.QtCore import QTimer
         QTimer.singleShot(250, self._refresh_tree)
-        self.statusBar().showMessage(f"'{subject_name}' ({cls_name} - {teacher}) dersi {day_name} günü {period_idx+1}. saate yerleştirildi.")
+
+        if swap_payload is not None:
+            other = swap_payload.get("subject_name") or swap_payload.get("subject") or "ders"
+            msg = (f"'{subject_name}' ile '{other}' yer değiştirdi "
+                   f"({day_name} {period_idx+1}. saat).")
+        elif pending_displaced is not None:
+            other = pending_displaced.get("subject_name") or pending_displaced.get("subject") or "ders"
+            msg = (f"'{subject_name}' yerleştirildi. '{other}' yerleştirilmeyenler "
+                   f"listesine taşındı — silinmedi.")
+        else:
+            msg = (f"'{subject_name}' ({cls_name} - {teacher}) dersi {day_name} günü "
+                   f"{period_idx+1}. saate yerleştirildi.")
+        if has_teacher_conflict:
+            msg += "  ⚠ Öğretmen çakışması var — düzenlemeyi unutmayın."
+        self.statusBar().showMessage(msg, 8000)
 
     # ── Actions ───────────────────────────────────────────────────────────────
     def _save_new_version_with_folder_picker(self, note, force=False):
@@ -3239,16 +3374,6 @@ class MainWindow(QMainWindow):
                 
                 total_hours = sum(p.get("duration", 1) for p in grid_placements)
 
-                # After an auto-plan the dock starts clean: whatever could not be
-                # scheduled is explained in the report below rather than left sitting
-                # in the side list. Deleting a lesson from the grid still drops it
-                # there, because that path adds a loose card (see _delete_lesson_at).
-                self.data_store["loose_unplaced_cards"] = []
-                self.data_store["suppress_unplaced_dock"] = True
-                self.data_store["suppress_unplaced_baseline"] = sum(
-                    int(a.get("duration") or a.get("hours") or 1)
-                    for a in self.data_store.get("atamalar", [])
-                )
                 self._show_auto_plan_report(total_hours)
                 self._refresh_unplaced_lessons()
                 self.statusBar().showMessage(f"Otomatik planlama tamamlandı ({total_hours} ders saati yerleştirildi).")
