@@ -2666,6 +2666,32 @@ class MainWindow(QMainWindow):
         if cancelled:
             return False
 
+        # Never let an empty schedule be written over a filled one without saying so.
+        # This is how a full week's work disappeared: something cleared
+        # data_store["grid_placements"] before the save, and the new version went to
+        # the server holding every assignment but not a single placed lesson — the
+        # other computer then opened a blank timetable with no hint anything was lost.
+        placements = self.data_store.get("grid_placements") or []
+        if not placements and ver_fn:
+            try:
+                previous = version_store.load_version(slug, ver_fn) or {}
+            except Exception:
+                previous = {}
+            prev_count = len(previous.get("grid_placements") or [])
+            if prev_count:
+                answer = QMessageBox.warning(
+                    self, "Çizelge Boş",
+                    f"⚠️ <b>Kaydedilecek çizelge boş görünüyor.</b><br><br>"
+                    f"Şu anki versiyonda <b>{prev_count} yerleştirilmiş ders</b> var, "
+                    f"ama kaydedilmek üzere olan çizelgede hiç ders yok.<br><br>"
+                    f"Boş olarak kaydedilirse bu dersler diğer bilgisayarlarda da silinir.<br><br>"
+                    f"Yine de boş kaydedilsin mi?",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+                )
+                if answer != QMessageBox.Yes:
+                    self.statusBar().showMessage("Boş kayıt iptal edildi — mevcut çizelge korundu.")
+                    return False
+
         try:
             self.save_db(sync_from_grid=True)
             new_vf = version_store.save_version(slug, self.data_store, source="manual", note=note, folder_id=folder_id)

@@ -498,17 +498,15 @@ class APIClient:
                     version_store.invalidate_version_summary(slug, filename)
                     synced += 1
 
-            if remote_filenames:
-                for local_fn in os.listdir(ver_dir):
-                    if local_fn.endswith(".roz") and local_fn not in remote_filenames:
-                        target = os.path.join(ver_dir, local_fn)
-                        try:
-                            if time.time() - os.path.getmtime(target) > 10:
-                                os.remove(target)
-                                version_store.invalidate_version_summary(slug, local_fn)
-                                synced += 1
-                        except OSError:
-                            pass
+            # A version missing from the server's payload is NOT evidence that it was
+            # deleted. It is far more often one this device just created whose upload
+            # has not landed yet, or one the server omitted from a partial response.
+            # Deleting on that basis (the old rule: gone from the payload and older
+            # than ten seconds) destroyed freshly saved schedules — the work was on
+            # screen one moment and the file was gone the next.
+            #
+            # Deletions travel as tombstones, which are applied above. That is the only
+            # thing allowed to remove a local version.
 
         version_store.invalidate_cross_busy_cache()
         return True, f"Senkronizasyon tamamlandı ({len(data)} kurum, {synced} değişiklik).", synced
@@ -587,10 +585,14 @@ class APIClient:
                 local_meta = existing.get("_version_meta", {}) if isinstance(existing, dict) else {}
                 remote_meta = payload.get("_version_meta", {}) if isinstance(payload, dict) else {}
 
-                local_ts = str(local_meta.get("last_modified") or local_meta.get("timestamp") or "")
-                remote_ts = str(remote_meta.get("last_modified") or remote_meta.get("timestamp") or "")
-
-                # If local file was modified more recently than remote, preserve local!
+                # Only a real last_modified on BOTH sides can decide this. The old code
+                # fell back to "timestamp", which is the version's CREATION time and
+                # never changes — so a local file that had merely been opened could
+                # out-rank a genuinely newer edit from another computer and block it
+                # forever. Mixing the two fields compared a modification time against
+                # a creation time, which is not a comparison at all.
+                local_ts = str(local_meta.get("last_modified") or "")
+                remote_ts = str(remote_meta.get("last_modified") or "")
                 if local_ts and remote_ts and local_ts > remote_ts:
                     return False
 
