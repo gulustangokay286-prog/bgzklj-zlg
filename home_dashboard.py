@@ -174,15 +174,10 @@ class AppleInfoDialog(QDialog):
         container.setStyleSheet("""
             #infoCard {
                 background: #FFFFFF;
-                border: 1px solid rgba(0, 0, 0, 0.08);
+                border: 1px solid #CBD5E1;
                 border-radius: 16px;
             }
         """)
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(30)
-        shadow.setColor(QColor(0, 0, 0, 45))
-        shadow.setOffset(0, 8)
-        container.setGraphicsEffect(shadow)
         
         c_lay = QVBoxLayout(container)
         c_lay.setContentsMargins(24, 20, 24, 20)
@@ -249,15 +244,10 @@ class AppleConfirmDialog(QDialog):
         container.setStyleSheet("""
             #confirmCard {
                 background: #FFFFFF;
-                border: 1px solid rgba(0, 0, 0, 0.08);
-                border-radius: 18px;
+                border: 1px solid #CBD5E1;
+                border-radius: 16px;
             }
         """)
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(35)
-        shadow.setColor(QColor(0, 0, 0, 50))
-        shadow.setOffset(0, 8)
-        container.setGraphicsEffect(shadow)
         
         c_lay = QVBoxLayout(container)
         c_lay.setContentsMargins(28, 22, 28, 22)
@@ -338,15 +328,10 @@ class AppleColorPickerDialog(QDialog):
         container.setStyleSheet("""
             #colorCard {
                 background: #FFFFFF;
-                border: 1px solid rgba(0, 0, 0, 0.08);
+                border: 1px solid #CBD5E1;
                 border-radius: 16px;
             }
         """)
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(30)
-        shadow.setColor(QColor(0, 0, 0, 45))
-        shadow.setOffset(0, 8)
-        container.setGraphicsEffect(shadow)
         
         c_lay = QVBoxLayout(container)
         c_lay.setContentsMargins(24, 20, 24, 20)
@@ -677,15 +662,10 @@ class AppleInputDialog(QDialog):
         container.setStyleSheet("""
             #inputCard {
                 background: #FFFFFF;
-                border: 1px solid rgba(0, 0, 0, 0.08);
+                border: 1px solid #CBD5E1;
                 border-radius: 16px;
             }
         """)
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(30)
-        shadow.setColor(QColor(0, 0, 0, 45))
-        shadow.setOffset(0, 8)
-        container.setGraphicsEffect(shadow)
         
         c_lay = QVBoxLayout(container)
         c_lay.setContentsMargins(24, 20, 24, 20)
@@ -2379,7 +2359,7 @@ class HomeDashboard(QWidget):
         
         # Password Protection Overlay Widget (Ultra-clean modern card)
         self.password_overlay_widget = QWidget()
-        self.password_overlay_widget.setStyleSheet("background: transparent;")
+        self.password_overlay_widget.setStyleSheet("background: #F8FAFC;")
         overlay_layout = QVBoxLayout(self.password_overlay_widget)
         overlay_layout.setAlignment(Qt.AlignCenter)
         overlay_layout.setContentsMargins(0, 0, 0, 0)
@@ -2387,19 +2367,14 @@ class HomeDashboard(QWidget):
         # Modal Floating Card (Centered)
         self.pwd_card = QFrame()
         self.pwd_card.setObjectName("pwdCard")
-        self.pwd_card.setFixedSize(480, 360)
+        self.pwd_card.setFixedSize(480, 350)
         self.pwd_card.setStyleSheet("""
             QFrame#pwdCard {
-                background: #FFFFFF;
-                border: 1px solid rgba(0, 0, 0, 0.08);
-                border-radius: 20px;
+                background-color: #FFFFFF;
+                border: 1px solid #CBD5E1;
+                border-radius: 16px;
             }
         """)
-        card_shadow = QGraphicsDropShadowEffect()
-        card_shadow.setBlurRadius(40)
-        card_shadow.setColor(QColor(0, 0, 0, 40))
-        card_shadow.setOffset(0, 10)
-        self.pwd_card.setGraphicsEffect(card_shadow)
         
         c_layout = QVBoxLayout(self.pwd_card)
         c_layout.setContentsMargins(40, 30, 40, 30)
