@@ -149,13 +149,13 @@ class HighTechSplashScreen(QDialog):
         self.anim_group = QParallelAnimationGroup(self)
         
         anim_logo = QPropertyAnimation(self.logo_widget, b"progress")
-        anim_logo.setDuration(700)
+        anim_logo.setDuration(400)
         anim_logo.setStartValue(0.0)
         anim_logo.setEndValue(1.0)
         anim_logo.setEasingCurve(QEasingCurve.OutQuad)
         
         anim_bar = QPropertyAnimation(self.progress_bar, b"progress")
-        anim_bar.setDuration(700)
+        anim_bar.setDuration(400)
         anim_bar.setStartValue(0.0)
         anim_bar.setEndValue(1.0)
         anim_bar.setEasingCurve(QEasingCurve.OutQuad)
@@ -169,14 +169,14 @@ class HighTechSplashScreen(QDialog):
     def _start_tip_cycle(self):
         self.tip_timer = QTimer(self)
         self.tip_timer.timeout.connect(self._next_tip)
-        self.tip_timer.start(1250)
+        self.tip_timer.start(1200)
         
     def _next_tip(self):
         self.current_tip_index += 1
         if self.current_tip_index < len(self.tips):
             # Fade out
             self.fade_out = QPropertyAnimation(self.opacity_effect, b"opacity")
-            self.fade_out.setDuration(250)
+            self.fade_out.setDuration(200)
             self.fade_out.setStartValue(1.0)
             self.fade_out.setEndValue(0.0)
             self.fade_out.finished.connect(self._change_tip_text)
@@ -187,35 +187,20 @@ class HighTechSplashScreen(QDialog):
             self.tip_label.setText(self.tips[self.current_tip_index])
             # Fade in
             self.fade_in = QPropertyAnimation(self.opacity_effect, b"opacity")
-            self.fade_in.setDuration(350)
+            self.fade_in.setDuration(200)
             self.fade_in.setStartValue(0.0)
             self.fade_in.setEndValue(1.0)
             self.fade_in.start()
 
     def _run_auth_check(self):
-        def check():
+        try:
             from api_client import api_client
-            try:
-                ok, auth = api_client.auto_authenticate()
-                if ok and auth:
-                    self.is_valid_token = True
-                    self.auth_data = auth
-                    try:
-                        api_client.pull_all_from_rtdb(auth)
-                    except Exception:
-                        pass
-            except Exception as e:
-                print(f"[Splash] auto-auth error: {e}")
-            finally:
-                self._auth_done = True
-
-        self._auth_thread = threading.Thread(target=check, daemon=True)
-        self._auth_thread.start()
+            ok, auth = api_client.auto_authenticate()
+            if ok and auth:
+                self.is_valid_token = True
+                self.auth_data = auth
+        except Exception as e:
+            print(f"[Splash] auth check note: {e}")
 
     def _finish(self):
-        def _check_and_close():
-            if self._auth_thread and self._auth_thread.is_alive() and not self._auth_done:
-                self._auth_thread.join(timeout=1.5)
-            self.accept()
-
-        QTimer.singleShot(250, _check_and_close)
+        QTimer.singleShot(100, self.accept)

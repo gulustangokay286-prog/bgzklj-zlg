@@ -201,39 +201,23 @@ class APIClient:
         return None
 
     def auto_authenticate(self) -> tuple:
-        """Tries to authenticate using stored token or stored credentials.
-        Returns (success: bool, auth_data: dict).
-        """
+        """Loads stored session credentials instantly without blocking GUI startup."""
         stored = self.get_stored_auth_data()
         if not stored:
             return False, None
 
         tok = stored.get("access_token")
-        email = stored.get("email")
-        password = stored.get("_refresh")
-
-        # Test existing token against server
         if tok and not str(tok).startswith("local_") and not stored.get("is_local"):
             self.token = tok
-            try:
-                resp = self.session.get(
-                    f"{self.base_url}/api/institutions",
-                    headers={"Authorization": f"Bearer {tok}"},
-                    timeout=5
-                )
-                if resp.status_code == 200:
-                    return True, stored
-            except Exception:
-                # Network might be slow/offline, trust valid non-local stored token
-                return True, stored
+            return True, stored
 
-        # Token expired or missing, try silent login with stored credentials
+        email = stored.get("email")
+        password = stored.get("_refresh")
         if email and password:
             ok, res = self.login(email, password)
             if ok and isinstance(res, dict):
                 return True, res
 
-        # Offline / local account fallback
         if stored.get("is_offline") or stored.get("is_local"):
             return True, stored
 
