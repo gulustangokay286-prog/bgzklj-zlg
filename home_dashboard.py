@@ -1224,36 +1224,26 @@ class AppleInstitutionCard(QFrame):
         """)
         
         act_primary = None
-        if self.is_master_admin:
-            if not self.is_primary:
-                act_primary = menu.addAction("⭐ Ana Kurum Olarak Ayarla")
-            else:
-                act_primary_dis = menu.addAction("★ Ana Kurum (Varsayılan)")
-                act_primary_dis.setEnabled(False)
-            menu.addSeparator()
-            
-        if self.is_master_admin:
-            act_rename = menu.addAction("Yeniden Adlandır")
+        if not self.is_primary:
+            act_primary = menu.addAction("⭐ Ana Kurum Olarak Ayarla")
         else:
-            act_rename = None
+            act_primary_dis = menu.addAction("★ Ana Kurum (Varsayılan)")
+            act_primary_dis.setEnabled(False)
+        menu.addSeparator()
+            
+        act_rename = menu.addAction("Yeniden Adlandır")
         act_color = menu.addAction("Renk Değiştir")
         
         menu.addSeparator()
-        if self.is_master_admin:
-            if self.has_password:
-                act_pwd = menu.addAction("Şifreyi Değiştir")
-                act_rm_pwd = menu.addAction("Şifreyi Kaldır")
-            else:
-                act_pwd = menu.addAction("Şifre Belirle (Yönetici)")
-                act_rm_pwd = None
+        if self.has_password:
+            act_pwd = menu.addAction("Şifreyi Değiştir")
+            act_rm_pwd = menu.addAction("Şifreyi Kaldır")
         else:
-            act_pwd = None
+            act_pwd = menu.addAction("Şifre Belirle (Yönetici)")
             act_rm_pwd = None
             
-        act_delete = None
-        if self.is_master_admin:
-            menu.addSeparator()
-            act_delete = menu.addAction("Kurumu Sil")
+        menu.addSeparator()
+        act_delete = menu.addAction("Kurumu Sil")
         
         action = menu.exec_(self.mapToGlobal(pos))
         if act_primary and action == act_primary:

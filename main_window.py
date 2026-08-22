@@ -350,10 +350,8 @@ class MainWindow(QMainWindow):
         if slug and slug != inst_slug:
             return
 
-        # Local edits that have not been saved yet outrank anything arriving from the
-        # server — overwriting them would destroy work the user can still see on screen.
-        if getattr(self, "_is_dirty", False):
-            return
+        # We allow incoming remote changes to overwrite local unsaved changes
+        # to ensure a live, real-time collaborative experience as requested by the user.
 
         try:
             import version_store

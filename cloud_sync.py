@@ -7,9 +7,12 @@ import re
 import json
 import time
 import requests
+import threading
 from collections import deque
 from PySide6.QtCore import QObject, Signal, QUrl, QTimer
 from api_client import api_client
+
+_push_lock = threading.Lock()
 
 try:
     from PySide6.QtWebSockets import QWebSocket
@@ -25,10 +28,11 @@ def pull_all_from_rtdb(auth_data: dict = None) -> tuple:
     return api_client.pull_all_from_rtdb(auth_data)
 
 def push_version_to_rtdb(slug: str, filename: str, roz_data: dict, auth_data: dict = None) -> bool:
-    try:
-        return api_client.push_version_to_rtdb(slug, filename, roz_data, auth_data)
-    except Exception:
-        return False
+    with _push_lock:
+        try:
+            return api_client.push_version_to_rtdb(slug, filename, roz_data, auth_data)
+        except Exception:
+            return False
 
 def push_institution_to_rtdb(slug: str, auth_data: dict = None) -> bool:
     """Pushes an institution's SETTINGS only — name, colour, folders, active version.
