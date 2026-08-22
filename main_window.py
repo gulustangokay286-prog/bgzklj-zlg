@@ -328,18 +328,8 @@ class MainWindow(QMainWindow):
         """A push only says 'something changed'; the data still has to be fetched."""
         if slug and slug != getattr(self, "institution_slug", None):
             return
-        import threading
-        from PySide6.QtCore import QTimer
-
-        def _worker():
-            try:
-                from api_client import api_client
-                api_client.pull_all_from_rtdb(getattr(self, "auth_data", None))
-            except Exception as e:
-                print(f"[MainWindow] realtime pull note: {e}")
-            QTimer.singleShot(0, lambda: self._on_remote_data_updated(slug, ""))
-
-        threading.Thread(target=_worker, daemon=True).start()
+        if hasattr(self, "cloud_worker") and self.cloud_worker:
+            self.cloud_worker.request_pull()
 
     def _on_remote_data_updated(self, slug, filename):
         inst_slug = getattr(self, "institution_slug", None)
