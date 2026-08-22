@@ -434,6 +434,7 @@ class TimetablePrintPreview(QDialog):
             printer.setFullPage(True)
             
             dlg = QPrintDialog(printer, self)
+            dlg.setWindowTitle("Yazdır")
             if dlg.exec() == QPrintDialog.Accepted:
                 self._paint(printer)
                 QMessageBox.information(self, "Yazdırıldı", "Yazdırma işlemi yazıcıya başarıyla iletildi.")
@@ -448,15 +449,30 @@ class TimetablePrintPreview(QDialog):
 
     def direct_print(self):
         try:
+            from PySide6.QtPrintSupport import QPrintDialog
             printer = QPrinter(QPrinter.HighResolution)
             mode = self.mode_combo.currentText()
             is_portrait = ("Sınıf Dersleri" in mode)
             printer.setPageOrientation(QPageLayout.Orientation.Portrait if is_portrait else QPageLayout.Orientation.Landscape)
             printer.setPageSize(QPageSize(QPageSize.A4))
             printer.setFullPage(True)
-            self._paint(printer)
+            
+            dlg = QPrintDialog(printer, self.parent() or self)
+            dlg.setWindowTitle("Yazdır")
+            if dlg.exec() == QPrintDialog.Accepted:
+                self._paint(printer)
+                QMessageBox.information(self.parent() or self, "Yazdırıldı", "Yazdırma işlemi yazıcıya başarıyla iletildi.")
+                return True
+            return False
         except Exception as e:
-            self._export_pdf()
+            reply = QMessageBox.question(
+                self.parent() or self, "Yazıcı Uyarısı",
+                f"Sistem yazıcısına ulaşılamadı:\n{e}\n\nDoğrudan PDF olarak kaydetmek ister misiniz?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply == QMessageBox.Yes:
+                self._export_pdf()
+            return False
 
     def _paint(self, printer):
         painter = QPainter(printer)

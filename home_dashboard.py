@@ -2011,6 +2011,13 @@ class HomeDashboard(QWidget):
         self.display_name = get_user_display_name(user_email, self, self.auth_data)
         
         version_store.migrate_existing_data()
+        # Move any single-machine teacher reservations into the institutions'
+        # meta.json, which syncs — so they become editable from every computer.
+        try:
+            import constraint_sync
+            constraint_sync.migrate_local_reservations()
+        except Exception as e:
+            print(f"[HomeDashboard] reservation migration note: {e}")
         self._build_ui()
         self._refresh_institutions()
         

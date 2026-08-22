@@ -18,15 +18,17 @@ class ConstraintsDialog(QDialog):
         self.target_type = target_type  # "ogretmen" veya "sinif"
         self.preselected_name = preselected_name
         
-        settings = self.data_store.get("settings", {})
-        self.periods = int(settings.get("periods", self.data_store.get("ders_saati", 8)))
-        if self.periods <= 0: self.periods = 8
-        self.days = settings.get("days")
-        if not self.days:
-            self.day_count = int(settings.get("days_count", settings.get("day_count", self.data_store.get("gun_sayisi", 5))))
-            from timetable_grid import DAYS
-            self.days = DAYS[:self.day_count]
-        
+        # Gün/saat boyutları Zaman Tablosu ekranıyla ORTAK kaynaktan gelir; ikisi
+        # farklı hesaplarsa matrisler kayar ve ekranlar birbirini ezer.
+        import constraint_sync
+        self._cs = constraint_sync
+        self.days = constraint_sync.day_names(self.data_store)
+        self.day_count, self.periods = constraint_sync.grid_dimensions(self.data_store)
+
+        # Düzenlenen matrisler hafızada tutulur; yalnızca "Kaydet ve Uygula" ile yazılır,
+        # böylece sadece ekranı açıp gezinmek veriye dokunmaz (eski davranış yazıyordu).
+        self._matrices = {}
+
         self.setWindowTitle("Gelişmiş Planlama ve Zaman Kısıtlamaları")
         self.resize(840, 600)
         self.setStyleSheet("""
@@ -82,7 +84,8 @@ class ConstraintsDialog(QDialog):
         header_layout.addWidget(btn_clear_all)
         t1_lay.addLayout(header_layout)
         
-        hint = QLabel("💡 İpucu: Kısıtlamak/Kapatmak istediğiniz hücreye tıklayın. (Yeşil ✓ = Müsait, Kırmızı ✗ = Kapalı)")
+        hint = QLabel("💡 İpucu: Hücreye tıklayarak durumu değiştirin (Yeşil ✓ Müsait → Kırmızı ✗ Kapalı → Sarı ? Tercih Edilmez).<br>"
+                      "Bu ekran <b>Zaman Tablosu</b> ekranıyla tamamen aynı veriyi kullanır; birinde yaptığınız değişiklik diğerine de yansır.")
         hint.setStyleSheet("color: #64748B; font-style: italic; font-size: 11px;")
         t1_lay.addWidget(hint)
         
@@ -208,63 +211,77 @@ class ConstraintsDialog(QDialog):
     def _get_current_name(self):
         return self.combo_target.currentText()
 
+    def _entity_for(self, name):
+        key = "ogretmenler" if self.target_type == "ogretmen" else "siniflar"
+        return next((item for item in self.data_store.get(key, []) if item.get("ad") == name), None)
+
+    def _matrix_for(self, name):
+        """Bu birimin düzenlenmekte olan matrisi (ilk erişimde ortak kaynaktan yüklenir)."""
+        if name not in self._matrices:
+            entity = self._entity_for(name) or {}
+            self._matrices[name] = self._cs.get_matrix(entity, name, self.data_store)
+        return self._matrices[name]
+
     def _load_matrix_for_current(self):
         name = self._get_current_name()
-        if not name: return
-        
-        entity_constraints = self.data_store.get("kisitlamalar", {}).get(name, {})
-        key = "ogretmenler" if self.target_type == "ogretmen" else "siniflar"
-        entity = next((item for item in self.data_store.get(key, []) if item.get("ad") == name), {})
-        toff = entity.get("timeoff", [])
-        
+        if not name:
+            return
+        matrix = self._matrix_for(name)
         for p in range(self.periods):
             for d in range(len(self.days)):
-                cell_key = f"{d},{p}"
-                is_available = True
-                if cell_key in entity_constraints:
-                    is_available = entity_constraints[cell_key]
-                elif toff and d < len(toff) and p < len(toff[d]):
-                    is_available = (toff[d][p] > 0)
-                self._set_cell_state(p, d, is_available)
+                self._set_cell_state(p, d, matrix[d][p], store=False)
 
-    def _set_cell_state(self, row, col, is_available):
+    def _set_cell_state(self, row, col, state, store=True):
+        """row = ders saati (period), col = gün. state: 2 açık / 1 tercih edilmez / 0 kapalı."""
+        state = self._cs._coerce_state(state)
+
         item = QTableWidgetItem()
         item.setTextAlignment(Qt.AlignCenter)
-        font = QFont("Arial", 10, QFont.Bold)
-        item.setFont(font)
-        
-        if is_available:
+        item.setFont(QFont("Arial", 10, QFont.Bold))
+
+        if state == self._cs.OPEN:
             item.setText("✓ Müsait")
             item.setBackground(QBrush(QColor("#E8F5E9")))
             item.setForeground(QBrush(QColor("#2E7D32")))
-        else:
+        elif state == self._cs.CLOSED:
             item.setText("✗ KAPALI")
             item.setBackground(QBrush(QColor("#FFEBEE")))
             item.setForeground(QBrush(QColor("#C62828")))
-            
+        else:
+            item.setText("? Tercih Edilmez")
+            item.setBackground(QBrush(QColor("#FEF9C3")))
+            item.setForeground(QBrush(QColor("#A16207")))
+
         self.table.setItem(row, col, item)
-        
-        name = self._get_current_name()
-        if name:
-            if name not in self.data_store["kisitlamalar"]:
-                self.data_store["kisitlamalar"][name] = {}
-            self.data_store["kisitlamalar"][name][f"{col},{row}"] = is_available
+
+        if store:
+            name = self._get_current_name()
+            if name:
+                self._matrix_for(name)[col][row] = state
 
     def _on_cell_clicked(self, row, col):
-        item = self.table.item(row, col)
-        current_available = True
-        if item and "KAPALI" in item.text():
-            current_available = False
-        self._set_cell_state(row, col, not current_available)
+        name = self._get_current_name()
+        if not name:
+            return
+        # Zaman Tablosu ekranıyla aynı döngü: ✓ -> ✗ -> ? -> ✓
+        current = self._matrix_for(name)[col][row]
+        if current == self._cs.OPEN:
+            new_state = self._cs.CLOSED
+        elif current == self._cs.CLOSED:
+            new_state = self._cs.AVOID
+        else:
+            new_state = self._cs.OPEN
+        self._set_cell_state(row, col, new_state)
 
     def _toggle_entire_day(self, day_idx, target_state):
+        state = self._cs.OPEN if target_state else self._cs.CLOSED
         for p in range(self.periods):
-            self._set_cell_state(p, day_idx, target_state)
+            self._set_cell_state(p, day_idx, state)
 
     def _make_all_available(self):
         for p in range(self.periods):
             for d in range(len(self.days)):
-                self._set_cell_state(p, d, True)
+                self._set_cell_state(p, d, self._cs.OPEN)
 
     def _save_and_accept(self):
         # Save pedagogical settings
@@ -284,22 +301,28 @@ class ConstraintsDialog(QDialog):
                 elif idx == 2:
                     sub_windows[s_name] = "afternoon"
         c["subject_windows"] = sub_windows
-        
-        # Synchronize timeoff matrix to all entities in data_store
-        kisitlamalar = self.data_store.get("kisitlamalar", {})
-        for key in ["ogretmenler", "siniflar"]:
-            for entity in self.data_store.get(key, []):
-                ent_name = entity.get("ad")
-                if ent_name in kisitlamalar:
-                    ent_k = kisitlamalar[ent_name]
-                    toff = []
-                    for d in range(len(self.days)):
-                        day_row = []
-                        for p in range(self.periods):
-                            cell_k = f"{d},{p}"
-                            val = 2 if ent_k.get(cell_k, True) else 0
-                            day_row.append(val)
-                        toff.append(day_row)
-                    entity["timeoff"] = toff
-                    
+
+        # Yalnızca bu ekranda GERÇEKTEN düzenlenen birimler yazılır. Eskiden burası
+        # kisitlamalar sözlüğündeki her birimin timeoff'unu bool'lardan yeniden
+        # üretiyordu; bu, 3 durumlu "? tercih edilmez" işaretlerini sessizce "açık"a
+        # çeviriyor ve dokunulmamış birimlerin verisini eziyordu.
+        for name, matrix in self._matrices.items():
+            entity = self._entity_for(name)
+            if entity is not None:
+                self._cs.set_matrix(entity, name, self.data_store, matrix)
+
+        # Kalan birimlerin iki gösterimini de hizada tut (eski kayıtları onarır).
+        self._cs.sync_all(self.data_store)
+
+        if self.target_type == "ogretmen":
+            try:
+                inst_slug = self.data_store.get("settings", {}).get("institution_slug")
+                if not inst_slug:
+                    import version_store
+                    inst_slug = version_store.get_last_active_institution_slug()
+                if inst_slug:
+                    self._cs.publish(inst_slug, self.data_store)
+            except Exception as e:
+                print(f"[CONSTRAINTS_SAVE_ERR] global publish failed: {e}")
+
         self.accept()

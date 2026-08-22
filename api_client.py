@@ -659,6 +659,23 @@ class APIClient:
         if deleted_folders:
             merged["deleted_folders"] = list(deleted_folders)
 
+        # Teacher hour reservations and published availability are stamped with the
+        # time they were last edited. merged.update() above would hand the win to the
+        # server unconditionally, and the server is a round-trip behind an edit made
+        # here seconds ago — so a reservation could vanish the moment a poll landed.
+        # Keep whichever side is actually newer; that also lets an edit made on another
+        # computer win here, which is the point of syncing them at all.
+        for block_key in ("teacher_reservations", "teacher_availability"):
+            local_block = local_meta.get(block_key)
+            remote_block = remote_meta.get(block_key)
+            if not isinstance(local_block, dict):
+                continue
+            if not isinstance(remote_block, dict):
+                merged[block_key] = local_block
+                continue
+            if str(local_block.get("updated") or "") > str(remote_block.get("updated") or ""):
+                merged[block_key] = local_block
+
         version_store._atomic_write_json(meta_path, merged)
         version_store._invalidate_meta_cache(os.path.basename(inst_dir.rstrip(os.sep)))
 

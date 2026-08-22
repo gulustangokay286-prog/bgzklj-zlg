@@ -143,7 +143,7 @@ class CloudSyncWorker(QObject):
                 fn = item.get("filename", "")
                 data = item.get("data")
                 
-                self.sync_status_changed.emit("Veritabanınız korunuyor: Senkronize ediliyor...")
+                self.sync_status_changed.emit("Veritabanı senkronize ediliyor...")
                 success = False
                 
                 if act == "push_version" and data:
@@ -161,9 +161,9 @@ class CloudSyncWorker(QObject):
                     with self._lock:
                         if len(self._queue) > 0:
                             self._queue.popleft()
-                    self.sync_status_changed.emit("Veritabanınız korunuyor: Canlı Senkronize (VDS Aktif)")
+                    self.sync_status_changed.emit("Veritabanı korunuyor")
                 else:
-                    self.sync_status_changed.emit("Veritabanınız korunuyor: Bağlantı bekleniyor...")
+                    self.sync_status_changed.emit("Bağlantı bekleniyor...")
                     self._sleep_interruptible(3)
             else:
                 now = time.time()
@@ -187,7 +187,7 @@ class CloudSyncWorker(QObject):
                         if pull_ok:
                             self._offline_streak = 0
                             self.sync_status_changed.emit(
-                                "Veritabanınız korunuyor: Canlı Senkronize (VDS Aktif)"
+                                "Veritabanı korunuyor"
                             )
                             if new_count > 0:
                                 self.institutions_list_changed.emit()

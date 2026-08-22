@@ -19,7 +19,7 @@ class StickyGhostWidget(QLabel):
     _hovered_table = None
     last_drop_time = 0
 
-    def __init__(self, pixmap, drag_data, parent_window=None):
+    def __init__(self, pixmap, drag_data, parent_window=None, grab_offset=None):
         if StickyGhostWidget._active_instance:
             StickyGhostWidget._active_instance.cancel()
 
@@ -29,7 +29,7 @@ class StickyGhostWidget(QLabel):
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
-        
+
         self.setPixmap(pixmap)
         self.setFixedSize(pixmap.size())
         # Low opacity so the ghost reads as "in flight" rather than a fully solid card
@@ -38,6 +38,19 @@ class StickyGhostWidget(QLabel):
         self.parent_window = parent_window
         self._tick_count = 0
         self._last_cursor_pos = None
+        # Where inside the card the user grabbed it. The ghost keeps that exact offset
+        # under the cursor, and the target cell is read from the ghost's own top-left
+        # corner — so a block always lands where it is drawn. Previously the ghost was
+        # CENTERED on the cursor while the drop cell was read from the cursor itself,
+        # which for a 2-hour block put the cursor over the block's second half: the
+        # lesson landed one period to the right of where it appeared, and putting a
+        # lesson back where it came from was nearly impossible.
+        if grab_offset is None:
+            grab_offset = QPoint(pixmap.width() // 2, pixmap.height() // 2)
+        # Keep the grab point inside the pixmap so the anchor can never fall outside it.
+        gx = max(0, min(int(grab_offset.x()), max(0, pixmap.width() - 1)))
+        gy = max(0, min(int(grab_offset.y()), max(0, pixmap.height() - 1)))
+        self._grab_offset = QPoint(gx, gy)
 
         # Follow cursor with fast timer
         self._timer = QTimer(self)
@@ -54,10 +67,22 @@ class StickyGhostWidget(QLabel):
         if StickyGhostWidget._active_instance == self:
             QApplication.instance().installEventFilter(self)
 
+    def _anchor_global(self, cursor_global):
+        """Global point used for hit-testing: a little way inside the ghost's FIRST cell.
+
+        Reading the cell from the ghost's exact corner is fragile — that pixel sits on
+        the grid line, so rounding decides whether the row/column comes back as the
+        intended one or its neighbour. Nudging a few pixels inward makes the answer the
+        cell the user actually sees the ghost covering.
+        """
+        top_left = cursor_global - self._grab_offset
+        return top_left + QPoint(4, 4)
+
     def _update_pos(self):
         cur = QCursor.pos()
         # Always move the ghost itself every tick so it tracks the cursor smoothly.
-        self.move(cur.x() - self.width() // 2, cur.y() - self.height() // 2)
+        top_left = cur - self._grab_offset
+        self.move(top_left.x(), top_left.y())
 
         # The hit-testing + preview computation below (QApplication.widgetAt is a global
         # window hit-test) is the expensive part. Running it on every 12ms tick was the
@@ -90,7 +115,7 @@ class StickyGhostWidget(QLabel):
 
         if table:
             StickyGhostWidget._hovered_table = table
-            local_pos = table.viewport().mapFromGlobal(cur)
+            local_pos = table.viewport().mapFromGlobal(self._anchor_global(cur))
             r = table.rowAt(local_pos.y())
             c = table.columnAt(local_pos.x())
             if r >= 0 and c >= 0:
@@ -125,10 +150,13 @@ class StickyGhostWidget(QLabel):
                 
             if event.button() == Qt.LeftButton:
                 click_pos = QCursor.pos()
+                # Resolve the drop anchor while the ghost is still alive; cancel()
+                # schedules this widget for deletion.
+                anchor_pos = self._anchor_global(click_pos)
                 data = dict(self.drag_data)
                 self.cancel()
                 StickyGhostWidget.last_drop_time = time.time()
-                
+
                 target_widget = QApplication.widgetAt(click_pos)
                 candidates = [obj, target_widget]
                 
@@ -145,7 +173,9 @@ class StickyGhostWidget(QLabel):
                         break
                         
                 if table:
-                    local_pos = table.viewport().mapFromGlobal(click_pos)
+                    # Same anchor the live preview used, so the lesson lands exactly on
+                    # the cells the preview highlighted.
+                    local_pos = table.viewport().mapFromGlobal(anchor_pos)
                     row = table.rowAt(local_pos.y())
                     col = table.columnAt(local_pos.x())
                     if row >= 0 and col >= 0:
@@ -688,7 +718,7 @@ class DraggableLessonCard(QLabel):
         self.setText(display_text)
         self.setAlignment(Qt.AlignCenter)
         self.setFixedSize(card_width, card_height)
-        self.setToolTip(f"📚 {self.subject_name}{' (🔗 Birleşik Ders)' if self.is_comb else ''}\n🎓 Sınıf: {self.class_name}\n👨‍🏫 Öğretmen: {self.teacher}\n⏱️ Süre: {self.duration} Saat")
+        self.setToolTip(f"{self.subject_name}{' (Birleşik Ders)' if self.is_comb else ''}\nSınıf: {self.class_name}\nÖğretmen: {self.teacher}\nSüre: {self.duration} Saat")
         
         c = QColor(color)
         if c.isValid():
@@ -735,7 +765,7 @@ class DraggableLessonCard(QLabel):
             p.drawRoundedRect(badge_r, 2, 2)
             p.setFont(QFont("Segoe UI", 9, QFont.Bold))
             p.setPen(QColor("#1D4ED8"))
-            p.drawText(badge_r, Qt.AlignCenter, "📎")
+            p.drawText(badge_r, Qt.AlignCenter, "+")
             p.end()
         
     def enterEvent(self, event):
@@ -753,7 +783,7 @@ class DraggableLessonCard(QLabel):
         if win and hasattr(win, "statusBar"):
             cls_txt = self.class_name if self.class_name else "-"
             tch_txt = self.teacher if self.teacher else "-"
-            win.statusBar().showMessage(f"📚 {self.subject_name}  |  🎓 {cls_txt}  |  👨‍🏫 {tch_txt}  ({self.duration} Saat)")
+            win.statusBar().showMessage(f"{self.subject_name}  •  {cls_txt}  •  {tch_txt}  ({self.duration} Saat)")
 
     def leaveEvent(self, event):
         super().leaveEvent(event)
@@ -794,7 +824,9 @@ class DraggableLessonCard(QLabel):
         data = self._get_card_data()
         pix = self.grab()
         win = self.window()
-        StickyGhostWidget(pix, data, win)
+        # Where on the card the user pressed, so the ghost keeps that grip.
+        StickyGhostWidget(pix, data, win,
+                          grab_offset=getattr(self, "_drag_start_pos", None))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -1032,33 +1064,6 @@ class UnplacedLessonsDock(QWidget):
         self.scroll.setWidget(self.container)
         self.layout.addWidget(self.scroll, 1)
         
-        # 'Daha Fazla Ders Ekle' button
-        self.btn_add_more = QPushButton("➕ Daha Fazla Ders Ekle...")
-        self.btn_add_more.setCursor(Qt.PointingHandCursor)
-        self.btn_add_more.setFixedHeight(32)
-        self.btn_add_more.setMinimumWidth(160)
-        self.btn_add_more.setStyleSheet("""
-            QPushButton {
-                background: #4F46E5;
-                color: #FFFFFF;
-                font-family: 'Segoe UI', system-ui;
-                font-size: 11.5px;
-                font-weight: bold;
-                padding: 4px 12px;
-                border-radius: 6px;
-                border: 1px solid #4338CA;
-            }
-            QPushButton:hover {
-                background: #4338CA;
-                border-color: #3730A3;
-            }
-            QPushButton:pressed {
-                background: #3730A3;
-            }
-        """)
-        self.btn_add_more.clicked.connect(self._on_add_more_clicked)
-        self.layout.addWidget(self.btn_add_more)
-        
         self.scroll.installEventFilter(self)
         self.scroll.viewport().installEventFilter(self)
         self.container.installEventFilter(self)
@@ -1153,8 +1158,8 @@ class UnplacedLessonsDock(QWidget):
             act_2.triggered.connect(make_handler(s_name, t_name, c_name, 2))
             act_2_2.triggered.connect(make_handler(s_name, t_name, c_name, 4))
             
-        from PySide6.QtCore import QPoint
-        menu.exec_(self.btn_add_more.mapToGlobal(QPoint(0, self.btn_add_more.height())))
+        from PySide6.QtGui import QCursor
+        menu.exec_(QCursor.pos())
 
     def _add_custom_card(self, s_name, t_name, c_name, duration):
         win = self.window()
@@ -1723,6 +1728,18 @@ class DropTableWidget(QTableWidget):
         self.clear_drag_preview()
         event.accept()
 
+    def _drop_anchor(self, pos, lesson_info):
+        """Viewport point identifying the block's FIRST cell for a drop at `pos`.
+
+        The drag pixmap's top-left sits at cursor - grab offset, so that corner (nudged
+        slightly inward, off the grid line) is the cell the user sees the block covering.
+        """
+        dx = int((lesson_info or {}).get("grab_dx", 0) or 0)
+        dy = int((lesson_info or {}).get("grab_dy", 0) or 0)
+        if not dx and not dy:
+            return pos
+        return pos - QPoint(dx, dy) + QPoint(4, 4)
+
     def dragMoveEvent(self, event):
         if event.mimeData().hasFormat("application/x-lesson"):
             try:
@@ -1730,11 +1747,12 @@ class DropTableWidget(QTableWidget):
                 lesson_info = json.loads(data)
             except Exception:
                 lesson_info = {}
-                
-            item = self.itemAt(event.pos())
-            r = self.row(item) if item else self.rowAt(event.pos().y())
-            c = self.column(item) if item else self.columnAt(event.pos().x())
-            
+
+            anchor = self._drop_anchor(event.pos(), lesson_info)
+            item = self.itemAt(anchor)
+            r = self.row(item) if item else self.rowAt(anchor.y())
+            c = self.column(item) if item else self.columnAt(anchor.x())
+
             if r >= 0 and c >= 0:
                 self.set_drag_preview(r, c, lesson_info)
                 event.acceptProposedAction()
@@ -1753,10 +1771,11 @@ class DropTableWidget(QTableWidget):
             except Exception:
                 lesson_info = {}
                 
-            item = self.itemAt(event.pos())
-            row = self.row(item) if item else self.rowAt(event.pos().y())
-            col = self.column(item) if item else self.columnAt(event.pos().x())
-            
+            anchor = self._drop_anchor(event.pos(), lesson_info)
+            item = self.itemAt(anchor)
+            row = self.row(item) if item else self.rowAt(anchor.y())
+            col = self.column(item) if item else self.columnAt(anchor.x())
+
             if row >= 0 and col >= 0 and lesson_info:
                 teacher = lesson_info.get("teacher", "")
                 dur = int(lesson_info.get("duration", 1))
@@ -1934,7 +1953,11 @@ class DropTableWidget(QTableWidget):
                         pixmap = self.viewport().grab(rect)
 
                         win = self.window()
-                        StickyGhostWidget(pixmap, data, win)
+                        # Hand over where inside the block it was grabbed, so the ghost
+                        # sits exactly over the cells it came from and can be dropped
+                        # straight back onto them.
+                        StickyGhostWidget(pixmap, data, win,
+                                          grab_offset=self.drag_start_pos - rect.topLeft())
 
     def mouseMoveEvent(self, event):
         # 1. Drag & Drop start when Left button is pressed
@@ -2016,20 +2039,27 @@ class DropTableWidget(QTableWidget):
                         data["combined_classes"] = combined_classes
                         if is_comb and combined_classes:
                             data["class_name"] = " + ".join(combined_classes)
-                        
-                        mime.setData("application/x-lesson", QByteArray(json.dumps(data).encode()))
-                        drag.setMimeData(mime)
 
                         # Always size the dragged pixmap to the lesson's FULL duration span.
                         rect = self._preview_rect({"row": orig_r, "col": orig_c, "duration": orig_dur})
                         if rect is None:
                             rect = self.visualRect(self.model().index(orig_r, orig_c))
                         pixmap = self.viewport().grab(rect)
-                        drag.setPixmap(pixmap)
-                        
+
                         hotspot = event.pos() - rect.topLeft()
+                        # Travel with the payload so the drop side can work out where the
+                        # block's FIRST cell is. Without it the drop reads the cell under
+                        # the cursor, which for a 2-hour block grabbed by its right half
+                        # is the block's second cell — the lesson then lands a period
+                        # further right than the ghost shows.
+                        data["grab_dx"] = int(hotspot.x())
+                        data["grab_dy"] = int(hotspot.y())
+
+                        mime.setData("application/x-lesson", QByteArray(json.dumps(data).encode()))
+                        drag.setMimeData(mime)
+                        drag.setPixmap(pixmap)
                         drag.setHotSpot(hotspot)
-                        
+
                         drag.exec_(Qt.MoveAction)
                         return
 
@@ -2925,8 +2955,8 @@ class TimetableGrid(QWidget):
             self.info_teacher_lbl.setText(t_display)
             
             if win and hasattr(win, "statusBar"):
-                lock_text = " [🔒 Kilitli]" if is_locked else ""
-                win.statusBar().showMessage(f"📚 {subj}  |  🎓 {cls}  |  👨‍🏫 {teacher}  ({dur} Saat){lock_text}")
+                lock_text = " [Kilitli]" if is_locked else ""
+                win.statusBar().showMessage(f"{subj}  •  {cls}  •  {teacher}  ({dur} Saat){lock_text}")
         else:
             self.info_color_box.setStyleSheet("background: transparent; border: 1px solid #666; border-radius: 3px;")
             self.info_subject_lbl.setText("")
@@ -3006,6 +3036,7 @@ class TimetableGrid(QWidget):
     def set_mode_single_entity(self, periods: int, days_list: list):
         """Standard view: 1 entity (class/teacher), Rows=Periods, Cols=Days"""
         self._periods = periods
+        self._active_table_layout_sig = ("single", periods, tuple(days_list))
         self.table.setRowCount(periods)
         self.table.setColumnCount(len(days_list))
         if hasattr(self.table, "asc_header"):
@@ -3020,13 +3051,9 @@ class TimetableGrid(QWidget):
         self.current_view_mode = "classes"
         total_cols = len(days_list) * periods
 
-        # Every single drag/drop calls this to rebuild the grid. Re-running the header/size
-        # setup below on every call was the main source of the "slow to settle" feel, since
-        # 99% of the time only the CONTENTS changed, not the class list/periods/days
-        # themselves. Skip the structural setup when it's identical to last time.
-        sig = (tuple(class_list), periods, tuple(days_list))
-        if getattr(self, "_classes_layout_sig", None) != sig:
-            self._classes_layout_sig = sig
+        sig = ("classes", tuple(class_list), periods, tuple(days_list))
+        if getattr(self, "_active_table_layout_sig", None) != sig:
+            self._active_table_layout_sig = sig
             self.table.setRowCount(len(class_list))
             self.table.setVerticalHeaderLabels(class_list)
             self.table.setColumnCount(total_cols)
@@ -3048,9 +3075,9 @@ class TimetableGrid(QWidget):
         self.current_view_mode = "teachers"
         total_cols = len(days_list) * periods
 
-        sig = (tuple(teacher_list), periods, tuple(days_list))
-        if getattr(self, "_teachers_layout_sig", None) != sig:
-            self._teachers_layout_sig = sig
+        sig = ("teachers", tuple(teacher_list), periods, tuple(days_list))
+        if getattr(self, "_active_table_layout_sig", None) != sig:
+            self._active_table_layout_sig = sig
             self.table.setRowCount(len(teacher_list))
             self.table.setVerticalHeaderLabels(teacher_list)
             self.table.setColumnCount(total_cols)

@@ -269,66 +269,9 @@ class MainWindow(QMainWindow):
         self._refresh_tree()
         self._is_loading = False
         
-        # Setup StatusBar and Cloud Worker
-        self.statusBar().showMessage("Hazır")
-        
-        # Cloud Sync Status Label
-        self.cloud_status_lbl = QLabel("Veritabanınız korunuyor: Senkronize")
-        self.cloud_status_lbl.setStyleSheet("color: #15803D; font-weight: bold; margin-right: 10px; font-size: 11px;")
-        self.statusBar().addPermanentWidget(self.cloud_status_lbl)
-        
-        from PySide6.QtWidgets import QPushButton
-        btn_download = QPushButton(" Güncel Versiyonu İndir")
-        from timetable_grid import make_grid_action_icon
-        btn_download.setIcon(make_grid_action_icon("download", 16))
-        btn_download.setCursor(Qt.PointingHandCursor)
-        btn_download.setStyleSheet("""
-            QPushButton {
-                padding: 3px 12px; font-weight: bold; background: #0284C7; color: white;
-                border-radius: 4px; border: none; font-size: 11px;
-            }
-            QPushButton:hover { background: #0369A1; }
-        """)
-        def open_download_page():
-            import webbrowser
-            download_url = self.data_store.get("settings", {}).get("download_url", "https://chenki.net/indir")
-            webbrowser.open(download_url)
-            self.statusBar().showMessage(f"İndirme sayfası açılıyor: {download_url}")
-            
-        btn_download.clicked.connect(open_download_page)
-        self.statusBar().addPermanentWidget(btn_download)
-
-        # Home button (back to dashboard)
-        btn_home = QPushButton("🏠  Ana Sayfa")
-        btn_home.setCursor(Qt.PointingHandCursor)
-        btn_home.setStyleSheet("""
-            QPushButton {
-                padding: 3px 14px; font-weight: bold; background: #7C3AED; color: white;
-                border-radius: 4px; border: none; font-size: 11px;
-            }
-            QPushButton:hover { background: #6D28D9; }
-        """)
-        btn_home.clicked.connect(self._go_home)
-        self.statusBar().addPermanentWidget(btn_home)
-
-        # Version / Institution info
-        inst_text = ""
-        if self.institution_name:
-            inst_text = f"🏫 {self.institution_name}"
-            if self.version_filename:
-                import re
-                m = re.match(r"v(\d+)_", self.version_filename)
-                if m:
-                    inst_text += f"  •  v{int(m.group(1))}"
-        else:
-            inst_text = "Chenki Akademi 2026 - 2027 Pro"
-        ver_lbl = QLabel(inst_text)
-        ver_lbl.setStyleSheet("color: #64748B; font-weight: bold; margin-left: 10px; margin-right: 10px;")
-        self.statusBar().addPermanentWidget(ver_lbl)
-        
-        # Cloud Sync Status Indicator
+        # Hide QStatusBar completely so bottom area is clear without wasted space
+        self.statusBar().hide()
         self.cloud_worker = None
-        self.cloud_status_lbl.setText("Veritabanınız korunuyor: Canlı Senkronize (VDS Aktif)")
 
         # Global Rollback / Undo / Redo Shortcuts
         from PySide6.QtGui import QKeySequence, QShortcut
@@ -338,12 +281,21 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+Y"), self, self._act_redo)
         QShortcut(QKeySequence("Ctrl+Shift+Z"), self, self._act_redo)
 
+    def _open_download_page(self):
+        import webbrowser
+        download_url = self.data_store.get("settings", {}).get("download_url", "https://chenki.net/indir")
+        webbrowser.open(download_url)
+
     
     def _on_remote_data_updated(self, slug, filename):
         if not slug or slug == getattr(self, "institution_slug", None):
             try:
                 import version_store
-                inst_slug = getattr(self, "institution_slug", "bogazici_egitim_kurumlari")
+                # Never fall back to a hardcoded institution here: doing so would pull
+                # another institution's schedule into this window.
+                inst_slug = getattr(self, "institution_slug", None)
+                if not inst_slug:
+                    return
                 latest_data = version_store.load_latest_version(inst_slug)
                 if latest_data:
                     if latest_data.get("grid_placements") != self.data_store.get("grid_placements") or latest_data.get("atamalar") != self.data_store.get("atamalar"):
@@ -540,6 +492,12 @@ class MainWindow(QMainWindow):
         # Wire the file menu (Integrated directly on Ribbon Tab Bar)
         fm = self._ribbon.file_menu
         
+        act_home = QAction(make_menu_icon("H", "#7C3AED", "#5B21B6"), "Ana Sayfa (Dashboard)", self)
+        act_home.triggered.connect(self._go_home)
+        fm.addAction(act_home)
+        
+        fm.addSeparator()
+        
         act_new = QAction(make_menu_icon("N", "#4CAF50", "#2E7D32"), "Yeni", self)
         act_new.triggered.connect(self._act_new)
         fm.addAction(act_new)
@@ -555,6 +513,10 @@ class MainWindow(QMainWindow):
         act_cloud_pull = QAction(make_menu_icon("C", "#0284C7", "#0369A1"), "Buluttan Verileri İndir / Senkronize Et", self)
         act_cloud_pull.triggered.connect(lambda: self._download_cloud_data(show_message=True))
         fm.addAction(act_cloud_pull)
+        
+        act_download = QAction(make_menu_icon("D", "#0284C7", "#0369A1"), "Güncel Versiyonu İndir (İndirme Sayfası)", self)
+        act_download.triggered.connect(self._open_download_page)
+        fm.addAction(act_download)
         
         act_update = QAction(make_menu_icon("U", "#8E44AD", "#6C3483"), "Evden Güncellemeleri Kontrol Et / İndir", self)
         act_update.triggered.connect(self._act_check_updates)
@@ -871,10 +833,10 @@ class MainWindow(QMainWindow):
         self._tab_widget = QTabWidget(right)
         self._tab_widget.setFont(QFont("Segoe UI", 9))
         self._tab_widget.setStyleSheet("""
-            QTabWidget::pane { border: 1px solid #BCC8D8; }
-            QTabBar::tab { padding: 5px 14px; font-size: 9pt; }
-            QTabBar::tab:selected { background: #FFFFFF; border-bottom: 3px solid #1E6DB5; color: #1E6DB5; }
-            QTabBar::tab:!selected { background: #F0F0F0; color: #555; }
+            QTabWidget::pane { border: 1px solid #CBD5E1; background: #FFFFFF; }
+            QTabBar::tab { padding: 6px 16px; font-size: 9pt; font-weight: bold; }
+            QTabBar::tab:selected { background: #FFFFFF; border-bottom: 3px solid #0071E3; color: #0071E3; }
+            QTabBar::tab:!selected { background: #F1F5F9; color: #64748B; }
         """)
 
         # Main timetable grid
@@ -882,6 +844,66 @@ class MainWindow(QMainWindow):
         periods = int(settings.get("periods", 8))
         self._grid = TimetableGrid(periods, right)
         self._tab_widget.addTab(self._grid, "Haftalık Program")
+        
+        # Top Header Bar on the right of the "Haftalık Program" tab (Bare clean text, no component boxes)
+        top_header_bar = QWidget()
+        top_header_bar.setStyleSheet("background: transparent; border: none;")
+        top_header_lay = QHBoxLayout(top_header_bar)
+        top_header_lay.setContentsMargins(0, 0, 12, 0)
+        top_header_lay.setSpacing(14)
+        top_header_lay.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+        # Status icon + label container (Checkmark + bare text)
+        status_box = QWidget()
+        status_box.setStyleSheet("background: transparent; border: none;")
+        status_lay = QHBoxLayout(status_box)
+        status_lay.setContentsMargins(0, 0, 0, 0)
+        status_lay.setSpacing(5)
+
+        from dialogs.edit_forms import make_edit_svg_icon
+        self.cloud_status_icon = QLabel()
+        self.cloud_status_icon.setStyleSheet("background: transparent; border: none;")
+        self.cloud_status_icon.setPixmap(make_edit_svg_icon("check", 14, "#16A34A").pixmap(14, 14))
+        status_lay.addWidget(self.cloud_status_icon)
+
+        self.cloud_status_lbl = QLabel("Veritabanı korunuyor")
+        self.cloud_status_lbl.setStyleSheet("""
+            QLabel {
+                color: #16A34A;
+                font-size: 12px;
+                font-weight: 600;
+                background: transparent;
+                border: none;
+            }
+        """)
+        status_lay.addWidget(self.cloud_status_lbl)
+        top_header_lay.addWidget(status_box)
+
+        # Version / Institution info (Bare text, NO emoji, elegant font)
+        inst_text = ""
+        if self.institution_name:
+            inst_text = f"{self.institution_name}"
+            if self.version_filename:
+                import re
+                m = re.match(r"v(\d+)_", self.version_filename)
+                if m:
+                    inst_text += f"  •  v{int(m.group(1))}"
+        else:
+            inst_text = "Chenki Akademi 2026 - 2027 Pro"
+
+        self.ver_lbl = QLabel(inst_text)
+        self.ver_lbl.setStyleSheet("""
+            QLabel {
+                color: #64748B;
+                font-size: 12px;
+                font-weight: 500;
+                background: transparent;
+                border: none;
+            }
+        """)
+        top_header_lay.addWidget(self.ver_lbl)
+
+        self._tab_widget.setCornerWidget(top_header_bar, Qt.TopRightCorner)
         
         # Connect drop signal
         self._grid.table.lesson_dropped.connect(self._on_lesson_dropped)
@@ -962,18 +984,23 @@ class MainWindow(QMainWindow):
                 for t in self.data_store.get("ogretmenler", []):
                     if t.get("ad"): t["ad"] = format_tr_name(t["ad"])
 
-                # Load global kisitlamalar and override local
-                from version_store import load_global_kisitlamalar
-                global_k = load_global_kisitlamalar()
-                inst_slug = self.data_store.get("settings", {}).get("institution_slug", "bogazici_egitim_kurumlari")
-                
                 if "kisitlamalar" not in self.data_store:
                     self.data_store["kisitlamalar"] = {}
-                
-                # Check if this institution has its own constraints in the global file
-                if inst_slug in global_k:
-                    for k, v in global_k[inst_slug].items():
-                        self.data_store["kisitlamalar"][k] = v
+
+                # Which institution this schedule actually belongs to. This used to
+                # fall back to a hardcoded "bogazici_egitim_kurumlari" whenever
+                # settings.institution_slug was missing — and it is missing on every
+                # existing schedule, since settings is empty — so opening ANY other
+                # institution pulled Boğaziçi's constraints in on top of its own.
+                import constraint_sync
+                inst_slug = (self.data_store.get("settings", {}) or {}).get("institution_slug") \
+                    or getattr(self, "institution_slug", None)
+                if inst_slug:
+                    self.data_store.setdefault("settings", {})["institution_slug"] = inst_slug
+
+                # Bring the two stored representations of every availability matrix
+                # back into agreement (repairs schedules written by older versions).
+                constraint_sync.sync_all(self.data_store)
 
                 self.statusBar().showMessage(f"Veriler yüklendi: {load_path}")
             except Exception as e:
@@ -1389,6 +1416,16 @@ class MainWindow(QMainWindow):
                         push_institution_to_rtdb(s_slug, auth_copy)
                 except Exception:
                     pass
+                # Republish this institution's teacher availability so the OTHER
+                # institutions' schedulers see it. Doing it on every save (not only
+                # when a constraints dialog happens to be used) is what makes the
+                # sharing work for institutions that were set up before this existed.
+                try:
+                    import constraint_sync
+                    if s_slug:
+                        constraint_sync.publish(s_slug, store_copy)
+                except Exception:
+                    pass
 
             threading.Thread(
                 target=_async_bg_sync,
@@ -1640,6 +1677,47 @@ class MainWindow(QMainWindow):
             lc_key = (format_tr_name(lc.get("subject_name", "")), format_tr_name(lc.get("class_name", "")), format_tr_name(lc.get("teacher", "")))
             loose_hours_by_group[lc_key] = loose_hours_by_group.get(lc_key, 0) + int(lc.get("duration", 1))
 
+        # ═══ STEP 1.5: Calculate Free Open Slots per Class on the Grid ═══
+        settings = self.data_store.get("settings", {})
+        periods = int(settings.get("periods", self.data_store.get("ders_saati", 8)))
+        if periods <= 0: periods = 8
+        days_list = settings.get("days")
+        if not days_list:
+            cnt = int(settings.get("day_count", self.data_store.get("gun_sayisi", 5)))
+            from timetable_grid import DAYS
+            days_list = DAYS[:cnt]
+        D = len(days_list)
+        P = periods
+
+        from auto_scheduler import _build_class_timeoff_map
+        blocked_class_map, _ = _build_class_timeoff_map(self.data_store)
+
+        # 1. Total open capacity per class
+        class_open_slots = {}
+        for cls in self.data_store.get("siniflar", []):
+            cn = (cls.get("ad") or cls.get("name") or "").strip()
+            if not cn: continue
+            closed_cnt = len(blocked_class_map.get(cn, set()))
+            class_open_slots[format_tr_name(cn)] = max(0, (D * P) - closed_cnt)
+
+        # 2. Currently placed non-filler hours on the grid per class
+        class_placed_hours = {}
+        for p in grid_placements:
+            if p.get("is_filler"): continue
+            p_s = (p.get("subject_name") or p.get("subject") or "").strip()
+            if not p_s or p_s.lower() in ["boş", "bos", "atanmadı"]: continue
+            p_c = (p.get("class_name") or p.get("class") or "").strip()
+            dur = int(p.get("duration", 1))
+            for sc in p_c.replace("&", "+").replace(",", "+").split("+"):
+                sc_clean = format_tr_name(sc.strip().split("(")[0].strip())
+                if sc_clean:
+                    class_placed_hours[sc_clean] = class_placed_hours.get(sc_clean, 0) + dur
+
+        # 3. Available free open slots per class
+        class_free_slots = {}
+        for cn_key, open_cap in class_open_slots.items():
+            class_free_slots[cn_key] = max(0, open_cap - class_placed_hours.get(cn_key, 0))
+
         # ═══ STEP 2: For each group, calculate parts and unplaced cards ═══
         unplaced = []
         for group_key, grp in grouped.items():
@@ -1681,12 +1759,6 @@ class MainWindow(QMainWindow):
                 p_s = (p.get("subject_name") or p.get("subject") or "").strip()
                 if not p_s or p_s.lower() in ["boş", "bos", "atanmadı"]:
                     continue
-                # Auto-scheduler "fill empty slots" padding duplicates a real subject just to
-                # avoid a visual gap — it must NOT count as "already placed" hours of the real
-                # assignment, or removing an actual assigned hour would never show back up
-                # here (there'd always be leftover filler copies making the total look
-                # over-satisfied). Filler blocks get their own loose, re-placeable dock card
-                # instead — see _delete_lesson_at's loose_unplaced_cards handling.
                 if p.get("is_filler"):
                     continue
                 if not matches_subject(p_s, s_name):
@@ -1727,9 +1799,7 @@ class MainWindow(QMainWindow):
                     })
 
             # Calculate total placed hours (sum of all hours placed on the grid), PLUS any
-            # hours already accounted for by a loose card for this exact group (see above) —
-            # otherwise this computed reconciliation would generate an extra, duplicate card
-            # for hours that are already showing up as their own direct loose card.
+            # hours already accounted for by a loose card for this exact group (see above)
             total_placed_hours = sum(max(1, s["dur"]) for s in matched_slots)
             loose_hours = loose_hours_by_group.get(group_key, 0)
             accounted_for_hours = total_placed_hours + loose_hours
@@ -1741,6 +1811,18 @@ class MainWindow(QMainWindow):
             remaining_hours = max(0, total_hours - accounted_for_hours)
             if remaining_hours <= 0:
                 continue
+
+            # Capacity constraint: if the class has no free open slots remaining on the grid,
+            # do not emit extra ghost cards into the dock!
+            c_key = format_tr_name(c_name.strip().split("(")[0].strip())
+            if display_mode == "classes" and c_key in class_free_slots:
+                avail_slots = class_free_slots[c_key]
+                if avail_slots <= 0:
+                    continue
+                remaining_hours = min(remaining_hours, avail_slots)
+                if remaining_hours <= 0:
+                    continue
+                class_free_slots[c_key] -= remaining_hours
                 
             # Group placed slots into contiguous blocks for block-matching
             matched_slots.sort(key=lambda x: (x["day"], x["period"]))
@@ -1809,6 +1891,24 @@ class MainWindow(QMainWindow):
                     "combined_classes": list(target_classes) if is_comb else []
                 })
                 
+        # Right after an auto-plan the computed "still owed" hours above are dropped:
+        # whatever could not be scheduled was already spelled out in the post-run report
+        # (teacher shortage at specific hours), so repeating it as a pile of draggable
+        # cards just makes the dock look like unfinished work. Cards the user creates by
+        # deleting a lesson off the grid are added below and always show.
+        if self.data_store.get("suppress_unplaced_dock"):
+            # Adding or editing assignments afterwards is the user asking for more
+            # lessons, so the dock has to start reporting again from that point on.
+            baseline = self.data_store.get("suppress_unplaced_baseline")
+            current = sum(
+                int(a.get("duration") or a.get("hours") or 1) for a in atamalar
+            )
+            if baseline is not None and current != baseline:
+                self.data_store["suppress_unplaced_dock"] = False
+                self.data_store.pop("suppress_unplaced_baseline", None)
+            else:
+                unplaced = []
+
         # Loose cards: anything removed straight off the grid (see _delete_lesson_at) shows up
         # here directly and unconditionally, scoped to the same class/teacher as everything
         # else in this view. This list is only READ here; a card is removed from it once it's
@@ -2256,7 +2356,9 @@ class MainWindow(QMainWindow):
         # ── 3.5. KESİN KONTROL: Çapraz Kurum Öğretmen Çakışması Kontrolü
         if teacher:
             import version_store
-            cross_busy = version_store.get_cross_institution_teacher_busy_slots(exclude_slug=getattr(self, "institution_slug", None))
+            import constraint_sync
+            my_slug = getattr(self, "institution_slug", None)
+            cross_busy = version_store.get_cross_institution_teacher_busy_slots(exclude_slug=my_slug)
             t_norm = version_store.normalize_teacher_name(teacher)
             cross_conflict = None
             for ext in range(duration):
@@ -2264,22 +2366,78 @@ class MainWindow(QMainWindow):
                 if check_slot in cross_busy:
                     cross_conflict = cross_busy[check_slot]
                     break
-            
+            # Exact-key lookup misses the same person written differently at the other
+            # branch ("Şeyma Nur Aker" vs "Şeyma Aker"), so fall back to the fuzzy
+            # matcher before concluding there is no clash.
+            if not cross_conflict:
+                for (busy_name, b_day, b_per), info in cross_busy.items():
+                    if b_day != day_idx or not (period_idx <= b_per < period_idx + duration):
+                        continue
+                    if busy_name != t_norm and version_store._matches_teacher(teacher, busy_name):
+                        cross_conflict = info
+                        break
+
+            # An hour another branch has reserved for this teacher counts as taken too,
+            # even though no lesson sits there yet.
+            if not cross_conflict:
+                try:
+                    reserved = constraint_sync.reserved_by_others(my_slug).get(t_norm, set())
+                    for ext in range(duration):
+                        if (day_idx, period_idx + ext) in reserved:
+                            owner = constraint_sync.reservations_for(teacher).get((day_idx, period_idx + ext), "")
+                            owner_name = owner
+                            try:
+                                for inst in version_store.list_institutions():
+                                    if inst.get("slug") == owner:
+                                        owner_name = inst.get("name", owner)
+                                        break
+                            except Exception:
+                                pass
+                            cross_conflict = {
+                                "institution_name": owner_name,
+                                "subject": "Rezerve saat",
+                                "class": "—",
+                                "period": period_idx + ext,
+                            }
+                            break
+                except Exception as e:
+                    print(f"[DROP] reservation check note: {e}")
+
             if cross_conflict:
                 c_inst = cross_conflict.get("institution_name", "Başka Kurum")
                 c_subj = cross_conflict.get("subject", "Ders")
                 c_cls = cross_conflict.get("class", "Sınıf")
                 c_per = cross_conflict.get("period", 0) + 1
-                QMessageBox.critical(
-                    self, "Çapraz Kurum Öğretmen Çakışması",
-                    f"⛔ <b>Çapraz Kurum Çakışması Tespit Edildi!</b><br><br>"
-                    f"<b>{teacher}</b> öğretmeni <b>{c_inst}</b> kurumunun aktif ders programında "
+                # Manual placement explains the clash and lets the user override it:
+                # they may be fixing exactly this problem, or the other institution's
+                # schedule may be the stale one. Auto-scheduling refuses the slot
+                # outright instead (see auto_scheduler cross_inst_map) — unless the
+                # user turns on "Diğer Kurumları Yoksay" there — since no one is
+                # present to make that judgement mid-run.
+                box = QMessageBox(self)
+                box.setIcon(QMessageBox.Warning)
+                box.setWindowTitle("Çapraz Kurum Öğretmen Çakışması")
+                box.setTextFormat(Qt.RichText)
+                box.setText(
+                    f"⚠️ <b>Bu saatte bu öğretmenin başka kurumda dersi var.</b><br><br>"
+                    f"<b>{teacher}</b> öğretmeni <b>{c_inst}</b> kurumunda "
                     f"<b>{day_name}</b> günü <b>{c_per}. ders saatinde</b> "
-                    f"zaten <b>{c_cls}</b> ({c_subj}) dersinde görevlidir!<br><br>"
-                    f"Bir öğretmen aynı saatte iki farklı kurumda ders veremez."
+                    f"<b>{c_cls}</b> ({c_subj}) dersinde görevli görünüyor.<br><br>"
+                    f"Yine de bu saate yerleştirmek istiyor musunuz?"
                 )
-                self.statusBar().showMessage(f"Çapraz çakışma engeli: {teacher} ({c_inst} - {day_name} {c_per}. saat)")
-                return
+                btn_ignore = box.addButton("Yoksay ve Yerleştir", QMessageBox.AcceptRole)
+                btn_cancel = box.addButton("Vazgeç", QMessageBox.RejectRole)
+                box.setDefaultButton(btn_cancel)
+                box.exec()
+
+                if box.clickedButton() is not btn_ignore:
+                    self.statusBar().showMessage(
+                        f"Yerleştirme iptal edildi: {teacher} ({c_inst} - {day_name} {c_per}. saat)"
+                    )
+                    return
+                self.statusBar().showMessage(
+                    f"Çakışma yok sayıldı: {teacher} ({c_inst} ile aynı saatte)"
+                )
 
         # ── 4. TÜM KONTROLLER BAŞARILI: Atomik ve Güvenli Yerleşim
         self.mark_dirty()
@@ -2961,15 +3119,99 @@ class MainWindow(QMainWindow):
                 self._refresh_tree()
                 
                 total_hours = sum(p.get("duration", 1) for p in grid_placements)
-                QMessageBox.information(
-                    self, "Otomatik Planlama Tamamlandı",
-                    f"🎉 Otomatik planlama başarıyla oluşturuldu!\n\nToplam {total_hours} ders saatinin tamamı haftalık çizelgeye eksiksiz (%100 Dolu) olarak yerleştirildi."
+
+                # After an auto-plan the dock starts clean: whatever could not be
+                # scheduled is explained in the report below rather than left sitting
+                # in the side list. Deleting a lesson from the grid still drops it
+                # there, because that path adds a loose card (see _delete_lesson_at).
+                self.data_store["loose_unplaced_cards"] = []
+                self.data_store["suppress_unplaced_dock"] = True
+                self.data_store["suppress_unplaced_baseline"] = sum(
+                    int(a.get("duration") or a.get("hours") or 1)
+                    for a in self.data_store.get("atamalar", [])
                 )
-                self.statusBar().showMessage(f"Otomatik planlama başarıyla oluşturuldu ({total_hours} ders saati yerleştirildi).")
+                self._show_auto_plan_report(total_hours)
+                self._refresh_unplaced_lessons()
+                self.statusBar().showMessage(f"Otomatik planlama tamamlandı ({total_hours} ders saati yerleştirildi).")
             else:
                 self.save_db(sync_from_grid=False)
                 self._refresh_grid()
                 self._refresh_tree()
+
+    def _show_auto_plan_report(self, total_hours):
+        """Explains the result of an auto-plan run, including WHY cells were left empty.
+
+        The old message always claimed a 100%-full schedule, which was simply untrue
+        whenever the teachers on hand could not cover every open hour — leaving the
+        user to guess whether the gaps were a bug or their own data.
+        """
+        from timetable_grid import DAYS
+        report = self.data_store.get("auto_schedule_report") or {}
+        understaffed = report.get("understaffed_slots") or []
+        unplaced = report.get("unplaced_summary") or []
+
+        if not understaffed and not unplaced:
+            QMessageBox.information(
+                self, "Otomatik Planlama Tamamlandı",
+                f"🎉 Otomatik planlama tamamlandı.<br><br>"
+                f"Toplam <b>{total_hours} ders saati</b> haftalık çizelgeye eksiksiz yerleştirildi."
+            )
+            return
+
+        parts = [
+            "✅ Otomatik planlama tamamlandı.<br>",
+            f"Çizelgeye <b>{total_hours} ders saati</b> yerleştirildi.<br><br>",
+            "<b>⚠️ Bazı saatler boş kaldı.</b> Sebep, planlayıcının yetersizliği değil; "
+            "o saatlerde <b>ders verebilecek öğretmen bulunmaması</b>:<br><br>",
+        ]
+
+        if understaffed:
+            parts.append("<b>Öğretmen yetersizliği olan saatler</b><br>")
+            parts.append("<table cellpadding='4'>")
+            parts.append("<tr><td><b>Saat</b></td><td><b>Açık sınıf</b></td>"
+                         "<td><b>Müsait öğretmen</b></td><td><b>Eksik</b></td></tr>")
+            for u in understaffed[:8]:
+                day_name = DAYS[u["day"]] if 0 <= u["day"] < len(DAYS) else f"{u['day'] + 1}. gün"
+                parts.append(
+                    f"<tr><td>{day_name} {u['period'] + 1}. saat</td>"
+                    f"<td align='center'>{u['classes']}</td>"
+                    f"<td align='center'>{u['teachers']}</td>"
+                    f"<td align='center'><b>{u['shortfall']}</b></td></tr>"
+                )
+            parts.append("</table><br>")
+            total_short = sum(u["shortfall"] for u in understaffed)
+            parts.append(
+                f"Bir öğretmen aynı saatte yalnızca tek bir sınıfta bulunabildiği için "
+                f"bu saatlerde toplam <b>{total_short} hücre</b> doldurulamaz.<br><br>"
+            )
+
+        if unplaced:
+            total_unplaced = sum(u["hours"] for u in unplaced)
+            parts.append(f"<b>Yerleştirilemeyen dersler ({total_unplaced} saat)</b><br>")
+            parts.append("<table cellpadding='4'>")
+            for u in unplaced[:10]:
+                parts.append(
+                    f"<tr><td>{u['class']}</td><td>{u['subject']}</td>"
+                    f"<td>{u['teacher']}</td><td align='right'><b>{u['hours']} saat</b></td></tr>"
+                )
+            parts.append("</table>")
+            if len(unplaced) > 10:
+                parts.append(f"<i>… ve {len(unplaced) - 10} kalem daha</i><br>")
+            parts.append("<br>")
+
+        parts.append(
+            "<b>Ne yapabilirsiniz?</b><br>"
+            "• Yukarıdaki saatlerde <b>Zaman Tablosu</b>'ndan daha fazla öğretmeni açın, ya da<br>"
+            "• O saatleri ilgili sınıflar için kapatın, ya da<br>"
+            "• Boş kalan hücrelere dersleri elle sürükleyin."
+        )
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Information)
+        box.setWindowTitle("Otomatik Planlama Tamamlandı")
+        box.setTextFormat(Qt.RichText)
+        box.setText("".join(parts))
+        box.exec()
 
     def _act_statistics(self):
         from dialogs.statistics_dialog import StatisticsDialog

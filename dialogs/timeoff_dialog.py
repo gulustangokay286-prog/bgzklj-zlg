@@ -22,33 +22,58 @@ class TimeoffDialog(QDialog):
         self.data_store = data_store if data_store is not None else {}
         
         name = self.entity_dict.get("ad", "İsimsiz")
-        
+        self.entity_name = name
+
         # Load cross-institution locks & busy slots
         self.cross_institution_locks = set()
         self.cross_institution_conflicts = {}
+        self.my_reserved = set()        # slots this institution has reserved
+        self.other_reserved = {}        # slot -> owning institution name
+        self.inst_slug = None
+        self.is_teacher = str(entity_type).strip().lower().startswith("öğretmen") or \
+            str(entity_type).strip().lower().startswith("ogretmen")
         try:
-            from version_store import load_global_kisitlamalar, get_cross_institution_teacher_busy_slots, normalize_teacher_name
-            global_k = load_global_kisitlamalar()
-            inst_slug = self.data_store.get("settings", {}).get("institution_slug", "bogazici_egitim_kurumlari")
-            for slug, k_data in global_k.items():
-                if slug != inst_slug and isinstance(k_data, dict):
-                    other_toff = k_data.get(name)
-                    if other_toff and isinstance(other_toff, dict):
-                        for k, v in other_toff.items():
-                            if not v: # locked
-                                try:
-                                    parts = k.split(",")
-                                    if len(parts) == 2:
-                                        self.cross_institution_locks.add((int(parts[0]), int(parts[1])))
-                                except: pass
-            
-            # Load actual timetable busy slots from other branches/institutions
-            cross_busy = get_cross_institution_teacher_busy_slots(exclude_slug=inst_slug)
+            import constraint_sync
+            from version_store import (
+                get_cross_institution_teacher_busy_slots, normalize_teacher_name,
+                get_last_active_institution_slug,
+            )
+            inst_slug = self.data_store.get("settings", {}).get("institution_slug") \
+                or get_last_active_institution_slug()
             norm_name = normalize_teacher_name(name)
+
+            # Constraints this teacher has at OTHER institutions. Matched on the
+            # normalized name so a different spelling of the same person still lines
+            # up — an exact-string lookup missed most real cases.
+            day_count, periods = constraint_sync.grid_dimensions(self.data_store)
+            shared = constraint_sync.shared_teacher_states(inst_slug, day_count, periods)
+            for slot, state in (shared.get(norm_name) or {}).items():
+                if state == constraint_sync.CLOSED:
+                    self.cross_institution_locks.add(slot)
+
+            # Hours this teacher is actually teaching elsewhere right now.
+            cross_busy = get_cross_institution_teacher_busy_slots(exclude_slug=inst_slug)
             for (t_norm, d, p_slot), conflict_info in cross_busy.items():
                 if t_norm == norm_name or conflict_info.get("teacher_name") == name:
                     self.cross_institution_locks.add((d, p_slot))
                     self.cross_institution_conflicts[(d, p_slot)] = conflict_info
+
+            # Manual reservations: which institution has claimed each hour.
+            self.inst_slug = inst_slug
+            if self.is_teacher:
+                import version_store as _vs
+                slug_to_name = {}
+                try:
+                    for inst in _vs.list_institutions():
+                        slug_to_name[inst.get("slug")] = inst.get("name", inst.get("slug"))
+                except Exception:
+                    pass
+                for slot, owner in constraint_sync.reservations_for(name).items():
+                    if owner == inst_slug:
+                        self.my_reserved.add(slot)
+                    else:
+                        self.other_reserved[slot] = slug_to_name.get(owner, owner)
+                        self.cross_institution_locks.add(slot)
         except Exception as e:
             print("Cross-institution lock load error:", e)
 
@@ -68,34 +93,16 @@ class TimeoffDialog(QDialog):
         """)
         
         self.settings = self.data_store.get("settings", {})
-        
-        # Günleri oku
-        self.days = self.settings.get("days")
-        if not self.days:
-            days_count = int(self.settings.get("days_count", self.settings.get("day_count", self.data_store.get("gun_sayisi", 5))))
-            from timetable_grid import DAYS
-            self.days = DAYS[:days_count]
-            
-        # Periyot / Günlük ders saatini Temel Bilgiler'den dinamik oku (Örn: 8, 10, 12, 16)
-        self.periods = int(self.settings.get("periods", self.data_store.get("ders_saati", 8)))
-        if self.periods <= 0:
-            self.periods = 8
-            
-        # `timeoff` verisini dinamik periyot ve gün sayısına göre boyutlandır ve senkronize et
-        current_toff = self.entity_dict.get("timeoff", [])
-        new_toff = []
-        for d_idx in range(len(self.days)):
-            row = []
-            for p_idx in range(self.periods):
-                if d_idx < len(current_toff) and p_idx < len(current_toff[d_idx]):
-                    row.append(current_toff[d_idx][p_idx])
-                else:
-                    row.append(2)  # Varsayılan: Açık / Uygun
-            new_toff.append(row)
-            
-        self.entity_dict["timeoff"] = new_toff
-        self.timeoff_data = self.entity_dict["timeoff"]
-        
+
+        # Gün/saat boyutları ve müsaitlik matrisi artık constraint_sync üzerinden okunur;
+        # Kısıtlamalar ekranı da aynı kaynağı kullandığı için iki ekran birbirini ezemez.
+        import constraint_sync
+        self._cs = constraint_sync
+        self.days = constraint_sync.day_names(self.data_store)
+        _, self.periods = constraint_sync.grid_dimensions(self.data_store)
+
+        self.timeoff_data = constraint_sync.get_matrix(self.entity_dict, name, self.data_store)
+
         self._build_ui()
         
     def _build_ui(self):
@@ -104,7 +111,13 @@ class TimeoffDialog(QDialog):
         layout.setSpacing(12)
         
         # Üst Bilgi
-        info_lbl = QLabel("💡 <b>Kısıtlama Ayarı:</b> Y ekseninde ders saatleri (1-" + str(self.periods) + "), X ekseninde günler yer alır.<br>Hücreye tıklayarak durumu değiştirin (Yeşil ✔ -> Kırmızı ✖ -> Sarı ? -> Yeşil ✔).")
+        info_text = ("💡 <b>Kısıtlama Ayarı:</b> Y ekseninde ders saatleri (1-" + str(self.periods) +
+                     "), X ekseninde günler yer alır.<br>"
+                     "Hücreye tıklayarak durumu değiştirin (Yeşil ✔ -> Kırmızı ✖ -> Sarı ? -> Yeşil ✔).")
+        if self.is_teacher:
+            info_text += ("<br>🔒 = bu öğretmen o saatte başka kurumda meşgul. "
+                          "⚑ = saat bu kuruma rezerve. Rezerve etmek/kaldırmak için hücreye <b>sağ tıklayın</b>.")
+        info_lbl = QLabel(info_text)
         info_lbl.setStyleSheet("color: #475569; font-size: 12px;")
         layout.addWidget(info_lbl)
         
@@ -130,6 +143,9 @@ class TimeoffDialog(QDialog):
         self.table.cellClicked.connect(self._on_cell_clicked)
         self.table.horizontalHeader().sectionClicked.connect(self._toggle_column)
         self.table.verticalHeader().sectionClicked.connect(self._toggle_row)
+        if self.is_teacher:
+            self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+            self.table.customContextMenuRequested.connect(self._on_context_menu)
         layout.addWidget(self.table, 1)
         
         # Hızlı Butonlar (Tümünü Kapat / Tümünü Aç)
@@ -201,15 +217,26 @@ class TimeoffDialog(QDialog):
         font = QFont("Segoe UI", 11, QFont.Bold)
         item.setFont(font)
         
-        is_cross_locked = (d_idx, p_idx) in getattr(self, "cross_institution_locks", set())
-        c_info = getattr(self, "cross_institution_conflicts", {}).get((d_idx, p_idx))
+        slot = (d_idx, p_idx)
+        is_cross_locked = slot in getattr(self, "cross_institution_locks", set())
+        c_info = getattr(self, "cross_institution_conflicts", {}).get(slot)
+        owner_other = getattr(self, "other_reserved", {}).get(slot)
+        is_mine = slot in getattr(self, "my_reserved", set())
+
         if c_info:
             c_inst = c_info.get("institution_name", "Başka Kurum")
             c_cls = c_info.get("class", "")
             c_subj = c_info.get("subject", "Ders")
             item.setToolTip(f"⚠️ ÇAKIŞMA UYARISI: Bu öğretmen {c_inst} kurumunda {c_cls} ({c_subj}) dersindedir!")
+        elif owner_other:
+            item.setToolTip(f"🔒 Bu saat '{owner_other}' kurumuna rezerve edilmiş. Serbest bırakması gereken o kurumdur.")
+        elif is_mine:
+            item.setToolTip("⚑ Bu saat bu kuruma rezerve edildi — diğer kurumlarda kapalı görünür.\n"
+                            "Kaldırmak için sağ tıklayın.")
         elif is_cross_locked:
             item.setToolTip("⚠️ Dikkat: Bu öğretmen bu saatte BAŞKA BİR KURUMDA (şubede) derse girmektedir veya kısıtlanmıştır!")
+        elif getattr(self, "is_teacher", False):
+            item.setToolTip("Bu saati kurumunuza rezerve etmek için sağ tıklayın.")
         else:
             item.setToolTip("")
 
@@ -230,17 +257,74 @@ class TimeoffDialog(QDialog):
             fg_color = "#A16207"
             bg_color = "#FEF9C3"
             
-        if is_cross_locked:
+        if is_mine:
+            # Ours by explicit reservation — shown in blue so it reads as "claimed",
+            # not as a restriction.
+            base_text += " ⚑"
+            bg_color = "#DBEAFE"
+            fg_color = "#1D4ED8"
+        elif is_cross_locked:
             base_text += " 🔒"
             if state != 0:
                 # If they leave it open locally but it's locked elsewhere, warn them heavily
                 bg_color = "#FFEDD5" # Orange
                 fg_color = "#C2410C"
-                
+
         item.setText(base_text)
         item.setForeground(QBrush(QColor(fg_color)))
         item.setBackground(QBrush(QColor(bg_color)))
             
+    def _on_context_menu(self, pos):
+        """Reserve/release this teacher's hour for the current institution.
+
+        Reserving is how an institution claims a shared teacher's time BEFORE any
+        lesson is placed there; every other institution then sees the hour as closed.
+        """
+        from PySide6.QtWidgets import QMenu, QMessageBox
+        index = self.table.indexAt(pos)
+        if not index.isValid():
+            return
+        p_idx, d_idx = index.row(), index.column()
+        slot = (d_idx, p_idx)
+
+        if not self.inst_slug:
+            return
+
+        owner_other = self.other_reserved.get(slot)
+        menu = QMenu(self)
+        if owner_other:
+            act = menu.addAction(f"🔒 '{owner_other}' kurumuna rezerve — değiştirilemez")
+            act.setEnabled(False)
+            menu.exec_(self.table.viewport().mapToGlobal(pos))
+            return
+
+        if slot in self.my_reserved:
+            act_toggle = menu.addAction("⚑ Rezervasyonu Kaldır")
+            want = False
+        else:
+            act_toggle = menu.addAction("⚑ Bu Saati Kurumumuza Rezerve Et")
+            want = True
+
+        chosen = menu.exec_(self.table.viewport().mapToGlobal(pos))
+        if chosen != act_toggle:
+            return
+
+        import constraint_sync
+        ok = constraint_sync.set_reservation(self.inst_slug, self.entity_name, slot, want)
+        if not ok:
+            QMessageBox.warning(self, "Rezervasyon",
+                                "Bu saat başka bir kuruma ait. Serbest bırakması gereken o kurumdur.")
+            return
+
+        if want:
+            self.my_reserved.add(slot)
+        else:
+            self.my_reserved.discard(slot)
+
+        item = self.table.item(p_idx, d_idx)
+        if item:
+            self._update_item_visuals(item, self.timeoff_data[d_idx][p_idx], d_idx, p_idx)
+
     def _on_cell_clicked(self, row, col):
         # row = p_idx (period), col = d_idx (day)
         current_state = self.timeoff_data[col][row]
@@ -294,39 +378,25 @@ class TimeoffDialog(QDialog):
         self._update_counters()
 
     def _save_data(self):
-        self.entity_dict["timeoff"] = self.timeoff_data
-        if "kisitlamalar" not in self.data_store:
-            self.data_store["kisitlamalar"] = {}
-        ent_name = self.entity_dict.get("ad", "")
-        if ent_name:
-            if ent_name not in self.data_store["kisitlamalar"]:
-                self.data_store["kisitlamalar"][ent_name] = {}
-            for d in range(len(self.days)):
-                for p in range(self.periods):
-                    st = self.timeoff_data[d][p]
-                    self.data_store["kisitlamalar"][ent_name][f"{d},{p}"] = (st > 0)
+        # Tek yazma noktası: timeoff ve kisitlamalar birlikte, 3 durumlu olarak yazılır.
+        ent_name = (self.entity_dict.get("ad") or "").strip()
+        self._cs.set_matrix(self.entity_dict, ent_name, self.data_store, self.timeoff_data)
 
-        # Both of these calls were wrong, and because they shared one try/except the
-        # first failure skipped the second silently:
-        #   * trigger_save_db lives in database.py, not version_store, so importing
-        #     it from there raised ImportError and nothing below ever ran;
-        #   * save_global_kisitlamalar takes (institution_slug, kisitlamalar) and was
-        #     being called with a single argument.
-        # The constraints survived only because master_data_dialog happens to call
-        # trigger_save_db itself afterwards; the cross-institution copy was never
-        # written at all.
         try:
             from database import trigger_save_db
             trigger_save_db(self, self.data_store)
         except Exception as e:
             print(f"[TIMEOFF_SAVE_ERR] local save failed: {e}")
 
+        # Öğretmen kısıtlamalarını kurumlar arası ortak dosyaya yayınla; böylece diğer
+        # kurumların planlayıcısı bu öğretmenin kapalı saatlerini görür.
         try:
-            from version_store import save_global_kisitlamalar
-            inst_slug = self.data_store.get("settings", {}).get(
-                "institution_slug", "bogazici_egitim_kurumlari"
-            )
-            save_global_kisitlamalar(inst_slug, self.data_store["kisitlamalar"])
+            inst_slug = self.data_store.get("settings", {}).get("institution_slug")
+            if not inst_slug:
+                import version_store
+                inst_slug = version_store.get_last_active_institution_slug()
+            if inst_slug:
+                self._cs.publish(inst_slug, self.data_store)
         except Exception as e:
             print(f"[TIMEOFF_SAVE_ERR] global constraint save failed: {e}")
 

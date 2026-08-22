@@ -15,6 +15,8 @@ hidden_modules = [
     'dialogs.startup_wizard',
     'dialogs.faq_dialog',
     'dialogs.compare_dialog',
+    'dialogs.timeoff_dialog',
+    'constraint_sync',
     'auto_scheduler',
     'timetable_grid',
     'ribbon_widget',
