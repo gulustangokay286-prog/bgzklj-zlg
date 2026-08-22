@@ -2074,6 +2074,7 @@ class HomeDashboard(QWidget):
             constraint_sync.migrate_local_reservations()
         except Exception as e:
             print(f"[HomeDashboard] reservation migration note: {e}")
+        self.setCursor(Qt.ArrowCursor)
         self._build_ui()
         self._refresh_institutions()
         
