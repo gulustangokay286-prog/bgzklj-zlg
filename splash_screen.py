@@ -14,22 +14,48 @@ from PySide6.QtCore import (Qt, QTimer, Property, QPropertyAnimation,
 from PySide6.QtGui import QPainter, QColor, QFont, QPixmap
 
 def resource_path(relative_path):
+    candidates = []
     if hasattr(sys, '_MEIPASS'):
-        return os.path.join(sys._MEIPASS, relative_path)
-    return os.path.join(os.path.abspath("."), relative_path)
+        candidates.append(os.path.join(sys._MEIPASS, relative_path))
+    if getattr(sys, 'frozen', False):
+        exe_dir = os.path.dirname(sys.executable)
+        candidates.append(os.path.join(exe_dir, relative_path))
+        candidates.append(os.path.join(exe_dir, "..", "Resources", relative_path))
+        candidates.append(os.path.join(exe_dir, "..", "Frameworks", relative_path))
+        candidates.append(os.path.join(exe_dir, "_internal", relative_path))
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates.append(os.path.join(base_dir, relative_path))
+    candidates.append(os.path.join(os.path.abspath("."), relative_path))
+    
+    for c in candidates:
+        if os.path.exists(c):
+            return os.path.abspath(c)
+    return os.path.join(base_dir, relative_path)
 
 class LogoRevealWidget(QWidget):
     def __init__(self, logo_path, parent=None):
         super().__init__(parent)
         self._progress = 0.0
         
-        original_pix = QPixmap(logo_path)
+        original_pix = QPixmap()
+        if logo_path and os.path.exists(logo_path):
+            original_pix = QPixmap(logo_path)
+            
+        if original_pix.isNull():
+            for fallback in ["11.png", "app_icon.png", "app_icon.ico", "app_icon.icns"]:
+                p = resource_path(fallback)
+                if os.path.exists(p):
+                    original_pix = QPixmap(p)
+                    if not original_pix.isNull():
+                        break
+                        
         if not original_pix.isNull():
             # Scale to a maximum size while preserving aspect ratio
-            self.pixmap = original_pix.scaled(350, 350, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.pixmap = original_pix.scaled(280, 280, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         else:
-            self.pixmap = QPixmap(350, 350)
-            self.pixmap.fill(QColor("#E2E8F0"))
+            # Transparent fallback - never draw a gray solid box
+            self.pixmap = QPixmap(280, 280)
+            self.pixmap.fill(Qt.transparent)
             
         self.setFixedSize(self.pixmap.width(), self.pixmap.height())
 

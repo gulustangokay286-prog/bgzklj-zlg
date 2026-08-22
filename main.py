@@ -46,9 +46,23 @@ def global_exception_handler(exc_type, exc_value, exc_traceback):
 sys.excepthook = global_exception_handler
 
 def get_asset_path(rel_path):
+    candidates = []
     if hasattr(sys, '_MEIPASS'):
-        return os.path.join(sys._MEIPASS, rel_path)
-    return os.path.abspath(rel_path)
+        candidates.append(os.path.join(sys._MEIPASS, rel_path))
+    if getattr(sys, 'frozen', False):
+        exe_dir = os.path.dirname(sys.executable)
+        candidates.append(os.path.join(exe_dir, rel_path))
+        candidates.append(os.path.join(exe_dir, "..", "Resources", rel_path))
+        candidates.append(os.path.join(exe_dir, "..", "Frameworks", rel_path))
+        candidates.append(os.path.join(exe_dir, "_internal", rel_path))
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates.append(os.path.join(base_dir, rel_path))
+    candidates.append(os.path.join(os.path.abspath("."), rel_path))
+    
+    for c in candidates:
+        if os.path.exists(c):
+            return os.path.abspath(c)
+    return os.path.join(base_dir, rel_path)
 
 class AppShell(QMainWindow):
     """Top-level window that holds Dashboard ↔ Editor via QStackedWidget."""
