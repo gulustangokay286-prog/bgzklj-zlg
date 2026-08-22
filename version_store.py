@@ -1628,13 +1628,33 @@ def flush_pending_deletes() -> int:
         filename = item.get("filename")
         if not (slug and filename):
             continue
-        try:
-            ok = api_client.delete_version_from_rtdb(slug, filename)
-        except Exception:
-            ok = False
-        if ok:
+
+        if not item.get("deleted_on_server"):
+            try:
+                item["deleted_on_server"] = bool(api_client.delete_version_from_rtdb(slug, filename))
+            except Exception:
+                item["deleted_on_server"] = False
+
+        # Removing the version from the server is only half a delete. The OTHER
+        # computers never drop their own copy on the strength of it being absent from
+        # the server — that rule exists so a partial upload cannot wipe local history —
+        # they drop it because of the tombstone, and the tombstone only travels inside
+        # the institution meta. add_tombstone pushes that meta once, from a daemon
+        # thread: if the machine was offline or the app closed straight after the
+        # delete, the push was simply lost and the version lived on everywhere else
+        # forever. So the meta push is retried here alongside the delete, and the entry
+        # is kept until BOTH have been confirmed.
+        if item["deleted_on_server"] and not item.get("tombstone_pushed"):
+            try:
+                import cloud_sync
+                item["tombstone_pushed"] = bool(cloud_sync.push_institution_to_rtdb(slug))
+            except Exception:
+                item["tombstone_pushed"] = False
+
+        if item.get("deleted_on_server") and item.get("tombstone_pushed"):
             confirmed += 1
             continue
+
         item["attempts"] = int(item.get("attempts", 0)) + 1
         # Keep retrying for a long time, but not forever: after ~200 failed attempts
         # the institution itself has almost certainly been deleted server-side, and
@@ -1642,8 +1662,7 @@ def flush_pending_deletes() -> int:
         if item["attempts"] < 200:
             remaining.append(item)
 
-    if len(remaining) != len(items):
-        _save_pending_deletes(remaining)
+    _save_pending_deletes(remaining)
     return confirmed
 
 

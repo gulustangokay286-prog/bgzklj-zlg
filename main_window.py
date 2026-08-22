@@ -272,6 +272,8 @@ class MainWindow(QMainWindow):
         # Hide QStatusBar completely so bottom area is clear without wasted space
         self.statusBar().hide()
         self.cloud_worker = None
+        self._realtime = None
+        self._start_cloud_sync()
 
         # Global Rollback / Undo / Redo Shortcuts
         from PySide6.QtGui import QKeySequence, QShortcut
@@ -287,25 +289,110 @@ class MainWindow(QMainWindow):
         webbrowser.open(download_url)
 
     
-    def _on_remote_data_updated(self, slug, filename):
-        if not slug or slug == getattr(self, "institution_slug", None):
+    def _start_cloud_sync(self):
+        """Keeps the OPEN schedule in step with the other computers.
+
+        Only the Home Dashboard used to run a sync worker, so once a schedule was
+        opened this window went completely deaf: an edit or deletion made on another
+        machine never arrived until the editor was closed and reopened. Outgoing
+        pushes always worked, which is why changes appeared to travel one way only.
+        """
+        auth = getattr(self, "auth_data", None)
+        if not auth or auth.get("is_offline"):
+            return
+
+        try:
+            from cloud_sync import CloudSyncWorker
+            self.cloud_worker = CloudSyncWorker(self)
+            self.cloud_worker.set_auth(auth)
+            self.cloud_worker.remote_data_updated.connect(self._on_remote_data_updated)
+            self.cloud_worker.institutions_list_changed.connect(
+                lambda: self._on_remote_data_updated(getattr(self, "institution_slug", ""), "")
+            )
+            self.cloud_worker.start()
+        except Exception as e:
+            print(f"[MainWindow] cloud worker init note: {e}")
+
+        # Push notifications land in well under a second; the poll above is the
+        # fallback for when the socket cannot be established.
+        try:
+            from cloud_sync import RealtimeSyncClient
+            self._realtime = RealtimeSyncClient(self)
+            self._realtime.sync_notified.connect(self._on_realtime_notice)
+            if getattr(self, "institution_slug", None):
+                self._realtime.watch(self.institution_slug)
+        except Exception as e:
+            print(f"[MainWindow] realtime sync init note: {e}")
+
+    def _on_realtime_notice(self, slug):
+        """A push only says 'something changed'; the data still has to be fetched."""
+        if slug and slug != getattr(self, "institution_slug", None):
+            return
+        import threading
+        from PySide6.QtCore import QTimer
+
+        def _worker():
             try:
-                import version_store
-                # Never fall back to a hardcoded institution here: doing so would pull
-                # another institution's schedule into this window.
-                inst_slug = getattr(self, "institution_slug", None)
-                if not inst_slug:
-                    return
-                latest_data = version_store.load_latest_version(inst_slug)
-                if latest_data:
-                    if latest_data.get("grid_placements") != self.data_store.get("grid_placements") or latest_data.get("atamalar") != self.data_store.get("atamalar"):
-                        self.data_store.clear()
-                        self.data_store.update(latest_data)
-                        self._refresh_grid()
-                        self._refresh_tree()
-                        self.statusBar().showMessage("☁️ VDS'den canlı veri güncellendi", 4000)
+                from api_client import api_client
+                api_client.pull_all_from_rtdb(getattr(self, "auth_data", None))
             except Exception as e:
-                print(f"[MainWindow] Live data update notice: {e}")
+                print(f"[MainWindow] realtime pull note: {e}")
+            QTimer.singleShot(0, lambda: self._on_remote_data_updated(slug, ""))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_remote_data_updated(self, slug, filename):
+        inst_slug = getattr(self, "institution_slug", None)
+        if not inst_slug:
+            return
+        # Never fall back to a hardcoded institution here: doing so would pull
+        # another institution's schedule into this window.
+        if slug and slug != inst_slug:
+            return
+
+        # Local edits that have not been saved yet outrank anything arriving from the
+        # server — overwriting them would destroy work the user can still see on screen.
+        if getattr(self, "_is_dirty", False):
+            return
+
+        try:
+            import version_store
+            ver_fn = getattr(self, "version_filename", None)
+            # Reload the version this window actually has open. Loading "the latest"
+            # instead would silently swap the user onto a different schedule the moment
+            # anyone created a new version anywhere.
+            remote = version_store.load_version(inst_slug, ver_fn) if ver_fn else None
+            if not remote:
+                # No version open, or its file is gone (deleted on another machine).
+                # Fall back to whatever the institution now marks active. The previous
+                # code called version_store.load_latest_version here — a function that
+                # does not exist, so this path raised AttributeError every time.
+                active = version_store.get_active_version(inst_slug)
+                remote = version_store.load_version(inst_slug, active) if active else None
+            if not remote:
+                return
+
+            if (remote.get("grid_placements") == self.data_store.get("grid_placements")
+                    and remote.get("atamalar") == self.data_store.get("atamalar")
+                    and remote.get("siniflar") == self.data_store.get("siniflar")
+                    and remote.get("ogretmenler") == self.data_store.get("ogretmenler")):
+                return
+
+            self._is_loading = True
+            try:
+                self.data_store.clear()
+                self.data_store.update(remote)
+            finally:
+                self._is_loading = False
+
+            self._refresh_grid()
+            self._refresh_tree()
+            self._refresh_unplaced_lessons()
+            self._initial_hash = self._calc_data_hash()
+            self._is_dirty = False
+            self.statusBar().showMessage("☁️ Diğer bilgisayardaki değişiklik alındı", 4000)
+        except Exception as e:
+            print(f"[MainWindow] Live data update notice: {e}")
 
     def _download_cloud_data(self, show_message=False):
         """Pulls latest data from VDS backend API (replaces old Firebase RTDB call)."""
@@ -443,6 +530,15 @@ class MainWindow(QMainWindow):
 
     def cleanup(self):
         """Clean up background workers and resources before deletion."""
+        rt = getattr(self, "_realtime", None)
+        if rt is not None:
+            self._realtime = None
+            try:
+                rt.stop()
+                rt.deleteLater()
+            except Exception as e:
+                print("Error stopping realtime sync:", e)
+
         if hasattr(self, 'cloud_worker') and self.cloud_worker:
             cw = self.cloud_worker
             self.cloud_worker = None
@@ -461,6 +557,14 @@ class MainWindow(QMainWindow):
                 print("Error stopping cloud_worker:", e)
 
     def closeEvent(self, event):
+        # Commit whatever is on the grid into the data store first: the save below
+        # reads data_store, so a change made right before closing (not yet mirrored
+        # out of the grid widget) would otherwise be lost.
+        try:
+            self.save_db(sync_from_grid=True)
+        except Exception as e:
+            print(f"[CLOSE] grid sync note: {e}")
+
         # 1. If there are unsaved changes, ask which folder to save the new version
         # into (same picker as "Kaydet" / "Ana Sayfa") — cancelling the picker aborts
         # the close instead of quietly discarding the choice.
