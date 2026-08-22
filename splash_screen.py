@@ -143,7 +143,6 @@ class HighTechSplashScreen(QDialog):
         
         self._build_ui()
         self.setFixedSize(600, 400)
-        self.show()
         
         # Start operations
         self._run_auth_check()
