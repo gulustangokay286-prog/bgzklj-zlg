@@ -134,6 +134,14 @@ class CloudSyncWorker(QObject):
         while self._is_running and time.time() < end_time:
             time.sleep(0.05)
 
+    def _safe_emit(self, signal, *args):
+        if not getattr(self, "_is_running", True):
+            return
+        try:
+            signal.emit(*args)
+        except Exception:
+            pass
+
     def run(self):
         while self._is_running:
             item = None
@@ -147,7 +155,7 @@ class CloudSyncWorker(QObject):
                 fn = item.get("filename", "")
                 data = item.get("data")
                 
-                self.sync_status_changed.emit("Veritabanı senkronize ediliyor...")
+                self._safe_emit(self.sync_status_changed, "Veritabanı senkronize ediliyor...")
                 success = False
                 
                 if act == "push_version" and data:
@@ -165,9 +173,9 @@ class CloudSyncWorker(QObject):
                     with self._lock:
                         if len(self._queue) > 0:
                             self._queue.popleft()
-                    self.sync_status_changed.emit("Veritabanı korunuyor")
+                    self._safe_emit(self.sync_status_changed, "Veritabanı korunuyor")
                 else:
-                    self.sync_status_changed.emit("Bağlantı bekleniyor...")
+                    self._safe_emit(self.sync_status_changed, "Bağlantı bekleniyor...")
                     self._sleep_interruptible(3)
             else:
                 now = time.time()
@@ -190,18 +198,16 @@ class CloudSyncWorker(QObject):
                         pull_ok, msg, new_count = api_client.pull_all_from_rtdb(self.auth_data)
                         if pull_ok:
                             self._offline_streak = 0
-                            self.sync_status_changed.emit(
-                                "Veritabanı korunuyor"
-                            )
+                            self._safe_emit(self.sync_status_changed, "Veritabanı korunuyor")
                             if new_count > 0:
-                                self.institutions_list_changed.emit()
-                                self.remote_data_updated.emit("", "")
+                                self._safe_emit(self.institutions_list_changed)
+                                self._safe_emit(self.remote_data_updated, "", "")
                         else:
                             self._offline_streak += 1
-                            self.sync_status_changed.emit("Veritabanı: Çevrimdışı (Yerel Mod)")
+                            self._safe_emit(self.sync_status_changed, "Veritabanı: Çevrimdışı (Yerel Mod)")
                     except Exception:
                         self._offline_streak += 1
-                        self.sync_status_changed.emit("Veritabanı: Çevrimdışı (Yerel Mod)")
+                        self._safe_emit(self.sync_status_changed, "Veritabanı: Çevrimdışı (Yerel Mod)")
                     self._last_pull_time = now
                 self._sleep_interruptible(0.5)
 

@@ -531,11 +531,13 @@ class MainWindow(QMainWindow):
             cw = self.cloud_worker
             self.cloud_worker = None
             try:
-                cw.sync_status_changed.disconnect()
+                if hasattr(cw, "sync_status_changed") and cw.receivers(cw.sync_status_changed) > 0:
+                    cw.sync_status_changed.disconnect()
             except Exception:
                 pass
             try:
-                cw.remote_data_updated.disconnect()
+                if hasattr(cw, "remote_data_updated") and cw.receivers(cw.remote_data_updated) > 0:
+                    cw.remote_data_updated.disconnect()
             except Exception:
                 pass
             try:
