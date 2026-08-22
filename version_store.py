@@ -1354,7 +1354,7 @@ def list_versions(slug: str, source_filter: str = "all") -> list:
             "number": num,
             "datetime": dt,
             "date_str": dt.strftime("%d %b %Y"),
-            "time_str": dt.strftime("%H:%M"),
+            "time_str": dt.strftime("%H:%M:%S"),
             "month_key": dt.strftime("%Y-%m"),
             "month_label": _turkish_month(dt),
             "source": source,

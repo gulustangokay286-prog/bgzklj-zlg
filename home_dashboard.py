@@ -1701,7 +1701,7 @@ class AppleVersionRow(QFrame):
         dt_lbl = QLabel(f"{d_str}  {t_str}")
         dt_lbl.setFont(QFont("Segoe UI", 8.5))
         dt_lbl.setStyleSheet("color: #64748B; background: transparent; border: none;")
-        dt_lbl.setFixedWidth(135)
+        dt_lbl.setFixedWidth(145)
         dt_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         layout.addWidget(dt_lbl)
         
