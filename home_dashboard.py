@@ -1140,14 +1140,14 @@ class AppleInstitutionCard(QFrame):
         if self._selected:
             self.setStyleSheet("""
                 AppleInstitutionCard {
-                    background: #F4F4F6;
-                    border: 1px solid #E5E5E8;
+                    background: #F0F6FF;
+                    border: 1px solid #D0E1FD;
                     border-radius: 8px;
                 }
             """)
-            self.name_lbl.setStyleSheet("color: #111111; font-weight: bold; background: transparent; border: none;")
-            self.sub_lbl.setStyleSheet("color: #777777; background: transparent; border: none;")
-            self.icon_lbl.setPixmap(make_3d_institution_icon(self.inst_name, "#111111", 28))
+            self.name_lbl.setStyleSheet("color: #1D4ED8; font-weight: bold; background: transparent; border: none;")
+            self.sub_lbl.setStyleSheet("color: #3B82F6; background: transparent; border: none;")
+            self.icon_lbl.setPixmap(make_3d_institution_icon(self.inst_name, "#2563EB", 28))
         else:
             self.setStyleSheet("""
                 AppleInstitutionCard {
@@ -1156,17 +1156,16 @@ class AppleInstitutionCard(QFrame):
                     border-radius: 8px;
                 }
                 AppleInstitutionCard:hover {
-                    background: #F8F8F9;
-                    border: 1px solid #EFEFEF;
+                    background: #F8FAFC;
+                    border: 1px solid #E2E8F0;
                 }
             """)
-            self.name_lbl.setStyleSheet("color: #333333; font-weight: 500; background: transparent; border: none;")
-            self.sub_lbl.setStyleSheet("color: #999999; background: transparent; border: none;")
-            self.icon_lbl.setPixmap(make_3d_institution_icon(self.inst_name, "#666666", 28))
+            self.name_lbl.setStyleSheet("color: #334155; font-weight: 500; background: transparent; border: none;")
+            self.sub_lbl.setStyleSheet("color: #94A3B8; background: transparent; border: none;")
+            self.icon_lbl.setPixmap(make_3d_institution_icon(self.inst_name, "#64748B", 28))
             
     def set_selected(self, selected):
         self._selected = selected
-        self._update_style()
         self._update_style()
         
     def mousePressEvent(self, event):
@@ -1537,6 +1536,9 @@ class CollapsibleVersionGroup(QFrame):
                 border: none;
                 border-bottom: 1px solid #EFEFEF;
             }
+            CollapsibleVersionGroup:hover {
+                background: #FAFAFC;
+            }
         """
         self._dragover_style = """
             CollapsibleVersionGroup {
@@ -1560,10 +1562,19 @@ class CollapsibleVersionGroup(QFrame):
         hdr_lay.setContentsMargins(0, 0, 0, 0)
         hdr_lay.setSpacing(14)
 
-        # Icon
+        # Icon with tasteful color accent
         icon_lbl = QLabel()
-        actual_icon = "folder_outline" if folder_id is not None else ("history" if icon_name in ("history", "archive") else icon_name)
-        icon_lbl.setPixmap(make_dashboard_icon(actual_icon, "#1A1A1A", 18))
+        if folder_id is not None:
+            actual_icon = "folder_outline"
+            icon_color = "#4F46E5"
+        elif icon_name in ("history", "archive"):
+            actual_icon = "history"
+            icon_color = "#64748B"
+        else:
+            actual_icon = icon_name
+            icon_color = color_hex or "#1E293B"
+            
+        icon_lbl.setPixmap(make_dashboard_icon(actual_icon, icon_color, 18))
         icon_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         hdr_lay.addWidget(icon_lbl)
 
@@ -1737,20 +1748,17 @@ class AppleVersionRow(QFrame):
         self._is_active = is_active
         self._is_selected = False
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedHeight(46)
+        self.setFixedHeight(44)
         self._update_style()
         
         layout = QHBoxLayout(self)
         layout.setContentsMargins(14, 4, 14, 4)
-        layout.setSpacing(12)
+        layout.setSpacing(10)
         
-        # Version title. Uses the collision-resolved label from list_versions, so two
-        # schedules that both ended up numbered 82 (independent saves on two devices)
-        # read as "Versiyon 82" and "Versiyon 82-B" rather than as the same thing
-        # listed twice.
+        # Version title
         num = version_info.get("number", 0)
         v_title = QLabel(version_info.get("label") or f"Versiyon {num}")
-        v_title.setFont(QFont("Segoe UI", 9.5, QFont.Bold))
+        v_title.setFont(QFont(FONT_FAMILY, 9.5, QFont.Bold))
         v_title.setStyleSheet("color: #0F172A; background: transparent; border: none;")
         v_title.setFixedWidth(95)
         v_title.setAttribute(Qt.WA_TransparentForMouseEvents, True)
@@ -1761,55 +1769,57 @@ class AppleVersionRow(QFrame):
             )
         layout.addWidget(v_title)
         
-        # Date & Time (Clean single block)
+        # Date & Time
         d_str = version_info.get("date_str", "")
         t_str = version_info.get("time_str", "")
         dt_lbl = QLabel(f"{d_str}  {t_str}")
-        dt_lbl.setFont(QFont("Segoe UI", 8.5))
+        dt_lbl.setFont(QFont(FONT_FAMILY, 8.5))
         dt_lbl.setStyleSheet("color: #64748B; background: transparent; border: none;")
-        dt_lbl.setFixedWidth(145)
+        dt_lbl.setFixedWidth(140)
         dt_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         layout.addWidget(dt_lbl)
         
-        # Details: Stats badge + Note
+        # Stats Badge
         tot = version_info.get("total_hours", 0)
         plc = version_info.get("placed_hours", 0)
         unp = version_info.get("unplaced_hours", 0)
         
         if tot > 0:
             if unp == 0:
-                stats_badge = QLabel(f"{tot} Saat • Tam Yerleşim")
-                stats_badge.setFont(QFont("Segoe UI", 8, QFont.Bold))
-                stats_badge.setStyleSheet("background: #ECFDF5; color: #047857; border: 1px solid #A7F3D0; padding: 2px 8px; border-radius: 5px;")
+                stats_badge = QLabel(f"✓ {tot} Saat • Tam")
+                stats_badge.setFont(QFont(FONT_FAMILY, 8, QFont.Bold))
+                stats_badge.setStyleSheet("background: #ECFDF5; color: #059669; padding: 2px 8px; border-radius: 5px;")
             else:
                 stats_badge = QLabel(f"{plc}/{tot} Saat • {unp} Boşta")
-                stats_badge.setFont(QFont("Segoe UI", 8, QFont.Bold))
-                stats_badge.setStyleSheet("background: #FFFBEB; color: #B45309; border: 1px solid #FDE68A; padding: 2px 8px; border-radius: 5px;")
+                stats_badge.setFont(QFont(FONT_FAMILY, 8, QFont.Bold))
+                stats_badge.setStyleSheet("background: #FFFBEB; color: #D97706; padding: 2px 8px; border-radius: 5px;")
         else:
             stats_badge = QLabel("Boş Çizelge")
-            stats_badge.setFont(QFont("Segoe UI", 8))
-            stats_badge.setStyleSheet("background: #F1F5F9; color: #64748B; border: 1px solid #E2E8F0; padding: 2px 8px; border-radius: 5px;")
+            stats_badge.setFont(QFont(FONT_FAMILY, 8))
+            stats_badge.setStyleSheet("background: #F1F5F9; color: #64748B; padding: 2px 8px; border-radius: 5px;")
             
         stats_badge.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         layout.addWidget(stats_badge)
         
+        # Note
         note_text = version_info.get("note", "")
         if note_text:
             from PySide6.QtGui import QFontMetrics
-            fm = QFontMetrics(QFont("Segoe UI", 8))
-            elided_note = fm.elidedText(note_text, Qt.ElideRight, 200)
+            fm = QFontMetrics(QFont(FONT_FAMILY, 8))
+            elided_note = fm.elidedText(note_text, Qt.ElideRight, 180)
             note_lbl = QLabel(elided_note)
             note_lbl.setToolTip(note_text)
-            note_lbl.setFont(QFont("Segoe UI", 8))
+            note_lbl.setFont(QFont(FONT_FAMILY, 8))
             note_lbl.setStyleSheet("color: #94A3B8; background: transparent; border: none;")
-            note_lbl.setMaximumWidth(200)
+            note_lbl.setMaximumWidth(180)
             note_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
             layout.addWidget(note_lbl)
+            
         layout.addStretch(1)
             
         # File Size
         size_lbl = QLabel(f"{version_info.get('size_kb', 0)} KB")
-        size_lbl.setFont(QFont("Segoe UI", 8))
+        size_lbl.setFont(QFont(FONT_FAMILY, 8))
         size_lbl.setStyleSheet("color: #94A3B8; background: transparent; border: none;")
         size_lbl.setFixedWidth(55)
         size_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -1819,12 +1829,12 @@ class AppleVersionRow(QFrame):
         # Active Status Indicator / Action
         if is_active:
             act_badge = QLabel("✓ Yayında")
-            act_badge.setFont(QFont("Segoe UI", 8, QFont.Bold))
+            act_badge.setFont(QFont(FONT_FAMILY, 8, QFont.Bold))
             act_badge.setStyleSheet("background: #ECFDF5; color: #047857; border: 1px solid #A7F3D0; padding: 3px 9px; border-radius: 6px;")
             layout.addWidget(act_badge)
         else:
             btn_make_act = QPushButton("Yayına Al")
-            btn_make_act.setFont(QFont("Segoe UI", 8))
+            btn_make_act.setFont(QFont(FONT_FAMILY, 8))
             btn_make_act.setCursor(Qt.PointingHandCursor)
             btn_make_act.setStyleSheet("""
                 QPushButton {
@@ -1836,31 +1846,31 @@ class AppleVersionRow(QFrame):
             btn_make_act.clicked.connect(lambda: self.action_requested.emit("set_active", self.slug, self.filename))
             layout.addWidget(btn_make_act)
             
-        # Open Button
+        # Open Button (Clean Apple Blue)
         btn_open = QPushButton("Aç")
-        btn_open.setFont(QFont("Segoe UI", 8.5, QFont.Bold))
+        btn_open.setFont(QFont(FONT_FAMILY, 8.5, QFont.Bold))
         btn_open.setCursor(Qt.PointingHandCursor)
         btn_open.setStyleSheet("""
             QPushButton {
                 background: #0071E3; color: #FFFFFF; border: none;
-                border-radius: 6px; padding: 4px 14px; min-height: 26px;
+                border-radius: 6px; padding: 4px 14px; min-height: 24px;
             }
-            QPushButton:hover { background: #0062C4; }
+            QPushButton:hover { background: #005BB5; }
         """)
         btn_open.clicked.connect(lambda: self.action_requested.emit("open", self.slug, self.filename))
         layout.addWidget(btn_open)
         
-        # Delete / Remove Button
+        # Delete / Remove Button (Subtle Outline)
         btn_del = QPushButton("Sil")
-        btn_del.setFont(QFont("Segoe UI", 8, QFont.Bold))
+        btn_del.setFont(QFont(FONT_FAMILY, 8))
         btn_del.setCursor(Qt.PointingHandCursor)
         btn_del.setToolTip("Versiyonu Sil")
         btn_del.setStyleSheet("""
             QPushButton {
-                background: #FFF5F5; color: #DC2626; border: 1px solid #FECACA;
-                border-radius: 6px; padding: 4px 10px; min-height: 26px;
+                background: transparent; color: #94A3B8; border: 1px solid #E2E8F0;
+                border-radius: 6px; padding: 4px 9px; min-height: 24px;
             }
-            QPushButton:hover { background: #FEE2E2; color: #B91C1C; border-color: #FCA5A5; }
+            QPushButton:hover { background: #FEE2E2; color: #DC2626; border-color: #FECACA; }
         """)
         btn_del.clicked.connect(lambda: self.action_requested.emit("delete", self.slug, self.filename))
         layout.addWidget(btn_del)
