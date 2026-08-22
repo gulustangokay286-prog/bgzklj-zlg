@@ -19,24 +19,25 @@ from PySide6.QtGui import (
 
 import version_store
 
-# ── Monochrome Design Tokens (Notion / Finder Aesthetic) ─────────────
-BG_CANVAS        = "#FFFFFF"  # Pure white canvas
+# ── Modern Apple / Notion Design Tokens ──────────────────────────────
+BG_CANVAS        = "#F8FAFC"  # Soft modern Apple canvas gray
 BG_CARD          = "#FFFFFF"  # Pure white card
-BG_SIDEBAR       = "#FAFAFA"  # Very light gray sidebar
-BORDER_HAIRLINE  = "#E8E8E8"  # Subtle gray border
-BORDER_SUBTLE    = "rgba(0, 0, 0, 0.06)"
-TEXT_PRIMARY     = "#1A1A1A"  # Near-black
-TEXT_SECONDARY   = "#6B6B6B"  # Medium gray
-TEXT_MUTED       = "#999999"  # Light muted
-APPLE_BLUE       = "#0071E3"  # Kept for backward compat in dialogs
-APPLE_GREEN      = "#34C759"
-APPLE_AMBER      = "#FF9500"
-APPLE_RED        = "#FF3B30"
-APPLE_PURPLE     = "#AF52DE"
+BG_SIDEBAR       = "#FFFFFF"  # White sidebar
+BORDER_HAIRLINE  = "#E2E8F0"  # Subtle modern border
+BORDER_SUBTLE    = "rgba(0, 0, 0, 0.05)"
+TEXT_PRIMARY     = "#0F172A"  # Deep slate dark
+TEXT_SECONDARY   = "#64748B"  # Medium slate gray
+TEXT_MUTED       = "#94A3B8"  # Light muted slate
+APPLE_BLUE       = "#0071E3"  # Apple Signature Blue
+APPLE_GREEN      = "#10B981"  # Emerald Green
+APPLE_AMBER      = "#F59E0B"  # Amber
+APPLE_RED        = "#EF4444"  # Red
+APPLE_PURPLE     = "#8B5CF6"  # Purple
+APPLE_INDIGO     = "#4F46E5"  # Indigo
 
-SELECTED_BG      = "#1A1A1A"  # Dark selected state
-SELECTED_TEXT    = "#FFFFFF"  # White text on selected
-HOVER_BG         = "#F5F5F5"  # Hover state
+SELECTED_BG      = "#EFF6FF"  # Soft Apple blue selected
+SELECTED_TEXT    = "#1D4ED8"  # Deep blue text
+HOVER_BG         = "#F8FAFC"  # Hover state
 
 FONT_FAMILY = '-apple-system, BlinkMacSystemFont, "Inter", "SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif'
 
@@ -1752,15 +1753,15 @@ class AppleVersionRow(QFrame):
         self._update_style()
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 4, 14, 4)
-        layout.setSpacing(10)
+        layout.setContentsMargins(14, 4, 12, 4)
+        layout.setSpacing(12)
         
         # Version title
         num = version_info.get("number", 0)
         v_title = QLabel(version_info.get("label") or f"Versiyon {num}")
         v_title.setFont(QFont(FONT_FAMILY, 9.5, QFont.Bold))
         v_title.setStyleSheet("color: #0F172A; background: transparent; border: none;")
-        v_title.setFixedWidth(95)
+        v_title.setFixedWidth(100)
         v_title.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         if version_info.get("has_number_collision"):
             v_title.setToolTip(
@@ -1775,7 +1776,7 @@ class AppleVersionRow(QFrame):
         dt_lbl = QLabel(f"{d_str}  {t_str}")
         dt_lbl.setFont(QFont(FONT_FAMILY, 8.5))
         dt_lbl.setStyleSheet("color: #64748B; background: transparent; border: none;")
-        dt_lbl.setFixedWidth(140)
+        dt_lbl.setFixedWidth(145)
         dt_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         layout.addWidget(dt_lbl)
         
@@ -1786,17 +1787,17 @@ class AppleVersionRow(QFrame):
         
         if tot > 0:
             if unp == 0:
-                stats_badge = QLabel(f"✓ {tot} Saat • Tam")
+                stats_badge = QLabel(f"✓ Tam Yerleşim")
                 stats_badge.setFont(QFont(FONT_FAMILY, 8, QFont.Bold))
-                stats_badge.setStyleSheet("background: #ECFDF5; color: #059669; padding: 2px 8px; border-radius: 5px;")
+                stats_badge.setStyleSheet("background: #ECFDF5; color: #059669; padding: 2px 7px; border-radius: 4px;")
             else:
                 stats_badge = QLabel(f"{plc}/{tot} Saat • {unp} Boşta")
                 stats_badge.setFont(QFont(FONT_FAMILY, 8, QFont.Bold))
-                stats_badge.setStyleSheet("background: #FFFBEB; color: #D97706; padding: 2px 8px; border-radius: 5px;")
+                stats_badge.setStyleSheet("background: #FFFBEB; color: #D97706; padding: 2px 7px; border-radius: 4px;")
         else:
             stats_badge = QLabel("Boş Çizelge")
             stats_badge.setFont(QFont(FONT_FAMILY, 8))
-            stats_badge.setStyleSheet("background: #F1F5F9; color: #64748B; padding: 2px 8px; border-radius: 5px;")
+            stats_badge.setStyleSheet("background: #F1F5F9; color: #64748B; padding: 2px 7px; border-radius: 4px;")
             
         stats_badge.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         layout.addWidget(stats_badge)
@@ -1826,25 +1827,12 @@ class AppleVersionRow(QFrame):
         size_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         layout.addWidget(size_lbl)
         
-        # Active Status Indicator / Action
+        # Active Status Badge
         if is_active:
             act_badge = QLabel("✓ Yayında")
             act_badge.setFont(QFont(FONT_FAMILY, 8, QFont.Bold))
-            act_badge.setStyleSheet("background: #ECFDF5; color: #047857; border: 1px solid #A7F3D0; padding: 3px 9px; border-radius: 6px;")
+            act_badge.setStyleSheet("background: #ECFDF5; color: #047857; padding: 3px 9px; border-radius: 5px;")
             layout.addWidget(act_badge)
-        else:
-            btn_make_act = QPushButton("Yayına Al")
-            btn_make_act.setFont(QFont(FONT_FAMILY, 8))
-            btn_make_act.setCursor(Qt.PointingHandCursor)
-            btn_make_act.setStyleSheet("""
-                QPushButton {
-                    background: #F8FAFC; color: #475569; border: 1px solid #E2E8F0;
-                    border-radius: 6px; padding: 4px 10px;
-                }
-                QPushButton:hover { background: #F1F5F9; color: #0F172A; border-color: #CBD5E1; }
-            """)
-            btn_make_act.clicked.connect(lambda: self.action_requested.emit("set_active", self.slug, self.filename))
-            layout.addWidget(btn_make_act)
             
         # Open Button (Clean Apple Blue)
         btn_open = QPushButton("Aç")
@@ -1860,20 +1848,18 @@ class AppleVersionRow(QFrame):
         btn_open.clicked.connect(lambda: self.action_requested.emit("open", self.slug, self.filename))
         layout.addWidget(btn_open)
         
-        # Delete / Remove Button (Subtle Outline)
-        btn_del = QPushButton("Sil")
-        btn_del.setFont(QFont(FONT_FAMILY, 8))
-        btn_del.setCursor(Qt.PointingHandCursor)
-        btn_del.setToolTip("Versiyonu Sil")
-        btn_del.setStyleSheet("""
-            QPushButton {
-                background: transparent; color: #94A3B8; border: 1px solid #E2E8F0;
-                border-radius: 6px; padding: 4px 9px; min-height: 24px;
-            }
-            QPushButton:hover { background: #FEE2E2; color: #DC2626; border-color: #FECACA; }
+        # Options Three-Dots Menu Button
+        btn_menu = QPushButton()
+        btn_menu.setIcon(QIcon(make_dashboard_icon("three_dots", "#94A3B8", 16)))
+        btn_menu.setFixedSize(26, 26)
+        btn_menu.setCursor(Qt.PointingHandCursor)
+        btn_menu.setToolTip("Diğer Seçenekler")
+        btn_menu.setStyleSheet("""
+            QPushButton { background: transparent; border: none; border-radius: 5px; }
+            QPushButton:hover { background: #F1F5F9; }
         """)
-        btn_del.clicked.connect(lambda: self.action_requested.emit("delete", self.slug, self.filename))
-        layout.addWidget(btn_del)
+        btn_menu.clicked.connect(lambda: self._context_menu(btn_menu.mapToGlobal(QPoint(0, btn_menu.height() + 2))))
+        layout.addWidget(btn_menu)
         
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._context_menu)
@@ -1882,19 +1868,20 @@ class AppleVersionRow(QFrame):
         menu = QMenu(self)
         menu.setStyleSheet(f"""
             QMenu {{
-                background: #FFFFFF; border: 1px solid {BORDER_HAIRLINE};
+                background: #FFFFFF; border: 1px solid #E2E8F0;
                 border-radius: 8px; padding: 4px; font-size: 12px; font-family: {FONT_FAMILY};
             }}
-            QMenu::item {{ padding: 6px 18px; border-radius: 4px; }}
-            QMenu::item:selected {{ background: #EBF5FF; color: {APPLE_BLUE}; }}
+            QMenu::item {{ padding: 6px 18px; border-radius: 4px; color: #0F172A; }}
+            QMenu::item:selected {{ background: #EFF6FF; color: {APPLE_BLUE}; }}
+            QMenu::separator {{ height: 1px; background: #F1F5F9; margin: 4px 0; }}
         """)
-        act_open = menu.addAction("Çizelgeyi Aç")
+        act_open = menu.addAction("📂  Çizelgeyi Aç")
         act_active = None
         if not self._is_active:
-            act_active = menu.addAction("Aktif Çizelge Yap")
+            act_active = menu.addAction("✓  Aktif Çizelge Yap")
         menu.addSeparator()
 
-        move_menu = menu.addMenu("Klasöre Taşı")
+        move_menu = menu.addMenu("📁  Klasöre Taşı")
         move_menu.setStyleSheet(menu.styleSheet())
         current_folder_id = self.version_info.get("folder_id")
         act_move_general = move_menu.addAction("Klasörsüz (Genel)")
@@ -1911,9 +1898,16 @@ class AppleVersionRow(QFrame):
             move_actions[act] = folder.get("id")
 
         menu.addSeparator()
-        act_del = menu.addAction("Versiyonu Sil")
+        act_del = menu.addAction("🗑️  Versiyonu Sil")
 
-        action = menu.exec_(self.mapToGlobal(pos))
+        if not isinstance(pos, QPoint):
+            global_pos = QCursor.pos()
+        elif 0 <= pos.x() <= self.width() and 0 <= pos.y() <= self.height():
+            global_pos = self.mapToGlobal(pos)
+        else:
+            global_pos = pos
+
+        action = menu.exec_(global_pos)
         if action == act_open:
             self.action_requested.emit("open", self.slug, self.filename)
         elif act_active and action == act_active:
@@ -2417,7 +2411,7 @@ class HomeDashboard(QWidget):
         
         # Right Area
         right_panel = QFrame()
-        right_panel.setStyleSheet("background: #FFFFFF;")
+        right_panel.setStyleSheet(f"background: {BG_CANVAS};")
         self.right_panel_layout = QVBoxLayout(right_panel)
         self.right_panel_layout.setContentsMargins(32, 28, 32, 16)
         self.right_panel_layout.setSpacing(16)
@@ -2432,7 +2426,7 @@ class HomeDashboard(QWidget):
         
         self.right_title = QLabel("Seçili Kurum")
         self.right_title.setFont(QFont(FONT_FAMILY, 16, QFont.Bold))
-        self.right_title.setStyleSheet("color: #111111;")
+        self.right_title.setStyleSheet("color: #0F172A;")
         title_vbox.addWidget(self.right_title)
         
         sub_info_hbox = QHBoxLayout()
@@ -2441,12 +2435,12 @@ class HomeDashboard(QWidget):
         
         self.ver_count_lbl = QLabel("0 versiyon")
         self.ver_count_lbl.setFont(QFont(FONT_FAMILY, 9.5))
-        self.ver_count_lbl.setStyleSheet("color: #777777;")
+        self.ver_count_lbl.setStyleSheet("color: #64748B;")
         sub_info_hbox.addWidget(self.ver_count_lbl)
         
         self.last_update_badge = QLabel("")
         self.last_update_badge.setFont(QFont(FONT_FAMILY, 9.5))
-        self.last_update_badge.setStyleSheet("color: #777777;")
+        self.last_update_badge.setStyleSheet("color: #64748B;")
         sub_info_hbox.addWidget(self.last_update_badge)
         sub_info_hbox.addStretch(1)
         title_vbox.addLayout(sub_info_hbox)
@@ -2460,33 +2454,33 @@ class HomeDashboard(QWidget):
         self.btn_set_primary.hide()
         
         # Action Buttons on Right Header:
-        # 1. "Yeni Boş Çizelge   +" (Solid Black)
+        # 1. "Yeni Boş Çizelge   +" (Apple Signature Blue)
         self.btn_new_empty = QPushButton("Yeni Boş Çizelge    +")
         self.btn_new_empty.setFont(QFont(FONT_FAMILY, 9.5, QFont.Bold))
         self.btn_new_empty.setCursor(Qt.PointingHandCursor)
         self.btn_new_empty.setStyleSheet("""
             QPushButton {
-                background: #111111; color: #FFFFFF; border: none;
+                background: #0071E3; color: #FFFFFF; border: none;
                 border-radius: 8px; padding: 8px 18px; font-weight: 600;
             }
-            QPushButton:hover { background: #2A2A2A; }
+            QPushButton:hover { background: #005BB5; }
         """)
         self.btn_new_empty.clicked.connect(self._on_new_empty_clicked)
         right_hdr.addWidget(self.btn_new_empty)
 
-        # 2. "Yeni Klasör   📁" (White Outline)
+        # 2. "Yeni Klasör   📁" (Soft Indigo Pill)
         self.btn_new_folder = QPushButton("Yeni Klasör  ")
-        self.btn_new_folder.setIcon(QIcon(make_dashboard_icon("folder_outline", "#111111", 16)))
+        self.btn_new_folder.setIcon(QIcon(make_dashboard_icon("folder_outline", "#4F46E5", 16)))
         self.btn_new_folder.setLayoutDirection(Qt.RightToLeft)
         self.btn_new_folder.setIconSize(QSize(16, 16))
         self.btn_new_folder.setFont(QFont(FONT_FAMILY, 9.5, QFont.DemiBold))
         self.btn_new_folder.setCursor(Qt.PointingHandCursor)
         self.btn_new_folder.setStyleSheet("""
             QPushButton {
-                background: #FFFFFF; color: #111111; border: 1px solid #E0E0E5;
+                background: #EEF2FF; color: #4F46E5; border: 1px solid #C7D2FE;
                 border-radius: 8px; padding: 8px 16px;
             }
-            QPushButton:hover { background: #F8F8FA; border-color: #D0D0D5; }
+            QPushButton:hover { background: #E0E7FF; border-color: #A5B4FC; }
         """)
         self.btn_new_folder.clicked.connect(self._on_new_folder_clicked)
         right_hdr.addWidget(self.btn_new_folder)
