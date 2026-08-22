@@ -92,15 +92,10 @@ class SaveLocationDialog(QDialog):
         container.setStyleSheet("""
             #saveLocCard {
                 background: #FFFFFF;
-                border: 1px solid rgba(0, 0, 0, 0.08);
+                border: 1px solid #CBD5E1;
                 border-radius: 20px;
             }
         """)
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(35)
-        shadow.setColor(QColor(0, 0, 0, 55))
-        shadow.setOffset(0, 10)
-        container.setGraphicsEffect(shadow)
 
         c_lay = QVBoxLayout(container)
         c_lay.setContentsMargins(28, 24, 28, 22)

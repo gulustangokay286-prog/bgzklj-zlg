@@ -316,12 +316,6 @@ class ReportSelectionDialog(QDialog):
         card_cls.setObjectName("card")
         card_cls.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         
-        shadow_cls = QGraphicsDropShadowEffect(self)
-        shadow_cls.setBlurRadius(16)
-        shadow_cls.setColor(QColor(0, 0, 0, 12))
-        shadow_cls.setOffset(0, 3)
-        card_cls.setGraphicsEffect(shadow_cls)
-        
         lay_cls = QVBoxLayout(card_cls)
         lay_cls.setContentsMargins(14, 12, 14, 12)
         lay_cls.setSpacing(8)
@@ -393,12 +387,6 @@ class ReportSelectionDialog(QDialog):
         card_t = QFrame()
         card_t.setObjectName("card")
         card_t.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        
-        shadow_t = QGraphicsDropShadowEffect(self)
-        shadow_t.setBlurRadius(16)
-        shadow_t.setColor(QColor(0, 0, 0, 12))
-        shadow_t.setOffset(0, 3)
-        card_t.setGraphicsEffect(shadow_t)
         
         lay_t = QVBoxLayout(card_t)
         lay_t.setContentsMargins(14, 12, 14, 12)

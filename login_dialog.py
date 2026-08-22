@@ -153,16 +153,9 @@ class LoginDialog(QDialog):
             QWidget#loginCard {
                 background-color: #FFFFFF;
                 border-radius: 20px;
-                border: 1px solid #E2E8F0;
+                border: 1px solid #CBD5E1;
             }
         """)
-        
-        # Soft modern shadow
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(35)
-        shadow.setColor(QColor(15, 23, 42, 35))
-        shadow.setOffset(0, 10)
-        self.card.setGraphicsEffect(shadow)
         
         card_lay = QVBoxLayout(self.card)
         card_lay.setContentsMargins(36, 20, 36, 28)

@@ -463,15 +463,10 @@ class AppleNewInstitutionDialog(QDialog):
         container.setStyleSheet("""
             #modalCard {
                 background: #FFFFFF;
-                border: 1px solid rgba(0, 0, 0, 0.08);
+                border: 1px solid #CBD5E1;
                 border-radius: 20px;
             }
         """)
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(35)
-        shadow.setColor(QColor(0, 0, 0, 50))
-        shadow.setOffset(0, 10)
-        container.setGraphicsEffect(shadow)
         
         c_lay = QVBoxLayout(container)
         c_lay.setContentsMargins(32, 28, 32, 28)

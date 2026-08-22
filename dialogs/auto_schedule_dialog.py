@@ -382,15 +382,10 @@ class CrossConflictResolutionDialog(QDialog):
         card.setStyleSheet("""
             #conflictCard {
                 background: #FFFFFF;
-                border: 1px solid rgba(0, 0, 0, 0.08);
+                border: 1px solid #CBD5E1;
                 border-radius: 18px;
             }
         """)
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(35)
-        shadow.setColor(QColor(0, 0, 0, 45))
-        shadow.setOffset(0, 8)
-        card.setGraphicsEffect(shadow)
         
         c_lay = QVBoxLayout(card)
         c_lay.setContentsMargins(24, 20, 24, 20)
