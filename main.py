@@ -392,7 +392,8 @@ def main():
         logo_path=logo_path if os.path.exists(logo_path) else None,
         auth_data=auth_data
     )
-    shell.showMaximized()
+    shell.resize(1200, 800)
+    shell.show()
 
     sys.exit(app.exec())
 
