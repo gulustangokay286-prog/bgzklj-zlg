@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QFrame, QScrollArea, QMenu, QInputDialog,
     QMessageBox, QStyledItemDelegate, QStyle, QApplication
 )
-from PySide6.QtCore import Qt, QMimeData, Signal, QByteArray, QRect, QRectF, QTimer, QPoint, QEvent
+from PySide6.QtCore import Qt, QMimeData, Signal, QByteArray, QRect, QRectF, QTimer, QPoint, QPointF, QEvent
 from PySide6.QtGui import QFont, QColor, QBrush, QDrag, QPainter, QPixmap, QAction, QPen, QLinearGradient, QIcon, QPainterPath, QCursor
 from auto_scheduler import matches_class
 
@@ -694,25 +694,26 @@ class DraggableLessonCard(QWidget):
         else:
             self.clean_cls_display = class_name.split("(")[0].strip() if class_name else ""
             
-        # Dimensions based on duration and stack depth
-        stack_depth = min(self.count, 4)
-        dx_stack = int(2.5 * (stack_depth - 1))
-        dy_stack = int(2.5 * (stack_depth - 1))
-        
+        # Modern Card Dimensions
         if self.duration == 1:
-            base_w = max(46, min(68, 8 * len(self.clean_cls_display) + 12)) if (self.is_comb and display_mode == "teachers") else 46
+            base_w = max(70, min(95, 9 * len(self.clean_cls_display) + 14)) if (self.is_comb and display_mode == "teachers") else 70
         elif self.duration == 2:
-            base_w = max(74, min(98, 7 * len(self.clean_cls_display) + 28)) if (self.is_comb and display_mode == "teachers") else 74
+            base_w = max(114, min(140, 8 * len(self.clean_cls_display) + 32)) if (self.is_comb and display_mode == "teachers") else 114
         else:
-            base_w = max(102, min(128, 7 * len(self.clean_cls_display) + 36)) if (self.is_comb and display_mode == "teachers") else 102
+            base_w = max(156, min(180, 8 * len(self.clean_cls_display) + 40)) if (self.is_comb and display_mode == "teachers") else 156
             
         self.card_w = base_w
-        self.card_h = 32
-        self.total_w = base_w + dx_stack + 3
-        self.total_h = self.card_h + dy_stack + 3
+        self.card_h = 36
+        
+        stack_depth = min(self.count, 3)
+        extra_w = 3.5 * (stack_depth - 1) if stack_depth > 1 else 0
+        extra_h = 3.5 * (stack_depth - 1) if stack_depth > 1 else 0
+        
+        self.total_w = int(base_w + extra_w + 6)
+        self.total_h = int(self.card_h + extra_h + 6)
         
         self.setFixedSize(self.total_w, self.total_h)
-        self.setCursor(Qt.OpenHandCursor)
+        self.setCursor(Qt.PointingHandCursor)
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_card_context_menu)
         
@@ -736,108 +737,122 @@ class DraggableLessonCard(QWidget):
             base_color = QColor("#64748B")
             
         lum = (0.299 * base_color.red() + 0.587 * base_color.green() + 0.114 * base_color.blue())
-        text_color = QColor("#FFFFFF") if lum < 155 else QColor("#0F172A")
+        text_color = QColor("#FFFFFF") if lum < 165 else QColor("#0F172A")
         
-        stack_depth = min(self.count, 4)
-        dx_step = 2.5
-        dy_step = 2.5
-        
+        stack_depth = min(self.count, 3)
         w = self.card_w
         h = self.card_h
         
-        # Draw bottom layers (from back to front)
+        # 1. Draw Underneath Card Layers (for stacks > 1)
         for layer in range(stack_depth - 1, 0, -1):
-            ox = layer * dx_step
-            oy = layer * dy_step
+            ox = 2 + layer * 3.5
+            oy = 2 + layer * 3.5
             r = QRectF(ox, oy, w, h)
-            # Side edge / shadow of underneath cards
-            p.setPen(QPen(QColor(0, 0, 0, 90), 1))
-            layer_shade = QColor(max(40, 175 - layer * 15), max(40, 180 - layer * 15), max(40, 190 - layer * 15))
-            p.setBrush(QBrush(layer_shade))
-            p.drawRoundedRect(r, 3.5, 3.5)
             
-            # Subtle edge line for stack realism
+            # Ambient soft shadow
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(0, 0, 0, 20))
+            p.drawRoundedRect(r.translated(1, 1), 6, 6)
+            
+            # Layer body
+            layer_color = base_color.darker(110 + layer * 10)
+            p.setPen(QPen(QColor(0, 0, 0, 45), 1))
+            p.setBrush(layer_color)
+            p.drawRoundedRect(r, 6, 6)
+            
+            # Top highlight edge on stack
             p.setPen(QPen(QColor(255, 255, 255, 60), 1))
-            p.drawLine(ox + 2, oy + 1, ox + w - 2, oy + 1)
+            p.drawLine(QPointF(ox + 4, oy + 1), QPointF(ox + w - 4, oy + 1))
             
-        # Top card position (shift slightly if pressed)
-        top_ox = 1 if self._is_pressed else 0
-        top_oy = 1 if self._is_pressed else 0
-            
+        # 2. Top Card
+        top_ox = 3 if self._is_pressed else 2
+        top_oy = 3 if self._is_pressed else 2
         top_r = QRectF(top_ox, top_oy, w, h)
+        
+        # Top card ambient shadow
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(0, 0, 0, 35 if not self._is_hovered else 50))
+        p.drawRoundedRect(top_r.translated(1, 1.5), 6, 6)
         
         # Top card gradient
         grad = QLinearGradient(top_ox, top_oy, top_ox, top_oy + h)
         if self._is_hovered:
-            grad.setColorAt(0.0, base_color.lighter(125))
-            grad.setColorAt(0.4, base_color.lighter(108))
-            grad.setColorAt(1.0, base_color.darker(105))
-        else:
             grad.setColorAt(0.0, base_color.lighter(116))
-            grad.setColorAt(0.4, base_color)
-            grad.setColorAt(1.0, base_color.darker(110))
+            grad.setColorAt(0.5, base_color.lighter(104))
+            grad.setColorAt(1.0, base_color)
+        else:
+            grad.setColorAt(0.0, base_color.lighter(108))
+            grad.setColorAt(0.5, base_color)
+            grad.setColorAt(1.0, base_color.darker(106))
             
         # Top card border
-        border_color = QColor("#0078D7") if self._is_hovered else QColor(0, 0, 0, 180)
+        border_color = QColor("#2563EB") if self._is_hovered else QColor(0, 0, 0, 48)
         border_w = 1.5 if self._is_hovered else 1.0
         p.setPen(QPen(border_color, border_w))
         p.setBrush(QBrush(grad))
-        p.drawRoundedRect(top_r, 3.5, 3.5)
+        p.drawRoundedRect(top_r, 6, 6)
         
-        # 3D Physical Bevel highlights (Top-Left gloss, Bottom-Right shadow)
-        p.setPen(QPen(QColor(255, 255, 255, 120), 1))
-        p.drawLine(top_ox + 3, top_oy + 1, top_ox + w - 3, top_oy + 1)
-        p.drawLine(top_ox + 1, top_oy + 3, top_ox + 1, top_oy + h - 3)
+        # Top inner subtle shine
+        p.setPen(QPen(QColor(255, 255, 255, 90), 1))
+        p.drawLine(QPointF(top_ox + 4, top_oy + 1), QPointF(top_ox + w - 4, top_oy + 1))
         
-        p.setPen(QPen(QColor(0, 0, 0, 65), 1))
-        p.drawLine(top_ox + 3, top_oy + h - 1, top_ox + w - 3, top_oy + h - 1)
-        p.drawLine(top_ox + w - 1, top_oy + 3, top_ox + w - 1, top_oy + h - 3)
-        
-        # Duration indicator: Vertical dashed line for multi-hour blocks
+        # 3. Multi-hour divider & duration text
         if self.duration == 2:
-            p.setPen(QPen(QColor(0, 0, 0, 50), 1, Qt.DashLine))
+            p.setPen(QPen(QColor(255, 255, 255, 60) if lum < 165 else QColor(0, 0, 0, 35), 1, Qt.DashLine))
             mid_x = top_ox + w / 2
-            p.drawLine(mid_x, top_oy + 4, mid_x, top_oy + h - 4)
+            p.drawLine(QPointF(mid_x, top_oy + 4), QPointF(mid_x, top_oy + h - 4))
+            
+            p.setFont(QFont("Segoe UI", 7, QFont.Bold))
+            p.setPen(QColor(255, 255, 255, 175) if lum < 165 else QColor(0, 0, 0, 130))
+            p.drawText(QRectF(top_ox, top_oy + h - 13, w - 6, 11), Qt.AlignRight | Qt.AlignVCenter, "2 Saat")
         elif self.duration >= 3:
-            p.setPen(QPen(QColor(0, 0, 0, 50), 1, Qt.DashLine))
-            step_w = w / self.duration
-            for s in range(1, self.duration):
-                p.drawLine(top_ox + s * step_w, top_oy + 4, top_ox + s * step_w, top_oy + h - 4)
-                
-        # Card Text:
-        p.setFont(QFont("Segoe UI", 9, QFont.Bold))
-        p.setPen(text_color)
+            p.setFont(QFont("Segoe UI", 7, QFont.Bold))
+            p.setPen(QColor(255, 255, 255, 175) if lum < 165 else QColor(0, 0, 0, 130))
+            p.drawText(QRectF(top_ox, top_oy + h - 13, w - 6, 11), Qt.AlignRight | Qt.AlignVCenter, f"{self.duration} Saat")
+            
+        # 4. Subject Name (carefully padded so it NEVER touches borders or badges)
+        text_padding_left = 7
+        text_padding_right = 26 if self.count > 1 else 8
+        if self.is_comb:
+            text_padding_left = 18
+            
+        text_w = max(20, w - text_padding_left - text_padding_right)
+        text_r = QRectF(top_ox + text_padding_left, top_oy, text_w, h - (10 if self.duration > 1 else 0))
         
         if self.display_mode == "teachers" and self.clean_cls_display:
-            t_rect_top = QRectF(top_ox, top_oy + 2, w, h * 0.5)
-            t_rect_bot = QRectF(top_ox, top_oy + h * 0.48, w, h * 0.5)
-            p.setFont(QFont("Segoe UI", 8.5, QFont.Bold))
-            p.drawText(t_rect_top, Qt.AlignCenter, self.clean_cls_display)
+            p.setFont(QFont("Segoe UI", 8, QFont.Bold))
+            p.setPen(text_color)
+            p.drawText(QRectF(top_ox + text_padding_left, top_oy + 2, text_w, h * 0.48), Qt.AlignLeft | Qt.AlignVCenter, self.clean_cls_display)
             p.setFont(QFont("Segoe UI", 7.5, QFont.Normal))
-            p.drawText(t_rect_bot, Qt.AlignCenter, self.abbr[:4])
+            p.drawText(QRectF(top_ox + text_padding_left, top_oy + h * 0.46, text_w, h * 0.48), Qt.AlignLeft | Qt.AlignVCenter, self.abbr[:5])
         else:
-            p.drawText(top_r, Qt.AlignCenter, self.abbr)
+            p.setFont(QFont("Segoe UI", 9, QFont.Bold))
+            p.setPen(text_color)
+            display_txt = self.abbr if len(self.abbr) <= 7 else self.abbr[:6] + "."
+            p.drawText(text_r, Qt.AlignLeft | Qt.AlignVCenter, display_txt)
             
-        # Combined lesson '+' badge in top-left
+        # 5. Combined lesson '+' badge in top-left
         if self.is_comb:
-            badge_r = QRectF(top_ox + 2, top_oy + 2, 11, 11)
+            badge_r = QRectF(top_ox + 3, top_oy + 3, 13, 13)
             p.setPen(QPen(QColor("#1D4ED8"), 1))
             p.setBrush(QBrush(QColor("#EFF6FF")))
-            p.drawRoundedRect(badge_r, 2, 2)
-            p.setFont(QFont("Segoe UI", 7.5, QFont.Bold))
+            p.drawRoundedRect(badge_r, 3, 3)
+            p.setFont(QFont("Segoe UI", 8, QFont.Bold))
             p.setPen(QColor("#1D4ED8"))
             p.drawText(badge_r, Qt.AlignCenter, "+")
             
-        # Count badge in top-right (if stack count > 1)
+        # 6. Count badge in top-right (sleek modern dark capsule pill)
         if self.count > 1:
             cnt_str = str(self.count)
-            badge_w = max(13, 7 * len(cnt_str) + 6)
-            badge_h = 12
-            badge_r = QRectF(top_ox + w - badge_w - 2, top_oy + 2, badge_w, badge_h)
+            badge_w = 16 if len(cnt_str) == 1 else 22
+            badge_h = 15
+            badge_r = QRectF(top_ox + w - badge_w - 4, top_oy + 4, badge_w, badge_h)
+            
             p.setPen(Qt.NoPen)
-            p.setBrush(QBrush(QColor(0, 0, 0, 190)))
-            p.drawRoundedRect(badge_r, 3, 3)
-            p.setFont(QFont("Segoe UI", 7, QFont.Bold))
+            p.setBrush(QColor(15, 23, 42, 215))
+            p.drawRoundedRect(badge_r, 4, 4)
+            
+            p.setFont(QFont("Segoe UI", 7.5, QFont.Bold))
             p.setPen(QColor("#FFFFFF"))
             p.drawText(badge_r, Qt.AlignCenter, cnt_str)
             
@@ -854,35 +869,44 @@ class DraggableLessonCard(QWidget):
         if not base_color.isValid():
             base_color = QColor("#64748B")
         lum = (0.299 * base_color.red() + 0.587 * base_color.green() + 0.114 * base_color.blue())
-        text_color = QColor("#FFFFFF") if lum < 155 else QColor("#0F172A")
+        text_color = QColor("#FFFFFF") if lum < 165 else QColor("#0F172A")
         
         r = QRectF(1, 1, self.card_w, self.card_h)
+        
+        # Ambient shadow
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(0, 0, 0, 30))
+        p.drawRoundedRect(r.translated(1, 1), 6, 6)
+        
         grad = QLinearGradient(1, 1, 1, 1 + self.card_h)
-        grad.setColorAt(0.0, base_color.lighter(116))
-        grad.setColorAt(0.4, base_color)
-        grad.setColorAt(1.0, base_color.darker(110))
+        grad.setColorAt(0.0, base_color.lighter(108))
+        grad.setColorAt(0.5, base_color)
+        grad.setColorAt(1.0, base_color.darker(106))
         
-        p.setPen(QPen(QColor(0, 0, 0, 180), 1))
+        p.setPen(QPen(QColor(0, 0, 0, 50), 1))
         p.setBrush(QBrush(grad))
-        p.drawRoundedRect(r, 3.5, 3.5)
+        p.drawRoundedRect(r, 6, 6)
         
-        p.setPen(QPen(QColor(255, 255, 255, 120), 1))
+        p.setPen(QPen(QColor(255, 255, 255, 90), 1))
         p.drawLine(3, 2, self.card_w - 1, 2)
-        p.drawLine(2, 3, 2, self.card_h - 1)
         
         if self.duration == 2:
-            p.setPen(QPen(QColor(0, 0, 0, 50), 1, Qt.DashLine))
+            p.setPen(QPen(QColor(255, 255, 255, 60) if lum < 165 else QColor(0, 0, 0, 35), 1, Qt.DashLine))
             p.drawLine(1 + self.card_w / 2, 4, 1 + self.card_w / 2, self.card_h - 2)
+            p.setFont(QFont("Segoe UI", 7, QFont.Bold))
+            p.setPen(QColor(255, 255, 255, 175) if lum < 165 else QColor(0, 0, 0, 130))
+            p.drawText(QRectF(1, self.card_h - 12, self.card_w - 5, 11), Qt.AlignRight | Qt.AlignVCenter, "2 Saat")
             
         p.setFont(QFont("Segoe UI", 9, QFont.Bold))
         p.setPen(text_color)
         if self.display_mode == "teachers" and self.clean_cls_display:
-            p.setFont(QFont("Segoe UI", 8.5, QFont.Bold))
-            p.drawText(QRectF(1, 2, self.card_w, self.card_h * 0.5), Qt.AlignCenter, self.clean_cls_display)
+            p.setFont(QFont("Segoe UI", 8, QFont.Bold))
+            p.drawText(QRectF(7, 2, self.card_w - 14, self.card_h * 0.48), Qt.AlignLeft | Qt.AlignVCenter, self.clean_cls_display)
             p.setFont(QFont("Segoe UI", 7.5, QFont.Normal))
-            p.drawText(QRectF(1, self.card_h * 0.48, self.card_w, self.card_h * 0.5), Qt.AlignCenter, self.abbr[:4])
+            p.drawText(QRectF(7, self.card_h * 0.46, self.card_w - 14, self.card_h * 0.48), Qt.AlignLeft | Qt.AlignVCenter, self.abbr[:5])
         else:
-            p.drawText(r, Qt.AlignCenter, self.abbr)
+            display_txt = self.abbr if len(self.abbr) <= 7 else self.abbr[:6] + "."
+            p.drawText(QRectF(7, 1, self.card_w - 14, self.card_h - (10 if self.duration > 1 else 0)), Qt.AlignLeft | Qt.AlignVCenter, display_txt)
             
         p.end()
         return pm
