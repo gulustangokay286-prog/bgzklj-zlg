@@ -671,112 +671,226 @@ def _compute_free_slot_capacity(data_store, class_name, teacher_name, is_comb, c
     return min(capacities) if capacities else None
 
 
-class DraggableLessonCard(QLabel):
-    def __init__(self, lesson_id: int, subject_name: str, color: str, duration: int = 1, teacher: str = "", class_name: str = "", display_mode: str = "classes", parent=None):
+class DraggableLessonCard(QWidget):
+    def __init__(self, lesson_id: str, subject_name: str, color: str, duration: int = 1, count: int = 1, teacher: str = "", class_name: str = "", display_mode: str = "classes", blocked_reason: str = "", parent=None):
         super().__init__(parent)
-        self.lesson_id = lesson_id
+        self.lesson_id = str(lesson_id)
         self.subject_name = subject_name
-        self.color = color
-        self.duration = duration
+        self.color = color or "#94A3B8"
+        self.duration = max(1, int(duration or 1))
+        self.count = max(1, int(count or 1))
         self.teacher = teacher
         self.class_name = class_name
         self.display_mode = display_mode
+        self.blocked_reason = blocked_reason
+        self._is_hovered = False
+        self._is_pressed = False
         
-        abbr = get_subject_abbr(subject_name)
-        t_short = ""
-        if teacher and teacher != "Öğretmen":
-            parts = teacher.strip().split()
-            if len(parts) >= 2:
-                t_short = f"{parts[0]} {parts[-1][0]}."
-            else:
-                t_short = parts[0]
-                
+        self.abbr = get_subject_abbr(subject_name)
         self.is_comb = bool("," in class_name or "&" in class_name or "+" in class_name)
         if self.is_comb:
             comb_parts = [c.split("(")[0].strip() for c in class_name.replace("&", "+").replace(",", "+").split("+") if c.strip()]
-            clean_cls_display = "+".join(comb_parts) if comb_parts else class_name.replace(" ", "")
+            self.clean_cls_display = "+".join(comb_parts) if comb_parts else class_name.replace(" ", "")
         else:
-            clean_cls_display = class_name.split("(")[0].strip() if class_name else ""
-        
-        # Dimensions: 1 hour = compact square (32x28), 2 hours = 2x wide (64x28), 3 hours = 3x (96x28)
-        if duration == 1:
-            card_width = max(38, min(64, 8 * len(clean_cls_display) + 8)) if (self.is_comb and display_mode == "teachers") else 32
-            card_height = 28
-            if display_mode == "teachers":
-                display_text = f"<b>{clean_cls_display}</b>"
-            else:
-                display_text = f"<b>{abbr[:4]}</b>"
-        elif duration == 2:
-            card_width = max(64, min(92, 7 * len(clean_cls_display) + 26)) if (self.is_comb and display_mode == "teachers") else 64
-            card_height = 28
-            if display_mode == "teachers":
-                display_text = f"<b>{clean_cls_display}</b> <span style='font-size:7.5px;'>{abbr[:4]}</span>"
-            else:
-                display_text = f"<b>{abbr}</b>"
-        else:
-            base_w = 32 * duration + 2 * (duration - 1)
-            card_width = max(base_w, min(120, 7 * len(clean_cls_display) + 32)) if (self.is_comb and display_mode == "teachers") else base_w
-            card_height = 28
-            if display_mode == "teachers":
-                display_text = f"<b>{clean_cls_display}</b> <span style='font-size:7.5px;'>{abbr[:4]}</span> {duration}h"
-            else:
-                display_text = f"<b>{abbr}</b> <span style='font-size:7.5px;'>{duration}h</span>"
+            self.clean_cls_display = class_name.split("(")[0].strip() if class_name else ""
             
-        self.setText(display_text)
-        self.setAlignment(Qt.AlignCenter)
-        self.setFixedSize(card_width, card_height)
-        self.setToolTip(f"{self.subject_name}{' (Birleşik Ders)' if self.is_comb else ''}\nSınıf: {self.class_name}\nÖğretmen: {self.teacher}\nSüre: {self.duration} Saat")
+        # Dimensions based on duration and stack depth
+        stack_depth = min(self.count, 4)
+        dx_stack = int(2.5 * (stack_depth - 1))
+        dy_stack = int(2.5 * (stack_depth - 1))
         
-        c = QColor(color)
-        if c.isValid():
-            h, s, l, a = c.getHsl()
-            if s > 85:
-                new_s = max(65, int(s * 0.65))
-                new_l = min(220, max(120, int(l * 1.05))) if l < 180 else l
-                c = QColor()
-                c.setHsl(h, new_s, new_l, a)
-            self.color = c.name()
+        if self.duration == 1:
+            base_w = max(46, min(68, 8 * len(self.clean_cls_display) + 12)) if (self.is_comb and display_mode == "teachers") else 46
+        elif self.duration == 2:
+            base_w = max(74, min(98, 7 * len(self.clean_cls_display) + 28)) if (self.is_comb and display_mode == "teachers") else 74
         else:
-            self.color = color
+            base_w = max(102, min(128, 7 * len(self.clean_cls_display) + 36)) if (self.is_comb and display_mode == "teachers") else 102
             
-        bg_hex = self.color
-        text_color = "#000000"
+        self.card_w = base_w
+        self.card_h = 34
+        self.total_w = base_w + dx_stack + 3
+        self.total_h = self.card_h + dy_stack + 3
         
-        self.setStyleSheet(f"""
-            QLabel {{
-                background-color: {bg_hex};
-                color: {text_color};
-                font-family: system-ui, -apple-system, sans-serif;
-                font-size: 8.5px;
-                font-weight: bold;
-                border: 1px solid rgba(0, 0, 0, 0.25);
-                border-radius: 3px;
-                padding: 0px 1px;
-            }}
-            QLabel:hover {{
-                border: 2px solid #0078D7;
-            }}
-        """)
+        self.setFixedSize(self.total_w, self.total_h)
         self.setCursor(Qt.OpenHandCursor)
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_card_context_menu)
         
+        # Tooltip
+        dur_str = f"{self.duration} Saatlik Blok" if self.duration > 1 else "1 Saatlik Ders"
+        cnt_str = f"\nDestedeki Kart Sayısı: {self.count} Adet" if self.count > 1 else ""
+        comb_str = "\n(Birleşik / Ortak Ders)" if self.is_comb else ""
+        tch_str = f"\nÖğretmen: {self.teacher}" if self.teacher else ""
+        cls_str = f"\nSınıf: {self.class_name}" if self.class_name else ""
+        blk_str = f"\n⚠️ Kısıtlama: {self.blocked_reason}" if self.blocked_reason else ""
+        self.setToolTip(f"<b>{self.subject_name}</b> ({dur_str}){cnt_str}{cls_str}{tch_str}{comb_str}{blk_str}")
+
     def paintEvent(self, event):
-        super().paintEvent(event)
-        if getattr(self, "is_comb", False):
-            p = QPainter(self)
-            p.setRenderHint(QPainter.Antialiasing)
-            badge_r = QRectF(1, 1, 14.5, 14.5)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.TextAntialiasing)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        
+        base_color = QColor(self.color)
+        if not base_color.isValid():
+            base_color = QColor("#64748B")
+            
+        lum = (0.299 * base_color.red() + 0.587 * base_color.green() + 0.114 * base_color.blue())
+        text_color = QColor("#FFFFFF") if lum < 155 else QColor("#0F172A")
+        
+        stack_depth = min(self.count, 4)
+        dx_step = 2.5
+        dy_step = 2.5
+        
+        w = self.card_w
+        h = self.card_h
+        
+        # Draw bottom layers (from back to front)
+        for layer in range(stack_depth - 1, 0, -1):
+            ox = layer * dx_step
+            oy = layer * dy_step
+            r = QRectF(ox, oy, w, h)
+            # Side edge / shadow of underneath cards
+            p.setPen(QPen(QColor(0, 0, 0, 90), 1))
+            layer_shade = QColor(max(40, 175 - layer * 15), max(40, 180 - layer * 15), max(40, 190 - layer * 15))
+            p.setBrush(QBrush(layer_shade))
+            p.drawRoundedRect(r, 3.5, 3.5)
+            
+            # Subtle edge line for stack realism
+            p.setPen(QPen(QColor(255, 255, 255, 60), 1))
+            p.drawLine(ox + 2, oy + 1, ox + w - 2, oy + 1)
+            
+        # Top card position (shift slightly if pressed)
+        top_ox = 1 if self._is_pressed else 0
+        top_oy = 1 if self._is_pressed else 0
+            
+        top_r = QRectF(top_ox, top_oy, w, h)
+        
+        # Top card gradient
+        grad = QLinearGradient(top_ox, top_oy, top_ox, top_oy + h)
+        if self._is_hovered:
+            grad.setColorAt(0.0, base_color.lighter(125))
+            grad.setColorAt(0.4, base_color.lighter(108))
+            grad.setColorAt(1.0, base_color.darker(105))
+        else:
+            grad.setColorAt(0.0, base_color.lighter(116))
+            grad.setColorAt(0.4, base_color)
+            grad.setColorAt(1.0, base_color.darker(110))
+            
+        # Top card border
+        border_color = QColor("#0078D7") if self._is_hovered else QColor(0, 0, 0, 180)
+        border_w = 1.5 if self._is_hovered else 1.0
+        p.setPen(QPen(border_color, border_w))
+        p.setBrush(QBrush(grad))
+        p.drawRoundedRect(top_r, 3.5, 3.5)
+        
+        # 3D Physical Bevel highlights (Top-Left gloss, Bottom-Right shadow)
+        p.setPen(QPen(QColor(255, 255, 255, 120), 1))
+        p.drawLine(top_ox + 3, top_oy + 1, top_ox + w - 3, top_oy + 1)
+        p.drawLine(top_ox + 1, top_oy + 3, top_ox + 1, top_oy + h - 3)
+        
+        p.setPen(QPen(QColor(0, 0, 0, 65), 1))
+        p.drawLine(top_ox + 3, top_oy + h - 1, top_ox + w - 3, top_oy + h - 1)
+        p.drawLine(top_ox + w - 1, top_oy + 3, top_ox + w - 1, top_oy + h - 3)
+        
+        # Duration indicator: Vertical dashed line for multi-hour blocks
+        if self.duration == 2:
+            p.setPen(QPen(QColor(0, 0, 0, 50), 1, Qt.DashLine))
+            mid_x = top_ox + w / 2
+            p.drawLine(mid_x, top_oy + 4, mid_x, top_oy + h - 4)
+        elif self.duration >= 3:
+            p.setPen(QPen(QColor(0, 0, 0, 50), 1, Qt.DashLine))
+            step_w = w / self.duration
+            for s in range(1, self.duration):
+                p.drawLine(top_ox + s * step_w, top_oy + 4, top_ox + s * step_w, top_oy + h - 4)
+                
+        # Card Text:
+        p.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        p.setPen(text_color)
+        
+        if self.display_mode == "teachers" and self.clean_cls_display:
+            t_rect_top = QRectF(top_ox, top_oy + 2, w, h * 0.5)
+            t_rect_bot = QRectF(top_ox, top_oy + h * 0.48, w, h * 0.5)
+            p.setFont(QFont("Segoe UI", 8.5, QFont.Bold))
+            p.drawText(t_rect_top, Qt.AlignCenter, self.clean_cls_display)
+            p.setFont(QFont("Segoe UI", 7.5, QFont.Normal))
+            p.drawText(t_rect_bot, Qt.AlignCenter, self.abbr[:4])
+        else:
+            p.drawText(top_r, Qt.AlignCenter, self.abbr)
+            
+        # Combined lesson '+' badge in top-left
+        if self.is_comb:
+            badge_r = QRectF(top_ox + 2, top_oy + 2, 11, 11)
+            p.setPen(QPen(QColor("#1D4ED8"), 1))
             p.setBrush(QBrush(QColor("#EFF6FF")))
-            p.setPen(QPen(QColor("#3B82F6"), 1))
             p.drawRoundedRect(badge_r, 2, 2)
-            p.setFont(QFont("Segoe UI", 9, QFont.Bold))
+            p.setFont(QFont("Segoe UI", 7.5, QFont.Bold))
             p.setPen(QColor("#1D4ED8"))
             p.drawText(badge_r, Qt.AlignCenter, "+")
-            p.end()
+            
+        # Count badge in top-right (if stack count > 1)
+        if self.count > 1:
+            cnt_str = str(self.count)
+            badge_w = max(13, 7 * len(cnt_str) + 6)
+            badge_h = 12
+            badge_r = QRectF(top_ox + w - badge_w - 2, top_oy + 2, badge_w, badge_h)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QBrush(QColor(0, 0, 0, 190)))
+            p.drawRoundedRect(badge_r, 3, 3)
+            p.setFont(QFont("Segoe UI", 7, QFont.Bold))
+            p.setPen(QColor("#FFFFFF"))
+            p.drawText(badge_r, Qt.AlignCenter, cnt_str)
+            
+        p.end()
+
+    def render_single_card_pixmap(self):
+        pm = QPixmap(self.card_w + 4, self.card_h + 4)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.TextAntialiasing)
         
+        base_color = QColor(self.color)
+        if not base_color.isValid():
+            base_color = QColor("#64748B")
+        lum = (0.299 * base_color.red() + 0.587 * base_color.green() + 0.114 * base_color.blue())
+        text_color = QColor("#FFFFFF") if lum < 155 else QColor("#0F172A")
+        
+        r = QRectF(1, 1, self.card_w, self.card_h)
+        grad = QLinearGradient(1, 1, 1, 1 + self.card_h)
+        grad.setColorAt(0.0, base_color.lighter(116))
+        grad.setColorAt(0.4, base_color)
+        grad.setColorAt(1.0, base_color.darker(110))
+        
+        p.setPen(QPen(QColor(0, 0, 0, 180), 1))
+        p.setBrush(QBrush(grad))
+        p.drawRoundedRect(r, 3.5, 3.5)
+        
+        p.setPen(QPen(QColor(255, 255, 255, 120), 1))
+        p.drawLine(3, 2, self.card_w - 1, 2)
+        p.drawLine(2, 3, 2, self.card_h - 1)
+        
+        if self.duration == 2:
+            p.setPen(QPen(QColor(0, 0, 0, 50), 1, Qt.DashLine))
+            p.drawLine(1 + self.card_w / 2, 4, 1 + self.card_w / 2, self.card_h - 2)
+            
+        p.setFont(QFont("Segoe UI", 9, QFont.Bold))
+        p.setPen(text_color)
+        if self.display_mode == "teachers" and self.clean_cls_display:
+            p.setFont(QFont("Segoe UI", 8.5, QFont.Bold))
+            p.drawText(QRectF(1, 2, self.card_w, self.card_h * 0.5), Qt.AlignCenter, self.clean_cls_display)
+            p.setFont(QFont("Segoe UI", 7.5, QFont.Normal))
+            p.drawText(QRectF(1, self.card_h * 0.48, self.card_w, self.card_h * 0.5), Qt.AlignCenter, self.abbr[:4])
+        else:
+            p.drawText(r, Qt.AlignCenter, self.abbr)
+            
+        p.end()
+        return pm
+
     def enterEvent(self, event):
         super().enterEvent(event)
+        self._is_hovered = True
+        self.update()
         w = self
         while w:
             if hasattr(w, 'info_subject_lbl'):
@@ -787,13 +901,17 @@ class DraggableLessonCard(QLabel):
                 break
             w = w.parent()
         win = self.window()
-        if win and hasattr(win, "statusBar"):
+        if win and hasattr(win, "statusBar") and win.statusBar():
             cls_txt = self.class_name if self.class_name else "-"
             tch_txt = self.teacher if self.teacher else "-"
-            win.statusBar().showMessage(f"{self.subject_name}  •  {cls_txt}  •  {tch_txt}  ({self.duration} Saat)")
+            cnt_txt = f"  |  Deste: {self.count} adet" if self.count > 1 else ""
+            dur_txt = f"{self.duration} Saatlik Blok" if self.duration > 1 else "1 Saatlik Ders"
+            win.statusBar().showMessage(f"{self.subject_name}  •  {cls_txt}  •  {tch_txt}  ({dur_txt}){cnt_txt}")
 
     def leaveEvent(self, event):
         super().leaveEvent(event)
+        self._is_hovered = False
+        self.update()
         w = self
         while w:
             if hasattr(w, 'info_subject_lbl'):
@@ -822,32 +940,37 @@ class DraggableLessonCard(QLabel):
         data = self._get_card_data()
         mime.setData("application/x-lesson", QByteArray(json.dumps(data).encode()))
         drag.setMimeData(mime)
-        pix = self.grab()
+        pix = self.render_single_card_pixmap()
         drag.setPixmap(pix)
-        drag.setHotSpot(pos)
+        drag.setHotSpot(QPoint(pix.width() // 2, pix.height() // 2))
         drag.exec_(Qt.MoveAction)
 
     def _start_sticky_drag(self):
         data = self._get_card_data()
-        pix = self.grab()
+        pix = self.render_single_card_pixmap()
         win = self.window()
-        # Where on the card the user pressed, so the ghost keeps that grip.
-        StickyGhostWidget(pix, data, win,
-                          grab_offset=getattr(self, "_drag_start_pos", None))
+        StickyGhostWidget(pix, data, win, grab_offset=QPoint(pix.width() // 2, pix.height() // 2))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self._drag_start_pos = event.pos()
+            self._is_pressed = True
+            self.update()
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
         if (event.buttons() & Qt.LeftButton) and hasattr(self, '_drag_start_pos'):
             if (event.pos() - self._drag_start_pos).manhattanLength() >= 5:
+                self._is_pressed = False
+                self.update()
                 self._start_standard_drag(event.pos())
                 return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
+        if self._is_pressed:
+            self._is_pressed = False
+            self.update()
         if event.button() == Qt.LeftButton and hasattr(self, '_drag_start_pos'):
             if (event.pos() - self._drag_start_pos).manhattanLength() < 5:
                 self._start_sticky_drag()
@@ -857,13 +980,23 @@ class DraggableLessonCard(QLabel):
     def _show_card_context_menu(self, pos):
         menu = QMenu(self)
         menu.setStyleSheet("""
-            QMenu { background: #FFFFFF; border: 1px solid #CCC; font-family: 'Segoe UI'; font-size: 12px; }
-            QMenu::item { padding: 6px 22px; }
-            QMenu::item:selected { background: #0078D7; color: white; }
-            QMenu::separator { height: 1px; background: #DDD; margin: 3px 10px; }
+            QMenu { background: #FFFFFF; border: 1px solid #CBD5E1; font-family: 'Segoe UI'; font-size: 12px; border-radius: 6px; padding: 4px; }
+            QMenu::item { padding: 6px 22px; border-radius: 4px; }
+            QMenu::item:selected { background: #EEF2FF; color: #4338CA; font-weight: bold; }
+            QMenu::separator { height: 1px; background: #E2E8F0; margin: 3px 8px; }
         """)
         
-        act_palette = menu.addAction(make_context_icon("🎨", "#E91E63", "#C2185B"), f"🎨 {self.subject_name} Rengini Ayarla (Renk Paleti)...")
+        act_palette = menu.addAction(make_context_icon("🎨", "#E91E63", "#C2185B"), f"🎨 {self.subject_name} Rengini Ayarla...")
+        menu.addSeparator()
+        
+        # Split / Combine options
+        act_split = None
+        act_merge = None
+        if self.duration == 2:
+            act_split = menu.addAction(make_context_icon("✂️", "#0284C7", "#0369A1"), "✂️ İkiye Böl (1+1 Saat Yap)")
+        elif self.duration == 1 and self.count >= 2:
+            act_merge = menu.addAction(make_context_icon("🔗", "#0284C7", "#0369A1"), "🔗 2 Kartı Birleştir (2 Saatlik Blok Yap)")
+            
         menu.addSeparator()
         act_2_2 = menu.addAction(make_context_icon("2+2", "#AB47BC", "#7B1FA2"), "2+2 Saat (2 İkili Blok)")
         act_2_1 = menu.addAction(make_context_icon("2+1", "#AB47BC", "#7B1FA2"), "2+1 Saat (1 İkili + 1 Tekli)")
@@ -875,7 +1008,6 @@ class DraggableLessonCard(QLabel):
         act_del = menu.addAction(make_context_icon("X", "#EF5350", "#C62828"), "Atamayı Sil (Kaldır)")
         
         action = menu.exec_(self.mapToGlobal(pos))
-        
         if not action:
             return
             
@@ -896,35 +1028,11 @@ class DraggableLessonCard(QLabel):
             if new_color and new_color.isValid():
                 new_hex = new_color.name()
                 self.color = new_hex
-                lum = (0.299 * new_color.red() + 0.587 * new_color.green() + 0.114 * new_color.blue())
-                text_color = "#FFFFFF" if lum < 160 else "#111111"
-                self.setStyleSheet(f"""
-                    QLabel {{
-                        background-color: {new_hex};
-                        color: {text_color};
-                        font-family: system-ui, -apple-system, sans-serif;
-                        font-size: 8.5px;
-                        border: 1px solid rgba(0, 0, 0, 0.22);
-                        border-radius: 3px;
-                        padding: 0px 2px;
-                    }}
-                    QLabel:hover {{
-                        border: 2px solid #0078D7;
-                    }}
-                """)
+                self.update()
                 update_subject_color_globally(self, data_store, self.subject_name, new_hex)
             return
 
         def _row_matches(a, s_fmt, c_fmt, t_fmt):
-            # atamalar rows can use either the English or the Turkish field names
-            # ("subject"/"ders", "class"/"sinif", "teacher"/"ogretmen") depending on where
-            # they were written from (manual entry vs. auto-scheduler vs. older saves).
-            # Only checking the English names here — while _refresh_unplaced_lessons's
-            # grouping checks BOTH — let stale rows survive a "replace" edit: the new rows
-            # got inserted, but an old duplicate (under "ders"/"sinif") stuck around too,
-            # and whichever one the grouping step happened to see LAST silently overrode the
-            # distribution/total shown in the dock (this is what caused "2+2+1" to render as
-            # "2+1" even though nothing was actually placed on the grid).
             from auto_scheduler import format_tr_name as _fmt2, normalize_clean as _nc2
             a_s = _fmt2(a.get("subject") or a.get("ders") or "")
             a_c = _fmt2(a.get("class") or a.get("sinif") or "")
@@ -934,7 +1042,50 @@ class DraggableLessonCard(QLabel):
                     (not t_fmt or a_t == t_fmt or _nc2(a_t_raw) == _nc2(self.teacher)))
 
         parts = None
-        if action == act_2_2:
+        if action == act_split and data_store and "atamalar" in data_store:
+            from auto_scheduler import format_tr_name as _fmt
+            s_fmt = _fmt(self.subject_name)
+            c_fmt = _fmt(self.class_name)
+            t_fmt = _fmt(self.teacher)
+            for idx, a in enumerate(data_store["atamalar"]):
+                if _row_matches(a, s_fmt, c_fmt, t_fmt):
+                    dist = a.get("distribution")
+                    if dist and 2 in dist:
+                        new_dist = []
+                        split_done = False
+                        for p in dist:
+                            if p == 2 and not split_done:
+                                new_dist.extend([1, 1])
+                                split_done = True
+                            else:
+                                new_dist.append(p)
+                        parts = new_dist
+                        break
+            if not parts:
+                parts = [1, 1]
+        elif action == act_merge and data_store and "atamalar" in data_store:
+            from auto_scheduler import format_tr_name as _fmt
+            s_fmt = _fmt(self.subject_name)
+            c_fmt = _fmt(self.class_name)
+            t_fmt = _fmt(self.teacher)
+            for idx, a in enumerate(data_store["atamalar"]):
+                if _row_matches(a, s_fmt, c_fmt, t_fmt):
+                    dist = a.get("distribution")
+                    if dist and dist.count(1) >= 2:
+                        new_dist = []
+                        ones_count = 0
+                        for p in dist:
+                            if p == 1 and ones_count < 2:
+                                ones_count += 1
+                                if ones_count == 2:
+                                    new_dist.append(2)
+                            else:
+                                new_dist.append(p)
+                        parts = new_dist
+                        break
+            if not parts:
+                parts = [2]
+        elif action == act_2_2:
             parts = [2, 2]
         elif action == act_2_1:
             parts = [2, 1]
@@ -972,10 +1123,6 @@ class DraggableLessonCard(QLabel):
                 c_fmt = _fmt(self.class_name)
                 t_fmt = _fmt(self.teacher)
 
-                # Warn (and refuse) rather than silently produce a distribution that can
-                # never actually fit on the timetable: check how many empty/eligible slots
-                # this class (and teacher, if any) has across the whole week, NOT counting
-                # hours this same lesson already occupies (those aren't "used up" by the edit).
                 capacity = _compute_free_slot_capacity(
                     data_store, self.class_name, self.teacher,
                     getattr(self, "is_comb", False), getattr(self, "combined_classes", []), s_fmt
@@ -991,22 +1138,14 @@ class DraggableLessonCard(QLabel):
                     )
                     return
 
-                # Find ALL matching atama rows for this subject/class/teacher (both English
-                # and Turkish field-name variants — see _row_matches above)
                 matching_indices = [i for i, a in enumerate(data_store["atamalar"]) if _row_matches(a, s_fmt, c_fmt, t_fmt)]
-
                 if not matching_indices:
-                    # Broader search: just subject match
                     matching_indices = [
                         i for i, a in enumerate(data_store["atamalar"])
                         if _fmt(a.get("subject") or a.get("ders") or "") == s_fmt
                     ]
 
                 if matching_indices:
-                    # Replace all old matching rows with new distribution rows. This edits
-                    # ONLY the assignment definition (atamalar) — it must NEVER touch
-                    # grid_placements, or it would rip already-scheduled hours off the
-                    # actual timetable just for having redefined the lesson's structure.
                     old_rows = data_store["atamalar"]
                     template = dict(old_rows[matching_indices[0]])
                     matching_set = set(matching_indices)
@@ -1023,8 +1162,6 @@ class DraggableLessonCard(QLabel):
                         new_row["id"] = str(_uuid.uuid4())
                         new_rows.append(new_row)
 
-                    # Reassign (not in-place pop/insert) so any earlier deep-copied undo
-                    # snapshot still safely references the OLD list object, untouched.
                     tail = [a for idx, a in enumerate(old_rows) if idx >= insert_pos and idx not in matching_set]
                     data_store["atamalar"] = old_rows[:insert_pos] + new_rows + tail
 
@@ -1041,7 +1178,7 @@ class UnplacedLessonsDock(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
-        self.setFixedHeight(46)
+        self.setFixedHeight(54)
         
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(6, 0, 6, 0)
@@ -1065,7 +1202,7 @@ class UnplacedLessonsDock(QWidget):
         self.container.setStyleSheet("background: transparent;")
         self.container_layout = QHBoxLayout(self.container)
         self.container_layout.setContentsMargins(4, 0, 4, 0)
-        self.container_layout.setSpacing(6)
+        self.container_layout.setSpacing(8)
         self.container_layout.setAlignment(Qt.AlignLeft)
         
         self.scroll.setWidget(self.container)
@@ -1085,7 +1222,6 @@ class UnplacedLessonsDock(QWidget):
         grid = getattr(win, "_grid", None)
         display_mode = getattr(grid, "current_view_mode", "classes") if grid else "classes"
         
-        # Determine active entity (class or teacher)
         target_entity = None
         if grid and hasattr(grid, "table"):
             cur_r = grid.table.currentRow()
@@ -1103,9 +1239,8 @@ class UnplacedLessonsDock(QWidget):
                 target_entity = cur_item.data(0, Qt.UserRole)
                 
         atamalar = win.data_store.get("atamalar", [])
-        from auto_scheduler import matches_class, format_tr_name, normalize_clean
+        from auto_scheduler import matches_class, format_tr_name
         
-        # Build menu of lessons
         menu = QMenu(self)
         menu.setStyleSheet("""
             QMenu { background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 8px; padding: 4px; font-family: 'Segoe UI', system-ui; font-size: 12px; }
@@ -1154,9 +1289,9 @@ class UnplacedLessonsDock(QWidget):
             sub_menu = menu.addMenu(f"📖 {s_name}  ({t_name or 'Öğretmen Yok'})")
             sub_menu.setStyleSheet(menu.styleSheet())
             
-            act_1 = sub_menu.addAction("1 Saat Ekle (Tekli)")
-            act_2 = sub_menu.addAction("2 Saat Ekle (İkili Blok)")
-            act_2_2 = sub_menu.addAction("2+2 Saat Ekle (2x İkili Blok)")
+            act_1 = sub_menu.addAction("1 Saat Ekle (Tekli Kart)")
+            act_2 = sub_menu.addAction("2 Saat Ekle (2 Saatlik Blok Kart)")
+            act_2_2 = sub_menu.addAction("2+2 Saat Ekle (2x Çiftli Deste)")
             
             def make_handler(sn, tn, cn, dur_choice):
                 return lambda: self._add_custom_card(sn, tn, cn, dur_choice)
@@ -1195,7 +1330,7 @@ class UnplacedLessonsDock(QWidget):
         for cd in card_durs:
             cid = f"manual_{s_name}_{c_name}_{uuid.uuid4().hex[:6]}"
             card = DraggableLessonCard(
-                cid, s_name, color, duration=cd, teacher=t_name,
+                cid, s_name, color, duration=cd, count=1, teacher=t_name,
                 class_name=c_name, display_mode=display_mode
             )
             card.setAcceptDrops(True)
@@ -1205,7 +1340,7 @@ class UnplacedLessonsDock(QWidget):
             
         if last_card:
             self.scroll.ensureWidgetVisible(last_card)
-        if win and hasattr(win, "statusBar"):
+        if win and hasattr(win, "statusBar") and win.statusBar():
             win.statusBar().showMessage(f"➕ '{s_name}' ders kartı yerleştirilmek üzere alt panele eklendi.", 4000)
 
     def eventFilter(self, watched, event):
@@ -1299,7 +1434,7 @@ class UnplacedLessonsDock(QWidget):
                     icon_lbl.setPixmap(make_grid_action_icon("check_circle", 18).pixmap(18, 18))
                     if target_entity:
                         ent_desc = "sınıfının" if display_mode == "classes" else "öğretmeninin"
-                        text_lbl.setText(f"✅ {target_entity} {ent_desc} çizelgesi dolu — boş hücre yok.")
+                        text_lbl.setText(f"✅ {target_entity} {ent_desc} çizelgesi dolu — yerleştirilecek ders kalmadı.")
                     else:
                         text_lbl.setText("✅ Çizelge dolu — yerleştirilecek ders kalmadı.")
                     text_lbl.setFont(QFont("Segoe UI", 8.5, QFont.Bold))
@@ -1310,12 +1445,12 @@ class UnplacedLessonsDock(QWidget):
                 
                 btn_empty_add = QPushButton("➕ Daha Fazla Ders Ekle...")
                 btn_empty_add.setCursor(Qt.PointingHandCursor)
-                btn_empty_add.setFixedHeight(26)
+                btn_empty_add.setFixedHeight(28)
                 btn_empty_add.setStyleSheet("""
                     QPushButton {
                         background: #4F46E5; color: white; font-family: 'Segoe UI';
                         font-size: 11px; font-weight: bold;
-                        padding: 3px 12px; border-radius: 5px; border: none;
+                        padding: 3px 14px; border-radius: 6px; border: none;
                     }
                     QPushButton:hover { background: #4338CA; }
                 """)
@@ -1329,9 +1464,15 @@ class UnplacedLessonsDock(QWidget):
             
             for l in lessons_data:
                 dur = l.get("duration", 1)
+                count = l.get("count", 1)
                 teacher = l.get("teacher", "")
                 cls_name = l.get("class_name", "")
-                card = DraggableLessonCard(l["id"], l["subject_name"], l["color"], duration=dur, teacher=teacher, class_name=cls_name, display_mode=display_mode)
+                card = DraggableLessonCard(
+                    l["id"], l["subject_name"], l["color"],
+                    duration=dur, count=count, teacher=teacher,
+                    class_name=cls_name, display_mode=display_mode,
+                    blocked_reason=l.get("blocked_reason", "")
+                )
                 if l.get("is_combined"): card.is_comb = True
                 card.is_combined = l.get("is_combined", False)
                 card.combined_classes = l.get("combined_classes", [])
@@ -1341,12 +1482,12 @@ class UnplacedLessonsDock(QWidget):
                 
             btn_inline_add = QPushButton("➕ Daha Fazla Ders Ekle...")
             btn_inline_add.setCursor(Qt.PointingHandCursor)
-            btn_inline_add.setFixedHeight(28)
+            btn_inline_add.setFixedHeight(30)
             btn_inline_add.setStyleSheet("""
                 QPushButton {
                     background: #EEF2FF; color: #4F46E5; font-family: 'Segoe UI';
                     font-size: 10.5px; font-weight: bold;
-                    padding: 3px 10px; border-radius: 5px; border: 1.5px dashed #6366F1;
+                    padding: 3px 12px; border-radius: 6px; border: 1.5px dashed #6366F1;
                 }
                 QPushButton:hover { background: #E0E7FF; border-color: #4F46E5; }
             """)

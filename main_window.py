@@ -1951,25 +1951,26 @@ class MainWindow(QMainWindow):
                     remaining_parts.append(b)
                     rem -= b
             
-            # 4. Emit unplaced cards
-            for p_idx, block_dur in enumerate(remaining_parts):
-                if block_dur <= 0:
+            # 4. Group remaining parts into clean aSc 3D card decks
+            from collections import Counter
+            part_counts = Counter(remaining_parts)
+            for block_dur, count in sorted(part_counts.items(), reverse=True):
+                if block_dur <= 0 or count <= 0:
                     continue
                 unplaced.append({
-                    "id": f"{idx}_{p_idx}_{block_dur}",
+                    "id": f"{idx}_{block_dur}",
                     "subject_name": s_name,
                     "color": color,
                     "teacher": t_name,
                     "class_name": c_name,
                     "duration": block_dur,
+                    "count": count,
                     "is_combined": is_comb,
                     "combined_classes": list(target_classes) if is_comb else []
                 })
 
-        # Loose cards: anything removed straight off the grid (see _delete_lesson_at) shows up
-        # here directly and unconditionally, scoped to the same class/teacher as everything
-        # else in this view. This list is only READ here; a card is removed from it once it's
-        # actually dropped back onto the grid (see _on_lesson_dropped), never just by viewing.
+        # Loose cards: group by (subject, class, teacher, duration)
+        loose_grouped = {}
         for lc in self.data_store.get("loose_unplaced_cards", []):
             if target_entity:
                 if display_mode == "classes":
@@ -1978,20 +1979,28 @@ class MainWindow(QMainWindow):
                 else:
                     if format_tr_name(lc.get("teacher", "")) != format_tr_name(target_entity):
                         continue
-            unplaced.append({
-                "id": lc["id"],
-                "subject_name": lc.get("subject_name", ""),
-                "color": lc.get("color", "#94A3B8"),
-                "teacher": lc.get("teacher", ""),
-                "class_name": lc.get("class_name", ""),
-                "duration": lc.get("duration", 1),
-                "is_combined": lc.get("is_combined", False),
-                "combined_classes": lc.get("combined_classes", []),
-                # Why the scheduler could not place it. Carried through to the card so
-                # dropping it can explain the clash and offer to override, instead of
-                # the lesson silently going missing with no way to find out why.
-                "blocked_reason": lc.get("blocked_reason", ""),
-            })
+            s_name = lc.get("subject_name", "")
+            c_name = lc.get("class_name", "")
+            t_name = lc.get("teacher", "")
+            dur = int(lc.get("duration", 1) or 1)
+            k = (format_tr_name(s_name), format_tr_name(c_name), format_tr_name(t_name), dur)
+            if k not in loose_grouped:
+                loose_grouped[k] = {
+                    "id": lc["id"],
+                    "subject_name": s_name,
+                    "color": lc.get("color", "#94A3B8"),
+                    "teacher": t_name,
+                    "class_name": c_name,
+                    "duration": dur,
+                    "count": 0,
+                    "is_combined": lc.get("is_combined", False),
+                    "combined_classes": lc.get("combined_classes", []),
+                    "blocked_reason": lc.get("blocked_reason", "")
+                }
+            loose_grouped[k]["count"] += 1
+
+        for g in loose_grouped.values():
+            unplaced.append(g)
 
         has_assignments = bool(scoped_atamalar) if target_entity else bool(atamalar)
         self._grid.unplaced_dock.load_unplaced(
