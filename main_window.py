@@ -24,6 +24,7 @@ from dialogs.edit_forms import format_tr_name
 
 APP_TITLE = "BGZ Ders Planlama"
 VERSION   = "2026 - 2027"
+FONT_FAMILY = ".AppleSystemUIFont, SF Pro Text, Helvetica Neue, Segoe UI, sans-serif"
 
 PASTEL_DISTINCT_COLORS = [
     "#1E88E5", "#43A047", "#FB8C00", "#8E24AA", "#E53935",
@@ -586,55 +587,55 @@ class MainWindow(QMainWindow):
         # Wire the file menu (Integrated directly on Ribbon Tab Bar)
         fm = self._ribbon.file_menu
         
-        act_home = QAction(make_menu_icon("H", "#7C3AED", "#5B21B6"), "Ana Sayfa (Dashboard)", self)
+        act_home = QAction(make_icon("anasayfa", 16), "Ana Sayfa (Dashboard)", self)
         act_home.triggered.connect(self._go_home)
         fm.addAction(act_home)
         
         fm.addSeparator()
         
-        act_new = QAction(make_menu_icon("N", "#4CAF50", "#2E7D32"), "Yeni", self)
+        act_new = QAction(make_icon("yeni", 16), "Yeni", self)
         act_new.triggered.connect(self._act_new)
         fm.addAction(act_new)
         
-        act_open = QAction(make_menu_icon("O", "#FFCA28", "#FF8F00"), "Aç", self)
+        act_open = QAction(make_icon("ac", 16), "Aç", self)
         act_open.triggered.connect(self._act_open)
         fm.addAction(act_open)
         
-        act_save = QAction(make_menu_icon("S", "#29B6F6", "#0277BD"), "Kaydet", self)
+        act_save = QAction(make_icon("kaydet", 16), "Kaydet", self)
         act_save.triggered.connect(self._act_save)
         fm.addAction(act_save)
         
-        act_cloud_pull = QAction(make_menu_icon("C", "#0284C7", "#0369A1"), "Buluttan Verileri İndir / Senkronize Et", self)
+        act_cloud_pull = QAction(make_icon("bulut", 16), "Buluttan Verileri İndir / Senkronize Et", self)
         act_cloud_pull.triggered.connect(lambda: self._download_cloud_data(show_message=True))
         fm.addAction(act_cloud_pull)
         
-        act_download = QAction(make_menu_icon("D", "#0284C7", "#0369A1"), "Güncel Versiyonu İndir (İndirme Sayfası)", self)
+        act_download = QAction(make_icon("bulut_olustur", 16), "Güncel Versiyonu İndir (İndirme Sayfası)", self)
         act_download.triggered.connect(self._open_download_page)
         fm.addAction(act_download)
         
-        act_update = QAction(make_menu_icon("U", "#8E44AD", "#6C3483"), "Evden Güncellemeleri Kontrol Et / İndir", self)
+        act_update = QAction(make_icon("internet", 16), "Evden Güncellemeleri Kontrol Et / İndir", self)
         act_update.triggered.connect(self._act_check_updates)
         fm.addAction(act_update)
         
         fm.addSeparator()
         
-        act_print = QAction(make_menu_icon("P", "#AB47BC", "#6A1B9A"), "Yazdır", self)
+        act_print = QAction(make_icon("yazdir", 16), "Yazdır", self)
         act_print.triggered.connect(self._act_print)
         fm.addAction(act_print)
         
-        act_prev = QAction(make_menu_icon("V", "#26C6DA", "#00838F"), "Ön İzleme", self)
+        act_prev = QAction(make_icon("on_izleme", 16), "Ön İzleme", self)
         act_prev.triggered.connect(self._act_preview)
         fm.addAction(act_prev)
         
         fm.addSeparator()
         
-        act_about = QAction(make_menu_icon("?", "#B0BEC5", "#546E7A"), "Hakkında", self)
+        act_about = QAction(make_icon("okul", 16), "Hakkında", self)
         act_about.triggered.connect(lambda: QMessageBox.about(self, "Hakkında", f"{APP_TITLE} {VERSION}\n\nBGZ Ders Planlama Yazılımı"))
         fm.addAction(act_about)
         
         fm.addSeparator()
         
-        act_exit = QAction(make_menu_icon("X", "#EF5350", "#C62828"), "Çıkış", self)
+        act_exit = QAction(make_icon("temizle", 16), "Çıkış", self)
         act_exit.triggered.connect(self.close)
         fm.addAction(act_exit)
 
@@ -704,8 +705,8 @@ class MainWindow(QMainWindow):
         p1.add_button("Yeni",           "yeni",     self._act_new)
         p1.add_button("Aç",             "ac",       self._act_open)
         p1.add_button("Kaydet",         "kaydet",   self._act_save)
-        p1.add_button("Geri Al\nCtrl+Z","bilgi",    self._act_undo)
-        p1.add_button("Yinele\nCtrl+Y", "bilgi",    self._act_redo)
+        p1.add_button("Geri Al\nCtrl+Z","geri_al",  self._act_undo)
+        p1.add_button("Yinele\nCtrl+Y", "yinele",   self._act_redo)
         p1.add_button("Yazdır",         "yazdir",   self._act_print)
         p1.add_button("Ön İzleme",      "on_izleme",self._act_preview)
         p1.add_divider()
@@ -713,17 +714,18 @@ class MainWindow(QMainWindow):
         p1.add_button("Sınıflar",       "sinif",    self._open_classes)
         p1.add_button("Derslikler",     "derslik",  self._open_rooms)
         p1.add_button("Öğretmenler",    "ogretmen", self._open_teachers)
-        p1.add_button("Seçmeli\nDersler","ders",    self._open_electives)
-        p1.add_button("Planlama\nİlişkileri","plan",self._open_relations)
+        p1.add_button("Seçmeli\nDersler","secim",   self._open_electives)
+        p1.add_button("Planlama\nİlişkileri","iliskiler",self._open_relations)
         p1.add_divider()
         p1.add_button("Planlama\nÖncesi Kontrol","kontrol",self._act_test_timetable)
         p1.add_button("Otomatik\nPlanlamayı Başlat","otomatik",self._act_auto_schedule)
-        p1.add_button("Bulut Tabanlı\nPlanlama","bulut",self._act_cloud_timetable)
+        p1.add_button("Bulut Tabanlı\nPlanlama","bulut_olustur",self._act_cloud_timetable)
         p1.add_button("Planlama Sonrası\nKontrol","kontrol",self._act_verify_timetable)
+        p1.add_button("Gelişmiş\nKısıtlamalar","sartlar",lambda: self._open_extracted(126))
         p1.add_button("Çizelgeyi\nSıfırla","temizle",self._act_clear_schedule)
         p1.add_divider()
-        p1.add_button("Temel\nBilgiler",  "bilgi",    self._open_school_info)
-        p1.add_button("Evden Kod\nGüncelle", "internet", self._act_check_updates)
+        p1.add_button("Temel\nBilgiler",  "okul",    self._open_school_info)
+        p1.add_button("Evden Kod\nGüncelle", "bulut", self._act_check_updates)
         p1.add_button("İnternet\nHesabı","internet", lambda: __import__('webbrowser').open("https://chenki.net/"))
         p1.add_button("Sorular?\nYorumlar?","yardim",lambda: __import__('dialogs.faq_dialog', fromlist=['FAQDialog']).FAQDialog(self).exec())
         p1.add_stretch()
@@ -734,14 +736,14 @@ class MainWindow(QMainWindow):
         p2.add_button("Yeni",       "yeni",   self._act_new)
         p2.add_button("Aç",         "ac",     self._act_open)
         p2.add_button("Kapat",      "temizle",self._act_close)
-        p2.add_button("Demo\nDosyaları","bilgi",self._act_nyi)
+        p2.add_button("Demo\nDosyaları","okul",self._act_nyi)
         p2.add_divider()
         p2.add_button("Kaydet",     "kaydet", self._act_save)
         p2.add_button("Yazdır",     "yazdir", self._act_print)
         p2.add_button("Ön İzleme",  "on_izleme",self._act_preview)
-        p2.add_button("Bilgi Al",   "bilgi",  self._act_nyi)
+        p2.add_button("Bilgi Al",   "okul",   self._act_nyi)
         p2.add_button("Aktar",      "internet",self._act_nyi)
-        p2.add_button("Karşılaştırma", "bilgi", self._act_compare)
+        p2.add_button("Karşılaştırma", "kontrol", self._act_compare)
         p2.add_button("E-Mail\nGönder","internet",self._act_nyi)
         p2.add_button("İnternet\nHesabı","internet", lambda: __import__('webbrowser').open("https://chenki.net/"))
         p2.add_stretch()
@@ -750,31 +752,31 @@ class MainWindow(QMainWindow):
         p3 = r.add_tab("Tanımlama İşlemleri")
         p3.add_back(self._go_main_tab)
         p3.add_button("Sihirbaz",   "sihirbaz",self._open_wizard)
-        p3.add_button("Temel\nBilgiler","bilgi",self._act_nyi)
+        p3.add_button("Temel\nBilgiler","okul",self._open_school_info)
         p3.add_divider()
-        p3.add_button("Toplu Atama\nListesi", "bilgi", self._act_assignment_list)
+        p3.add_button("Toplu Atama\nListesi", "iliskiler", self._act_assignment_list)
         p3.add_button("Dersler",    "ders",   self._open_subjects)
         p3.add_button("Sınıflar",   "sinif",  self._open_classes)
         p3.add_button("Derslikler", "derslik",self._open_rooms)
         p3.add_button("Öğretmenler","ogretmen",self._open_teachers)
-        p3.add_button("Seçmeli\nDersler","ders",self._open_electives)
-        p3.add_button("Planlama\nİlişkileri","plan",self._open_relations)
-        p3.add_button("Tanımlanan\nKısıtlamalar","kontrol",lambda: self._open_extracted(126))
+        p3.add_button("Seçmeli\nDersler","secim",self._open_electives)
+        p3.add_button("Planlama\nİlişkileri","iliskiler",self._open_relations)
+        p3.add_button("Tanımlanan\nKısıtlamalar","sartlar",lambda: self._open_extracted(126))
         p3.add_divider()
-        p3.add_button("Değiştir",   "param",  lambda: self._open_extracted(135))
+        p3.add_button("Değiştir",   "okul",  lambda: self._open_extracted(135))
         p3.add_stretch()
 
         # ── 4. Görünüm ───────────────────────────────────────────────────────
         p4 = r.add_tab("Görünüm")
         p4.add_back(self._go_main_tab)
-        p4.add_button("Geri Al\nCtrl+Z","bilgi",self._act_undo)
-        p4.add_button("Tekrarla\nCtrl+Y","bilgi",self._act_redo)
+        p4.add_button("Geri Al\nCtrl+Z","geri_al",self._act_undo)
+        p4.add_button("Tekrarla\nCtrl+Y","yinele",self._act_redo)
         p4.add_divider()
-        p4.add_button("Görünüm",    "plan",   self._act_nyi)
-        p4.add_button("Yakınlaştır","istatistik",self._act_nyi)
-        p4.add_button("Hafta",      "plan",   self._act_nyi)
-        p4.add_button("Sekmeleri\nGöster","bilgi",self._act_nyi)
-        p4.add_button("Ders Programı\nİle İlgili","plan",self._act_nyi)
+        p4.add_button("Görünüm",    "iliskiler",   self._act_nyi)
+        p4.add_button("Yakınlaştır","on_izleme",self._act_nyi)
+        p4.add_button("Hafta",      "iliskiler",   self._act_nyi)
+        p4.add_button("Sekmeleri\nGöster","okul",self._act_nyi)
+        p4.add_button("Ders Programı\nİle İlgili","iliskiler",self._act_nyi)
         p4.add_stretch()
 
         # ── 5. Planlama / Yerleştirme ────────────────────────────────────────
@@ -782,33 +784,25 @@ class MainWindow(QMainWindow):
         p5.add_back(self._go_main_tab)
         p5.add_button("Planlama\nÖncesi Kontrol","kontrol",self._act_test_timetable)
         p5.add_button("Otomatik\nPlanlamayı Başlat","otomatik",self._act_auto_schedule)
-        p5.add_button("Bulut Tabanlı\nPlanlama","bulut",self._act_cloud_timetable)
+        p5.add_button("Bulut Tabanlı\nPlanlama","bulut_olustur",self._act_cloud_timetable)
         p5.add_divider()
-        p5.add_button("İyileştirme\nUygula","param",self._act_nyi)
-        p5.add_button("Analiz",     "istatistik",self._act_nyi)
-        p5.add_button("Parametreler","param",self._act_nyi)
-        p5.add_button("Tanımlanan\nKısıtlamalar","kontrol",self._act_nyi)
+        p5.add_button("İyileştirme\nUygula","otomatik",self._act_nyi)
+        p5.add_button("Analiz",     "kontrol",self._act_nyi)
+        p5.add_button("Tanımlanan\nKısıtlamalar","sartlar",self._act_nyi)
         p5.add_divider()
         p5.add_button("Planlama Sonrası\nKontrol","kontrol",self._act_verify_timetable)
         p5.add_button("Danışman",   "yardim",self._act_nyi)
-        p5.add_button("İstatistik", "istatistik", self._act_statistics)
+        p5.add_button("İstatistik", "iliskiler", self._act_statistics)
         p5.add_divider()
         p5.add_button("Dersliklere\nAtama","derslik",self._act_nyi)
-        p5.add_button("Kart\nKilitle","kilit",self._act_nyi)
-        p5.add_button("Kilit Aç",   "kilit",  self._act_nyi)
         p5.add_button("Tabloyu\nTemizle","temizle",self._act_clear_schedule)
         p5.add_stretch()
 
         # ── 6. Arayüz Ayarları ───────────────────────────────────────────────
         p6 = r.add_tab("Arayüz Ayarları")
         p6.add_back(self._go_main_tab)
-        p6.add_button("Temel\nBilgiler","bilgi",  lambda: self._open_extracted(100))
-        p6.add_button("Yazılımı\nÖzelleştir","param",self._act_nyi)
-        p6.add_button("Gelişmiş",   "param",  lambda: self._open_extracted(135))
-        p6.add_divider()
-        p6.add_button("Uygulama\nRenk Teması","renk",lambda: self._open_extracted(136))
-        p6.add_button("Yazı",       "yazi",   lambda: self._open_extracted(137))
-        p6.add_button("Menü Dil\nGüncelle","dil",lambda: self._open_extracted(138))
+        p6.add_button("Temel\nBilgiler","okul",  lambda: self._open_extracted(100))
+        p6.add_button("Gelişmiş",   "sartlar",  lambda: self._open_extracted(135))
         p6.add_divider()
         p6.add_checkbox("Durum Çubukları Göster/Gizle", True)
         p6.add_checkbox("Ana Menü Tuşlarını Göster/Gizle", True)
@@ -818,12 +812,10 @@ class MainWindow(QMainWindow):
         # ── 7. Yardım ────────────────────────────────────────────────────────
         p7 = r.add_tab("Yardım")
         p7.add_back(self._go_main_tab)
-        p7.add_button("Tanıtım Ve\nÖğrenme","bilgi",self._act_nyi)
-        p7.add_button("Günlük\nİpucu","bilgi",self._act_nyi)
-        p7.add_button("Demo Dosyaları\nGöster","bilgi",self._act_nyi)
+        p7.add_button("Tanıtım Ve\nÖğrenme","okul",self._act_nyi)
+        p7.add_button("Günlük\nİpucu","yardim",self._act_nyi)
+        p7.add_button("Demo Dosyaları\nGöster","okul",self._act_nyi)
         p7.add_divider()
-        p7.add_button("Program Dilini\nDeğiştir","dil",self._act_nyi)
-        p7.add_button("Lisans\nBilgi Kartı","kilit",self._act_nyi)
         p7.add_button("Teknik\nDestek","yardim",self._act_nyi)
         p7.add_button("Yeni Versiyon\nKontrolü","internet",self._act_nyi)
         p7.add_button("Hizmet Yenilemek\nİçin Tıklayınız","internet",self._act_nyi)
@@ -872,17 +864,17 @@ class MainWindow(QMainWindow):
         self._tree.setAnimated(True)
         self._tree.setIconSize(QSize(48, 28))
         self._tree.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self._tree.setStyleSheet("""
-            QTreeWidget {
+        self._tree.setStyleSheet(f"""
+            QTreeWidget {{
                 border: none;
                 background: transparent;
-                font-family: system-ui, -apple-system, sans-serif;
+                font-family: {FONT_FAMILY};
                 outline: none;
-            }
-            QTreeWidget:focus {
+            }}
+            QTreeWidget:focus {{
                 outline: none;
-            }
-            QTreeWidget::item {
+            }}
+            QTreeWidget::item {{
                 padding: 7px 10px;
                 margin-bottom: 3px;
                 border-radius: 6px;
@@ -891,26 +883,26 @@ class MainWindow(QMainWindow):
                 font-size: 13px;
                 background: transparent;
                 border: 1.5px dashed transparent;
-            }
-            QTreeWidget::item:hover {
+            }}
+            QTreeWidget::item:hover {{
                 background: transparent;
                 border: 1.5px dashed #0284C7;
                 color: #0284C7;
-            }
-            QTreeWidget::item:selected {
+            }}
+            QTreeWidget::item:selected {{
                 background: transparent;
                 border: 1.5px dashed #0284C7;
                 color: #0369A1;
                 font-weight: 700;
-            }
-            QTreeWidget::item:selected:hover {
+            }}
+            QTreeWidget::item:selected:hover {{
                 background: transparent;
                 border: 1.5px dashed #0284C7;
                 color: #0369A1;
-            }
-            QTreeWidget::branch {
+            }}
+            QTreeWidget::branch {{
                 background: transparent;
-            }
+            }}
         """)
         self._tree.itemExpanded.connect(self._on_tree_item_expanded_collapsed)
         self._tree.itemCollapsed.connect(self._on_tree_item_expanded_collapsed)
@@ -926,12 +918,12 @@ class MainWindow(QMainWindow):
 
         # Tab widget for multiple views
         self._tab_widget = QTabWidget(right)
-        self._tab_widget.setFont(QFont("Segoe UI", 9))
-        self._tab_widget.setStyleSheet("""
-            QTabWidget::pane { border: 1px solid #CBD5E1; background: #FFFFFF; }
-            QTabBar::tab { padding: 6px 16px; font-size: 9pt; font-weight: bold; }
-            QTabBar::tab:selected { background: #FFFFFF; border-bottom: 3px solid #0071E3; color: #0071E3; }
-            QTabBar::tab:!selected { background: #F1F5F9; color: #64748B; }
+        self._tab_widget.setFont(QFont(FONT_FAMILY, 9))
+        self._tab_widget.setStyleSheet(f"""
+            QTabWidget::pane {{ border: 1px solid #CBD5E1; background: #FFFFFF; border-radius: 6px; }}
+            QTabBar::tab {{ padding: 6px 18px; font-size: 12.5px; font-weight: 700; font-family: {FONT_FAMILY}; }}
+            QTabBar::tab:selected {{ background: #FFFFFF; border-bottom: 2.5px solid #0071E3; color: #0071E3; }}
+            QTabBar::tab:!selected {{ background: #F1F5F9; color: #64748B; }}
         """)
 
         # Main timetable grid

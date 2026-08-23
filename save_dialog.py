@@ -73,7 +73,12 @@ class AppleSaveDialog(QDialog):
                  message="Veritabanı ve bulut senkronizasyonu yapılıyor...",
                  parent=None, show_spinner=True):
         super().__init__(parent)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        # NoDropShadowWindowHint: on macOS a frameless + translucent window still gets a
+        # native Cocoa shadow layer, and that layer is what paints as an opaque black
+        # rectangle when the compositor cannot resolve the window's alpha. The in-app
+        # QGraphicsDropShadowEffects were removed for this same symptom; this is the
+        # remaining shadow source. The cards draw their own border, so nothing is lost.
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool | Qt.NoDropShadowWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setFixedSize(420, 170 if show_spinner else 120)
 

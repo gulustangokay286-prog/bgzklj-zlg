@@ -370,7 +370,12 @@ class AppleProgressBar(QWidget):
 class CrossConflictResolutionDialog(QDialog):
     def __init__(self, conflicts, parent=None):
         super().__init__(parent)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        # NoDropShadowWindowHint: on macOS a frameless + translucent window still gets a
+        # native Cocoa shadow layer, and that layer is what paints as an opaque black
+        # rectangle when the compositor cannot resolve the window's alpha. The in-app
+        # QGraphicsDropShadowEffects were removed for this same symptom; this is the
+        # remaining shadow source. The cards draw their own border, so nothing is lost.
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool | Qt.NoDropShadowWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setFixedSize(540, 420)
         

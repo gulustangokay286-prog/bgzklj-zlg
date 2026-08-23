@@ -19,7 +19,7 @@ class ColorSwatchButton(QPushButton):
     def __init__(self, hex_color: str, parent=None):
         super().__init__(parent)
         self.hex_color = hex_color
-        self.setFixedSize(36, 36)
+        self.setFixedSize(40, 40)
         self.setCursor(Qt.PointingHandCursor)
         self.is_selected = False
         self.update_style()
@@ -29,17 +29,15 @@ class ColorSwatchButton(QPushButton):
         self.update_style()
 
     def update_style(self):
-        border = "3px solid #0F172A" if self.is_selected else "1px solid rgba(0,0,0,0.15)"
-        scale_shadow = "box-shadow: 0 2px 4px rgba(0,0,0,0.2);" if self.is_selected else ""
+        border = "2.5px solid #0071E3" if self.is_selected else "1px solid rgba(0,0,0,0.14)"
         self.setStyleSheet(f"""
             QPushButton {{
                 background-color: {self.hex_color};
                 border: {border};
-                border-radius: 6px;
-                {scale_shadow}
+                border-radius: 8px;
             }}
             QPushButton:hover {{
-                border: 2px solid #2563EB;
+                border: 2px solid #0071E3;
             }}
         """)
 
@@ -103,14 +101,7 @@ def resolve_subject_color(subject_name: str, data_store: dict = None) -> str:
 
 def update_subject_color_globally(widget_or_parent, data_store: dict, subject_name: str, new_hex: str):
     """
-    Globally updates and immediately persists subject color across:
-    1. data_store["dersler"]
-    2. data_store["atamalar"]
-    3. data_store["grid_placements"]
-    4. data_store["yerlesim"]
-    5. active grid _placed_lessons and table cells
-    6. active unplaced dock cards
-    7. writes to disk database file
+    Globally updates and immediately persists subject color across data_store and UI.
     """
     if not subject_name or not new_hex:
         return
@@ -223,10 +214,11 @@ def update_subject_color_globally(widget_or_parent, data_store: dict, subject_na
 
 class ModernColorPickerDialog(QDialog):
     """Modern, Sade ve Şık Renk Seçim Penceresi"""
-    def __init__(self, current_color="#2563EB", title="Renk Seç", parent=None):
+    def __init__(self, current_color="#2563EB", title="Renk Seçimi", parent=None):
         super().__init__(parent)
-        self.setWindowTitle(title)
-        self.setFixedSize(380, 420)
+        clean_title = str(title).replace("🎨", "").strip()
+        self.setWindowTitle(clean_title)
+        self.setFixedSize(400, 460)
         
         # Parse initial color
         if isinstance(current_color, QColor):
@@ -241,27 +233,27 @@ class ModernColorPickerDialog(QDialog):
 
     def _build_ui(self):
         self.setStyleSheet("""
-            QDialog { background-color: #FFFFFF; font-family: system-ui, -apple-system, sans-serif; }
-            QLabel { color: #1E293B; font-size: 13px; font-weight: bold; }
-            QLineEdit { border: 1px solid #CBD5E1; border-radius: 6px; padding: 6px 10px; font-size: 13px; font-weight: bold; color: #0F172A; }
-            QLineEdit:focus { border: 2px solid #2563EB; }
-            QPushButton { min-height: 32px; border-radius: 6px; font-size: 13px; font-weight: bold; }
+            QDialog { background-color: #FFFFFF; font-family: .AppleSystemUIFont, SF Pro Text, -apple-system, Helvetica Neue, Segoe UI, sans-serif; }
+            QLabel { color: #1E293B; font-size: 13px; font-weight: 600; }
+            QLineEdit { border: 1px solid #CBD5E1; border-radius: 8px; padding: 6px 10px; font-size: 13px; font-weight: 600; color: #0F172A; }
+            QLineEdit:focus { border: 1.5px solid #0071E3; }
         """)
         
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(18, 18, 18, 18)
+        lay.setContentsMargins(20, 20, 20, 20)
         lay.setSpacing(14)
         
         # Header
-        lbl_title = QLabel("🎨 Canlı Renk Paleti")
-        lbl_title.setStyleSheet("font-size: 15px; color: #0F172A; font-weight: bold;")
+        lbl_title = QLabel("Canlı Renk Paleti")
+        lbl_title.setStyleSheet("font-size: 15px; color: #0F172A; font-weight: 700;")
         lay.addWidget(lbl_title)
         
-        # Swatch Palette Grid (4 rows x 7 cols)
+        # Swatch Palette Grid (4 rows x 7 cols) with generous X and Y spacing
         grid_widget = QWidget()
         grid = QGridLayout(grid_widget)
         grid.setContentsMargins(0, 0, 0, 0)
-        grid.setSpacing(8)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(12)
         
         cols = 7
         for idx, hex_code in enumerate(CURATED_PALETTE):
@@ -278,23 +270,24 @@ class ModernColorPickerDialog(QDialog):
         
         # Live Preview & Custom Input Row
         preview_frame = QFrame()
-        preview_frame.setStyleSheet("background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 6px;")
+        preview_frame.setStyleSheet("background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 12px; padding: 6px;")
         prev_lay = QHBoxLayout(preview_frame)
-        prev_lay.setContentsMargins(10, 8, 10, 8)
-        prev_lay.setSpacing(10)
+        prev_lay.setContentsMargins(12, 10, 12, 10)
+        prev_lay.setSpacing(12)
         
         self.preview_box = QLabel()
-        self.preview_box.setFixedSize(36, 36)
+        self.preview_box.setFixedSize(38, 38)
         self._update_preview_box()
         prev_lay.addWidget(self.preview_box)
         
         v_hex = QVBoxLayout()
+        v_hex.setSpacing(2)
         lbl_hex = QLabel("Renk Kodu (HEX):")
-        lbl_hex.setStyleSheet("font-size: 11px; color: #64748B; font-weight: normal;")
+        lbl_hex.setStyleSheet("font-size: 11px; color: #64748B; font-weight: 500;")
         v_hex.addWidget(lbl_hex)
         
         self.txt_hex = QLineEdit(self.selected_hex)
-        self.txt_hex.setFixedWidth(100)
+        self.txt_hex.setFixedWidth(110)
         self.txt_hex.textChanged.connect(self._on_hex_text_changed)
         v_hex.addWidget(self.txt_hex)
         prev_lay.addLayout(v_hex)
@@ -302,24 +295,60 @@ class ModernColorPickerDialog(QDialog):
         prev_lay.addStretch(1)
         
         btn_custom = QPushButton("Özel Renk...")
-        btn_custom.setStyleSheet("background: #FFFFFF; color: #475569; border: 1px solid #CBD5E1; padding: 6px 12px;")
+        btn_custom.setStyleSheet("""
+            QPushButton {
+                background: #FFFFFF;
+                color: #334155;
+                border: 1px solid #CBD5E1;
+                border-radius: 17px;
+                padding: 0 16px;
+                min-height: 34px;
+                font-weight: 600;
+                font-size: 12px;
+            }
+            QPushButton:hover { background: #F1F5F9; }
+        """)
         btn_custom.clicked.connect(self._open_native_picker)
         prev_lay.addWidget(btn_custom)
         
         lay.addWidget(preview_frame)
         lay.addStretch(1)
         
-        # Bottom Buttons
+        # Bottom Buttons (Capsule pills)
         bot_lay = QHBoxLayout()
-        bot_lay.setSpacing(10)
+        bot_lay.setSpacing(12)
         
         btn_cancel = QPushButton("İptal")
-        btn_cancel.setStyleSheet("background: #F1F5F9; color: #475569; border: 1px solid #CBD5E1; padding: 6px 16px;")
+        btn_cancel.setStyleSheet("""
+            QPushButton {
+                background: #FFFFFF;
+                color: #475569;
+                border: 1px solid #CBD5E1;
+                border-radius: 19px;
+                padding: 0 22px;
+                min-height: 38px;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            QPushButton:hover { background: #F8FAFC; color: #0F172A; }
+        """)
         btn_cancel.clicked.connect(self.reject)
         bot_lay.addWidget(btn_cancel)
         
         btn_apply = QPushButton("Seçilen Rengi Uygula")
-        btn_apply.setStyleSheet("background: #2563EB; color: #FFFFFF; border: none; padding: 6px 20px; font-weight: bold; border-radius: 6px;")
+        btn_apply.setStyleSheet("""
+            QPushButton {
+                background: #0071E3;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 19px;
+                padding: 0 26px;
+                min-height: 38px;
+                font-weight: 600;
+                font-size: 13px;
+            }
+            QPushButton:hover { background: #0062C4; }
+        """)
         btn_apply.clicked.connect(self.accept)
         bot_lay.addWidget(btn_apply)
         
@@ -349,7 +378,7 @@ class ModernColorPickerDialog(QDialog):
         self.preview_box.setStyleSheet(f"""
             background-color: {self.selected_hex};
             border: 2px solid {border_col};
-            border-radius: 6px;
+            border-radius: 8px;
         """)
 
     def _open_native_picker(self):
@@ -368,9 +397,10 @@ class ModernColorPickerDialog(QDialog):
         return self.selected_hex
 
     @staticmethod
-    def pick_color(initial_color="#2563EB", parent=None, title="Renk Seç", data_store=None, subject_name=None):
+    def pick_color(initial_color="#2563EB", parent=None, title="Renk Seçimi", data_store=None, subject_name=None):
         """Helper that opens dialog and optionally saves to data_store automatically."""
-        dlg = ModernColorPickerDialog(current_color=initial_color, title=title, parent=parent)
+        clean_title = str(title).replace("🎨", "").strip()
+        dlg = ModernColorPickerDialog(current_color=initial_color, title=clean_title, parent=parent)
         if dlg.exec() == QDialog.Accepted:
             chosen_hex = dlg.get_hex()
             if subject_name:

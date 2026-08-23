@@ -1,19 +1,21 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget, 
-    QTableWidgetItem, QLabel, QMessageBox, QHeaderView, QAbstractItemView
+    QTableWidgetItem, QLabel, QMessageBox, QHeaderView, QAbstractItemView, QWidget
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QBrush, QIcon, QFont
 
+FONT_FAMILY = ".AppleSystemUIFont, SF Pro Text, -apple-system, Helvetica Neue, Segoe UI, sans-serif"
+
 class TimeoffDialog(QDialog):
     """
-    Öğretmen, Sınıf veya Derslik için Zaman-Kilit Matrisi (Time-off Matrix).
-    Y Ekseni (Satırlar): 1. Ders ... 16. Ders (Temel Bilgiler ayarına göre dinamik)
-    X Ekseni (Sütunlar): Pazartesi ... Cuma / Pazar
+    Öğretmen, Sınıf veya Derslik için Modern Zaman-Kısıtlama Matrisi (Time-off Matrix).
+    Y Ekseni (Satırlar): 1. Ders ... 16. Ders
+    X Ekseni (Sütunlar): Pazartesi ... Cuma
     Durumlar:
-      2 = Yeşil Tik (Uygundur)
-      0 = Kırmızı Çarpı (Çalışamaz / Kapalı)
-      1 = Sarı Soru İşareti (Zorunlu olmadıkça atanmasın)
+      2 = Müsait (Yeşil)
+      0 = Kapalı / Kısıtlı (Kırmızı)
+      1 = Tercih Edilmez (Sarı)
     """
     def __init__(self, entity_dict, entity_type, data_store, parent=None):
         super().__init__(parent)
@@ -42,23 +44,18 @@ class TimeoffDialog(QDialog):
                 or get_last_active_institution_slug()
             norm_name = normalize_teacher_name(name)
 
-            # Constraints this teacher has at OTHER institutions. Matched on the
-            # normalized name so a different spelling of the same person still lines
-            # up — an exact-string lookup missed most real cases.
             day_count, periods = constraint_sync.grid_dimensions(self.data_store)
             shared = constraint_sync.shared_teacher_states(inst_slug, day_count, periods)
             for slot, state in (shared.get(norm_name) or {}).items():
                 if state == constraint_sync.CLOSED:
                     self.cross_institution_locks.add(slot)
 
-            # Hours this teacher is actually teaching elsewhere right now.
             cross_busy = get_cross_institution_teacher_busy_slots(exclude_slug=inst_slug)
             for (t_norm, d, p_slot), conflict_info in cross_busy.items():
                 if t_norm == norm_name or conflict_info.get("teacher_name") == name:
                     self.cross_institution_locks.add((d, p_slot))
                     self.cross_institution_conflicts[(d, p_slot)] = conflict_info
 
-            # Manual reservations: which institution has claimed each hour.
             self.inst_slug = inst_slug
             if self.is_teacher:
                 import version_store as _vs
@@ -77,25 +74,42 @@ class TimeoffDialog(QDialog):
         except Exception as e:
             print("Cross-institution lock load error:", e)
 
-        self.setWindowTitle(f"Zaman Tablosu (Kısıtlamalar) - {name} ({self.entity_type})")
-        self.resize(740, 520)
+        self.setWindowTitle(f"Zaman Tablosu (Kısıtlamalar) — {name} ({self.entity_type})")
+        self.resize(780, 560)
+        self.setMinimumSize(700, 500)
         
         # Tema ve CSS
-        self.setStyleSheet("""
-            QDialog { background-color: #F8FAFC; font-family: 'Segoe UI', Tahoma, sans-serif; }
-            QLabel { color: #1E293B; font-size: 13px; }
-            QTableWidget { background-color: white; gridline-color: #CBD5E1; border: 1px solid #CBD5E1; border-radius: 6px; }
-            QHeaderView::section { background-color: #F1F5F9; font-weight: bold; padding: 6px; border: 1px solid #E2E8F0; color: #1E293B; font-size: 12px; }
-            QPushButton { background-color: #2563EB; color: white; border-radius: 4px; padding: 8px 18px; font-weight: bold; font-size: 13px; border: none; }
-            QPushButton:hover { background-color: #1D4ED8; }
-            QPushButton#btn_cancel { background-color: #FFFFFF; color: #475569; border: 1px solid #CBD5E1; }
-            QPushButton#btn_cancel:hover { background-color: #F1F5F9; }
+        self.setStyleSheet(f"""
+            QDialog {{ background-color: #F8FAFC; font-family: {FONT_FAMILY}; }}
+            QLabel {{ color: #1E293B; font-size: 13px; font-family: {FONT_FAMILY}; }}
+            QTableWidget {{
+                background-color: #FFFFFF;
+                gridline-color: #E2E8F0;
+                border: 1px solid #E2E8F0;
+                border-radius: 8px;
+                font-family: {FONT_FAMILY};
+            }}
+            QHeaderView::section {{
+                background-color: #F8FAFC;
+                font-weight: 600;
+                padding: 8px;
+                border: none;
+                border-bottom: 1px solid #E2E8F0;
+                border-right: 1px solid #F1F5F9;
+                color: #0F172A;
+                font-size: 12px;
+                font-family: {FONT_FAMILY};
+            }}
+            QPushButton {{
+                border-radius: 6px;
+                font-weight: 600;
+                font-size: 13px;
+                font-family: {FONT_FAMILY};
+            }}
         """)
         
         self.settings = self.data_store.get("settings", {})
 
-        # Gün/saat boyutları ve müsaitlik matrisi artık constraint_sync üzerinden okunur;
-        # Kısıtlamalar ekranı da aynı kaynağı kullandığı için iki ekran birbirini ezemez.
         import constraint_sync
         self._cs = constraint_sync
         self.days = constraint_sync.day_names(self.data_store)
@@ -107,19 +121,36 @@ class TimeoffDialog(QDialog):
         
     def _build_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(14)
         
-        # Üst Bilgi
-        info_text = ("💡 <b>Kısıtlama Ayarı:</b> Y ekseninde ders saatleri (1-" + str(self.periods) +
-                     "), X ekseninde günler yer alır.<br>"
-                     "Hücreye tıklayarak durumu değiştirin (Yeşil ✔ -> Kırmızı ✖ -> Sarı ? -> Yeşil ✔).")
+        # Üst Bilgi Kartı
+        info_frame = QWidget()
+        info_frame.setStyleSheet("""
+            QWidget {
+                background: #F0F9FF;
+                border: 1px solid #BAE6FD;
+                border-radius: 8px;
+                padding: 10px 14px;
+            }
+        """)
+        info_lay = QVBoxLayout(info_frame)
+        info_lay.setContentsMargins(12, 10, 12, 10)
+        info_lay.setSpacing(4)
+        
+        info_title = QLabel("<b>Zaman Kısıtlama Tablosu</b> — Gün ve saat bazında müsaitlik durumunu ayarlayın.")
+        info_title.setStyleSheet("color: #0369A1; font-size: 13px;")
+        info_desc = QLabel("Hücreye tıklayarak durumu değiştirin (Müsait ✓ → Kısıtlı ✕ → Tercih Edilmez ? → Müsait ✓).")
+        info_desc.setStyleSheet("color: #0284C7; font-size: 12px;")
+        info_lay.addWidget(info_title)
+        info_lay.addWidget(info_desc)
+        
         if self.is_teacher:
-            info_text += ("<br>🔒 = bu öğretmen o saatte başka kurumda meşgul. "
-                          "⚑ = saat bu kuruma rezerve. Rezerve etmek/kaldırmak için hücreye <b>sağ tıklayın</b>.")
-        info_lbl = QLabel(info_text)
-        info_lbl.setStyleSheet("color: #475569; font-size: 12px;")
-        layout.addWidget(info_lbl)
+            info_teacher = QLabel("Bu öğretmen için bir saati bu kuruma rezerve etmek veya kaldırmak için hücreye sağ tıklayın.")
+            info_teacher.setStyleSheet("color: #0284C7; font-size: 11px; font-weight: 500;")
+            info_lay.addWidget(info_teacher)
+            
+        layout.addWidget(info_frame)
         
         # Grid: Y-Ekseni = Periyotlar (1..periods), X-Ekseni = Günler (Pzt..Cuma)
         self.table = QTableWidget(self.periods, len(self.days))
@@ -127,6 +158,7 @@ class TimeoffDialog(QDialog):
         self.table.setHorizontalHeaderLabels(self.days)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setShowGrid(True)
         
         # Satır ve Sütun boyutları
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
@@ -148,52 +180,106 @@ class TimeoffDialog(QDialog):
             self.table.customContextMenuRequested.connect(self._on_context_menu)
         layout.addWidget(self.table, 1)
         
-        # Hızlı Butonlar (Tümünü Kapat / Tümünü Aç)
-        quick_bar = QHBoxLayout()
-        btn_all_open = QPushButton("Tümünü Müsait Yap (✔)")
-        btn_all_open.setStyleSheet("background: #DCFCE7; color: #15803D; border: 1px solid #86EFAC; font-size: 11px;")
+        # Hızlı Butonlar ve Lejand
+        bar_layout = QHBoxLayout()
+        bar_layout.setSpacing(12)
+        
+        btn_all_open = QPushButton("Tümünü Müsait Yap")
+        btn_all_open.setStyleSheet("""
+            QPushButton {
+                background: #ECFDF5;
+                color: #065F46;
+                border: 1px solid #A7F3D0;
+                padding: 6px 14px;
+                font-weight: 600;
+                font-size: 12px;
+            }
+            QPushButton:hover { background: #D1FAE5; }
+        """)
         btn_all_open.clicked.connect(self._make_all_open)
         
-        btn_all_close = QPushButton("Tümünü Kapat / Kısıtla (✖)")
-        btn_all_close.setStyleSheet("background: #FEE2E2; color: #B91C1C; border: 1px solid #FCA5A5; font-size: 11px;")
+        btn_all_close = QPushButton("Tümünü Kısıtla")
+        btn_all_close.setStyleSheet("""
+            QPushButton {
+                background: #FFF1F2;
+                color: #9F1239;
+                border: 1px solid #FECDD3;
+                padding: 6px 14px;
+                font-weight: 600;
+                font-size: 12px;
+            }
+            QPushButton:hover { background: #FFE4E6; }
+        """)
         btn_all_close.clicked.connect(self._make_all_close)
         
-        quick_bar.addWidget(btn_all_open)
-        quick_bar.addWidget(btn_all_close)
-        quick_bar.addStretch(1)
-        layout.addLayout(quick_bar)
+        bar_layout.addWidget(btn_all_open)
+        bar_layout.addWidget(btn_all_close)
+        bar_layout.addSpacing(16)
         
-        # Lejand (Legend)
-        legend_layout = QHBoxLayout()
-        self.lbl_musait = self._create_legend_item("✔ Müsait (0)", "#15803D")
-        self.lbl_kapali = self._create_legend_item("✖ Kapalı / Kısıtlı (0)", "#B91C1C")
-        self.lbl_tercih = self._create_legend_item("? Tercih Edilmez (0)", "#A16207")
-        legend_layout.addWidget(self.lbl_musait)
-        legend_layout.addWidget(self.lbl_kapali)
-        legend_layout.addWidget(self.lbl_tercih)
-        legend_layout.addStretch()
-        layout.addLayout(legend_layout)
+        # Lejand (Legend Chips)
+        self.lbl_musait = self._create_legend_item("Müsait (0)", "#059669", "#ECFDF5", "#A7F3D0")
+        self.lbl_kapali = self._create_legend_item("Kapalı / Kısıtlı (0)", "#E11D48", "#FFF1F2", "#FECDD3")
+        self.lbl_tercih = self._create_legend_item("Tercih Edilmez (0)", "#D97706", "#FFFBEB", "#FDE68A")
+        bar_layout.addWidget(self.lbl_musait)
+        bar_layout.addWidget(self.lbl_kapali)
+        bar_layout.addWidget(self.lbl_tercih)
+        bar_layout.addStretch(1)
+        
+        layout.addLayout(bar_layout)
         
         self._update_counters()
         
         # Alt Butonlar
         btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
+        btn_layout.setSpacing(10)
+        btn_layout.addStretch(1)
         
         btn_cancel = QPushButton("İptal")
-        btn_cancel.setObjectName("btn_cancel")
+        btn_cancel.setStyleSheet("""
+            QPushButton {
+                background: #FFFFFF;
+                color: #475569;
+                border: 1px solid #CBD5E1;
+                padding: 8px 20px;
+                min-height: 36px;
+                border-radius: 8px;
+            }
+            QPushButton:hover { background: #F8FAFC; color: #1E293B; }
+        """)
         btn_cancel.clicked.connect(self.reject)
         btn_layout.addWidget(btn_cancel)
         
         btn_save = QPushButton("Kaydet ve Uygula")
+        btn_save.setStyleSheet("""
+            QPushButton {
+                background: #0071E3;
+                color: #FFFFFF;
+                border: none;
+                padding: 8px 24px;
+                min-height: 36px;
+                border-radius: 8px;
+                font-weight: 600;
+            }
+            QPushButton:hover { background: #0062C4; }
+        """)
         btn_save.clicked.connect(self._save_data)
         btn_layout.addWidget(btn_save)
         
         layout.addLayout(btn_layout)
         
-    def _create_legend_item(self, text, color):
+    def _create_legend_item(self, text, fg, bg, border):
         lbl = QLabel(text)
-        lbl.setStyleSheet(f"color: {color}; font-weight: bold; margin-right: 15px;")
+        lbl.setStyleSheet(f"""
+            QLabel {{
+                color: {fg};
+                background: {bg};
+                border: 1px solid {border};
+                border-radius: 12px;
+                padding: 4px 10px;
+                font-weight: 600;
+                font-size: 11px;
+            }}
+        """)
         return lbl
         
     def _update_counters(self):
@@ -207,14 +293,13 @@ class TimeoffDialog(QDialog):
                 elif state == 0: c_kapali += 1
                 elif state == 1: c_tercih += 1
                 
-        self.lbl_musait.setText(f"✔ Müsait ({c_musait})")
-        self.lbl_kapali.setText(f"✖ Kapalı / Kısıtlı ({c_kapali})")
-        self.lbl_tercih.setText(f"? Tercih Edilmez ({c_tercih})")
-
+        self.lbl_musait.setText(f"● Müsait: {c_musait}")
+        self.lbl_kapali.setText(f"● Kısıtlı: {c_kapali}")
+        self.lbl_tercih.setText(f"● Tercih Edilmez: {c_tercih}")
 
     def _update_item_visuals(self, item, state, d_idx, p_idx):
         item.setTextAlignment(Qt.AlignCenter)
-        font = QFont("Segoe UI", 11, QFont.Bold)
+        font = QFont(".AppleSystemUIFont", 12, QFont.Bold)
         item.setFont(font)
         
         slot = (d_idx, p_idx)
@@ -227,14 +312,13 @@ class TimeoffDialog(QDialog):
             c_inst = c_info.get("institution_name", "Başka Kurum")
             c_cls = c_info.get("class", "")
             c_subj = c_info.get("subject", "Ders")
-            item.setToolTip(f"⚠️ ÇAKIŞMA UYARISI: Bu öğretmen {c_inst} kurumunda {c_cls} ({c_subj}) dersindedir!")
+            item.setToolTip(f"Çakışma: Bu öğretmen {c_inst} kurumunda {c_cls} ({c_subj}) dersindedir.")
         elif owner_other:
-            item.setToolTip(f"🔒 Bu saat '{owner_other}' kurumuna rezerve edilmiş. Serbest bırakması gereken o kurumdur.")
+            item.setToolTip(f"Bu saat '{owner_other}' kurumuna rezerve edilmiş.")
         elif is_mine:
-            item.setToolTip("⚑ Bu saat bu kuruma rezerve edildi — diğer kurumlarda kapalı görünür.\n"
-                            "Kaldırmak için sağ tıklayın.")
+            item.setToolTip("Bu saat bu kuruma rezerve edildi.\nKaldırmak için sağ tıklayın.")
         elif is_cross_locked:
-            item.setToolTip("⚠️ Dikkat: Bu öğretmen bu saatte BAŞKA BİR KURUMDA (şubede) derse girmektedir veya kısıtlanmıştır!")
+            item.setToolTip("Bu öğretmen bu saatte başka bir kurumda derse girmektedir.")
         elif getattr(self, "is_teacher", False):
             item.setToolTip("Bu saati kurumunuza rezerve etmek için sağ tıklayın.")
         else:
@@ -245,29 +329,26 @@ class TimeoffDialog(QDialog):
         bg_color = ""
 
         if state == 2:
-            base_text = "✔"
-            fg_color = "#15803D"
-            bg_color = "#DCFCE7"
+            base_text = "✓"
+            fg_color = "#059669"
+            bg_color = "#ECFDF5"
         elif state == 0:
-            base_text = "✖"
-            fg_color = "#B91C1C"
-            bg_color = "#FEE2E2"
+            base_text = "✕"
+            fg_color = "#E11D48"
+            bg_color = "#FFF1F2"
         elif state == 1:
             base_text = "?"
-            fg_color = "#A16207"
-            bg_color = "#FEF9C3"
+            fg_color = "#D97706"
+            bg_color = "#FFFBEB"
             
         if is_mine:
-            # Ours by explicit reservation — shown in blue so it reads as "claimed",
-            # not as a restriction.
-            base_text += " ⚑"
-            bg_color = "#DBEAFE"
-            fg_color = "#1D4ED8"
+            base_text += " [Rezerve]"
+            bg_color = "#EFF6FF"
+            fg_color = "#2563EB"
         elif is_cross_locked:
-            base_text += " 🔒"
+            base_text += " [Kilitli]"
             if state != 0:
-                # If they leave it open locally but it's locked elsewhere, warn them heavily
-                bg_color = "#FFEDD5" # Orange
+                bg_color = "#FFEDD5"
                 fg_color = "#C2410C"
 
         item.setText(base_text)

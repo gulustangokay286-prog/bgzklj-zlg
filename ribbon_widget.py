@@ -1,14 +1,17 @@
 """
 ribbon_widget.py  –  Pixel-perfect Ribbon toolbar
-Birebir aSc k12 Bilişim Ders Planlama 2020 görünümü
+Birebir aSc Ders Dağıtım / aSc Timetables ikon seti ve ribbon görünümü.
+Retina 2x Vektörel Çizim Motoru ile kristal netliğinde 3D ikonlar.
 """
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton,
     QSizePolicy, QFrame, QCheckBox, QToolButton
 )
-from PySide6.QtCore import Qt, QSize, Signal
-from PySide6.QtGui import QIcon, QPixmap, QColor, QPainter, QPen, QFont, QBrush, QPolygon, QLinearGradient, QRadialGradient, QPainterPath, QPainterPath
-from PySide6.QtCore import QPoint, QPointF
+from PySide6.QtCore import Qt, QSize, Signal, QPoint, QPointF, QRectF
+from PySide6.QtGui import (
+    QIcon, QPixmap, QColor, QPainter, QPen, QFont, QBrush,
+    QPolygon, QPolygonF, QLinearGradient, QRadialGradient, QPainterPath
+)
 
 
 # ── Colours from screenshots ──────────────────────────────────────────────────
@@ -16,7 +19,7 @@ RIBBON_BG        = "#FFFFFF"
 RIBBON_BORDER    = "#D0D0D0"
 TAB_ACTIVE_BG    = "#FFFFFF"
 TAB_INACTIVE_BG  = "#F0F0F0"
-TAB_ACTIVE_LINE  = "#1E6DB5"   # blue underline on active tab
+TAB_ACTIVE_LINE  = "#1E6DB5"
 TAB_TEXT         = "#333333"
 TAB_ACTIVE_TEXT  = "#1E6DB5"
 BTN_HOVER_BG     = "#DAE8FC"
@@ -24,282 +27,813 @@ BTN_PRESSED_BG   = "#B8D4F0"
 GROUP_DIVIDER    = "#CCCCCC"
 BACK_BTN_BG      = "#1E6DB5"
 
+FONT_FAMILY = ".AppleSystemUIFont, SF Pro Text, Helvetica Neue, Segoe UI, sans-serif"
 
-# ── Icon painter helpers ──────────────────────────────────────────────────────
+
+# ── Retina 2x Icon Painter Helper ──────────────────────────────────────────────
 def _make_pixmap(size: int, draw_fn) -> QPixmap:
-    px = QPixmap(size, size)
+    scale = 2
+    px = QPixmap(size * scale, size * scale)
     px.fill(Qt.transparent)
     p = QPainter(px)
     p.setRenderHint(QPainter.Antialiasing)
+    p.setRenderHint(QPainter.SmoothPixmapTransform)
+    p.scale(scale, scale)
     draw_fn(p, size)
     p.end()
+    px.setDevicePixelRatio(scale)
     return px
 
 
-def icon_new(p, s):
-    p.setBrush(QBrush(QColor("#0EA5E9")))
-    p.setPen(Qt.NoPen)
-    p.drawRoundedRect(4, 3, s-8, s-6, 4, 4)
-    p.setBrush(QBrush(QColor("#FFFFFF")))
-    p.drawRoundedRect(6, 5, s-12, s-10, 3, 3)
-    p.setBrush(QBrush(QColor("#10B981")))
-    p.drawEllipse(s-14, s-14, 12, 12)
-    p.setPen(QPen(Qt.white, 2))
-    p.drawLine(s-8, s-12, s-8, s-4)
-    p.drawLine(s-12, s-8, s-4, s-8)
+# ── aSc Timetables Vector Icons ────────────────────────────────────────────────
 
-def icon_open(p, s):
-    p.setBrush(QBrush(QColor("#D97706")))
-    p.setPen(Qt.NoPen)
-    p.drawRoundedRect(3, 7, 13, 6, 2, 2)
-    p.setBrush(QBrush(QColor("#F59E0B")))
+def icon_new(p: QPainter, s: int):
+    """1. Yeni Dosya: Beyaz kıvrımlı sayfa ve sağ altta yeşil dairesel '+' rozeti"""
+    # White page base
+    p.setPen(QPen(QColor("#94A3B8"), 1.2))
+    p.setBrush(QBrush(QColor("#FFFFFF")))
+    
+    # Page with folded corner
     path = QPainterPath()
-    path.moveTo(3, 11)
-    path.lineTo(s-3, 11)
-    path.lineTo(s-6, s-5)
-    path.lineTo(6, s-5)
+    path.moveTo(5, 3)
+    path.lineTo(19, 3)
+    path.lineTo(25, 9)
+    path.lineTo(25, 27)
+    path.lineTo(5, 27)
     path.closeSubpath()
     p.drawPath(path)
-
-def icon_save(p, s):
-    p.setBrush(QBrush(QColor("#0284C7")))
-    p.setPen(Qt.NoPen)
-    p.drawRoundedRect(3, 3, s-6, s-6, 4, 4)
-    p.setBrush(QBrush(QColor("#FFFFFF")))
-    p.drawRoundedRect(7, 3, s-14, 9, 1, 1)
+    
+    # Fold corner
+    fold = QPainterPath()
+    fold.moveTo(19, 3)
+    fold.lineTo(19, 9)
+    fold.lineTo(25, 9)
+    fold.closeSubpath()
     p.setBrush(QBrush(QColor("#E2E8F0")))
-    p.drawRoundedRect(7, 16, s-14, 11, 2, 2)
+    p.drawPath(fold)
+    
+    # Content lines on page
+    p.setPen(QPen(QColor("#CBD5E1"), 1.5))
+    p.drawLine(8, 12, 17, 12)
+    p.drawLine(8, 16, 17, 16)
+    p.drawLine(8, 20, 14, 20)
+    
+    # Green Plus Circle Badge at bottom right
+    p.setPen(QPen(QColor("#FFFFFF"), 1.5))
+    grad = QLinearGradient(16, 16, 28, 28)
+    grad.setColorAt(0, QColor("#34D399"))
+    grad.setColorAt(1, QColor("#059669"))
+    p.setBrush(QBrush(grad))
+    p.drawEllipse(15, 15, 13, 13)
+    
+    # Plus sign
+    p.setPen(QPen(QColor("#FFFFFF"), 2, Qt.SolidLine, Qt.RoundCap))
+    p.drawLine(21.5, 18.5, 21.5, 24.5)
+    p.drawLine(18.5, 21.5, 24.5, 21.5)
 
-def icon_print(p, s):
-    p.setBrush(QBrush(QColor("#64748B")))
-    p.setPen(Qt.NoPen)
-    p.drawRoundedRect(3, 11, s-6, 12, 3, 3)
-    p.setBrush(QBrush(QColor("#FFFFFF")))
-    p.drawRoundedRect(7, 3, s-14, 9, 2, 2)
-    p.drawRoundedRect(7, 18, s-14, 9, 2, 2)
-    p.setBrush(QBrush(QColor("#38BDF8")))
-    p.drawEllipse(s-9, 14, 4, 4)
 
-def icon_preview(p, s):
-    p.setBrush(QBrush(QColor("#0EA5E9")))
-    p.setPen(Qt.NoPen)
-    p.drawRoundedRect(5, 3, 16, 24, 3, 3)
+def icon_open(p: QPainter, s: int):
+    """2. Aç: 3D Altın Sarısı Açık Klasör"""
+    # Back folder body
+    p.setPen(QPen(QColor("#B45309"), 1))
+    grad_back = QLinearGradient(3, 4, 3, 26)
+    grad_back.setColorAt(0, QColor("#FBBF24"))
+    grad_back.setColorAt(1, QColor("#D97706"))
+    p.setBrush(QBrush(grad_back))
+    
+    back_path = QPainterPath()
+    back_path.moveTo(3, 8)
+    back_path.lineTo(3, 5)
+    back_path.lineTo(12, 5)
+    back_path.lineTo(15, 8)
+    back_path.lineTo(28, 8)
+    back_path.lineTo(28, 24)
+    back_path.lineTo(3, 24)
+    back_path.closeSubpath()
+    p.drawPath(back_path)
+    
+    # Inner white paper sheet sticking out
+    p.setPen(QPen(QColor("#CBD5E1"), 1))
     p.setBrush(QBrush(QColor("#FFFFFF")))
-    p.drawRoundedRect(7, 5, 12, 20, 2, 2)
-    p.setPen(QPen(QColor("#0284C7"), 2.5))
+    p.drawRoundedRect(6, 8, 19, 13, 1.5, 1.5)
+    p.setPen(QPen(QColor("#94A3B8"), 1))
+    p.drawLine(9, 12, 21, 12)
+    p.drawLine(9, 15, 18, 15)
+    
+    # Front open flap (angled 3D perspective)
+    grad_front = QLinearGradient(2, 13, 28, 27)
+    grad_front.setColorAt(0, QColor("#FDE047"))
+    grad_front.setColorAt(1, QColor("#F59E0B"))
+    p.setBrush(QBrush(grad_front))
+    p.setPen(QPen(QColor("#B45309"), 1))
+    
+    front_poly = QPolygonF([
+        QPointF(2, 14),
+        QPointF(26, 14),
+        QPointF(23, 27),
+        QPointF(4, 27)
+    ])
+    p.drawPolygon(front_poly)
+
+
+def icon_save(p: QPainter, s: int):
+    """3. Kaydet: Klasik Mor/Lavanta 3.5 inç Disket"""
+    # Floppy disk main body (purple/lavender)
+    p.setPen(QPen(QColor("#6D28D9"), 1))
+    grad = QLinearGradient(3, 3, 29, 29)
+    grad.setColorAt(0, QColor("#C4B5FD"))
+    grad.setColorAt(1, QColor("#8B5CF6"))
+    p.setBrush(QBrush(grad))
+    
+    disk_path = QPainterPath()
+    disk_path.moveTo(3, 3)
+    disk_path.lineTo(25, 3)
+    disk_path.lineTo(29, 7)
+    disk_path.lineTo(29, 29)
+    disk_path.lineTo(3, 29)
+    disk_path.closeSubpath()
+    p.drawPath(disk_path)
+    
+    # Top metal shutter
+    p.setPen(QPen(QColor("#94A3B8"), 1))
+    shutter_grad = QLinearGradient(7, 3, 23, 13)
+    shutter_grad.setColorAt(0, QColor("#F8FAFC"))
+    shutter_grad.setColorAt(1, QColor("#CBD5E1"))
+    p.setBrush(QBrush(shutter_grad))
+    p.drawRoundedRect(7, 3, 16, 10, 1.5, 1.5)
+    
+    # Metal slider notch
+    p.setPen(Qt.NoPen)
+    p.setBrush(QBrush(QColor("#475569")))
+    p.drawRect(18, 5, 3, 6)
+    
+    # Bottom white paper label
+    p.setPen(QPen(QColor("#94A3B8"), 0.8))
+    p.setBrush(QBrush(QColor("#FFFFFF")))
+    p.drawRoundedRect(6, 15, 20, 14, 1.5, 1.5)
+    
+    # Blue stripe on label
+    p.setPen(Qt.NoPen)
+    p.setBrush(QBrush(QColor("#0284C7")))
+    p.drawRect(8, 17, 16, 2.5)
+    
+    # Pencil lines on label
+    p.setPen(QPen(QColor("#94A3B8"), 1))
+    p.drawLine(8, 22, 22, 22)
+    p.drawLine(8, 25, 18, 25)
+
+
+def icon_print(p: QPainter, s: int):
+    """4. Yazdır: Açık Mavi & Beyaz Masaüstü Yazıcı"""
+    # Top feed paper
+    p.setPen(QPen(QColor("#94A3B8"), 1))
+    p.setBrush(QBrush(QColor("#FFFFFF")))
+    p.drawRoundedRect(8, 3, 16, 9, 1, 1)
+    p.setPen(QPen(QColor("#CBD5E1"), 1))
+    p.drawLine(10, 6, 22, 6)
+    p.drawLine(10, 8, 19, 8)
+    
+    # Printer main housing
+    p.setPen(QPen(QColor("#2563EB"), 1))
+    grad = QLinearGradient(3, 10, 29, 23)
+    grad.setColorAt(0, QColor("#93C5FD"))
+    grad.setColorAt(1, QColor("#3B82F6"))
+    p.setBrush(QBrush(grad))
+    p.drawRoundedRect(3, 10, 26, 13, 3, 3)
+    
+    # Output tray slot
+    p.setPen(Qt.NoPen)
+    p.setBrush(QBrush(QColor("#1E3A8A")))
+    p.drawRoundedRect(6, 16, 20, 4, 1, 1)
+    
+    # Emerging output paper
+    p.setPen(QPen(QColor("#94A3B8"), 1))
+    p.setBrush(QBrush(QColor("#FFFFFF")))
+    p.drawRoundedRect(7, 18, 18, 9, 1, 1)
+    p.setPen(QPen(QColor("#0284C7"), 1))
+    p.drawLine(9, 21, 23, 21)
+    p.drawLine(9, 23, 20, 23)
+    
+    # Power LED button
+    p.setPen(Qt.NoPen)
+    p.setBrush(QBrush(QColor("#34D399")))
+    p.drawEllipse(24, 12, 3, 3)
+
+
+def icon_preview(p: QPainter, s: int):
+    """5. Baskı Önizleme: Büyüteçli Doküman"""
+    # Background document
+    p.setPen(QPen(QColor("#94A3B8"), 1))
+    p.setBrush(QBrush(QColor("#FFFFFF")))
+    p.drawRoundedRect(4, 3, 17, 25, 2, 2)
+    
+    # Document content lines
+    p.setPen(QPen(QColor("#CBD5E1"), 1.2))
+    p.drawLine(7, 7, 17, 7)
+    p.drawLine(7, 10, 16, 10)
+    p.drawLine(7, 13, 18, 13)
+    p.drawLine(7, 16, 15, 16)
+    p.drawLine(7, 19, 14, 19)
+    p.drawLine(7, 22, 17, 22)
+    
+    # Magnifying glass handle
+    p.setPen(QPen(QColor("#0369A1"), 3.5, Qt.SolidLine, Qt.RoundCap))
+    p.drawLine(21, 21, 28, 28)
+    
+    # Magnifying glass lens rim
+    p.setPen(QPen(QColor("#0284C7"), 2.2))
+    p.setBrush(QBrush(QColor(56, 189, 248, 100)))
+    p.drawEllipse(12, 8, 13, 13)
+    
+    # Lens reflection glint
+    p.setPen(QPen(QColor("#FFFFFF"), 1.2, Qt.SolidLine, Qt.RoundCap))
+    p.drawArc(14, 10, 9, 9, 45 * 16, 90 * 16)
+
+
+def icon_undo(p: QPainter, s: int):
+    """Geri Al (Ctrl+Z): Mavi kıvrımlı geri oku"""
+    p.setPen(QPen(QColor("#0284C7"), 2.8, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
     p.setBrush(Qt.NoBrush)
-    p.drawEllipse(15, 12, 10, 10)
-    p.drawLine(22, 19, 28, 25)
+    path = QPainterPath()
+    path.moveTo(24, 23)
+    path.cubicTo(24, 11, 14, 9, 8, 13)
+    p.drawPath(path)
+    # Arrow head
+    p.drawLine(8, 13, 13, 9)
+    p.drawLine(8, 13, 12, 18)
 
-def icon_back(p, s):
+
+def icon_redo(p: QPainter, s: int):
+    """Yinele (Ctrl+Y): Mavi kıvrımlı ileri oku"""
+    p.setPen(QPen(QColor("#0284C7"), 2.8, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    p.setBrush(Qt.NoBrush)
+    path = QPainterPath()
+    path.moveTo(8, 23)
+    path.cubicTo(8, 11, 18, 9, 24, 13)
+    p.drawPath(path)
+    # Arrow head
+    p.drawLine(24, 13, 19, 9)
+    p.drawLine(24, 13, 20, 18)
+
+
+def icon_subjects(p: QPainter, s: int):
+    """7. Dersler: Yüksek Çözünürlüklü 3D Mavi Ciltli Ders Kitabı"""
+    p.setRenderHint(QPainter.Antialiasing, True)
+    
+    # White page block on right & top
+    p.setPen(QPen(QColor("#CBD5E1"), 0.8))
+    p.setBrush(QBrush(QColor("#FFFFFF")))
+    p.drawRect(9, 4, 18, 24)
+    
+    # Page edge lines
+    p.setPen(QPen(QColor("#E2E8F0"), 0.8))
+    p.drawLine(25, 6, 25, 27)
+    p.drawLine(23, 6, 23, 27)
+    
+    # Front Blue Hardcover
+    grad = QLinearGradient(6, 3, 24, 29)
+    grad.setColorAt(0, QColor("#60A5FA"))
+    grad.setColorAt(0.5, QColor("#2563EB"))
+    grad.setColorAt(1, QColor("#1D4ED8"))
+    p.setPen(QPen(QColor("#1E40AF"), 1.2))
+    p.setBrush(QBrush(grad))
+    p.drawRoundedRect(6, 3, 19, 26, 2.5, 2.5)
+    
+    # Dark blue spine trim on the left
+    p.setPen(QPen(QColor("#1E3A8A"), 1))
+    p.setBrush(QBrush(QColor("#1E40AF")))
+    p.drawRoundedRect(6, 3, 4.5, 26, 2, 2)
+    
+    # White label badge on front cover
+    p.setPen(QPen(QColor("#93C5FD"), 0.8))
+    p.setBrush(QBrush(QColor("#FFFFFF")))
+    p.drawRoundedRect(12, 8, 10, 14, 1.5, 1.5)
+    
+    # Ruled lines on label
+    p.setPen(QPen(QColor("#3B82F6"), 1))
+    p.drawLine(14, 11, 20, 11)
+    p.drawLine(14, 14, 20, 14)
+    p.drawLine(14, 17, 18, 17)
+
+
+def icon_classes(p: QPainter, s: int):
+    """8. Sınıflar: Modern 3D Öğrenci Grubu / Sınıf Kohortu (Pembe, Zümrüt Yeşili ve Gök Mavisi Öğrenciler)"""
+    p.setRenderHint(QPainter.Antialiasing, True)
+    
+    # ── 1. Left Student (Girl in Coral/Pink) ──
+    p.setPen(Qt.NoPen)
+    p.setBrush(QBrush(QColor("#92400E")))
+    p.drawEllipse(2, 6, 11, 11)  # Hair
+    p.setBrush(QBrush(QColor("#FDE68A")))
+    p.drawEllipse(3, 8, 9, 9)    # Face
+    
+    grad_l = QLinearGradient(1, 17, 13, 27)
+    grad_l.setColorAt(0, QColor("#FB7185"))
+    grad_l.setColorAt(1, QColor("#E11D48"))
+    p.setBrush(QBrush(grad_l))
+    path_l = QPainterPath()
+    path_l.moveTo(1, 27)
+    path_l.lineTo(1, 19)
+    path_l.cubicTo(1, 15, 13, 15, 13, 19)
+    path_l.lineTo(13, 27)
+    path_l.closeSubpath()
+    p.drawPath(path_l)
+    
+    # ── 2. Right Student (Sky Blue Polo) ──
+    p.setBrush(QBrush(QColor("#334155")))
+    p.drawEllipse(19, 6, 11, 11)  # Hair
+    p.setBrush(QBrush(QColor("#FDE68A")))
+    p.drawEllipse(20, 8, 9, 9)    # Face
+    
+    grad_r = QLinearGradient(19, 17, 31, 27)
+    grad_r.setColorAt(0, QColor("#38BDF8"))
+    grad_r.setColorAt(1, QColor("#0284C7"))
+    p.setBrush(QBrush(grad_r))
+    path_r = QPainterPath()
+    path_r.moveTo(19, 27)
+    path_r.lineTo(19, 19)
+    path_r.cubicTo(19, 15, 31, 15, 31, 19)
+    path_r.lineTo(31, 27)
+    path_r.closeSubpath()
+    p.drawPath(path_r)
+    
+    # ── 3. Center Front Student (Emerald Green - Main Focus) ──
+    grad_c = QLinearGradient(8, 15, 24, 29)
+    grad_c.setColorAt(0, QColor("#34D399"))
+    grad_c.setColorAt(1, QColor("#059669"))
+    p.setBrush(QBrush(grad_c))
+    path_c = QPainterPath()
+    path_c.moveTo(7, 29)
+    path_c.lineTo(7, 18)
+    path_c.cubicTo(7, 13, 25, 13, 25, 18)
+    path_c.lineTo(25, 29)
+    path_c.closeSubpath()
+    p.drawPath(path_c)
+    
+    # White V-collar
+    p.setBrush(QBrush(QColor("#FFFFFF")))
+    p.setPen(QPen(QColor("#047857"), 0.8))
+    p.drawPolygon([QPoint(13, 17), QPoint(16, 22), QPoint(19, 17), QPoint(16, 18)])
+    
+    # Face
+    p.setPen(Qt.NoPen)
+    p.setBrush(QBrush(QColor("#FEF08A")))
+    p.drawEllipse(10, 5, 12, 12)
+    
+    # Cheek blush
+    p.setBrush(QBrush(QColor(244, 63, 94, 60)))
+    p.drawEllipse(11, 11, 2.5, 1.8)
+    p.drawEllipse(18, 11, 2.5, 1.8)
+    
+    # Golden styled hair
+    p.setBrush(QBrush(QColor("#F59E0B")))
+    path_ch = QPainterPath()
+    path_ch.moveTo(9, 9)
+    path_ch.cubicTo(9, 2, 23, 2, 23, 9)
+    path_ch.cubicTo(20, 5, 13, 5, 9, 9)
+    path_ch.closeSubpath()
+    p.drawPath(path_ch)
+    
+    # Hair highlight
+    p.setBrush(QBrush(QColor("#FDE047")))
+    p.drawEllipse(13, 3.5, 6, 2.5)
+
+
+def icon_rooms(p: QPainter, s: int):
+    """9. Derslikler: 3D Açık Sınıf Kapısı (Ahşap Açık Kapı & Kasa)"""
+    p.setRenderHint(QPainter.Antialiasing, True)
+    
+    # Outer Door Frame (Light Sand Wood)
+    p.setPen(QPen(QColor("#92400E"), 1.2))
+    p.setBrush(QBrush(QColor("#FDE68A")))
+    p.drawRect(5, 4, 22, 25)
+    
+    # Dark Open Room Interior (Void)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QBrush(QColor("#1E293B")))
+    p.drawRect(8, 7, 16, 22)
+    
+    # Open Wooden Door Leaf (Swung open into room in 3D perspective)
+    grad_door = QLinearGradient(8, 7, 26, 29)
+    grad_door.setColorAt(0, QColor("#FBBF24"))
+    grad_door.setColorAt(1, QColor("#D97706"))
+    p.setBrush(QBrush(grad_door))
+    p.setPen(QPen(QColor("#92400E"), 1.2))
+    
+    door_poly = QPolygon([
+        QPoint(8, 7),
+        QPoint(26, 3),
+        QPoint(26, 29),
+        QPoint(8, 27)
+    ])
+    p.drawPolygon(door_poly)
+    
+    # Door panel bevels
+    p.setPen(QPen(QColor("#92400E"), 0.8))
+    p.drawLine(12, 8, 22, 6)
+    p.drawLine(22, 6, 22, 26)
+    p.drawLine(22, 26, 12, 26)
+    p.drawLine(12, 26, 12, 8)
+    
+    # Gold Door Handle / Knob
+    p.setPen(QPen(QColor("#78350F"), 0.8))
+    p.setBrush(QBrush(QColor("#FEF08A")))
+    p.drawEllipse(22, 16, 3, 3)
+
+
+def icon_teachers(p: QPainter, s: int):
+    """10. Öğretmenler: 3D Akademik Mezuniyet Kepi / Kep Başlığı"""
+    p.setRenderHint(QPainter.Antialiasing, True)
+    
+    # Cap skull base underneath
+    p.setPen(Qt.NoPen)
+    p.setBrush(QBrush(QColor("#0F172A")))
+    p.drawRect(10, 16, 12, 8)
+    p.drawRoundedRect(9, 14, 14, 10, 2, 2)
+    
+    # Diamond Cap Top (Mortarboard) in 3D perspective
+    hat_poly = QPolygon([
+        QPoint(16, 5),
+        QPoint(30, 12),
+        QPoint(16, 19),
+        QPoint(2, 12)
+    ])
+    grad_hat = QLinearGradient(2, 5, 30, 19)
+    grad_hat.setColorAt(0, QColor("#334155"))
+    grad_hat.setColorAt(1, QColor("#0F172A"))
+    p.setPen(QPen(QColor("#475569"), 1.2))
+    p.setBrush(QBrush(grad_hat))
+    p.drawPolygon(hat_poly)
+    
+    # Golden Button at center of mortarboard
+    p.setPen(Qt.NoPen)
+    p.setBrush(QBrush(QColor("#F59E0B")))
+    p.drawEllipse(14.5, 10.5, 3, 3)
+    
+    # Golden Tassel Ribbon hanging left
+    p.setPen(QPen(QColor("#F59E0B"), 1.6, Qt.SolidLine, Qt.RoundCap))
+    tassel_path = QPainterPath()
+    tassel_path.moveTo(16, 12)
+    tassel_path.cubicTo(10, 13, 6, 17, 5, 21)
+    p.drawPath(tassel_path)
+    
+    # Golden Tassel Brush
+    p.setPen(Qt.NoPen)
+    p.setBrush(QBrush(QColor("#F59E0B")))
+    p.drawRoundedRect(4, 21, 3, 6, 1, 1)
+
+
+def icon_electives(p: QPainter, s: int):
+    """11. Seçmeli Dersler / Öğrenciler: Öğrenci ve Mavi Onay Rozeti"""
+    # Student Bust (Head)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QBrush(QColor("#92400E")))
+    p.drawEllipse(7, 4, 12, 12)  # Hair
+    p.setBrush(QBrush(QColor("#FDE68A")))
+    p.drawEllipse(8, 7, 10, 10)  # Face
+    
+    # Shirt (Green / Teal)
+    p.setBrush(QBrush(QColor("#10B981")))
+    body = QPainterPath()
+    body.moveTo(3, 27)
+    body.lineTo(3, 21)
+    body.cubicTo(3, 17, 18, 17, 18, 21)
+    body.lineTo(18, 27)
+    body.closeSubpath()
+    p.drawPath(body)
+    
+    # Blue Checkmark Badge at bottom right
+    p.setPen(QPen(QColor("#FFFFFF"), 1.2))
+    grad_b = QLinearGradient(16, 15, 29, 28)
+    grad_b.setColorAt(0, QColor("#60A5FA"))
+    grad_b.setColorAt(1, QColor("#2563EB"))
+    p.setBrush(QBrush(grad_b))
+    p.drawRoundedRect(16, 15, 13, 13, 3, 3)
+    
+    # White checkmark in badge
+    p.setPen(QPen(QColor("#FFFFFF"), 2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    p.drawLine(19, 21.5, 21.5, 24.5)
+    p.drawLine(21.5, 24.5, 26, 18.5)
+
+
+def icon_relations(p: QPainter, s: int):
+    """12. İlişkiler: Bağlantılı Molekül Grafı (Renkli Düğümler & Çubuklar)"""
+    # Connecting silver rods
+    p.setPen(QPen(QColor("#94A3B8"), 2.2, Qt.SolidLine, Qt.RoundCap))
+    p.drawLine(8, 8, 24, 8)
+    p.drawLine(8, 8, 16, 16)
+    p.drawLine(24, 8, 16, 16)
+    p.drawLine(16, 16, 8, 24)
+    p.drawLine(16, 16, 24, 24)
+    p.drawLine(8, 24, 24, 24)
+    
+    # Helper to draw a 3D sphere node
+    def _draw_node(cx, cy, r, c1, c2):
+        grad = QRadialGradient(cx - r*0.3, cy - r*0.3, r * 1.3)
+        grad.setColorAt(0, QColor(c1))
+        grad.setColorAt(1, QColor(c2))
+        p.setPen(QPen(QColor(0, 0, 0, 40), 0.8))
+        p.setBrush(QBrush(grad))
+        p.drawEllipse(QPointF(cx, cy), r, r)
+        
+    _draw_node(8, 8, 4.5, "#93C5FD", "#2563EB")     # Top Left (Blue)
+    _draw_node(24, 8, 4.5, "#FDA4AF", "#E11D48")    # Top Right (Pink)
+    _draw_node(16, 16, 5.5, "#6EE7B7", "#059669")   # Center (Green)
+    _draw_node(8, 24, 4.5, "#67E8F9", "#0891B2")    # Bottom Left (Cyan)
+    _draw_node(24, 24, 4.5, "#FDE047", "#D97706")   # Bottom Right (Amber)
+
+
+def icon_check_badge(p: QPainter, s: int):
+    """13. Doğrula / Kontrol: Yeşil Daire Rozet ve Beyaz Onay İşareti"""
+    # Emerald green scalloped / circular seal
+    p.setPen(QPen(QColor("#059669"), 1))
+    grad = QLinearGradient(4, 4, 28, 28)
+    grad.setColorAt(0, QColor("#6EE7B7"))
+    grad.setColorAt(1, QColor("#059669"))
+    p.setBrush(QBrush(grad))
+    p.drawEllipse(3, 3, 26, 26)
+    
+    # Inner white circle border
+    p.setPen(QPen(QColor(255, 255, 255, 120), 1))
+    p.setBrush(Qt.NoBrush)
+    p.drawEllipse(5.5, 5.5, 21, 21)
+    
+    # Crisp white checkmark
+    p.setPen(QPen(QColor("#FFFFFF"), 3, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    p.drawLine(9, 16, 14, 21)
+    p.drawLine(14, 21, 23, 11)
+
+
+def icon_auto(p: QPainter, s: int):
+    """14. Otomatik Planla: Kırmızı Parlayan Tepe Sireni / Feneri"""
+    # Metal base
+    p.setPen(QPen(QColor("#64748B"), 1))
+    grad_base = QLinearGradient(5, 22, 27, 28)
+    grad_base.setColorAt(0, QColor("#F1F5F9"))
+    grad_base.setColorAt(1, QColor("#94A3B8"))
+    p.setBrush(QBrush(grad_base))
+    p.drawRoundedRect(5, 22, 22, 6, 2, 2)
+    
+    # Translucent Red Beacon Glass Dome
+    grad_dome = QLinearGradient(7, 5, 25, 22)
+    grad_dome.setColorAt(0, QColor("#F87171"))
+    grad_dome.setColorAt(1, QColor("#DC2626"))
+    p.setPen(QPen(QColor("#991B1B"), 1))
+    p.setBrush(QBrush(grad_dome))
+    
+    dome = QPainterPath()
+    dome.moveTo(7, 22)
+    dome.lineTo(9, 9)
+    dome.cubicTo(10, 5, 22, 5, 23, 9)
+    dome.lineTo(25, 22)
+    dome.closeSubpath()
+    p.drawPath(dome)
+    
+    # Glowing central bulb
+    p.setPen(Qt.NoPen)
+    p.setBrush(QBrush(QColor("#FEF08A")))
+    p.drawEllipse(13, 12, 6, 6)
+    
+    # Specular glass reflection line
+    p.setPen(QPen(QColor(255, 255, 255, 180), 1.5, Qt.SolidLine, Qt.RoundCap))
+    p.drawLine(10, 9, 9, 19)
+
+
+def icon_cloud_auto(p: QPainter, s: int):
+    """15. Bulutta Oluştur: Kırmızı Siren ve Bulut Rozeti"""
+    # Red Siren (Slightly left)
+    p.setPen(QPen(QColor("#64748B"), 1))
+    p.setBrush(QBrush(QColor("#CBD5E1")))
+    p.drawRoundedRect(3, 22, 18, 5, 2, 2)
+    
+    # Red Dome
+    grad_dome = QLinearGradient(5, 5, 20, 22)
+    grad_dome.setColorAt(0, QColor("#F87171"))
+    grad_dome.setColorAt(1, QColor("#DC2626"))
+    p.setPen(QPen(QColor("#991B1B"), 1))
+    p.setBrush(QBrush(grad_dome))
+    dome = QPainterPath()
+    dome.moveTo(5, 22)
+    dome.lineTo(7, 9)
+    dome.cubicTo(8, 5, 17, 5, 18, 9)
+    dome.lineTo(19, 22)
+    dome.closeSubpath()
+    p.drawPath(dome)
+    
+    # Cloud at bottom right
+    p.setPen(QPen(QColor("#0284C7"), 1.2))
+    p.setBrush(QBrush(QColor("#F0F9FF")))
+    c_path = QPainterPath()
+    c_path.addEllipse(15, 16, 7, 7)
+    c_path.addEllipse(19, 13, 8, 8)
+    c_path.addEllipse(24, 16, 6, 6)
+    c_path.addRect(17, 18, 11, 6)
+    p.drawPath(c_path)
+
+
+def icon_gavel(p: QPainter, s: int):
+    """16. Gelişmiş Kısıtlamalar: Ahşap Adalet / Şart Tokmağı (Gavel)"""
+    # Sound block at bottom
+    p.setPen(QPen(QColor("#78350F"), 1))
+    grad_b = QLinearGradient(6, 23, 26, 28)
+    grad_b.setColorAt(0, QColor("#D97706"))
+    grad_b.setColorAt(1, QColor("#92400E"))
+    p.setBrush(QBrush(grad_b))
+    p.drawRoundedRect(6, 23, 20, 5, 2, 2)
+    
+    # Gavel Handle (Diagonal)
+    p.setPen(QPen(QColor("#B45309"), 3, Qt.SolidLine, Qt.RoundCap))
+    p.drawLine(14, 14, 27, 25)
+    
+    # Gavel Mallet Head (Angled Cylinder)
+    p.save()
+    p.translate(12, 12)
+    p.rotate(-35)
+    p.setPen(QPen(QColor("#78350F"), 1))
+    grad_m = QLinearGradient(-8, -5, 8, 5)
+    grad_m.setColorAt(0, QColor("#F59E0B"))
+    grad_m.setColorAt(1, QColor("#B45309"))
+    p.setBrush(QBrush(grad_m))
+    p.drawRoundedRect(-9, -5, 18, 10, 2.5, 2.5)
+    
+    # Gold decorative rings
+    p.setPen(Qt.NoPen)
+    p.setBrush(QBrush(QColor("#FDE047")))
+    p.drawRect(-3, -5, 2, 10)
+    p.drawRect(1, -5, 2, 10)
+    p.restore()
+
+
+def icon_school_info(p: QPainter, s: int):
+    """17. Okul Bilgileri: Klasik Akademik Kurum / Tapınak Binası (Pantheon)"""
+    # Roof (Triangular Pediment)
+    p.setPen(QPen(QColor("#0284C7"), 1))
+    grad_roof = QLinearGradient(3, 4, 29, 12)
+    grad_roof.setColorAt(0, QColor("#93C5FD"))
+    grad_roof.setColorAt(1, QColor("#2563EB"))
+    p.setBrush(QBrush(grad_roof))
+    
+    roof = QPolygonF([
+        QPointF(16, 4),
+        QPointF(29, 11),
+        QPointF(3, 11)
+    ])
+    p.drawPolygon(roof)
+    
+    # Roof Base Beam
+    p.setPen(QPen(QColor("#1D4ED8"), 0.8))
+    p.setBrush(QBrush(QColor("#DBEAFE")))
+    p.drawRect(4, 11, 24, 2.5)
+    
+    # 4 Classical Columns
+    p.setPen(QPen(QColor("#0284C7"), 1))
+    p.setBrush(QBrush(QColor("#FFFFFF")))
+    for x in [5.5, 11.5, 17.5, 23.5]:
+        p.drawRect(x, 13.5, 3, 10.5)
+        # Column capital & base
+        p.drawLine(x - 0.5, 13.5, x + 3.5, 13.5)
+        p.drawLine(x - 0.5, 24, x + 3.5, 24)
+        
+    # Steps at bottom (Base steps)
+    p.setPen(QPen(QColor("#1D4ED8"), 0.8))
+    p.setBrush(QBrush(QColor("#BFDBFE")))
+    p.drawRect(3, 24, 26, 2.5)
+    p.drawRect(1.5, 26.5, 29, 2.5)
+
+
+def icon_cloud(p: QPainter, s: int):
+    """18. İnternet Hesabı / Bulut: Gökyüzü Mavisi Bulut"""
+    p.setPen(QPen(QColor("#0284C7"), 1.8, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    grad = QLinearGradient(4, 8, 28, 26)
+    grad.setColorAt(0, QColor("#E0F2FE"))
+    grad.setColorAt(1, QColor("#BAE6FD"))
+    p.setBrush(QBrush(grad))
+    
+    path = QPainterPath()
+    path.addEllipse(4, 14, 11, 11)
+    path.addEllipse(10, 7, 13, 13)
+    path.addEllipse(19, 12, 9, 9)
+    path.addRect(8, 17, 17, 8)
+    p.drawPath(path)
+
+
+def icon_help(p: QPainter, s: int):
+    """19. Sorular & Yardım: Mavi Daire Soru İşareti"""
+    p.setPen(QPen(QColor("#0284C7"), 1))
+    grad = QLinearGradient(3, 3, 29, 29)
+    grad.setColorAt(0, QColor("#60A5FA"))
+    grad.setColorAt(1, QColor("#2563EB"))
+    p.setBrush(QBrush(grad))
+    p.drawEllipse(3, 3, 26, 26)
+    
+    # White question mark vector path
+    p.setPen(QPen(QColor("#FFFFFF"), 2.6, Qt.SolidLine, Qt.RoundCap))
+    p.setBrush(Qt.NoBrush)
+    q_path = QPainterPath()
+    q_path.moveTo(11.5, 11.5)
+    q_path.cubicTo(11.5, 8, 20.5, 8, 20.5, 12.5)
+    q_path.cubicTo(20.5, 15.5, 16, 16, 16, 19.5)
+    p.drawPath(q_path)
+    
     p.setPen(Qt.NoPen)
     p.setBrush(QBrush(QColor("#FFFFFF")))
-    arr = QPolygon([QPoint(s//2, 4), QPoint(4, s//2), QPoint(s//2, s-4), QPoint(s//2, s//2+4), QPoint(s-6, s//2+4), QPoint(s-6, s//2-4), QPoint(s//2, s//2-4)])
+    p.drawEllipse(14.7, 22.5, 2.6, 2.6)
+
+
+def icon_home(p: QPainter, s: int):
+    """Ana Sayfa: Şık Mor Ev İkonu"""
+    p.setPen(QPen(QColor("#4C1D95"), 1))
+    grad = QLinearGradient(3, 4, 29, 28)
+    grad.setColorAt(0, QColor("#A78BFA"))
+    grad.setColorAt(1, QColor("#7C3AED"))
+    p.setBrush(QBrush(grad))
+    
+    roof = QPolygonF([
+        QPointF(16, 3),
+        QPointF(29, 13),
+        QPointF(3, 13)
+    ])
+    p.drawPolygon(roof)
+    
+    p.drawRoundedRect(6, 13, 20, 14, 2, 2)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QBrush(QColor("#FFFFFF")))
+    p.drawRoundedRect(13, 18, 6, 9, 1, 1)
+
+
+def icon_clear(p: QPainter, s: int):
+    """Çizelgeyi Sıfırla: Kırmızı Silme / Sıfırlama Rozeti"""
+    p.setPen(QPen(QColor("#DC2626"), 1))
+    grad = QLinearGradient(3, 3, 29, 29)
+    grad.setColorAt(0, QColor("#F87171"))
+    grad.setColorAt(1, QColor("#EF4444"))
+    p.setBrush(QBrush(grad))
+    p.drawEllipse(3, 3, 26, 26)
+    
+    p.setPen(QPen(QColor("#FFFFFF"), 3, Qt.SolidLine, Qt.RoundCap))
+    p.drawLine(9, 9, 23, 23)
+    p.drawLine(23, 9, 9, 23)
+
+
+def icon_wizard(p: QPainter, s: int):
+    """Sihirbaz: Sihirli Değnek ve Yıldızlar"""
+    p.setPen(QPen(QColor("#8B5CF6"), 3, Qt.SolidLine, Qt.RoundCap))
+    p.drawLine(6, 26, 22, 10)
+    
+    p.setPen(QPen(QColor("#FBBF24"), 1))
+    p.setBrush(QBrush(QColor("#FDE047")))
+    # Small stars around wand
+    p.drawEllipse(23, 6, 4, 4)
+    p.drawEllipse(13, 5, 3, 3)
+    p.drawEllipse(25, 15, 3, 3)
+
+
+def icon_back(p: QPainter, s: int):
+    p.setPen(Qt.NoPen)
+    p.setBrush(QBrush(QColor("#FFFFFF")))
+    arr = QPolygon([
+        QPoint(s//2, 4), QPoint(4, s//2), QPoint(s//2, s-4),
+        QPoint(s//2, s//2+4), QPoint(s-6, s//2+4),
+        QPoint(s-6, s//2-4), QPoint(s//2, s//2-4)
+    ])
     p.drawPolygon(arr)
 
-def icon_teachers(p, s):
-    p.setBrush(QBrush(QColor("#10B981")))
-    p.setPen(Qt.NoPen)
-    p.drawEllipse(s//2-5, 3, 10, 10)
-    path = QPainterPath()
-    path.moveTo(3, s-5)
-    path.cubicTo(3, 16, s-3, 16, s-3, s-5)
-    path.lineTo(s-3, s-4)
-    path.lineTo(3, s-4)
-    path.closeSubpath()
-    p.drawPath(path)
 
-def icon_classes(p, s):
-    p.setBrush(QBrush(QColor("#0284C7")))
-    p.setPen(Qt.NoPen)
-    p.drawRoundedRect(3, 3, 11, 11, 3, 3)
-    p.drawRoundedRect(17, 3, 11, 11, 3, 3)
-    p.drawRoundedRect(3, 17, 11, 11, 3, 3)
-    p.drawRoundedRect(17, 17, 11, 11, 3, 3)
-
-def icon_rooms(p, s):
-    p.setBrush(QBrush(QColor("#8B5CF6")))
-    p.setPen(Qt.NoPen)
-    p.drawRoundedRect(3, 4, 26, 18, 3, 3)
-    p.setPen(QPen(QColor("#7C3AED"), 2.5))
-    p.drawLine(7, 22, 4, 29)
-    p.drawLine(24, 22, 27, 29)
-    p.setPen(Qt.NoPen)
-    p.setBrush(QBrush(QColor("#F3E8FF")))
-    p.drawRoundedRect(5, 6, 22, 14, 1, 1)
-
-def icon_subjects(p, s):
-    p.setBrush(QBrush(QColor("#F59E0B")))
-    p.setPen(Qt.NoPen)
-    cap = QPainterPath()
-    cap.moveTo(16, 4)
-    cap.lineTo(30, 11)
-    cap.lineTo(16, 18)
-    cap.lineTo(2, 11)
-    cap.closeSubpath()
-    p.drawPath(cap)
-    base = QPainterPath()
-    base.moveTo(7, 15)
-    base.lineTo(7, 22)
-    base.cubicTo(7, 28, 25, 28, 25, 22)
-    base.lineTo(25, 15)
-    p.drawPath(base)
-
-def icon_schedule(p, s):
-    p.setBrush(QBrush(QColor("#EF4444")))
-    p.setPen(Qt.NoPen)
-    p.drawRoundedRect(3, 4, s-6, s-7, 4, 4)
-    p.setBrush(QBrush(QColor("#FFFFFF")))
-    p.drawRoundedRect(3, 11, s-6, s-14, 0, 0)
-    p.setBrush(QBrush(QColor("#94A3B8")))
-    for x in [7, 14, 21]:
-        for y in [15, 21]:
-            p.drawRoundedRect(x, y, 4, 4, 1, 1)
-
-def icon_auto(p, s):
-    p.setBrush(QBrush(QColor("#F59E0B")))
-    p.setPen(Qt.NoPen)
-    pts = [QPoint(18, 2), QPoint(6, 17), QPoint(15, 17), QPoint(13, 29), QPoint(26, 13), QPoint(17, 13)]
-    p.drawPolygon(QPolygon(pts))
-
-def icon_cloud(p, s):
-    p.setBrush(QBrush(QColor("#0284C7")))
-    p.setPen(Qt.NoPen)
-    path = QPainterPath()
-    path.addEllipse(4, 13, 14, 14)
-    path.addEllipse(11, 7, 15, 15)
-    path.addEllipse(19, 12, 11, 11)
-    path.addRect(8, 17, 18, 10)
-    p.drawPath(path)
-
-def icon_check(p, s):
-    p.setPen(QPen(QColor("#10B981"), 3.5, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-    p.setBrush(Qt.NoBrush)
-    p.drawLine(5, 16, 12, 24)
-    p.drawLine(12, 24, 27, 7)
-
-def icon_wizard(p, s):
-    p.setPen(QPen(QColor("#8B5CF6"), 2))
-    p.drawLine(4, s-4, s-4, 4)
-
-def icon_info(p, s):
-    p.setBrush(QBrush(QColor("#3B82F6")))
-    p.setPen(Qt.NoPen)
-    p.drawEllipse(3, 3, s-6, s-6)
-    p.setPen(QPen(Qt.white, 2.5))
-    p.setFont(QFont("Segoe UI", 12, QFont.Bold))
-    p.drawText(3, 3, s-6, s-6, Qt.AlignCenter, "i")
-
-def icon_help(p, s):
-    p.setBrush(QBrush(QColor("#8B5CF6")))
-    p.setPen(Qt.NoPen)
-    p.drawEllipse(3, 3, s-6, s-6)
-    p.setPen(QPen(Qt.white, 2.5))
-    p.setFont(QFont("Segoe UI", 12, QFont.Bold))
-    p.drawText(3, 3, s-6, s-6, Qt.AlignCenter, "?")
-
-def icon_internet(p, s):
-    p.setPen(QPen(QColor("#6366F1"), 2))
-    p.setBrush(QBrush(QColor("#EEF2FF")))
-    p.drawEllipse(3, 3, s-6, s-6)
-    p.drawLine(s//2, 3, s//2, s-3)
-    p.drawLine(3, s//2, s-3, s//2)
-    p.drawEllipse(s//2-5, 3, 10, s-6)
-
-def icon_color(p, s):
-    colors = ["#EF4444","#10B981","#0284C7","#F59E0B"]
-    r = (s-8)//2
-    for i, c in enumerate(colors):
-        p.setPen(Qt.NoPen)
-        p.setBrush(QBrush(QColor(c)))
-        x = (i % 2) * (r+2) + 4
-        y = (i // 2) * (r+2) + 4
-        p.drawEllipse(x, y, r, r)
-
-def icon_font(p, s):
-    p.setPen(QPen(QColor("#333"), 2))
-    p.setBrush(Qt.NoBrush)
-    f = QFont("Segoe UI", 14, QFont.Bold)
-    p.setFont(f)
-    p.drawText(QPoint(4, s-4), "A")
-
-def icon_lang(p, s):
-    p.setPen(QPen(QColor("#555"), 1.5))
-    p.setBrush(QBrush(QColor("#C62828")))
-    p.drawRect(4, 6, s-8, s-12)
-
-def icon_stat(p, s):
-    p.setPen(Qt.NoPen)
-    p.setBrush(QBrush(QColor("#0284C7")))
-    for i, h in enumerate([8, 14, 10, 16, 12]):
-        p.drawRoundedRect(4+i*5, s-4-h, 4, h, 1, 1)
-
-def icon_params(p, s):
-    p.setPen(QPen(QColor("#64748B"), 1.5))
-    for y in [6, 14, 22]:
-        p.setBrush(QBrush(QColor("#94A3B8")))
-        p.drawRect(4, y, s-8, 4)
-        p.setBrush(QBrush(QColor("#0284C7")))
-        cx = 6 + (y//8)*6
-        p.drawEllipse(cx, y-1, 6, 6)
-
-def icon_delete(p, s):
-    p.setPen(QPen(QColor("#EF4444"), 3.5, Qt.SolidLine, Qt.RoundCap))
-    p.setBrush(Qt.NoBrush)
-    p.drawLine(7, 7, s-7, s-7)
-    p.drawLine(s-7, 7, 7, s-7)
-
-def icon_key_lock(p, s):
-    p.setBrush(QBrush(QColor("#F59E0B")))
-    p.setPen(Qt.NoPen)
-    p.drawRoundedRect(6, 13, 20, 15, 3, 3)
-    p.setPen(QPen(QColor("#D97706"), 2.5))
-    p.drawArc(10, 4, 12, 16, 0, 180 * 16)
-
-def icon_home(p, s):
-    p.setBrush(QBrush(QColor("#7C3AED")))  # Purple color
-    p.setPen(Qt.NoPen)
-    p.drawRoundedRect(4, 12, s-8, s-14, 2, 2)
-    path = QPainterPath()
-    path.moveTo(s/2, 2)
-    path.lineTo(s-2, 14)
-    path.lineTo(2, 14)
-    p.drawPath(path)
-    p.setBrush(QBrush(QColor("#FFFFFF")))
-    p.drawRect(s/2 - 3, s-10, 6, 8)
+# ── ICON MAP ──────────────────────────────────────────────────────────────────
 
 ICON_MAP = {
-    "anasayfa":   icon_home,
-    "yeni":       icon_new,
-    "ac":         icon_open,
-    "kaydet":     icon_save,
-    "yazdir":     icon_print,
-    "on_izleme":  icon_preview,
-    "geri":       icon_back,
-    "ogretmen":   icon_teachers,
-    "sinif":      icon_classes,
-    "derslik":    icon_rooms,
-    "ders":       icon_subjects,
-    "plan":       icon_schedule,
-    "otomatik":   icon_auto,
-    "bulut":      icon_cloud,
-    "kontrol":    icon_check,
-    "sihirbaz":   icon_wizard,
-    "bilgi":      icon_info,
-    "yardim":     icon_help,
-    "internet":   icon_internet,
-    "renk":       icon_color,
-    "yazi":       icon_font,
-    "dil":        icon_lang,
-    "istatistik": icon_stat,
-    "param":      icon_params,
-    "temizle":    icon_delete,
-    "kilit":      icon_key_lock,
+    "anasayfa":       icon_home,
+    "yeni":           icon_new,
+    "ac":             icon_open,
+    "kaydet":         icon_save,
+    "yazdir":         icon_print,
+    "on_izleme":      icon_preview,
+    "geri_al":        icon_undo,
+    "yinele":         icon_redo,
+    "ders":           icon_subjects,
+    "sinif":          icon_classes,
+    "derslik":        icon_rooms,
+    "ogretmen":       icon_teachers,
+    "secim":          icon_electives,
+    "iliskiler":      icon_relations,
+    "plan":           icon_relations,
+    "kontrol":        icon_check_badge,
+    "otomatik":       icon_auto,
+    "bulut_olustur":  icon_cloud_auto,
+    "bulut":          icon_cloud,
+    "sartlar":        icon_gavel,
+    "okul":           icon_school_info,
+    "bilgi":          icon_school_info,
+    "internet":       icon_cloud,
+    "yardim":         icon_help,
+    "temizle":        icon_clear,
+    "sihirbaz":       icon_wizard,
+    "geri":           icon_back,
 }
 
 
 def make_icon(key: str, size: int = 32) -> QIcon:
-    fn = ICON_MAP.get(key, icon_info)
+    fn = ICON_MAP.get(key, icon_school_info)
     return QIcon(_make_pixmap(size, fn))
 
 
@@ -312,22 +846,24 @@ class RibbonButton(QToolButton):
         self.setIcon(make_icon(icon_key, 32))
         self.setIconSize(QSize(32, 32))
         self.setText(label)
-        self.setFixedSize(64, 68)
+        self.setFixedSize(68, 70)
         self.setCheckable(False)
-        font = QFont("Segoe UI", 7)
+        self.setCursor(Qt.PointingHandCursor)
+        font = QFont(FONT_FAMILY, 7)
         self.setFont(font)
         self.setStyleSheet("""
             QToolButton {
                 background: transparent;
                 border: none;
                 padding: 2px;
-                color: #333333;
-                font-size: 7pt;
+                color: #0F172A;
+                font-size: 7.5pt;
+                font-weight: 500;
             }
             QToolButton:hover {
                 background: #DAE8FC;
                 border: 1px solid #B8CCE4;
-                border-radius: 3px;
+                border-radius: 4px;
             }
             QToolButton:pressed {
                 background: #B8D4F0;
@@ -345,8 +881,9 @@ class RibbonWideButton(QToolButton):
         self.setIcon(make_icon("geri", 32))
         self.setIconSize(QSize(32, 32))
         self.setText("Geri")
-        self.setFixedSize(52, 68)
-        font = QFont("Segoe UI", 7, QFont.Bold)
+        self.setFixedSize(54, 70)
+        self.setCursor(Qt.PointingHandCursor)
+        font = QFont(FONT_FAMILY, 7.5, QFont.Bold)
         self.setFont(font)
         self.setStyleSheet("""
             QToolButton {
@@ -355,7 +892,7 @@ class RibbonWideButton(QToolButton):
                 border-radius: 4px;
                 padding: 2px;
                 color: #FFFFFF;
-                font-size: 7pt;
+                font-size: 7.5pt;
                 font-weight: bold;
             }
             QToolButton:hover { background: #1557A0; }
@@ -373,7 +910,7 @@ class RibbonCheckItem(QWidget):
         layout.setContentsMargins(4, 1, 4, 1)
         self.cb = QCheckBox(label, self)
         self.cb.setChecked(checked)
-        font = QFont("Segoe UI", 8)
+        font = QFont(FONT_FAMILY, 8)
         self.cb.setFont(font)
         layout.addWidget(self.cb)
 
@@ -382,7 +919,7 @@ def _divider(parent=None):
     f = QFrame(parent)
     f.setFrameShape(QFrame.VLine)
     f.setFrameShadow(QFrame.Sunken)
-    f.setStyleSheet("color: #CCCCCC;")
+    f.setStyleSheet("color: #E2E8F0;")
     f.setFixedWidth(2)
     return f
 
@@ -391,9 +928,9 @@ def _divider(parent=None):
 class RibbonPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(80)
+        self.setFixedHeight(82)
         self.main_layout = QHBoxLayout(self)
-        self.main_layout.setContentsMargins(6, 4, 6, 4)
+        self.main_layout.setContentsMargins(6, 3, 6, 3)
         self.main_layout.setSpacing(2)
         self.main_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.setStyleSheet(f"background: {RIBBON_BG};")
@@ -433,7 +970,7 @@ def make_menu_icon(symbol: str, color1: str, color2: str) -> QIcon:
     p.setPen(QPen(QColor(0,0,0,30), 1))
     p.drawRoundedRect(2, 2, 24, 24, 5, 5)
     p.setPen(QPen(Qt.white, 2))
-    p.setFont(QFont("Segoe UI", 11, QFont.Bold))
+    p.setFont(QFont(FONT_FAMILY, 11, QFont.Bold))
     p.drawText(2, 2, 24, 24, Qt.AlignCenter, symbol)
     p.end()
     return QIcon(pix)
@@ -445,7 +982,7 @@ class RibbonWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(114)
+        self.setFixedHeight(116)
         self._pages = []
         self._tab_buttons = []
         self._active = 0
@@ -456,34 +993,79 @@ class RibbonWidget(QWidget):
 
         # ── Tab bar ──
         self._tab_bar = QWidget(self)
-        self._tab_bar.setFixedHeight(30)
-        self._tab_bar.setStyleSheet(f"background: #F1F5F9; border-bottom: 1px solid {RIBBON_BORDER};")
+        self._tab_bar.setFixedHeight(34)
+        self._tab_bar.setStyleSheet(f"background: #F8FAFC; border-bottom: 1px solid {RIBBON_BORDER};")
         self._tab_layout = QHBoxLayout(self._tab_bar)
-        self._tab_layout.setContentsMargins(6, 2, 8, 0)
-        self._tab_layout.setSpacing(2)
+        self._tab_layout.setContentsMargins(8, 3, 8, 0)
+        self._tab_layout.setSpacing(4)
 
-        # File menu button (Integrated seamlessly on tab bar left)
+        # Redesigned Modern File Menu Button (Sleek Apple Pill)
+        def _make_hamburger_icon(sz=14):
+            pix = QPixmap(sz * 2, sz * 2)
+            pix.fill(Qt.transparent)
+            p = QPainter(pix)
+            p.setRenderHint(QPainter.Antialiasing)
+            p.scale(2, 2)
+            p.setPen(QPen(QColor("#FFFFFF"), 2, Qt.SolidLine, Qt.RoundCap))
+            p.drawLine(2.5, 3.5, 11.5, 3.5)
+            p.drawLine(2.5, 7, 11.5, 7)
+            p.drawLine(2.5, 10.5, 11.5, 10.5)
+            p.end()
+            pix.setDevicePixelRatio(2)
+            return QIcon(pix)
+
         self.file_btn = QToolButton(self._tab_bar)
-        self.file_btn.setIcon(make_menu_icon("M", "#0284C7", "#0369A1"))
-        self.file_btn.setIconSize(QSize(24, 24))
-        self.file_btn.setFixedSize(26, 26)
+        self.file_btn.setIcon(_make_hamburger_icon(14))
+        self.file_btn.setIconSize(QSize(14, 14))
+        self.file_btn.setText("  Dosya")
+        self.file_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.file_btn.setFixedHeight(27)
         self.file_btn.setCursor(Qt.PointingHandCursor)
-        self.file_btn.setStyleSheet("""
-            QToolButton {
+        self.file_btn.setStyleSheet(f"""
+            QToolButton {{
+                background: #0284C7;
+                color: #FFFFFF;
                 border: none;
-                border-radius: 4px;
-                background: transparent;
-            }
-            QToolButton:hover { background: #E2E8F0; }
-            QToolButton::menu-indicator { image: none; }
+                border-radius: 6px;
+                padding: 2px 10px 2px 8px;
+                font-family: {FONT_FAMILY};
+                font-size: 11.5px;
+                font-weight: 700;
+            }}
+            QToolButton:hover {{
+                background: #0369A1;
+            }}
+            QToolButton:pressed {{
+                background: #075985;
+            }}
+            QToolButton::menu-indicator {{ image: none; }}
         """)
         from PySide6.QtWidgets import QMenu
         self.file_menu = QMenu(self.file_btn)
-        self.file_menu.setStyleSheet("""
-            QMenu { background: #FFFFFF; border: 1px solid #CCC; font-family: 'Segoe UI'; font-size: 10pt; }
-            QMenu::item { padding: 8px 30px; }
-            QMenu::item:selected { background: #0284C7; color: white; }
-            QMenu::separator { height: 1px; background: #DDD; margin: 3px 10px; }
+        self.file_menu.setStyleSheet(f"""
+            QMenu {{
+                background: #FFFFFF;
+                border: 1px solid #E2E8F0;
+                border-radius: 10px;
+                padding: 6px;
+                font-family: {FONT_FAMILY};
+                font-size: 13px;
+            }}
+            QMenu::item {{
+                padding: 7px 22px 7px 12px;
+                border-radius: 6px;
+                color: #0F172A;
+                font-weight: 500;
+            }}
+            QMenu::item:selected {{
+                background: #F1F5F9;
+                color: #0284C7;
+            }}
+            QMenu::separator {{
+                height: 1px;
+                background: #F1F5F9;
+                margin: 4px 6px;
+            }}
         """)
         self.file_btn.setMenu(self.file_menu)
         self.file_btn.setPopupMode(QToolButton.InstantPopup)
@@ -504,13 +1086,13 @@ class RibbonWidget(QWidget):
         idx = len(self._pages)
         page = RibbonPage(self._page_area)
 
-        # Tab button
         btn = QPushButton(name, self._tab_bar)
         btn.setFlat(True)
-        btn.setFixedHeight(28)
-        btn.setFont(QFont("Segoe UI", 9))
+        btn.setFixedHeight(30)
+        btn.setFont(QFont(FONT_FAMILY, 9))
         btn.setCheckable(True)
         btn.setChecked(idx == 0)
+        btn.setCursor(Qt.PointingHandCursor)
         btn.clicked.connect(lambda _, i=idx: self._select(i))
         self._tab_layout.addWidget(btn)
         self._tab_buttons.append(btn)
@@ -538,34 +1120,36 @@ class RibbonWidget(QWidget):
     def _update_tab_styles(self):
         for i, btn in enumerate(self._tab_buttons):
             if i == self._active:
-                btn.setStyleSheet("""
-                    QPushButton {
+                btn.setStyleSheet(f"""
+                    QPushButton {{
                         background: #FFFFFF;
                         color: #0284C7;
                         border: none;
                         border-bottom: 2.5px solid #0284C7;
                         padding: 2px 14px;
                         font-weight: 700;
-                        font-size: 13px;
+                        font-family: {FONT_FAMILY};
+                        font-size: 12.5px;
                         border-top-left-radius: 6px;
                         border-top-right-radius: 6px;
-                    }
+                    }}
                 """)
             else:
-                btn.setStyleSheet("""
-                    QPushButton {
+                btn.setStyleSheet(f"""
+                    QPushButton {{
                         background: transparent;
-                        color: #475569;
+                        color: #64748B;
                         border: none;
                         border-bottom: 2.5px solid transparent;
                         padding: 2px 14px;
                         font-weight: 600;
-                        font-size: 13px;
+                        font-family: {FONT_FAMILY};
+                        font-size: 12.5px;
                         border-top-left-radius: 6px;
                         border-top-right-radius: 6px;
-                    }
-                    QPushButton:hover {
+                    }}
+                    QPushButton:hover {{
                         background: #F1F5F9;
                         color: #0F172A;
-                    }
+                    }}
                 """)

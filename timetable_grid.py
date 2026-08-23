@@ -14,6 +14,8 @@ from PySide6.QtCore import Qt, QMimeData, Signal, QByteArray, QRect, QRectF, QTi
 from PySide6.QtGui import QFont, QColor, QBrush, QDrag, QPainter, QPixmap, QAction, QPen, QLinearGradient, QIcon, QPainterPath, QCursor
 from auto_scheduler import matches_class
 
+FONT_FAMILY = ".AppleSystemUIFont, SF Pro Text, Helvetica Neue, Segoe UI, sans-serif"
+
 class StickyGhostWidget(QLabel):
     _active_instance = None
     _hovered_table = None
@@ -25,7 +27,12 @@ class StickyGhostWidget(QLabel):
 
         super().__init__(None)
         StickyGhostWidget._active_instance = self
-        self.setWindowFlags(Qt.ToolTip | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.BypassWindowManagerHint)
+        # NoDropShadowWindowHint: on macOS a frameless + translucent window still gets a
+        # native Cocoa shadow layer, and that layer is what paints as an opaque black
+        # rectangle when the compositor cannot resolve the window's alpha. The in-app
+        # QGraphicsDropShadowEffects were removed for this same symptom; this is the
+        # remaining shadow source. The cards draw their own border, so nothing is lost.
+        self.setWindowFlags(Qt.ToolTip | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.BypassWindowManagerHint | Qt.NoDropShadowWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
@@ -518,7 +525,7 @@ class AsCTimetableHeader(QHeaderView):
                 painter.drawRect(rect)
                 
                 painter.setPen(QPen(QColor("#0F172A")))
-                painter.setFont(QFont("Segoe UI", 8, QFont.Bold))
+                painter.setFont(QFont(FONT_FAMILY, 8.5, QFont.Bold))
                 painter.drawText(rect, Qt.AlignCenter, day_name)
                 
                 # Thick day separator line on right edge
@@ -543,12 +550,12 @@ class AsCTimetableHeader(QHeaderView):
                 continue
                 
             day_rect = QRect(x_start, 0, day_w, 19)
-            painter.setPen(QPen(QColor("#94A3B8"), 1))
+            painter.setPen(QPen(QColor("#CBD5E1"), 1))
             painter.setBrush(QBrush(QColor("#E2E8F0")))
             painter.drawRect(day_rect)
             
             painter.setPen(QPen(QColor("#0F172A")))
-            font_day = QFont("Segoe UI", 7.5, QFont.Bold)
+            font_day = QFont(FONT_FAMILY, 8, QFont.Bold)
             painter.setFont(font_day)
             
             # Keep day label visible and centered in the viewport portion of that day
@@ -571,11 +578,11 @@ class AsCTimetableHeader(QHeaderView):
             
             period_rect = QRect(x, 19, w, 19)
             painter.setPen(QPen(QColor("#CBD5E1"), 1))
-            painter.setBrush(QBrush(QColor("#F8FAFC")))
+            painter.setBrush(QBrush(QColor("#FFFFFF")))
             painter.drawRect(period_rect)
             
             painter.setPen(QPen(QColor("#334155")))
-            font_p = QFont("Segoe UI", 7, QFont.Bold)
+            font_p = QFont(FONT_FAMILY, 7.5, QFont.Bold)
             painter.setFont(font_p)
             painter.drawText(period_rect, Qt.AlignCenter, str(period_num))
             
@@ -1599,6 +1606,14 @@ class DropTableWidget(QTableWidget):
         self.horizontalScrollBar().valueChanged.connect(lambda: self.asc_header.viewport().update())
         self.setItemDelegate(TimetableCellDelegate(self))
         self._drag_preview_info = None
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "asc_header"):
+            self.asc_header.viewport().update()
+        grid = self.parent()
+        if grid and hasattr(grid, "adjust_columns_to_fit"):
+            grid.adjust_columns_to_fit()
 
     def _preview_rect(self, preview):
         """Union rect covering a preview's full duration span, or None if off-grid."""
@@ -2666,34 +2681,37 @@ class TimetableGrid(QWidget):
         top.setSpacing(8)
 
         self.toggle_panel_btn = QPushButton(" Sol Panel", self)
-        self.toggle_panel_btn.setIcon(make_grid_action_icon("toggle_panel", 16))
-        self.toggle_panel_btn.setFont(QFont("Segoe UI", 9, QFont.Bold))
-        self.toggle_panel_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #FFFFFF; color: #334155; border: 1px solid #CBD5E1;
-                border-radius: 6px; padding: 4px 12px;
-            }
-            QPushButton:hover { background-color: #F1F5F9; border-color: #94A3B8; }
+        self.toggle_panel_btn.setIcon(make_grid_action_icon("toggle_panel", 15))
+        self.toggle_panel_btn.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
+        self.toggle_panel_btn.setFixedHeight(30)
+        self.toggle_panel_btn.setCursor(Qt.PointingHandCursor)
+        self.toggle_panel_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #FFFFFF; color: #0F172A; border: 1px solid #CBD5E1;
+                border-radius: 15px; padding: 0 14px; font-weight: 600;
+                font-family: {FONT_FAMILY};
+            }}
+            QPushButton:hover {{ background-color: #F8FAFC; border-color: #0284C7; color: #0284C7; }}
         """)
         top.addWidget(self.toggle_panel_btn)
         
-        top.addSpacing(10)
+        top.addSpacing(8)
         
         # Segmented view switchers (Sınıflar Çarşafı / Öğretmenler Çarşafı)
         switcher_frame = QFrame(self)
-        switcher_frame.setStyleSheet("QFrame { background: #E2E8F0; border-radius: 6px; }")
+        switcher_frame.setStyleSheet("QFrame { background: #F1F5F9; border: 1px solid #E2E8F0; border-radius: 16px; }")
         switcher_layout = QHBoxLayout(switcher_frame)
         switcher_layout.setContentsMargins(2, 2, 2, 2)
         switcher_layout.setSpacing(2)
         
         self.btn_view_classes = QPushButton(" Sınıflar Çarşafı", switcher_frame)
-        self.btn_view_classes.setIcon(make_grid_action_icon("siniflar", 18))
+        self.btn_view_classes.setIcon(make_grid_action_icon("siniflar", 16))
         self.btn_view_teachers = QPushButton(" Öğretmenler Çarşafı", switcher_frame)
-        self.btn_view_teachers.setIcon(make_grid_action_icon("ogretmenler", 18))
+        self.btn_view_teachers.setIcon(make_grid_action_icon("ogretmenler", 16))
         
         for btn in (self.btn_view_classes, self.btn_view_teachers):
             btn.setCheckable(True)
-            btn.setFont(QFont("Segoe UI", 9, QFont.Bold))
+            btn.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
             btn.setFixedHeight(28)
             btn.setCursor(Qt.PointingHandCursor)
             switcher_layout.addWidget(btn)
@@ -2710,16 +2728,18 @@ class TimetableGrid(QWidget):
         
         # Unlock All Button
         btn_unlock_all = QPushButton(" Tüm Kilitleri Aç", self)
-        btn_unlock_all.setIcon(make_grid_action_icon("lock_open", 16))
-        btn_unlock_all.setFont(QFont("Segoe UI", 9, QFont.Bold))
-        btn_unlock_all.setStyleSheet("""
-            QPushButton {
-                background: #FEF2F2; color: #DC2626; border: 1px solid #FECACA;
-                border-radius: 6px; padding: 4px 12px;
-            }
-            QPushButton:hover { background: #FEE2E2; }
-        """)
+        btn_unlock_all.setIcon(make_grid_action_icon("lock_open", 15))
+        btn_unlock_all.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
+        btn_unlock_all.setFixedHeight(30)
         btn_unlock_all.setCursor(Qt.PointingHandCursor)
+        btn_unlock_all.setStyleSheet(f"""
+            QPushButton {{
+                background: #FEF2F2; color: #DC2626; border: 1px solid #FECACA;
+                border-radius: 15px; padding: 0 14px; font-weight: 600;
+                font-family: {FONT_FAMILY};
+            }}
+            QPushButton:hover {{ background: #FEE2E2; }}
+        """)
         btn_unlock_all.clicked.connect(self._unlock_all_lessons)
         top.addWidget(btn_unlock_all)
         
@@ -2734,33 +2754,74 @@ class TimetableGrid(QWidget):
         self.table.setGridStyle(Qt.SolidLine)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
         vh = self.table.verticalHeader()
         vh.setSectionResizeMode(QHeaderView.Stretch)
         vh.setMinimumSectionSize(0)
         vh.setDefaultSectionSize(36)
         vh.setDefaultAlignment(Qt.AlignCenter)
-        vh.setStyleSheet("""
-            QHeaderView::section {
-                background: #D4D4D4; font-weight: bold; border: 1px solid #888888;
-                padding: 1px 4px; font-size: 8.5px; color: #111111;
-            }
+        vh.setStyleSheet(f"""
+            QHeaderView::section {{
+                background: #E2E8F0;
+                font-weight: 700;
+                border: 1px solid #CBD5E1;
+                padding: 1px 6px;
+                font-size: 11px;
+                font-family: {FONT_FAMILY};
+                color: #0F172A;
+            }}
         """)
 
-        self.table.setStyleSheet("""
-            QTableWidget {
-                background: #B4B4B8;
-                gridline-color: #7E7E84;
-                font-size: 8.5px;
-                selection-background-color: #FFFF00;
-                selection-color: #000;
-            }
-            QTableWidget::item {
+        self.table.setStyleSheet(f"""
+            QTableWidget {{
+                background: #F1F5F9;
+                gridline-color: #CBD5E1;
+                font-size: 11px;
+                font-family: {FONT_FAMILY};
+                selection-background-color: #DBEAFE;
+                selection-color: #1E40AF;
+                border: none;
+            }}
+            QTableWidget::item {{
                 padding: 0px;
                 border: none;
-            }
+            }}
+            QScrollBar:vertical {{
+                background: #F8FAFC;
+                width: 8px;
+                margin: 0;
+                border-radius: 4px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: #CBD5E1;
+                min-height: 20px;
+                border-radius: 4px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: #94A3B8;
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+            QScrollBar:horizontal {{
+                background: #F8FAFC;
+                height: 8px;
+                margin: 0;
+                border-radius: 4px;
+            }}
+            QScrollBar::handle:horizontal {{
+                background: #CBD5E1;
+                min-width: 20px;
+                border-radius: 4px;
+            }}
+            QScrollBar::handle:horizontal:hover {{
+                background: #94A3B8;
+            }}
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+                width: 0px;
+            }}
         """)
 
         # Connect explicit click, keyboard navigation, and header click for info panel & unplaced dock update
@@ -2773,47 +2834,47 @@ class TimetableGrid(QWidget):
         
         # ── Bottom area: info panel + unplaced dock
         bottom_frame = QFrame(self)
-        bottom_frame.setStyleSheet("QFrame { background: #B0B0B8; border-top: 1px solid #888; }")
+        bottom_frame.setStyleSheet("QFrame { background: #FFFFFF; border-top: 1px solid #E2E8F0; }")
         bottom_layout = QHBoxLayout(bottom_frame)
-        bottom_layout.setContentsMargins(0, 0, 0, 0)
-        bottom_layout.setSpacing(0)
+        bottom_layout.setContentsMargins(6, 4, 6, 4)
+        bottom_layout.setSpacing(8)
         
-        # Left: Lesson Info Panel (aSc-style)
+        # Left: Lesson Info Panel (Apple Card Style)
         self.info_panel = QFrame(self)
-        self.info_panel.setFixedHeight(56)
+        self.info_panel.setFixedHeight(54)
         self.info_panel.setMinimumWidth(220)
         self.info_panel.setMaximumWidth(320)
-        self.info_panel.setStyleSheet("QFrame { background: #B8B8C0; border: 1px solid #888; }")
+        self.info_panel.setStyleSheet("QFrame { background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; }")
         info_inner = QVBoxLayout(self.info_panel)
-        info_inner.setContentsMargins(6, 3, 6, 3)
-        info_inner.setSpacing(1)
+        info_inner.setContentsMargins(8, 4, 8, 4)
+        info_inner.setSpacing(2)
         
         # Color swatch + subject name
         info_top = QHBoxLayout()
-        info_top.setSpacing(5)
+        info_top.setSpacing(6)
         self.info_color_box = QLabel()
         self.info_color_box.setFixedSize(18, 18)
         self.info_color_box.setCursor(Qt.PointingHandCursor)
         self.info_color_box.setToolTip("Rengi Değiştirmek İçin Tıklayın")
-        self.info_color_box.setStyleSheet("background: transparent; border: 1px solid #666; border-radius: 3px;")
+        self.info_color_box.setStyleSheet("background: transparent; border: 1px solid #94A3B8; border-radius: 4px;")
         self.info_color_box.mousePressEvent = self._on_color_box_clicked
         info_top.addWidget(self.info_color_box)
         
         self.info_subject_lbl = QLabel("")
-        self.info_subject_lbl.setFont(QFont("Segoe UI", 10, QFont.Bold))
-        self.info_subject_lbl.setStyleSheet("color: #111; background: transparent; border: none;")
+        self.info_subject_lbl.setFont(QFont(FONT_FAMILY, 10, QFont.Bold))
+        self.info_subject_lbl.setStyleSheet("color: #0F172A; background: transparent; border: none;")
         info_top.addWidget(self.info_subject_lbl)
         info_top.addStretch(1)
         info_inner.addLayout(info_top)
         
         self.info_class_lbl = QLabel("")
-        self.info_class_lbl.setFont(QFont("Segoe UI", 8.5))
-        self.info_class_lbl.setStyleSheet("color: #D32F2F; background: transparent; border: none; font-weight: bold;")
+        self.info_class_lbl.setFont(QFont(FONT_FAMILY, 8.5, QFont.Bold))
+        self.info_class_lbl.setStyleSheet("color: #DC2626; background: transparent; border: none;")
         info_inner.addWidget(self.info_class_lbl)
         
         self.info_teacher_lbl = QLabel("")
-        self.info_teacher_lbl.setFont(QFont("Segoe UI", 8.5))
-        self.info_teacher_lbl.setStyleSheet("color: #333; background: transparent; border: none;")
+        self.info_teacher_lbl.setFont(QFont(FONT_FAMILY, 8.5))
+        self.info_teacher_lbl.setStyleSheet("color: #475569; background: transparent; border: none;")
         info_inner.addWidget(self.info_teacher_lbl)
         
         bottom_layout.addWidget(self.info_panel)
@@ -2869,8 +2930,8 @@ class TimetableGrid(QWidget):
                 update_subject_color_globally(self, data_store, s_name, new_hex)
 
     def _update_view_btn_styles(self):
-        active_style = "QPushButton { background-color: #2563EB; color: #FFFFFF; border: none; border-radius: 4px; padding: 4px 14px; font-weight: bold; } QPushButton:hover { background-color: #1D4ED8; }"
-        inactive_style = "QPushButton { background-color: transparent; color: #475569; border: none; border-radius: 4px; padding: 4px 14px; font-weight: bold; } QPushButton:hover { background-color: #CBD5E1; color: #0F172A; }"
+        active_style = f"QPushButton {{ background-color: #0071E3; color: #FFFFFF; border: none; border-radius: 14px; padding: 0 16px; font-weight: 700; font-family: {FONT_FAMILY}; font-size: 12px; }} QPushButton:hover {{ background-color: #0062C4; }}"
+        inactive_style = f"QPushButton {{ background-color: transparent; color: #64748B; border: none; border-radius: 14px; padding: 0 16px; font-weight: 600; font-family: {FONT_FAMILY}; font-size: 12px; }} QPushButton:hover {{ background-color: #E2E8F0; color: #0F172A; }}"
         self.btn_view_classes.setStyleSheet(active_style if self.current_view_mode == "classes" else inactive_style)
         self.btn_view_teachers.setStyleSheet(active_style if self.current_view_mode == "teachers" else inactive_style)
 
@@ -3076,6 +3137,39 @@ class TimetableGrid(QWidget):
         self.table.clearContents()
         self.table.clearSpans()
         self._placed_lessons.clear()
+
+    def adjust_columns_to_fit(self):
+        """Dynamically scales all columns so the timetable always perfectly fits the available viewport width without right-side overflow."""
+        total_cols = self.table.columnCount()
+        if total_cols <= 0:
+            return
+            
+        vw = self.table.viewport().width()
+        if vw <= 0:
+            vh = self.table.verticalHeader()
+            vh_w = vh.width() if (vh and vh.isVisible()) else 0
+            vw = self.table.width() - vh_w - 4
+            
+        if vw <= 0:
+            return
+            
+        base_w = vw // total_cols
+        remainder = vw % total_cols
+        
+        # Responsive column width: fit 100% of viewport width
+        min_w = 16
+        col_w = max(min_w, base_w)
+        
+        for c in range(total_cols):
+            w = col_w + (1 if c < remainder else 0)
+            self.table.setColumnWidth(c, w)
+            
+        if hasattr(self.table, "asc_header"):
+            self.table.asc_header.viewport().update()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.adjust_columns_to_fit()
         
     def set_mode_single_entity(self, periods: int, days_list: list):
         """Standard view: 1 entity (class/teacher), Rows=Periods, Cols=Days"""
@@ -3086,10 +3180,11 @@ class TimetableGrid(QWidget):
         if hasattr(self.table, "asc_header"):
             self.table.asc_header.set_config(1, days_list)
         self.table.setVerticalHeaderLabels([f"{i+1}" for i in range(periods)])
+        self.adjust_columns_to_fit()
         self.clear_grid()
         
     def set_mode_all_classes(self, class_list: list, periods: int, days_list: list):
-        """Whole School View (aSc Çarşaf - Sınıflar): Rows=Classes, Cols=Days*Periods (Scaled down 25%)"""
+        """Whole School View (aSc Çarşaf - Sınıflar): Rows=Classes, Cols=Days*Periods"""
         self._periods = periods
         self.class_list = class_list
         self.current_view_mode = "classes"
@@ -3105,15 +3200,16 @@ class TimetableGrid(QWidget):
             if hasattr(self.table, "asc_header"):
                 self.table.asc_header.set_config(periods, days_list)
 
-            for i in range(total_cols):
-                self.table.setColumnWidth(i, 36)
+            self.adjust_columns_to_fit()
             for r in range(len(class_list)):
                 self.table.setRowHeight(r, 28)
+        else:
+            self.adjust_columns_to_fit()
 
         self.clear_grid()
 
     def set_mode_all_teachers(self, teacher_list: list, periods: int, days_list: list):
-        """Whole School View (aSc Çarşaf - Öğretmenler): Rows=Teachers, Cols=Days*Periods (Scaled down 25%)"""
+        """Whole School View (aSc Çarşaf - Öğretmenler): Rows=Teachers, Cols=Days*Periods"""
         self._periods = periods
         self.teacher_list = teacher_list
         self.current_view_mode = "teachers"
@@ -3129,10 +3225,11 @@ class TimetableGrid(QWidget):
             if hasattr(self.table, "asc_header"):
                 self.table.asc_header.set_config(periods, days_list)
 
-            for i in range(total_cols):
-                self.table.setColumnWidth(i, 36)
+            self.adjust_columns_to_fit()
             for r in range(len(teacher_list)):
                 self.table.setRowHeight(r, 28)
+        else:
+            self.adjust_columns_to_fit()
 
         self.clear_grid()
 

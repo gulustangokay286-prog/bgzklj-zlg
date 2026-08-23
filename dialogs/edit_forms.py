@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QLabel,
     QLineEdit, QComboBox, QCheckBox, QColorDialog, QFrame, QFormLayout, QGridLayout,
     QScrollArea, QTableWidget, QTableWidgetItem, QHeaderView, QListWidget, QListWidgetItem,
-    QMessageBox, QGroupBox, QSpinBox, QAbstractItemView
+    QMessageBox, QGroupBox, QSpinBox, QAbstractItemView, QSizePolicy
 )
 from PySide6.QtCore import Qt, QPointF
 from PySide6.QtGui import QFont, QColor, QBrush, QPainter, QPen, QPainterPath, QPixmap, QIcon
@@ -184,15 +184,32 @@ class BaseEditForm(QDialog):
         self.existing_data = existing_data or {}
         
         self.setStyleSheet("""
-            QDialog { background-color: #F8FAFC; font-family: system-ui, -apple-system, sans-serif; font-size: 13px; }
+            QDialog { background-color: #F8FAFC; font-family: .AppleSystemUIFont, SF Pro Text, -apple-system, Helvetica Neue, Segoe UI, sans-serif; font-size: 13px; }
             QGroupBox { font-weight: bold; margin-top: 6px; }
             QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 3px 0 3px; }
             QLabel { border: none; background: transparent; color: #1E293B; font-size: 13px; }
-            QLineEdit { min-height: 32px; padding: 4px 10px; border: 1px solid #CBD5E1; border-radius: 6px; background: #FFFFFF; font-size: 13px; color: #0F172A; }
+            QLineEdit { min-height: 34px; padding: 4px 10px; border: 1px solid #CBD5E1; border-radius: 8px; background: #FFFFFF; font-size: 13px; color: #0F172A; }
             QLineEdit:focus { border: 1.5px solid #0071E3; }
-            QComboBox { min-height: 32px; padding: 4px 10px; border: 1px solid #CBD5E1; border-radius: 6px; background: #FFFFFF; font-size: 13px; color: #0F172A; }
+            QComboBox { min-height: 34px; padding: 4px 10px; border: 1px solid #CBD5E1; border-radius: 8px; background: #FFFFFF; font-size: 13px; color: #0F172A; }
             QComboBox:focus { border: 1.5px solid #0071E3; }
-            QPushButton { min-height: 32px; padding: 6px 14px; border: 1px solid #CBD5E1; border-radius: 6px; background: #FFFFFF; font-size: 13px; font-weight: 600; color: #334155; }
+            QComboBox::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 26px;
+                border-left: none;
+                background: transparent;
+            }
+            QComboBox::down-arrow {
+                width: 10px;
+                height: 10px;
+                image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748B' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>");
+            }
+            QComboBox::down-arrow:on, QComboBox::down-arrow:pressed {
+                width: 10px;
+                height: 10px;
+                image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%230071E3' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='18 15 12 9 6 15'></polyline></svg>");
+            }
+            QPushButton { min-height: 34px; padding: 6px 16px; border: 1px solid #CBD5E1; border-radius: 17px; background: #FFFFFF; font-size: 13px; font-weight: 600; color: #334155; }
             QPushButton:hover { background: #F1F5F9; }
             QCheckBox { color: #334155; font-size: 13px; spacing: 8px; }
         """)
@@ -201,10 +218,11 @@ class BaseEditForm(QDialog):
         self.main_layout.setContentsMargins(20, 20, 20, 16)
         self.main_layout.setSpacing(14)
 
-    def _add_bottom_buttons(self):
-        self.main_layout.addStretch(1)
+    def _add_bottom_buttons(self, add_stretch=True):
+        if add_stretch:
+            self.main_layout.addStretch(1)
         bottom = QHBoxLayout()
-        bottom.setSpacing(10)
+        bottom.setSpacing(12)
         bottom.addStretch(1)
         
         btn_iptal = QPushButton("İptal")
@@ -213,14 +231,15 @@ class BaseEditForm(QDialog):
                 background: #FFFFFF;
                 color: #475569;
                 border: 1px solid #CBD5E1;
-                border-radius: 8px;
+                border-radius: 19px;
                 font-weight: 600;
                 font-size: 13px;
-                min-height: 36px;
-                padding: 0 20px;
+                min-height: 38px;
+                padding: 0 24px;
             }
             QPushButton:hover {
                 background: #F8FAFC;
+                color: #0F172A;
             }
         """)
         btn_iptal.clicked.connect(self.reject)
@@ -231,11 +250,11 @@ class BaseEditForm(QDialog):
                 background: #0071E3;
                 color: #FFFFFF;
                 border: none;
-                border-radius: 8px;
+                border-radius: 19px;
                 font-weight: 600;
                 font-size: 13px;
-                min-height: 36px;
-                padding: 0 24px;
+                min-height: 38px;
+                padding: 0 28px;
             }
             QPushButton:hover {
                 background: #0062C4;
@@ -252,33 +271,33 @@ class CustomFieldsDialog(QDialog):
     """aSc Standartlarında Özel Alanlar (Custom Fields) Yönetim Penceresi"""
     def __init__(self, entity_name, entity_type="Öğretmen", custom_fields=None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"Özel Alanlar - {entity_name}")
-        self.setFixedSize(520, 440)
+        self.setWindowTitle(f"Özel Alanlar — {entity_name}")
+        self.setFixedSize(520, 460)
         self.custom_fields = dict(custom_fields or {})
         
         self.setStyleSheet("""
-            QDialog { background-color: #F8FAFC; font-family: system-ui, -apple-system, sans-serif; font-size: 13px; }
+            QDialog { background-color: #F8FAFC; font-family: .AppleSystemUIFont, SF Pro Text, -apple-system, Helvetica Neue, Segoe UI, sans-serif; font-size: 13px; }
             QLabel { color: #1E293B; font-size: 13px; }
-            QTableWidget { background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 6px; }
-            QLineEdit { min-height: 28px; padding: 2px 8px; border: 1px solid #CBD5E1; border-radius: 4px; }
-            QLineEdit:focus { border: 1px solid #0078D7; }
-            QPushButton { min-height: 28px; padding: 4px 12px; border: 1px solid #CBD5E1; border-radius: 4px; background: #FFFFFF; font-weight: 500; }
+            QTableWidget { background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; }
+            QLineEdit { min-height: 30px; padding: 2px 8px; border: 1px solid #CBD5E1; border-radius: 6px; }
+            QLineEdit:focus { border: 1.5px solid #0071E3; }
+            QPushButton { min-height: 30px; padding: 4px 14px; border: 1px solid #CBD5E1; border-radius: 15px; background: #FFFFFF; font-weight: 600; font-size: 12px; }
             QPushButton:hover { background: #F1F5F9; }
         """)
         
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(10)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
         
         # Header Info Card
         header_card = QFrame()
-        header_card.setStyleSheet("background: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 6px; padding: 8px;")
+        header_card.setStyleSheet("background: #F0F9FF; border: 1px solid #BAE6FD; border-radius: 10px; padding: 8px;")
         h_lay = QVBoxLayout(header_card)
         lbl_info = QLabel(f"<b>{entity_type}:</b> {entity_name} için özel alan ve meta verileri tanımlayın.")
-        lbl_info.setStyleSheet("color: #1D4ED8; font-size: 13px;")
+        lbl_info.setStyleSheet("color: #0369A1; font-size: 13px;")
         h_lay.addWidget(lbl_info)
-        lbl_sub = QLabel("Bu alanlar aSc standartlarında raporlarda, özel filtrelerde ve veri aktarımlarında kullanılır.")
-        lbl_sub.setStyleSheet("color: #3B82F6; font-size: 11px;")
+        lbl_sub = QLabel("Bu alanlar standart raporlarda, özel filtrelerde ve veri aktarımlarında kullanılır.")
+        lbl_sub.setStyleSheet("color: #0284C7; font-size: 11px;")
         h_lay.addWidget(lbl_sub)
         layout.addWidget(header_card)
         
@@ -289,7 +308,7 @@ class CustomFieldsDialog(QDialog):
         presets = ["Telefon", "E-Posta", "Sicil / TC", "Branş", "Notlar"]
         for p_name in presets:
             btn = QPushButton(p_name)
-            btn.setStyleSheet("font-size: 11px; padding: 3px 8px; background: #F1F5F9;")
+            btn.setStyleSheet("font-size: 11px; padding: 3px 10px; background: #F1F5F9; border-radius: 12px;")
             btn.clicked.connect(lambda _, n=p_name: self._add_field(n, ""))
             presets_lay.addWidget(btn)
             
@@ -308,11 +327,11 @@ class CustomFieldsDialog(QDialog):
         # Action Buttons below table
         btn_bar = QHBoxLayout()
         btn_add = QPushButton("+ Yeni Alan Ekle")
-        btn_add.setStyleSheet("background: #E0F2FE; color: #0284C7; font-weight: bold;")
+        btn_add.setStyleSheet("background: #E0F2FE; color: #0284C7; font-weight: 600; border-radius: 15px;")
         btn_add.clicked.connect(lambda: self._add_field("", ""))
         
         btn_del = QPushButton("Seçiliyi Sil")
-        btn_del.setStyleSheet("background: #FEE2E2; color: #DC2626;")
+        btn_del.setStyleSheet("background: #FFF1F2; color: #E11D48; border: 1px solid #FECDD3; border-radius: 15px;")
         btn_del.clicked.connect(self._delete_selected_row)
         
         btn_bar.addWidget(btn_add)
@@ -322,13 +341,13 @@ class CustomFieldsDialog(QDialog):
         
         # Bottom Save/Cancel
         bot = QHBoxLayout()
+        bot.setSpacing(10)
         btn_cancel = QPushButton("İptal")
-        btn_cancel.setFixedSize(90, 32)
+        btn_cancel.setStyleSheet("background: #FFFFFF; color: #475569; border: 1px solid #CBD5E1; border-radius: 17px; min-height: 34px; padding: 0 18px;")
         btn_cancel.clicked.connect(self.reject)
         
         btn_save = QPushButton("Kaydet")
-        btn_save.setFixedSize(110, 32)
-        btn_save.setStyleSheet("background: #0078D7; color: white; font-weight: bold; border-radius: 4px;")
+        btn_save.setStyleSheet("background: #0071E3; color: white; font-weight: 600; border: none; border-radius: 17px; min-height: 34px; padding: 0 22px;")
         btn_save.clicked.connect(self._save_and_accept)
         
         bot.addStretch(1)
@@ -381,6 +400,37 @@ class NoScrollComboBox(QComboBox):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFocusPolicy(Qt.StrongFocus)
+        self.setStyleSheet("""
+            QComboBox {
+                min-height: 34px;
+                padding: 4px 10px;
+                border: 1px solid #CBD5E1;
+                border-radius: 8px;
+                background: #FFFFFF;
+                font-size: 13px;
+                color: #0F172A;
+            }
+            QComboBox:focus {
+                border: 1.5px solid #0071E3;
+            }
+            QComboBox::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 26px;
+                border-left: none;
+                background: transparent;
+            }
+            QComboBox::down-arrow {
+                width: 10px;
+                height: 10px;
+                image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748B' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>");
+            }
+            QComboBox::down-arrow:on, QComboBox::down-arrow:pressed {
+                width: 10px;
+                height: 10px;
+                image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%230071E3' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='18 15 12 9 6 15'></polyline></svg>");
+            }
+        """)
         
     def wheelEvent(self, event):
         if self.view() and self.view().isVisible():
@@ -408,23 +458,33 @@ class SearchableComboBox(QComboBox):
         self.setStyleSheet("""
             QComboBox {
                 border: 1px solid #CBD5E1;
-                border-radius: 4px;
-                padding: 2px 8px;
+                border-radius: 8px;
+                padding: 4px 10px;
                 background: #FFFFFF;
                 font-size: 13px;
-                font-weight: 600;
+                font-weight: 500;
                 color: #0F172A;
-                min-height: 28px;
+                min-height: 34px;
+            }
+            QComboBox:focus, QComboBox:focus-within {
+                border: 1.5px solid #0071E3;
             }
             QComboBox::drop-down {
-                border-left: 1px solid #CBD5E1;
-                width: 28px;
-                background: #F8FAFC;
-                border-top-right-radius: 4px;
-                border-bottom-right-radius: 4px;
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 26px;
+                border-left: none;
+                background: transparent;
             }
             QComboBox::down-arrow {
-                image: none;
+                width: 10px;
+                height: 10px;
+                image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748B' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>");
+            }
+            QComboBox::down-arrow:on, QComboBox::down-arrow:pressed {
+                width: 10px;
+                height: 10px;
+                image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%230071E3' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='18 15 12 9 6 15'></polyline></svg>");
             }
         """)
 
@@ -442,10 +502,10 @@ class SearchableComboBox(QComboBox):
         self.setCompleter(self._completer)
         
         # We handle text edited to dynamically update completer model (for Turkish support)
-        self.lineEdit().textEdited.connect(self._on_text_edited)
-        
-        # Propagate currentTextChanged
-        self.lineEdit().textChanged.connect(self.currentTextChanged.emit)
+        if self.lineEdit():
+            self.lineEdit().setStyleSheet("border: none; background: transparent; padding-right: 20px;")
+            self.lineEdit().textEdited.connect(self._on_text_edited)
+            self.lineEdit().textChanged.connect(self.currentTextChanged.emit)
 
     def setItems(self, items):
         self._all_items = list(items)
@@ -490,33 +550,34 @@ class SubjectClassMultiSelectDialog(QDialog):
     def __init__(self, subject_name, all_classes, selected_classes=None, default_distribution="2", class_configs=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle(f"Sınıf(lar) Ata — {subject_name}")
-        self.resize(520, 560)
-        self.setMinimumSize(480, 480)
+        self.resize(540, 580)
+        self.setMinimumSize(480, 500)
         self.selected_classes = list(selected_classes or [])
         self.default_distribution = str(default_distribution or "2")
         self.class_configs = dict(class_configs or {})
         
         self.setStyleSheet("""
-            QDialog { background-color: #F8FAFC; font-family: system-ui, -apple-system, sans-serif; font-size: 13px; }
+            QDialog { background-color: #F8FAFC; font-family: .AppleSystemUIFont, SF Pro Text, -apple-system, Helvetica Neue, Segoe UI, sans-serif; font-size: 13px; }
             QLabel { color: #1E293B; font-size: 13px; }
             QCheckBox { font-size: 13px; font-weight: 600; padding: 4px; color: #0F172A; }
-            QComboBox { min-height: 26px; padding: 2px 6px; border: 1px solid #CBD5E1; border-radius: 4px; background: #FFFFFF; font-size: 12px; font-weight: bold; color: #1E293B; }
-            QPushButton { min-height: 30px; padding: 4px 12px; border: 1px solid #CBD5E1; border-radius: 4px; background: #FFFFFF; font-weight: 500; font-size: 13px; }
-            QPushButton:hover { background: #F1F5F9; }
+            QLineEdit { min-height: 34px; padding: 4px 10px; border: 1px solid #CBD5E1; border-radius: 8px; background: #FFFFFF; font-size: 13px; color: #0F172A; }
+            QLineEdit:focus { border: 1.5px solid #0071E3; }
         """)
         
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(10)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
         
         card = QFrame()
-        card.setStyleSheet("background: #F0FDF4; border: 1px solid #BBF7D0; border-radius: 6px; padding: 8px;")
+        card.setStyleSheet("background: #F0F9FF; border: 1px solid #BAE6FD; border-radius: 10px; padding: 10px 14px;")
         c_lay = QVBoxLayout(card)
+        c_lay.setContentsMargins(0, 0, 0, 0)
+        c_lay.setSpacing(4)
         lbl_h = QLabel(f"<b>{subject_name}</b> Dersi İçin Sınıfları ve Saat Formatını Seçin")
-        lbl_h.setStyleSheet("color: #166534; font-size: 13px;")
+        lbl_h.setStyleSheet("color: #0369A1; font-size: 13px;")
         c_lay.addWidget(lbl_h)
         lbl_s = QLabel("Her sınıf için bağımsız saat formatı (Örn: 11A = 3 saat 2+1, 9A = 4 saat 2+2) belirleyebilirsiniz.")
-        lbl_s.setStyleSheet("color: #15803D; font-size: 11px;")
+        lbl_s.setStyleSheet("color: #0284C7; font-size: 11px;")
         c_lay.addWidget(lbl_s)
         layout.addWidget(card)
         
@@ -528,20 +589,21 @@ class SubjectClassMultiSelectDialog(QDialog):
         
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 6px; }")
+        scroll.setStyleSheet("QScrollArea { background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 10px; }")
         w = QWidget()
         w.setStyleSheet("background: #FFFFFF;")
         self.v_lay = QVBoxLayout(w)
-        self.v_lay.setContentsMargins(10, 10, 10, 10)
-        self.v_lay.setSpacing(6)
+        self.v_lay.setContentsMargins(12, 12, 12, 12)
+        self.v_lay.setSpacing(8)
         
         self.row_items = []
         DISTRIBUTIONS = ["1", "2", "3", "4", "5", "6", "1+1", "2+1", "2+2", "3+1", "3+2", "4+2", "3+3", "2+2+1", "2+2+2", "3+2+1"]
         
         for c in sorted(all_classes):
             row_w = QWidget()
+            row_w.setStyleSheet("QWidget { background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 4px 8px; }")
             r_lay = QHBoxLayout(row_w)
-            r_lay.setContentsMargins(4, 2, 4, 2)
+            r_lay.setContentsMargins(8, 6, 8, 6)
             
             chk = QCheckBox(c)
             is_checked = (c in self.selected_classes)
@@ -564,8 +626,8 @@ class SubjectClassMultiSelectDialog(QDialog):
             
             chk.toggled.connect(cb_tip.setEnabled)
             
-            lbl_hour_badge = QLabel("Saat/Format:")
-            lbl_hour_badge.setStyleSheet("color: #64748B; font-size: 11px;")
+            lbl_hour_badge = QLabel("Saat / Dağılım:")
+            lbl_hour_badge.setStyleSheet("color: #64748B; font-size: 11px; font-weight: 500;")
             
             r_lay.addWidget(chk, 1)
             r_lay.addStretch(1)
@@ -580,14 +642,53 @@ class SubjectClassMultiSelectDialog(QDialog):
         layout.addWidget(scroll)
         
         bot = QHBoxLayout()
+        bot.setSpacing(12)
         btn_sel_all = QPushButton("Tümünü Seç / Kaldır")
+        btn_sel_all.setStyleSheet("""
+            QPushButton {
+                background: #FFFFFF;
+                color: #334155;
+                border: 1px solid #CBD5E1;
+                border-radius: 18px;
+                font-weight: 600;
+                font-size: 12px;
+                min-height: 36px;
+                padding: 0 18px;
+            }
+            QPushButton:hover { background: #F8FAFC; }
+        """)
         btn_sel_all.clicked.connect(self._toggle_all)
         
         btn_cancel = QPushButton("İptal")
+        btn_cancel.setStyleSheet("""
+            QPushButton {
+                background: #FFFFFF;
+                color: #475569;
+                border: 1px solid #CBD5E1;
+                border-radius: 18px;
+                font-weight: 600;
+                font-size: 13px;
+                min-height: 36px;
+                padding: 0 20px;
+            }
+            QPushButton:hover { background: #F8FAFC; color: #1E293B; }
+        """)
         btn_cancel.clicked.connect(self.reject)
         
         btn_ok = QPushButton("Seçimi Onayla")
-        btn_ok.setStyleSheet("background: #0078D7; color: white; font-weight: bold;")
+        btn_ok.setStyleSheet("""
+            QPushButton {
+                background: #0071E3;
+                color: white;
+                font-weight: 600;
+                font-size: 13px;
+                min-height: 36px;
+                padding: 0 24px;
+                border-radius: 18px;
+                border: none;
+            }
+            QPushButton:hover { background: #0062C4; }
+        """)
         btn_ok.clicked.connect(self._accept_selection)
         
         bot.addWidget(btn_sel_all)
@@ -636,7 +737,7 @@ class CombinedClassesDialog(QDialog):
     def __init__(self, data_store=None, selected_classes=None, parent=None, subject_name="", duration="2", teacher_name=""):
         super().__init__(parent)
         self.setWindowTitle("Birleşik / Ortak Ders Oluştur")
-        self.setFixedSize(540, 620)
+        self.setFixedSize(560, 640)
         self.data_store = data_store or {}
         self.selected_classes = list(selected_classes or [])
         self.init_subject = subject_name or ""
@@ -645,37 +746,35 @@ class CombinedClassesDialog(QDialog):
         self.bypass_conflict = False
         
         self.setStyleSheet("""
-            QDialog { background-color: #F8FAFC; font-family: system-ui, -apple-system, sans-serif; font-size: 13px; }
+            QDialog { background-color: #F8FAFC; font-family: .AppleSystemUIFont, SF Pro Text, -apple-system, Helvetica Neue, Segoe UI, sans-serif; font-size: 13px; }
             QLabel { color: #1E293B; font-size: 13px; }
-            QComboBox { min-height: 28px; padding: 2px 6px; border: 1px solid #CBD5E1; border-radius: 4px; background: #FFFFFF; font-size: 13px; }
-            QComboBox:focus { border: 1px solid #0078D7; }
-            QPushButton { min-height: 30px; padding: 4px 12px; border: 1px solid #CBD5E1; border-radius: 4px; background: #FFFFFF; font-weight: 500; }
-            QPushButton:hover { background: #F1F5F9; }
         """)
         
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(10)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
         
         # Info Header
         info_card = QFrame()
-        info_card.setStyleSheet("background: #FFFBEB; border: 1px solid #FDE68A; border-radius: 6px; padding: 8px;")
+        info_card.setStyleSheet("background: #F0F9FF; border: 1px solid #BAE6FD; border-radius: 10px; padding: 10px 14px;")
         info_lay = QVBoxLayout(info_card)
-        lbl_h = QLabel("🔗 <b>Birleşik / Ortak Ders Tanımlama</b> (En az 2 sınıf gereklidir)")
-        lbl_h.setStyleSheet("color: #92400E; font-size: 13px;")
+        info_lay.setContentsMargins(0, 0, 0, 0)
+        info_lay.setSpacing(4)
+        lbl_h = QLabel("<b>Birleşik / Ortak Ders Tanımlama</b> — En az 2 sınıf gereklidir")
+        lbl_h.setStyleSheet("color: #0369A1; font-size: 13px;")
         info_lay.addWidget(lbl_h)
         lbl_sub = QLabel("Farklı sınıflar veya gruplar aynı saatte, aynı öğretmenle ortak ders işleyecek şekilde eşleştirilir.")
-        lbl_sub.setStyleSheet("color: #B45309; font-size: 11px;")
+        lbl_sub.setStyleSheet("color: #0284C7; font-size: 11px;")
         info_lay.addWidget(lbl_sub)
         layout.addWidget(info_card)
         
         # 1. Ders ve Saat Seçim Kartı
         meta_frame = QFrame()
-        meta_frame.setStyleSheet("background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 6px;")
+        meta_frame.setStyleSheet("background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; padding: 6px;")
         meta_lay = QGridLayout(meta_frame)
-        meta_lay.setContentsMargins(12, 10, 12, 10)
-        meta_lay.setHorizontalSpacing(10)
-        meta_lay.setVerticalSpacing(8)
+        meta_lay.setContentsMargins(14, 12, 14, 12)
+        meta_lay.setHorizontalSpacing(12)
+        meta_lay.setVerticalSpacing(10)
         
         meta_lay.addWidget(QLabel("<b>Ders Seçimi:</b>"), 0, 0)
         self.cb_subject = SearchableComboBox()
@@ -710,10 +809,10 @@ class CombinedClassesDialog(QDialog):
         
         # 2. Birleştirilecek Sınıflar Kartı
         rows_frame = QFrame()
-        rows_frame.setStyleSheet("background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 6px;")
+        rows_frame.setStyleSheet("background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; padding: 6px;")
         rows_lay = QVBoxLayout(rows_frame)
-        rows_lay.setContentsMargins(12, 10, 12, 10)
-        rows_lay.setSpacing(6)
+        rows_lay.setContentsMargins(14, 12, 14, 12)
+        rows_lay.setSpacing(8)
         
         header_lay = QHBoxLayout()
         lbl_c = QLabel("<b>Birleştirilecek Sınıf</b>")
@@ -752,17 +851,53 @@ class CombinedClassesDialog(QDialog):
         
         # Bottom Buttons
         bot = QHBoxLayout()
-        self.btn_clear = QPushButton("🗑️ Birleşik Sınıfı Kaldır")
-        self.btn_clear.setStyleSheet("background: #FEE2E2; color: #DC2626; font-weight: bold; border: 1px solid #FECACA; border-radius: 4px; padding: 6px 12px;")
+        bot.setSpacing(12)
+        self.btn_clear = QPushButton("Birleşik Sınıfı Kaldır")
+        self.btn_clear.setStyleSheet("""
+            QPushButton {
+                background: #FFF1F2;
+                color: #E11D48;
+                font-weight: 600;
+                border: 1px solid #FECDD3;
+                border-radius: 19px;
+                min-height: 38px;
+                padding: 0 20px;
+                font-size: 13px;
+            }
+            QPushButton:hover { background: #FFE4E6; }
+        """)
         self.btn_clear.clicked.connect(self._do_clear)
         
         btn_cancel = QPushButton("İptal")
-        btn_cancel.setFixedSize(80, 32)
+        btn_cancel.setStyleSheet("""
+            QPushButton {
+                background: #FFFFFF;
+                color: #475569;
+                border: 1px solid #CBD5E1;
+                border-radius: 19px;
+                min-height: 38px;
+                padding: 0 22px;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            QPushButton:hover { background: #F8FAFC; color: #1E293B; }
+        """)
         btn_cancel.clicked.connect(self.reject)
         
-        self.btn_ok = QPushButton("✅ Birleşik Dersi Onayla")
-        self.btn_ok.setFixedSize(170, 32)
-        self.btn_ok.setStyleSheet("background: #0078D7; color: white; font-weight: bold; border-radius: 4px;")
+        self.btn_ok = QPushButton("Birleşik Dersi Onayla")
+        self.btn_ok.setStyleSheet("""
+            QPushButton {
+                background: #0071E3;
+                color: white;
+                font-weight: 600;
+                border-radius: 19px;
+                border: none;
+                min-height: 38px;
+                padding: 0 26px;
+                font-size: 13px;
+            }
+            QPushButton:hover { background: #0062C4; }
+        """)
         self.btn_ok.clicked.connect(self._do_accept)
         
         bot.addWidget(self.btn_clear)
@@ -885,14 +1020,14 @@ class LessonAssignmentDialog(QDialog):
                 
         super().__init__(parent)
         self.setWindowTitle("Öğretmene Ders ve Sınıf Atama Paneli")
-        self.resize(800, 720)
-        self.setMinimumSize(720, 640)
+        self.resize(820, 720)
+        self.setMinimumSize(740, 640)
         self.setStyleSheet("""
-            QDialog { background-color: #F8FAFC; font-family: system-ui, -apple-system, sans-serif; font-size: 13px; }
+            QDialog { background-color: #F8FAFC; font-family: .AppleSystemUIFont, SF Pro Text, -apple-system, Helvetica Neue, Segoe UI, sans-serif; font-size: 13px; }
             QLabel { border: none; background: transparent; color: #1E293B; font-size: 13px; }
-            QLineEdit, QComboBox { min-height: 30px; padding: 3px 8px; border: 1px solid #CBD5E1; border-radius: 4px; background: #FFFFFF; font-size: 13px; color: #1E293B; }
-            QLineEdit:focus, QComboBox:focus { border: 1px solid #0078D7; }
-            QPushButton { min-height: 30px; padding: 4px 12px; border: 1px solid #CBD5E1; border-radius: 4px; background: #FFFFFF; font-size: 13px; color: #1E293B; font-weight: 500; }
+            QLineEdit, QComboBox { min-height: 34px; padding: 4px 10px; border: 1px solid #CBD5E1; border-radius: 8px; background: #FFFFFF; font-size: 13px; color: #0F172A; }
+            QLineEdit:focus, QComboBox:focus { border: 1.5px solid #0071E3; }
+            QPushButton { min-height: 34px; padding: 6px 14px; border: 1px solid #CBD5E1; border-radius: 8px; background: #FFFFFF; font-size: 13px; color: #1E293B; font-weight: 600; }
             QPushButton:hover { background: #F1F5F9; }
         """)
         self.existing_data = existing_data or {}
@@ -905,13 +1040,13 @@ class LessonAssignmentDialog(QDialog):
         
     def _create_row_frame(self):
         f = QFrame()
-        f.setStyleSheet(".QFrame { background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; }")
+        f.setStyleSheet(".QFrame { background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; }")
         return f
 
     def _build_ui(self):
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(16, 16, 16, 16)
-        main_layout.setSpacing(12)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(14)
         
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -922,19 +1057,20 @@ class LessonAssignmentDialog(QDialog):
         scroll_content.setObjectName("scrollContent")
         self.scroll_layout = QVBoxLayout(scroll_content)
         self.scroll_layout.setContentsMargins(0, 0, 0, 0)
-        self.scroll_layout.setSpacing(12)
+        self.scroll_layout.setSpacing(14)
         
         # 1. Öğretmen Seçim Kartı
         row1 = self._create_row_frame()
         l1 = QHBoxLayout(row1)
-        l1.setContentsMargins(14, 12, 14, 12)
+        l1.setContentsMargins(16, 14, 16, 14)
         
         v1 = QVBoxLayout()
+        v1.setSpacing(6)
         lbl_ogr = QLabel("<b>Atanacak Öğretmen</b>")
         lbl_ogr.setStyleSheet("color: #0F172A; font-size: 13px;")
         v1.addWidget(lbl_ogr)
         self.cb_ogretmen = NoScrollComboBox()
-        self.cb_ogretmen.setMinimumWidth(280)
+        self.cb_ogretmen.setMinimumWidth(320)
         self.cb_ogretmen.currentTextChanged.connect(self._on_teacher_changed)
         v1.addWidget(self.cb_ogretmen)
         l1.addLayout(v1)
@@ -944,12 +1080,11 @@ class LessonAssignmentDialog(QDialog):
         # 2. Atanacak Dersler Kartı
         row2 = self._create_row_frame()
         self.l2_main = QVBoxLayout(row2)
-        self.l2_main.setContentsMargins(14, 12, 14, 12)
-        self.l2_main.setSpacing(10)
+        self.l2_main.setContentsMargins(16, 14, 16, 14)
+        self.l2_main.setSpacing(12)
         
-        # Header (Clean Title Only - Row level combined buttons exist per input)
         h_ders_head = QHBoxLayout()
-        lbl_dersler_title = QLabel("<b>Atanacak Dersler</b> (Bireysel veya Birleşik Sınıf Eşleme)")
+        lbl_dersler_title = QLabel("<b>Atanacak Dersler</b> — Bireysel veya Birleşik Sınıf Eşleme")
         lbl_dersler_title.setStyleSheet("color: #0F172A; font-size: 13px;")
         h_ders_head.addWidget(lbl_dersler_title)
         h_ders_head.addStretch(1)
@@ -958,32 +1093,31 @@ class LessonAssignmentDialog(QDialog):
         
         # Container for dynamic subject rows
         self.subjects_container = QVBoxLayout()
-        self.subjects_container.setSpacing(8)
+        self.subjects_container.setSpacing(10)
         self.l2_main.addLayout(self.subjects_container)
         
         self.scroll_layout.addWidget(row2)
         
         # 3. Sınıf / Sınıflarım Özet Kartı
         row3 = self._create_row_frame()
-        l3 = QHBoxLayout(row3)
-        l3.setContentsMargins(14, 12, 14, 12)
+        l3 = QVBoxLayout(row3)
+        l3.setContentsMargins(16, 14, 16, 14)
+        l3.setSpacing(6)
         
-        v3 = QVBoxLayout()
         lbl_sinif = QLabel("<b>Tüm Atanan Sınıflar (Genel Özet)</b>")
         lbl_sinif.setStyleSheet("color: #0F172A; font-size: 13px;")
-        v3.addWidget(lbl_sinif)
+        l3.addWidget(lbl_sinif)
         
         self.txt_classes_summary = QLineEdit()
         self.txt_classes_summary.setReadOnly(True)
         self.txt_classes_summary.setPlaceholderText("Derslere atanan sınıflar burada otomatik listelenir (Örn: 9A, 10B, 11A + 10B)")
-        self.txt_classes_summary.setStyleSheet("background: #F1F5F9; color: #0F172A; font-weight: bold;")
-        v3.addWidget(self.txt_classes_summary)
-        l3.addLayout(v3)
+        self.txt_classes_summary.setStyleSheet("background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; color: #0F172A; font-weight: 600; padding: 6px 12px;")
+        l3.addWidget(self.txt_classes_summary)
         self.scroll_layout.addWidget(row3)
         
         # 4. Canlı Özet Çubuğu
         self.lbl_ozet = QLabel("Otomatik Eşleşme: -")
-        self.lbl_ozet.setStyleSheet("background: #EFF6FF; color: #1D4ED8; font-weight: bold; border-radius: 6px; padding: 10px; border: 1px solid #BFDBFE;")
+        self.lbl_ozet.setStyleSheet("background: #F0F9FF; color: #0369A1; font-weight: 600; border-radius: 10px; padding: 12px 16px; border: 1px solid #BAE6FD; font-size: 13px;")
         self.scroll_layout.addWidget(self.lbl_ozet)
         
         self.scroll_layout.addStretch(1)
@@ -992,13 +1126,37 @@ class LessonAssignmentDialog(QDialog):
         
         # Bottom Buttons
         bot_lay = QHBoxLayout()
+        bot_lay.setSpacing(12)
         btn_iptal = QPushButton("İptal")
-        btn_iptal.setFixedSize(100, 36)
+        btn_iptal.setStyleSheet("""
+            QPushButton {
+                background: #FFFFFF;
+                color: #475569;
+                border: 1px solid #CBD5E1;
+                border-radius: 19px;
+                font-weight: 600;
+                font-size: 13px;
+                min-height: 38px;
+                padding: 0 24px;
+            }
+            QPushButton:hover { background: #F8FAFC; color: #1E293B; }
+        """)
         btn_iptal.clicked.connect(self.reject)
         
         btn_tamam = QPushButton("Tamam ve Kaydet")
-        btn_tamam.setFixedSize(170, 36)
-        btn_tamam.setStyleSheet("background: #0078D7; color: white; font-weight: bold; border-radius: 4px;")
+        btn_tamam.setStyleSheet("""
+            QPushButton {
+                background: #0071E3;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 19px;
+                font-weight: 600;
+                font-size: 13px;
+                min-height: 38px;
+                padding: 0 28px;
+            }
+            QPushButton:hover { background: #0062C4; }
+        """)
         btn_tamam.clicked.connect(self.accept)
         
         bot_lay.addWidget(btn_iptal)
@@ -1016,12 +1174,13 @@ class LessonAssignmentDialog(QDialog):
 
     def _add_subject_row(self, subject_name="", hours="2", distribution="2", assigned_classes=None, class_configs=None, is_combined=False, combined_classes=None):
         row_widget = QWidget()
-        row_widget.setStyleSheet("background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 4px;")
+        row_widget.setStyleSheet("background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 12px; padding: 6px;")
         row_layout = QVBoxLayout(row_widget)
-        row_layout.setContentsMargins(8, 8, 8, 8)
-        row_layout.setSpacing(6)
+        row_layout.setContentsMargins(12, 12, 12, 12)
+        row_layout.setSpacing(8)
         
         top_h = QHBoxLayout()
+        top_h.setSpacing(8)
         
         # Subject Combo (Searchable with Turkish-aware real-time search)
         cb_subject = SearchableComboBox()
@@ -1054,26 +1213,60 @@ class LessonAssignmentDialog(QDialog):
         top_h.addWidget(cb_tip, 1)
         
         # Sınıfları Seç Butonu
-        btn_classes = QPushButton("🏫 Sınıf(lar) Ata...")
-        btn_classes.setStyleSheet("background: #F0FDF4; color: #166534; font-weight: bold; border: 1px solid #BBF7D0;")
+        btn_classes = QPushButton("Sınıf(lar) Ata...")
+        btn_classes.setStyleSheet("""
+            QPushButton {
+                background: #ECFDF5;
+                color: #065F46;
+                border: 1px solid #A7F3D0;
+                border-radius: 17px;
+                font-weight: 600;
+                font-size: 12px;
+                min-height: 34px;
+                padding: 0 16px;
+            }
+            QPushButton:hover { background: #D1FAE5; }
+        """)
         top_h.addWidget(btn_classes, 1)
         
         # Birleşik Sınıf Butonu
-        btn_comb = QPushButton("🔗 Birleşik Sınıf...")
-        btn_comb.setStyleSheet("background: #FFFBEB; color: #B45309; font-weight: bold; border: 1px solid #FDE68A;")
+        btn_comb = QPushButton("Birleşik Sınıf...")
+        btn_comb.setStyleSheet("""
+            QPushButton {
+                background: #FFFBEB;
+                color: #92400E;
+                border: 1px solid #FDE68A;
+                border-radius: 17px;
+                font-weight: 600;
+                font-size: 12px;
+                min-height: 34px;
+                padding: 0 16px;
+            }
+            QPushButton:hover { background: #FEF3C7; }
+        """)
         top_h.addWidget(btn_comb, 1)
         
-        # Sil Butonu
-        btn_del = QPushButton("X")
-        btn_del.setFixedSize(30, 30)
-        btn_del.setStyleSheet("background: #FEE2E2; color: #DC2626; font-weight: bold; border: 1px solid #FECACA;")
+        # Sil Butonu (Circular Capsule)
+        btn_del = QPushButton("✕")
+        btn_del.setFixedSize(34, 34)
+        btn_del.setStyleSheet("""
+            QPushButton {
+                background: #FFF1F2;
+                color: #E11D48;
+                border: 1px solid #FECDD3;
+                border-radius: 17px;
+                font-weight: 700;
+                font-size: 14px;
+            }
+            QPushButton:hover { background: #FFE4E6; }
+        """)
         top_h.addWidget(btn_del)
         
         row_layout.addLayout(top_h)
         
-        # Badge showing assigned classes for this row with their individual hours
+        # Badge showing assigned classes
         lbl_classes_badge = QLabel("Atanan Sınıflar: Belirtilmedi")
-        lbl_classes_badge.setStyleSheet("color: #0369A1; font-size: 11px; font-weight: bold; padding: 3px 6px; border-radius: 4px;")
+        lbl_classes_badge.setStyleSheet("background: #F0F9FF; color: #0369A1; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 6px; border: 1px solid #BAE6FD;")
         row_layout.addWidget(lbl_classes_badge)
         
         comb_cls_list = list(combined_classes or [])
@@ -1904,7 +2097,7 @@ class DersEditDialog(QDialog):
         c = ModernColorPickerDialog.pick_color(
             initial_color=self.current_color,
             parent=self,
-            title=f"🎨 {s_name} — Renk Seçimi",
+            title=f"Renk Seçimi — {s_name}",
             data_store=data_store,
             subject_name=s_name
         )
@@ -3391,10 +3584,10 @@ class SinifEditDialog(BaseEditForm):
                 background: #F8FAFC;
                 color: #334155;
                 border: 1px solid #CBD5E1;
-                border-radius: 6px;
+                border-radius: 16px;
                 font-size: 12px;
                 font-weight: 600;
-                padding: 6px 14px;
+                padding: 0 16px;
                 min-height: 32px;
             }
             QPushButton:hover { background: #F1F5F9; }
@@ -3426,8 +3619,8 @@ class SinifEditDialog(BaseEditForm):
                 border: none;
                 font-weight: 600;
                 font-size: 13px;
-                border-radius: 8px;
-                padding: 8px 18px;
+                border-radius: 19px;
+                padding: 0 20px;
                 min-height: 38px;
             }
             QPushButton:hover {
@@ -3442,15 +3635,15 @@ class SinifEditDialog(BaseEditForm):
             QPushButton {
                 background: #FFFFFF;
                 color: #1D1D1F;
-                border: 1px solid #D1D1D6;
+                border: 1px solid #CBD5E1;
                 font-weight: 600;
                 font-size: 13px;
-                border-radius: 8px;
-                padding: 8px 18px;
+                border-radius: 19px;
+                padding: 0 20px;
                 min-height: 38px;
             }
             QPushButton:hover {
-                background: #F5F5F7;
+                background: #F8FAFC;
             }
         """)
         btn_cizelge.clicked.connect(self._show_class_timetable)
@@ -3493,7 +3686,7 @@ class SinifEditDialog(BaseEditForm):
         c = ModernColorPickerDialog.pick_color(
             initial_color=self._color,
             parent=self,
-            title=f"🎨 {c_name} — Renk Seçimi"
+            title=f"Renk Seçimi — {c_name}"
         )
         if c and c.isValid():
             self._color = c.name()
@@ -3524,17 +3717,29 @@ class SinifEditDialog(BaseEditForm):
 class OgretmenEditDialog(BaseEditForm):
     def __init__(self, parent=None, existing_data=None):
         super().__init__("Öğretmen Düzenle", parent, existing_data)
-        self.resize(600, 680)
-        self.setMinimumSize(550, 650)
+        self.resize(650, 780)
+        self.setMinimumSize(580, 600)
         self._color = self.existing_data.get("renk", "#27AE60")
         self._build_ui()
         
     def _build_ui(self):
+        # Create a scroll area so cards never get squashed or overlap on any screen resolution
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; } QWidget#scrollContent { background: transparent; }")
+        
+        scroll_content = QWidget()
+        scroll_content.setObjectName("scrollContent")
+        content_lay = QVBoxLayout(scroll_content)
+        content_lay.setContentsMargins(0, 0, 0, 0)
+        content_lay.setSpacing(14)
+        
         # 1. Temel Bilgiler Frame
         frame_temel = QFrame()
-        frame_temel.setStyleSheet(".QFrame { background: #FFFFFF; border: 1px solid #E0E0E0; border-radius: 6px; }")
+        frame_temel.setStyleSheet(".QFrame { background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; }")
         lay_temel = QFormLayout(frame_temel)
-        lay_temel.setContentsMargins(15, 15, 15, 15)
+        lay_temel.setContentsMargins(16, 16, 16, 16)
         lay_temel.setSpacing(12)
         
         self.w_ad = QLineEdit(self.existing_data.get("ad", ""))
@@ -3547,16 +3752,19 @@ class OgretmenEditDialog(BaseEditForm):
         lay_temel.addRow(QLabel("<b>Kısa Kodu:</b>"), self.w_kisa)
         
         btn_ozel = QPushButton("Özel Alanlar...")
-        btn_ozel.setStyleSheet("background: #F1F5F9; color: #1E293B; font-weight: 500;")
+        btn_ozel.setStyleSheet("background: #F8FAFC; color: #334155; font-weight: 600; border: 1px solid #CBD5E1; border-radius: 16px; min-height: 32px; padding: 0 16px;")
         btn_ozel.clicked.connect(self._open_custom_fields)
         lay_temel.addRow("", btn_ozel)
         
-        self.main_layout.addWidget(frame_temel)
+        content_lay.addWidget(frame_temel)
         
         # 2. Görev ve Sınıf Frame
         frame_gorev = QFrame()
-        frame_gorev.setStyleSheet(".QFrame { background: #FFFFFF; border: 1px solid #E0E0E0; border-radius: 6px; }")
+        frame_gorev.setStyleSheet(".QFrame { background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; }")
         lay_gorev = QFormLayout(frame_gorev)
+        lay_gorev.setContentsMargins(16, 16, 16, 16)
+        lay_gorev.setSpacing(12)
+        
         self.w_so = QComboBox()
         classes = [""]
         p = self.parent()
@@ -3580,17 +3788,27 @@ class OgretmenEditDialog(BaseEditForm):
         
         lay_gorev.addRow(QLabel("<b>Sınıf Öğretmeni (Rehberlik):</b>"), self.w_so)
         
-        # Branch is now a multi-branch field with "Branş(lar) Ata..." popup dialog
+        # Branch Multi-Branch field
         h_brans_lay = QHBoxLayout()
         existing_brans = self.existing_data.get("brans", "").strip()
         self.w_brans = QLineEdit(existing_brans)
         self.w_brans.setReadOnly(True)
         self.w_brans.setPlaceholderText("Branş atanmadı...")
-        self.w_brans.setStyleSheet("background: #F8FAFC; border: 1px solid #CBD5E1; border-radius: 4px; padding: 4px 8px; font-weight: bold; color: #0369A1;")
+        self.w_brans.setStyleSheet("background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 4px 10px; font-weight: 600; color: #0369A1;")
         
         btn_brans_ata = QPushButton("Branş(lar) Ata...")
-        btn_brans_ata.setFixedSize(125, 30)
-        btn_brans_ata.setStyleSheet("background: #F0F9FF; color: #0284C7; border: 1px solid #BAE6FD; border-radius: 4px; font-size: 11px; font-weight: bold;")
+        btn_brans_ata.setFixedSize(130, 34)
+        btn_brans_ata.setStyleSheet("""
+            QPushButton {
+                background: #F0F9FF;
+                color: #0284C7;
+                border: 1px solid #BAE6FD;
+                border-radius: 17px;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            QPushButton:hover { background: #E0F2FE; }
+        """)
         
         def open_branch_dialog():
             raw_subjects = [d.get("ad", "").strip() for d in data_store.get("dersler", []) if d.get("ad")]
@@ -3617,46 +3835,111 @@ class OgretmenEditDialog(BaseEditForm):
         self.chk_es_zamanli.setChecked(self.existing_data.get("es_zamanli", False))
         lay_gorev.addRow("", self.chk_es_zamanli)
         
-        self.main_layout.addWidget(frame_gorev)
+        content_lay.addWidget(frame_gorev)
         
         # 3. Dersler ve Planlama Frame
         frame_ders = QFrame()
-        frame_ders.setStyleSheet(".QFrame { background: #F8F9FA; border: 1px solid #E0E0E0; border-radius: 6px; }")
+        frame_ders.setStyleSheet(".QFrame { background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; }")
         lay_ders = QVBoxLayout(frame_ders)
-        lay_ders.setContentsMargins(15, 12, 15, 12)
+        lay_ders.setContentsMargins(16, 16, 16, 16)
         lay_ders.setSpacing(10)
         
         lbl_dersler = QLabel("<b>Atandığı Sınıflar ve Dersler (Gerçek Zamanlı):</b>")
-        lbl_dersler.setFont(QFont("Segoe UI", 9))
+        lbl_dersler.setStyleSheet("color: #0F172A; font-size: 13px;")
         lay_ders.addWidget(lbl_dersler)
         
         self.list_assignments = QListWidget()
-        self.list_assignments.setFixedHeight(80)
-        self.list_assignments.setStyleSheet("QListWidget { background: #FFFFFF; border: 1px solid #D0D7DE; border-radius: 4px; font-size: 11px; padding: 4px; }")
-        
+        self.list_assignments.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.list_assignments.setStyleSheet("""
+            QListWidget {
+                background: #F8FAFC;
+                border: 1px solid #CBD5E1;
+                border-radius: 10px;
+                font-size: 13px;
+                padding: 6px;
+                color: #0F172A;
+            }
+            QListWidget::item {
+                padding: 6px 10px;
+                border-radius: 6px;
+                margin-bottom: 2px;
+            }
+            QListWidget::item:hover {
+                background: #E2E8F0;
+            }
+        """)
         lay_ders.addWidget(self.list_assignments)
         self._update_assignments_list(data_store)
         
-
+        # Explicit vertical spacing between list and button bar so they NEVER touch or overlap
+        lay_ders.addSpacing(6)
         
-        # Action Buttons (Clean text, no emojis)
+        # Action Buttons (Cylindrical capsule buttons)
         h_btn_lay = QHBoxLayout()
         h_btn_lay.setSpacing(8)
         
         btn_ata = QPushButton("Ders Ata")
-        btn_ata.setStyleSheet("background: #0078D7; color: white; font-weight: bold; min-height: 32px; border-radius: 4px;")
+        btn_ata.setStyleSheet("""
+            QPushButton {
+                background: #0071E3;
+                color: white;
+                font-weight: 600;
+                min-height: 36px;
+                border: none;
+                border-radius: 18px;
+                font-size: 13px;
+                padding: 0 16px;
+            }
+            QPushButton:hover { background: #0062C4; }
+        """)
         btn_ata.clicked.connect(self._assign_lessons_for_this_teacher)
         
         btn_cizelge = QPushButton("Çizelge / Yazdır")
-        btn_cizelge.setStyleSheet("background: #27AE60; color: white; font-weight: bold; min-height: 32px; border-radius: 4px;")
+        btn_cizelge.setStyleSheet("""
+            QPushButton {
+                background: #F1F5F9;
+                color: #0F172A;
+                font-weight: 600;
+                min-height: 36px;
+                border: 1px solid #CBD5E1;
+                border-radius: 18px;
+                font-size: 13px;
+                padding: 0 16px;
+            }
+            QPushButton:hover { background: #E2E8F0; }
+        """)
         btn_cizelge.clicked.connect(self._show_teacher_timetable)
         
         btn_zaman = QPushButton("Zaman / Kısıtlama")
-        btn_zaman.setStyleSheet("background: #E67E22; color: white; font-weight: bold; min-height: 32px; border-radius: 4px;")
+        btn_zaman.setStyleSheet("""
+            QPushButton {
+                background: #F1F5F9;
+                color: #0F172A;
+                font-weight: 600;
+                min-height: 36px;
+                border: 1px solid #CBD5E1;
+                border-radius: 18px;
+                font-size: 13px;
+                padding: 0 16px;
+            }
+            QPushButton:hover { background: #E2E8F0; }
+        """)
         btn_zaman.clicked.connect(self._open_constraints)
         
         btn_oto = QPushButton("Otomatik Oluştur")
-        btn_oto.setStyleSheet("background: #8E44AD; color: white; font-weight: bold; min-height: 32px; border-radius: 4px;")
+        btn_oto.setStyleSheet("""
+            QPushButton {
+                background: #F1F5F9;
+                color: #0F172A;
+                font-weight: 600;
+                min-height: 36px;
+                border: 1px solid #CBD5E1;
+                border-radius: 18px;
+                font-size: 13px;
+                padding: 0 16px;
+            }
+            QPushButton:hover { background: #E2E8F0; }
+        """)
         btn_oto.clicked.connect(self._auto_plan_teacher)
         
         h_btn_lay.addWidget(btn_ata)
@@ -3665,26 +3948,41 @@ class OgretmenEditDialog(BaseEditForm):
         h_btn_lay.addWidget(btn_oto)
         lay_ders.addLayout(h_btn_lay)
         
-        self.main_layout.addWidget(frame_ders)
+        content_lay.addWidget(frame_ders)
         
         # 4. Renk Frame
         frame_renk = QFrame()
-        frame_renk.setStyleSheet(".QFrame { background: #FFFFFF; border: 1px solid #E0E0E0; border-radius: 6px; }")
+        frame_renk.setStyleSheet(".QFrame { background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; }")
         lay_renk = QHBoxLayout(frame_renk)
-        lay_renk.setContentsMargins(15, 10, 15, 10)
+        lay_renk.setContentsMargins(16, 12, 16, 12)
         lay_renk.addWidget(QLabel("<b>Renk Kodu:</b>"))
         self.color_box = QLabel()
-        self.color_box.setFixedSize(120, 30)
-        self.color_box.setStyleSheet(f"background: {self._color}; border: 1px solid #CCC; border-radius: 4px;")
+        self.color_box.setFixedSize(120, 32)
+        self.color_box.setStyleSheet(f"background: {self._color}; border: 1.5px solid rgba(0,0,0,0.12); border-radius: 8px;")
         btn_degistir = QPushButton("Değiştir")
-        btn_degistir.setFixedSize(80, 28)
+        btn_degistir.setFixedSize(96, 34)
+        btn_degistir.setStyleSheet("background: #F8FAFC; color: #334155; border: 1px solid #CBD5E1; border-radius: 17px; font-weight: 600;")
         btn_degistir.clicked.connect(self._pick_color)
         lay_renk.addWidget(self.color_box)
         lay_renk.addWidget(btn_degistir)
         lay_renk.addStretch(1)
-        self.main_layout.addWidget(frame_renk)
+        content_lay.addWidget(frame_renk)
         
-        self._add_bottom_buttons()
+        content_lay.addStretch(1)
+        scroll.setWidget(scroll_content)
+        self.main_layout.addWidget(scroll, 1)
+        
+        self._add_bottom_buttons(add_stretch=False)
+
+    def _adjust_assignments_height(self):
+        count = self.list_assignments.count()
+        if count == 0:
+            h = 44
+        elif count <= 6:
+            h = count * 36 + 14
+        else:
+            h = 220
+        self.list_assignments.setFixedHeight(h)
 
     def _open_constraints(self):
         t_name = self.w_ad.text().strip()
@@ -3757,11 +4055,13 @@ class OgretmenEditDialog(BaseEditForm):
             c_name = a.get("sinif") or a.get("class", "")
             dur = a.get("ders_sayisi") or a.get("duration", 0)
             tip = a.get("dagilim") or a.get("type", str(dur))
-            item_text = f"📚 {s_name}  ➔  🎓 {c_name} ({dur} Saat: {tip})"
+            item_text = f"•  {s_name}  →  {c_name}  ({dur} Saat: {tip})"
             self.list_assignments.addItem(QListWidgetItem(item_text))
             
         if not my_atamalar:
-            self.list_assignments.addItem(QListWidgetItem("❌ Henüz hiçbir derse veya sınıfa atanmadı."))
+            self.list_assignments.addItem(QListWidgetItem("Henüz atanmış ders veya sınıf bulunmuyor."))
+            
+        self._adjust_assignments_height()
 
     def _assign_lessons_for_this_teacher(self):
         t_name = self.w_ad.text().strip() or self.existing_data.get("ad", "").strip()
@@ -3819,7 +4119,7 @@ class OgretmenEditDialog(BaseEditForm):
         c = ModernColorPickerDialog.pick_color(
             initial_color=self._color,
             parent=self,
-            title=f"🎨 {t_name} — Renk Seçimi"
+            title=f"Renk Seçimi — {t_name}"
         )
         if c and c.isValid():
             self._color = c.name()
@@ -3907,7 +4207,7 @@ class DerslikEditDialog(BaseEditForm):
         c = ModernColorPickerDialog.pick_color(
             initial_color=self._color,
             parent=self,
-            title=f"🎨 {d_name} — Renk Seçimi"
+            title=f"Renk Seçimi — {d_name}"
         )
         if c and c.isValid():
             self._color = c.name()

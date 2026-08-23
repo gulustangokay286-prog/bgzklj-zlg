@@ -735,7 +735,28 @@ def set_institution_color(slug: str, color: str):
 def delete_institution(slug: str):
     inst_dir = os.path.join(_base_dir(), slug)
     if os.path.isdir(inst_dir):
-        shutil.rmtree(inst_dir)
+        try:
+            shutil.rmtree(inst_dir, ignore_errors=True)
+        except Exception:
+            pass
+        if os.path.isdir(inst_dir):
+            try:
+                for root, dirs, files in os.walk(inst_dir, topdown=False):
+                    for name in files:
+                        try:
+                            os.remove(os.path.join(root, name))
+                        except Exception:
+                            pass
+                    for name in dirs:
+                        try:
+                            os.rmdir(os.path.join(root, name))
+                        except Exception:
+                            pass
+                os.rmdir(inst_dir)
+            except Exception:
+                pass
+
+    _invalidate_meta_cache(slug)
         
     tomb_file = os.path.join(_base_dir(), "deleted_institutions.json")
     try:

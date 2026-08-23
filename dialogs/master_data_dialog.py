@@ -5,13 +5,15 @@ from PySide6.QtWidgets import (
     QFrame, QSizePolicy, QSpacerItem, QMessageBox
 )
 from PySide6.QtCore import Qt, QSize, QPoint
-from PySide6.QtGui import QFont, QPixmap, QPainter, QColor, QPen, QBrush, QPolygon, QIcon
+from PySide6.QtGui import QFont, QPixmap, QPainter, QColor, QPen, QBrush, QPolygon, QIcon, QLinearGradient, QPainterPath
 
 from dialogs.edit_forms import DersEditDialog, SinifEditDialog, OgretmenEditDialog, DerslikEditDialog
 from auto_scheduler import format_tr_name, matches_class
 from database import trigger_save_db
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QAbstractItemView
+
+FONT_FAMILY = ".AppleSystemUIFont, SF Pro Text, Helvetica Neue, Segoe UI, sans-serif"
 
 class DragDropTableWidget(QTableWidget):
     row_dropped = Signal(int, int) # start_row, dest_row
@@ -39,100 +41,271 @@ class DragDropTableWidget(QTableWidget):
                 return
         super().dropEvent(event)
 def create_wizard_icon(name: str) -> QPixmap:
-    pix = QPixmap(48, 48)
+    """Authentic aSc Timetables left navigation icons (Retina 2x vector supersampling)."""
+    sz = 48
+    pix = QPixmap(sz * 2, sz * 2)
     pix.fill(Qt.transparent)
     p = QPainter(pix)
-    p.setRenderHint(QPainter.Antialiasing)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+    p.scale(2, 2)
     
     selected = name.endswith("_selected")
     base_name = name.replace("_selected", "")
     
     if base_name == "book":
-        # Mavi Kitap
-        p.setBrush(QColor("#5C99D6"))
-        p.setPen(QColor("#3A78B4"))
-        p.drawRect(8, 6, 32, 36)
-        p.setBrush(QColor("#FFFFFF"))
+        # 1. DERSLER: 3D Mavi Ciltli Ders Kitabı
+        # Page Block on right & top
+        p.setPen(QPen(QColor("#CBD5E1"), 0.8))
+        p.setBrush(QBrush(QColor("#FFFFFF")))
+        p.drawRect(14, 6, 26, 35)
+        
+        # Page lines
+        p.setPen(QPen(QColor("#E2E8F0"), 0.8))
+        p.drawLine(37, 8, 37, 40)
+        p.drawLine(35, 8, 35, 40)
+        
+        # Front Blue Hardcover
+        grad_cover = QLinearGradient(9, 5, 34, 43)
+        grad_cover.setColorAt(0, QColor("#60A5FA"))
+        grad_cover.setColorAt(0.5, QColor("#2563EB"))
+        grad_cover.setColorAt(1, QColor("#1D4ED8"))
+        p.setPen(QPen(QColor("#1E40AF"), 1.2))
+        p.setBrush(QBrush(grad_cover))
+        p.drawRoundedRect(9, 5, 27, 38, 3, 3)
+        
+        # Dark blue spine on left
+        p.setPen(QPen(QColor("#1E3A8A"), 1))
+        p.setBrush(QBrush(QColor("#1E40AF")))
+        p.drawRoundedRect(9, 5, 6, 38, 2, 2)
+        
+        # White label on front cover
+        p.setPen(QPen(QColor("#93C5FD"), 0.8))
+        p.setBrush(QBrush(QColor("#FFFFFF")))
+        p.drawRoundedRect(18, 12, 14, 20, 2, 2)
+        
+        # Label lines
+        p.setPen(QPen(QColor("#3B82F6"), 1))
+        p.drawLine(21, 17, 29, 17)
+        p.drawLine(21, 22, 29, 22)
+        p.drawLine(21, 27, 26, 27)
+        
+    elif base_name in ["teachers", "siniflar"]:
+        # 2. SINIFLAR: 3D Öğrenci Grubu / Sınıf Kohortu (Pembe, Zümrüt Yeşili ve Gök Mavisi)
+        # ── 1. Left Student (Coral/Pink) ──
         p.setPen(Qt.NoPen)
-        p.drawRect(12, 12, 20, 4)
-        p.drawRect(12, 20, 24, 2)
+        p.setBrush(QBrush(QColor("#92400E")))
+        p.drawEllipse(3, 10, 16, 16)
+        p.setBrush(QBrush(QColor("#FDE68A")))
+        p.drawEllipse(5, 13, 13, 13)
         
-    elif base_name == "teachers":
-        # İki Kişi (Kahve ve Yeşil)
-        # Kişi 1 (Kahve/Turuncu)
-        p.setBrush(QColor("#E2A065"))
-        p.setPen(QColor("#C07C41"))
-        p.drawEllipse(6, 12, 14, 14)
-        p.setBrush(QColor("#D66A55"))
-        p.setPen(QColor("#B54D3D"))
-        _create_shoulder_path(p, 13, 30, 20, 16)
+        grad_l = QLinearGradient(2, 26, 20, 42)
+        grad_l.setColorAt(0, QColor("#FB7185"))
+        grad_l.setColorAt(1, QColor("#E11D48"))
+        p.setBrush(QBrush(grad_l))
+        path_l = QPainterPath()
+        path_l.moveTo(2, 42)
+        path_l.lineTo(2, 29)
+        path_l.cubicTo(2, 23, 20, 23, 20, 29)
+        path_l.lineTo(20, 42)
+        path_l.closeSubpath()
+        p.drawPath(path_l)
         
-        # Kişi 2 (Yeşil)
-        p.setBrush(QColor("#F4D08F"))
-        p.setPen(QColor("#CF9F53"))
-        p.drawEllipse(18, 16, 16, 16)
-        p.setBrush(QColor("#9BD08F"))
-        p.setPen(QColor("#6A9E5F"))
-        _create_shoulder_path(p, 26, 36, 24, 18)
+        # ── 2. Right Student (Sky Blue) ──
+        p.setBrush(QBrush(QColor("#334155")))
+        p.drawEllipse(29, 10, 16, 16)
+        p.setBrush(QBrush(QColor("#FDE68A")))
+        p.drawEllipse(30, 13, 13, 13)
         
-    elif base_name == "door":
-        # Kahverengi Kapı
-        p.setBrush(QColor("#E8C9A8"))
-        p.setPen(QColor("#9E7655"))
-        p.drawRect(10, 8, 28, 32)
-        # Açık kapı detayı
-        p.setBrush(QColor("#5A3E26"))
-        p.drawRect(14, 12, 20, 28)
-        p.setBrush(QColor("#E8C9A8"))
-        poly = QPolygon([QPoint(14, 12), QPoint(34, 4), QPoint(34, 44), QPoint(14, 40)])
-        p.drawPolygon(poly)
+        grad_r = QLinearGradient(28, 26, 46, 42)
+        grad_r.setColorAt(0, QColor("#38BDF8"))
+        grad_r.setColorAt(1, QColor("#0284C7"))
+        p.setBrush(QBrush(grad_r))
+        path_r = QPainterPath()
+        path_r.moveTo(28, 42)
+        path_r.lineTo(28, 29)
+        path_r.cubicTo(28, 23, 46, 23, 46, 29)
+        path_r.lineTo(46, 42)
+        path_r.closeSubpath()
+        p.drawPath(path_r)
         
-    elif base_name == "grad_hat":
-        # Mezuniyet Şapkası
-        p.setBrush(QColor("#333333"))
-        p.setPen(QColor("#111111"))
-        poly = QPolygon([QPoint(24, 8), QPoint(42, 16), QPoint(24, 24), QPoint(6, 16)])
-        p.drawPolygon(poly)
-        p.drawRect(16, 20, 16, 12)
-        # Püskül
-        p.setPen(QPen(QColor("#F4A030"), 2))
-        p.drawLine(24, 16, 38, 26)
-        p.drawLine(38, 26, 38, 34)
+        # ── 3. Center Front Student (Emerald Green) ──
+        grad_c = QLinearGradient(12, 23, 36, 45)
+        grad_c.setColorAt(0, QColor("#34D399"))
+        grad_c.setColorAt(1, QColor("#059669"))
+        p.setBrush(QBrush(grad_c))
+        path_c = QPainterPath()
+        path_c.moveTo(11, 45)
+        path_c.lineTo(11, 28)
+        path_c.cubicTo(11, 20, 37, 20, 37, 28)
+        path_c.lineTo(37, 45)
+        path_c.closeSubpath()
+        p.drawPath(path_c)
         
-    if selected:
-        # Yeşil Ok
-        p.setBrush(QColor("#4CAF50"))
-        p.setPen(QColor("#2E7D32"))
-        poly = QPolygon([
-            QPoint(12, 22), QPoint(32, 22), QPoint(32, 14),
-            QPoint(48, 26), QPoint(32, 38), QPoint(32, 30), QPoint(12, 30)
+        # White V-collar
+        p.setBrush(QBrush(QColor("#FFFFFF")))
+        p.setPen(QPen(QColor("#047857"), 0.8))
+        p.drawPolygon([QPoint(20, 26), QPoint(24, 34), QPoint(28, 26), QPoint(24, 28)])
+        
+        # Face
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(QColor("#FEF08A")))
+        p.drawEllipse(15, 8, 18, 18)
+        
+        # Cheek blush
+        p.setBrush(QBrush(QColor(244, 63, 94, 60)))
+        p.drawEllipse(17, 18, 3.5, 2.5)
+        p.drawEllipse(27, 18, 3.5, 2.5)
+        
+        # Golden styled hair
+        p.setBrush(QBrush(QColor("#F59E0B")))
+        path_ch = QPainterPath()
+        path_ch.moveTo(14, 14)
+        path_ch.cubicTo(14, 4, 34, 4, 34, 14)
+        path_ch.cubicTo(30, 8, 20, 8, 14, 14)
+        path_ch.closeSubpath()
+        p.drawPath(path_ch)
+        
+        # Hair highlight
+        p.setBrush(QBrush(QColor("#FDE047")))
+        p.drawEllipse(19, 6, 9, 3.5)
+        
+    elif base_name in ["door", "derslikler"]:
+        # 3. DERSLİKLER: 3D Açık Sınıf Kapısı
+        p.setPen(QPen(QColor("#92400E"), 1.2))
+        p.setBrush(QBrush(QColor("#FDE68A")))
+        p.drawRect(7, 5, 33, 38)
+        
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(QColor("#1E293B")))
+        p.drawRect(11, 9, 25, 34)
+        
+        grad_door = QLinearGradient(11, 9, 39, 43)
+        grad_door.setColorAt(0, QColor("#FBBF24"))
+        grad_door.setColorAt(1, QColor("#D97706"))
+        p.setPen(QPen(QColor("#92400E"), 1.2))
+        p.setBrush(QBrush(grad_door))
+        
+        door_poly = QPolygon([
+            QPoint(11, 9),
+            QPoint(39, 3),
+            QPoint(39, 44),
+            QPoint(11, 42)
         ])
-        p.drawPolygon(poly)
+        p.drawPolygon(door_poly)
+        
+        p.setPen(QPen(QColor("#92400E"), 0.9))
+        p.drawLine(18, 12, 33, 8)
+        p.drawLine(33, 8, 33, 40)
+        p.drawLine(33, 40, 18, 40)
+        p.drawLine(18, 40, 18, 12)
+        
+        p.setPen(QPen(QColor("#78350F"), 0.8))
+        p.setBrush(QBrush(QColor("#FEF08A")))
+        p.drawEllipse(34, 24, 4, 4)
+        
+    elif base_name in ["grad_hat", "teacher", "ogretmenler", "ogretmen"]:
+        # 4. ÖĞRETMENLER: 3D Mezuniyet Kepi
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(QColor("#0F172A")))
+        p.drawRect(15, 23, 18, 12)
+        p.drawRoundedRect(13, 21, 22, 14, 3, 3)
+        
+        hat_poly = QPolygon([
+            QPoint(24, 7),
+            QPoint(45, 17),
+            QPoint(24, 27),
+            QPoint(3, 17)
+        ])
+        grad_hat = QLinearGradient(3, 7, 45, 27)
+        grad_hat.setColorAt(0, QColor("#334155"))
+        grad_hat.setColorAt(1, QColor("#0F172A"))
+        p.setPen(QPen(QColor("#475569"), 1.2))
+        p.setBrush(QBrush(grad_hat))
+        p.drawPolygon(hat_poly)
+        
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(QColor("#F59E0B")))
+        p.drawEllipse(22.5, 15.5, 3.5, 3.5)
+        
+        p.setPen(QPen(QColor("#F59E0B"), 1.8, Qt.SolidLine, Qt.RoundCap))
+        tassel = QPainterPath()
+        tassel.moveTo(24, 17)
+        tassel.cubicTo(16, 18, 9, 23, 8, 29)
+        p.drawPath(tassel)
+        
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(QColor("#F59E0B")))
+        p.drawRoundedRect(6, 29, 4, 8, 1, 1)
+        
+    # ── 3D Green Arrow Highlight on Selected / Active Item ──────────────────
+    if selected:
+        arrow = QPolygon([
+            QPoint(2, 20),
+            QPoint(20, 20),
+            QPoint(20, 12),
+            QPoint(36, 24),
+            QPoint(20, 36),
+            QPoint(20, 28),
+            QPoint(2, 28)
+        ])
+        grad_arrow = QLinearGradient(2, 12, 36, 36)
+        grad_arrow.setColorAt(0, QColor("#4ADE80"))
+        grad_arrow.setColorAt(1, QColor("#15803D"))
+        
+        # Arrow Shadow
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(QColor(0, 0, 0, 70)))
+        arrow_shadow = QPolygon([
+            QPoint(3, 22),
+            QPoint(21, 22),
+            QPoint(21, 14),
+            QPoint(38, 26),
+            QPoint(21, 38),
+            QPoint(21, 30),
+            QPoint(3, 30)
+        ])
+        p.drawPolygon(arrow_shadow)
+        
+        # Arrow Body
+        p.setPen(QPen(QColor("#14532D"), 1.5))
+        p.setBrush(QBrush(grad_arrow))
+        p.drawPolygon(arrow)
+        
+        # Arrow Inner 3D Highlight
+        p.setPen(QPen(QColor(255, 255, 255, 140), 1))
+        p.drawLine(3, 21, 20, 21)
+        p.drawLine(20, 14, 33, 24)
         
     p.end()
+    pix.setDevicePixelRatio(2.0)
     return pix
 
-def _create_shoulder_path(painter, cx, cy, w, h):
-    from PySide6.QtGui import QPainterPath
-    path = QPainterPath()
-    path.moveTo(cx - w/2, cy + h/2)
-    path.quadTo(cx - w/2, cy - h/2, cx, cy - h/2)
-    path.quadTo(cx + w/2, cy - h/2, cx + w/2, cy + h/2)
-    path.closeSubpath()
-    painter.drawPath(path)
 
 class LeftMenuButton(QPushButton):
     def __init__(self, icon_name, parent=None):
         super().__init__(parent)
         self.icon_name = icon_name
-        self.setFixedSize(64, 64)
+        self.setFixedSize(68, 68)
         self.setIcon(create_wizard_icon(self.icon_name))
-        self.setIconSize(QSize(48, 48))
+        self.setIconSize(QSize(52, 52))
         self.setCheckable(True)
+        self.setCursor(Qt.PointingHandCursor)
         self.setStyleSheet("""
-            QPushButton { border: none; background: transparent; border-radius: 4px; }
-            QPushButton:hover { background: rgba(0, 120, 215, 0.1); }
-            QPushButton:checked { background: rgba(0, 120, 215, 0.2); border: 1px solid rgba(0, 120, 215, 0.5); }
+            QPushButton {
+                border: 1.5px solid transparent;
+                background: transparent;
+                border-radius: 8px;
+                margin: 2px;
+            }
+            QPushButton:hover {
+                background: #F1F5F9;
+                border-color: #E2E8F0;
+            }
+            QPushButton:checked {
+                background: #E0F2FE;
+                border-color: #0284C7;
+            }
         """)
 
     def setChecked(self, checked):
@@ -144,102 +317,140 @@ class LeftMenuButton(QPushButton):
 
 
 class MiniTimeoffGridWidget(QWidget):
+    """Authentic aSc Timetables Compact Timeoff Matrix.
+    X-Axis = Days (Cols, e.g. Pazartesi..Cuma)
+    Y-Axis = Periods (Rows, e.g. 1.Ders..8.Ders - stacked vertically)
+    """
     def __init__(self, timeoff_data=None, days=5, periods=8, parent=None):
         super().__init__(parent)
         self.timeoff_data = timeoff_data or []
-        self.days = days
-        self.periods = periods
+        self.days = max(1, int(days))
+        self.periods = max(1, int(periods))
         self.setToolTip("Çift Tıklayarak Zaman Tablosu / Kısıtlama Ayarlarını Açın")
-        self.setMinimumSize(40, 24)
+        
+        # Sizing: Days on X-axis (e.g. 5 cols * 11px = 56px), Periods on Y-axis (e.g. 8 rows * 2.8px = 23px)
+        w = max(48, min(75, self.days * 11 + 1))
+        h = max(20, min(28, self.periods * 3 + 1))
+        self.setFixedSize(w, h)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.Antialiasing, False)
         
         w = self.width()
         h = self.height()
         
-        margin_x = 4
-        margin_y = 2
+        cols = self.days     # X-axis: Days (Pazartesi .. Cuma)
+        rows = self.periods  # Y-axis: Periods (1. Ders .. 8. Ders, top to bottom)
         
-        cell_w = (w - margin_x*2) / max(1, self.days)
-        cell_h = (h - margin_y*2) / max(1, self.periods)
-        
-        if cell_w < 2: cell_w = 2
-        if cell_h < 2: cell_h = 2
-        
-        # Draw grid
-        for d in range(self.days):
-            for p in range(self.periods):
-                val = 2 # default open
+        # 1. Fill solid colored cells: row p (periods, top to bottom), col d (days, left to right)
+        for p in range(rows):
+            y_start = int(p * (h - 1) / rows)
+            y_end = int((p + 1) * (h - 1) / rows)
+            cell_h = y_end - y_start
+            
+            for d in range(cols):
+                x_start = int(d * (w - 1) / cols)
+                x_end = int((d + 1) * (w - 1) / cols)
+                cell_w = x_end - x_start
+                
+                # timeoff_data is indexed as [day_idx][period_idx]
+                val = 2  # Default open/ideal
                 if self.timeoff_data and d < len(self.timeoff_data) and p < len(self.timeoff_data[d]):
                     val = self.timeoff_data[d][p]
-                
-                if val == 2:
-                    color = QColor("#86EFAC") # Green
-                elif val == 1:
-                    color = QColor("#FDE047") # Yellow
-                else:
-                    color = QColor("#FCA5A5") # Red
                     
-                x = margin_x + d * (cell_w + 1)
-                y = margin_y + p * (cell_h + 1)
+                if val == 2:
+                    color = QColor("#00C800")  # Authentic bright green
+                elif val == 1:
+                    color = QColor("#FACC15")  # Yellow
+                else:
+                    color = QColor("#DC2626")  # Red
+                    
+                painter.fillRect(x_start, y_start, cell_w, cell_h, color)
                 
-                painter.fillRect(int(x), int(y), int(cell_w), int(cell_h), color)
+        # 2. Draw crisp 1px black grid lines and outer border
+        painter.setPen(QPen(QColor("#000000"), 1))
+        
+        # Vertical grid lines (between days)
+        for d in range(cols + 1):
+            x = int(d * (w - 1) / cols)
+            painter.drawLine(x, 0, x, h - 1)
+            
+        # Horizontal grid lines (between periods)
+        for p in range(rows + 1):
+            y = int(p * (h - 1) / rows)
+            painter.drawLine(0, y, w - 1, y)
+
 
 class ActionButton(QPushButton):
     def __init__(self, text, icon_name=None, is_primary=False, parent=None):
         super().__init__(text, parent)
         self.icon_name = icon_name
-        self.setFixedHeight(28)
-        self.setFont(QFont("Segoe UI", 9))
-        self.setStyleSheet("text-align: left; padding-left: 32px;")
+        self.setFixedHeight(30)
+        self.setFont(QFont("SF Pro Text", 9, QFont.Bold))
+        self.setCursor(Qt.PointingHandCursor)
+        self.setStyleSheet("""
+            QPushButton {
+                text-align: left;
+                padding-left: 32px;
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
+                background-color: #FFFFFF;
+                color: #0F172A;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #F8FAFC;
+                border-color: #94A3B8;
+            }
+        """)
 
     def paintEvent(self, event):
         super().paintEvent(event)
-        if not self.icon_name: return
+        if not self.icon_name:
+            return
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         if self.icon_name == "plus":
-            p.setBrush(QColor("#4CAF50"))
+            p.setBrush(QColor("#16A34A"))
             p.setPen(Qt.NoPen)
-            p.drawEllipse(8, 6, 16, 16)
+            p.drawEllipse(8, 7, 16, 16)
             p.setPen(QPen(Qt.white, 2))
-            p.drawLine(16, 10, 16, 18)
-            p.drawLine(12, 14, 20, 14)
+            p.drawLine(16, 11, 16, 19)
+            p.drawLine(12, 15, 20, 15)
         elif self.icon_name == "edit":
-            p.setBrush(QColor("#B0B0B0"))
+            p.setBrush(QColor("#64748B"))
             p.setPen(Qt.NoPen)
-            p.drawRect(8, 8, 16, 12)
-            p.drawPolygon([QPoint(8, 8), QPoint(16, 4), QPoint(24, 8)])
+            p.drawRect(8, 9, 16, 12)
+            p.drawPolygon([QPoint(8, 9), QPoint(16, 5), QPoint(24, 9)])
         elif self.icon_name == "minus":
-            p.setBrush(QColor("#B0B0B0"))
+            p.setBrush(QColor("#64748B"))
             p.setPen(Qt.NoPen)
-            p.drawEllipse(8, 6, 16, 16)
+            p.drawEllipse(8, 7, 16, 16)
             p.setPen(QPen(Qt.white, 2))
-            p.drawLine(12, 14, 20, 14)
+            p.drawLine(12, 15, 20, 15)
         elif self.icon_name == "doc":
-            p.setBrush(QColor("#B0B0B0"))
+            p.setBrush(QColor("#64748B"))
             p.setPen(Qt.NoPen)
-            p.drawRect(10, 6, 12, 16)
-            p.drawRect(18, 4, 6, 6)
+            p.drawRect(10, 7, 12, 16)
+            p.drawRect(18, 5, 6, 6)
         elif self.icon_name == "clock":
-            p.setPen(QPen(QColor("#B0B0B0"), 2))
-            p.drawEllipse(8, 6, 16, 16)
-            p.drawLine(16, 14, 16, 8)
-            p.drawLine(16, 14, 20, 14)
+            p.setPen(QPen(QColor("#64748B"), 2))
+            p.drawEllipse(8, 7, 16, 16)
+            p.drawLine(16, 15, 16, 9)
+            p.drawLine(16, 15, 20, 15)
         elif self.icon_name == "hash":
-            p.setPen(QPen(QColor("#B0B0B0"), 2))
-            p.drawLine(12, 6, 12, 22)
-            p.drawLine(20, 6, 20, 22)
-            p.drawLine(8, 10, 24, 10)
-            p.drawLine(8, 18, 24, 18)
+            p.setPen(QPen(QColor("#64748B"), 2))
+            p.drawLine(12, 7, 12, 23)
+            p.drawLine(20, 7, 20, 23)
+            p.drawLine(8, 11, 24, 11)
+            p.drawLine(8, 19, 24, 19)
         elif self.icon_name == "branch":
-            p.setPen(QPen(QColor("#B0B0B0"), 2))
-            p.drawLine(16, 20, 16, 14)
-            p.drawLine(16, 14, 10, 8)
-            p.drawLine(16, 14, 22, 8)
+            p.setPen(QPen(QColor("#64748B"), 2))
+            p.drawLine(16, 21, 16, 15)
+            p.drawLine(16, 15, 10, 9)
+            p.drawLine(16, 15, 22, 9)
         p.end()
 
 
@@ -251,7 +462,7 @@ class MasterDataDialog(QDialog):
             start_idx = 0
         self.setWindowTitle("Sınıflar") # Will be updated in select_tab
         self.resize(900, 650)
-        self.setFont(QFont("Segoe UI", 9))
+        self.setFont(QFont(FONT_FAMILY, 9))
         
         self.main_window = parent
         if data_store is not None:
@@ -489,37 +700,43 @@ class MasterDataDialog(QDialog):
         bottom_layout.setContentsMargins(0, 12, 0, 0)
         
         btn_help = QPushButton("Yardım")
-        btn_help.setIcon(QIcon.fromTheme("help-browser")) # System icon if available
-        btn_help.setFixedSize(90, 30)
-        btn_help.setStyleSheet("background: #F0F0F0; border: 1px solid #CCC; border-radius: 4px;")
+        btn_help.setFixedSize(90, 32)
+        btn_help.setFont(QFont("SF Pro Text", 9, QFont.Bold))
+        btn_help.setStyleSheet("background: #FFFFFF; border: 1px solid #CBD5E1; color: #334155; font-weight: 600; border-radius: 6px;")
         
-        btn_undo = QPushButton("↺ Geri Al")
+        btn_undo = QPushButton("Geri Al")
         btn_undo.setFixedSize(90, 32)
-        btn_undo.setStyleSheet("background: #F1F5F9; border: 1px solid #CBD5E1; color: #334155; font-weight: bold; border-radius: 4px;")
+        btn_undo.setFont(QFont("SF Pro Text", 9, QFont.Bold))
+        btn_undo.setStyleSheet("background: #F1F5F9; border: 1px solid #CBD5E1; color: #334155; font-weight: 600; border-radius: 6px;")
         btn_undo.clicked.connect(self._act_undo)
 
-        btn_redo = QPushButton("↻ Yinele")
+        btn_redo = QPushButton("Yinele")
         btn_redo.setFixedSize(90, 32)
-        btn_redo.setStyleSheet("background: #F1F5F9; border: 1px solid #CBD5E1; color: #334155; font-weight: bold; border-radius: 4px;")
+        btn_redo.setFont(QFont("SF Pro Text", 9, QFont.Bold))
+        btn_redo.setStyleSheet("background: #F1F5F9; border: 1px solid #CBD5E1; color: #334155; font-weight: 600; border-radius: 6px;")
         btn_redo.clicked.connect(self._act_redo)
 
         btn_save = QPushButton("Kaydet")
         btn_save.setFixedSize(110, 32)
-        btn_save.setStyleSheet("background: #0078D7; color: white; font-weight: bold; border-radius: 4px; font-size: 13px;")
+        btn_save.setFont(QFont("SF Pro Text", 9.5, QFont.Bold))
+        btn_save.setStyleSheet("background: #0071E3; color: white; font-weight: 700; border-radius: 6px; border: none;")
         btn_save.clicked.connect(self.accept)
         
-        btn_reset_classes = QPushButton("🧹 Tüm Sınıf Atamalarını Sıfırla")
-        btn_reset_classes.setFixedSize(200, 32)
-        btn_reset_classes.setStyleSheet("background: #FEF2F2; color: #DC2626; border: 1px solid #FECACA; font-weight: bold; border-radius: 4px; font-size: 12px;")
+        btn_reset_classes = QPushButton("Tüm Sınıf Atamalarını Sıfırla")
+        btn_reset_classes.setFixedSize(210, 32)
+        btn_reset_classes.setFont(QFont("SF Pro Text", 9, QFont.Bold))
+        btn_reset_classes.setStyleSheet("background: #FEF2F2; color: #DC2626; border: 1px solid #FECACA; font-weight: 600; border-radius: 6px;")
         btn_reset_classes.clicked.connect(self._reset_all_class_assignments)
         
         btn_info = QPushButton("Bilgi Al")
-        btn_info.setFixedSize(90, 30)
-        btn_info.setStyleSheet("background: #F0F0F0; border: 1px solid #CCC; border-radius: 4px;")
+        btn_info.setFixedSize(90, 32)
+        btn_info.setFont(QFont("SF Pro Text", 9, QFont.Bold))
+        btn_info.setStyleSheet("background: #FFFFFF; border: 1px solid #CBD5E1; color: #334155; font-weight: 600; border-radius: 6px;")
         
         btn_close = QPushButton("Kapat")
-        btn_close.setFixedSize(90, 30)
-        btn_close.setStyleSheet("background: #F0F0F0; border: 1px solid #CCC; border-radius: 4px;")
+        btn_close.setFixedSize(90, 32)
+        btn_close.setFont(QFont("SF Pro Text", 9, QFont.Bold))
+        btn_close.setStyleSheet("background: #FFFFFF; border: 1px solid #CBD5E1; color: #334155; font-weight: 600; border-radius: 6px;")
         btn_close.clicked.connect(self.reject)
         
         self.btn_help = btn_help
@@ -779,7 +996,7 @@ class MasterDataDialog(QDialog):
         
         top_bar = QHBoxLayout()
         lbl = QLabel(title)
-        lbl.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        lbl.setFont(QFont(FONT_FAMILY, 9, QFont.Weight.Bold))
         lbl.setStyleSheet("padding: 4px;")
         top_bar.addWidget(lbl)
         top_bar.addStretch(1)
@@ -1331,8 +1548,9 @@ class MasterDataDialog(QDialog):
                 
                 mini_grid = MiniTimeoffGridWidget(timeoff_data=timeoff, days=days_cnt, periods=periods_cnt)
                 
-                # Center the widget in the cell
+                # Center the widget in the cell without any outer box border
                 container = QWidget()
+                container.setStyleSheet("background: transparent; border: none;")
                 container_layout = QHBoxLayout(container)
                 container_layout.setContentsMargins(0, 0, 0, 0)
                 container_layout.setAlignment(Qt.AlignCenter)
@@ -1442,7 +1660,7 @@ class TeacherIndividualTimetableDialog(QDialog):
                 
                 item = QTableWidgetItem(f"{subj}\n({cls})" if cls else f"{subj}")
                 item.setTextAlignment(Qt.AlignCenter)
-                item.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+                item.setFont(QFont(FONT_FAMILY, 10, QFont.Weight.Bold))
                 
                 bg_color = QColor(col_hex or get_subject_color(subj))
                 item.setBackground(QBrush(bg_color))
@@ -1528,12 +1746,12 @@ class TeacherIndividualTimetableDialog(QDialog):
                         c_cls = conflict_info.get("class", "")
                         c_subj = conflict_info.get("subject", "Ders")
                         
-                        item = QTableWidgetItem(f"{c_subj}\n({c_cls})\n🏢 {c_inst}")
+                        item = QTableWidgetItem(f"{c_subj}\n({c_cls})\n[{c_inst}]")
                         item.setTextAlignment(Qt.AlignCenter)
-                        item.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+                        item.setFont(QFont(FONT_FAMILY, 9, QFont.Weight.Bold))
                         item.setBackground(QBrush(QColor("#D97706"))) # Amber warning
                         item.setForeground(QBrush(Qt.white))
-                        item.setToolTip(f"⚠️ Bu öğretmen {c_inst} kurumunda {c_cls} ({c_subj}) dersindedir!")
+                        item.setToolTip(f"Bu öğretmen {c_inst} kurumunda {c_cls} ({c_subj}) dersindedir.")
                         table.setItem(p_slot, d, item)
         except Exception as e:
             print(f"[MasterDataDialog] Cross-institution scan notice: {e}")

@@ -134,7 +134,12 @@ class LoginDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("BGZ Ders Planlama - Yönetici Girişi")
         self.setFixedSize(540, 710)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        # NoDropShadowWindowHint: on macOS a frameless + translucent window still gets a
+        # native Cocoa shadow layer, and that layer is what paints as an opaque black
+        # rectangle when the compositor cannot resolve the window's alpha. The in-app
+        # QGraphicsDropShadowEffects were removed for this same symptom; this is the
+        # remaining shadow source. The cards draw their own border, so nothing is lost.
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.NoDropShadowWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         
         self._drag_pos = QPoint()

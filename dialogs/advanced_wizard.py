@@ -20,66 +20,180 @@ def create_wizard_icon(name: str) -> QPixmap:
     base_name = name.replace("_selected", "")
     
     if base_name == "book":
-        # Mavi Kitap
-        p.setBrush(QColor("#5C99D6"))
-        p.setPen(QColor("#3A78B4"))
-        p.drawRect(8, 6, 32, 36)
-        p.setBrush(QColor("#FFFFFF"))
+        # 1. DERSLER: 3D Mavi Ciltli Ders Kitabı
+        p.setPen(QPen(QColor("#CBD5E1"), 0.8))
+        p.setBrush(QBrush(QColor("#FFFFFF")))
+        p.drawRect(14, 6, 26, 35)
+        
+        grad_cover = QLinearGradient(9, 5, 34, 43)
+        grad_cover.setColorAt(0, QColor("#60A5FA"))
+        grad_cover.setColorAt(0.5, QColor("#2563EB"))
+        grad_cover.setColorAt(1, QColor("#1D4ED8"))
+        p.setPen(QPen(QColor("#1E40AF"), 1.2))
+        p.setBrush(QBrush(grad_cover))
+        p.drawRoundedRect(9, 5, 27, 38, 3, 3)
+        
+        p.setPen(QPen(QColor("#1E3A8A"), 1))
+        p.setBrush(QBrush(QColor("#1E40AF")))
+        p.drawRoundedRect(9, 5, 6, 38, 2, 2)
+        
+        p.setPen(QPen(QColor("#93C5FD"), 0.8))
+        p.setBrush(QBrush(QColor("#FFFFFF")))
+        p.drawRoundedRect(18, 12, 14, 20, 2, 2)
+        
+    elif base_name in ["teachers", "siniflar"]:
+        # 2. SINIFLAR: 3D Öğrenci Grubu / Sınıf Kohortu (Pembe, Zümrüt Yeşili ve Gök Mavisi)
+        # ── 1. Left Student (Coral/Pink) ──
         p.setPen(Qt.NoPen)
-        p.drawRect(12, 12, 20, 4)
-        p.drawRect(12, 20, 24, 2)
+        p.setBrush(QBrush(QColor("#92400E")))
+        p.drawEllipse(3, 10, 16, 16)
+        p.setBrush(QBrush(QColor("#FDE68A")))
+        p.drawEllipse(5, 13, 13, 13)
         
-    elif base_name == "teachers":
-        # İki Kişi (Kahve ve Yeşil)
-        # Kişi 1 (Kahve/Turuncu)
-        p.setBrush(QColor("#E2A065"))
-        p.setPen(QColor("#C07C41"))
-        p.drawEllipse(6, 12, 14, 14)
-        p.setBrush(QColor("#D66A55"))
-        p.setPen(QColor("#B54D3D"))
-        _create_shoulder_path(p, 13, 30, 20, 16)
+        grad_l = QLinearGradient(2, 26, 20, 42)
+        grad_l.setColorAt(0, QColor("#FB7185"))
+        grad_l.setColorAt(1, QColor("#E11D48"))
+        p.setBrush(QBrush(grad_l))
+        path_l = QPainterPath()
+        path_l.moveTo(2, 42)
+        path_l.lineTo(2, 29)
+        path_l.cubicTo(2, 23, 20, 23, 20, 29)
+        path_l.lineTo(20, 42)
+        path_l.closeSubpath()
+        p.drawPath(path_l)
         
-        # Kişi 2 (Yeşil)
-        p.setBrush(QColor("#F4D08F"))
-        p.setPen(QColor("#CF9F53"))
-        p.drawEllipse(18, 16, 16, 16)
-        p.setBrush(QColor("#9BD08F"))
-        p.setPen(QColor("#6A9E5F"))
-        _create_shoulder_path(p, 26, 36, 24, 18)
+        # ── 2. Right Student (Sky Blue) ──
+        p.setBrush(QBrush(QColor("#334155")))
+        p.drawEllipse(29, 10, 16, 16)
+        p.setBrush(QBrush(QColor("#FDE68A")))
+        p.drawEllipse(30, 13, 13, 13)
         
-    elif base_name == "door":
-        # Kahverengi Kapı
-        p.setBrush(QColor("#E8C9A8"))
-        p.setPen(QColor("#9E7655"))
-        p.drawRect(10, 8, 28, 32)
-        # Açık kapı detayı
-        p.setBrush(QColor("#5A3E26"))
-        p.drawRect(14, 12, 20, 28)
-        p.setBrush(QColor("#E8C9A8"))
-        poly = QPolygon([QPoint(14, 12), QPoint(34, 4), QPoint(34, 44), QPoint(14, 40)])
-        p.drawPolygon(poly)
+        grad_r = QLinearGradient(28, 26, 46, 42)
+        grad_r.setColorAt(0, QColor("#38BDF8"))
+        grad_r.setColorAt(1, QColor("#0284C7"))
+        p.setBrush(QBrush(grad_r))
+        path_r = QPainterPath()
+        path_r.moveTo(28, 42)
+        path_r.lineTo(28, 29)
+        path_r.cubicTo(28, 23, 46, 23, 46, 29)
+        path_r.lineTo(46, 42)
+        path_r.closeSubpath()
+        p.drawPath(path_r)
         
-    elif base_name == "grad_hat":
-        # Mezuniyet Şapkası
-        p.setBrush(QColor("#333333"))
-        p.setPen(QColor("#111111"))
-        poly = QPolygon([QPoint(24, 8), QPoint(42, 16), QPoint(24, 24), QPoint(6, 16)])
-        p.drawPolygon(poly)
-        p.drawRect(16, 20, 16, 12)
-        # Püskül
-        p.setPen(QPen(QColor("#F4A030"), 2))
-        p.drawLine(24, 16, 38, 26)
-        p.drawLine(38, 26, 38, 34)
+        # ── 3. Center Front Student (Emerald Green) ──
+        grad_c = QLinearGradient(12, 23, 36, 45)
+        grad_c.setColorAt(0, QColor("#34D399"))
+        grad_c.setColorAt(1, QColor("#059669"))
+        p.setBrush(QBrush(grad_c))
+        path_c = QPainterPath()
+        path_c.moveTo(11, 45)
+        path_c.lineTo(11, 28)
+        path_c.cubicTo(11, 20, 37, 20, 37, 28)
+        path_c.lineTo(37, 45)
+        path_c.closeSubpath()
+        p.drawPath(path_c)
+        
+        # White V-collar
+        p.setBrush(QBrush(QColor("#FFFFFF")))
+        p.setPen(QPen(QColor("#047857"), 0.8))
+        p.drawPolygon([QPoint(20, 26), QPoint(24, 34), QPoint(28, 26), QPoint(24, 28)])
+        
+        # Face
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(QColor("#FEF08A")))
+        p.drawEllipse(15, 8, 18, 18)
+        
+        # Cheek blush
+        p.setBrush(QBrush(QColor(244, 63, 94, 60)))
+        p.drawEllipse(17, 18, 3.5, 2.5)
+        p.drawEllipse(27, 18, 3.5, 2.5)
+        
+        # Golden styled hair
+        p.setBrush(QBrush(QColor("#F59E0B")))
+        path_ch = QPainterPath()
+        path_ch.moveTo(14, 14)
+        path_ch.cubicTo(14, 4, 34, 4, 34, 14)
+        path_ch.cubicTo(30, 8, 20, 8, 14, 14)
+        path_ch.closeSubpath()
+        p.drawPath(path_ch)
+        
+        # Hair highlight
+        p.setBrush(QBrush(QColor("#FDE047")))
+        p.drawEllipse(19, 6, 9, 3.5)
+        
+    elif base_name in ["door", "derslikler"]:
+        # 3. DERSLİKLER: 3D Açık Sınıf Kapısı
+        p.setPen(QPen(QColor("#92400E"), 1.2))
+        p.setBrush(QBrush(QColor("#FDE68A")))
+        p.drawRect(7, 5, 33, 38)
+        
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(QColor("#1E293B")))
+        p.drawRect(11, 9, 25, 34)
+        
+        grad_door = QLinearGradient(11, 9, 39, 43)
+        grad_door.setColorAt(0, QColor("#FBBF24"))
+        grad_door.setColorAt(1, QColor("#D97706"))
+        p.setPen(QPen(QColor("#92400E"), 1.2))
+        p.setBrush(QBrush(grad_door))
+        door_poly = QPolygon([
+            QPoint(11, 9),
+            QPoint(39, 3),
+            QPoint(39, 44),
+            QPoint(11, 42)
+        ])
+        p.drawPolygon(door_poly)
+        
+    elif base_name in ["grad_hat", "teacher", "ogretmenler", "ogretmen"]:
+        # 4. ÖĞRETMENLER: 3D Mezuniyet Kepi
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(QColor("#0F172A")))
+        p.drawRect(15, 23, 18, 12)
+        
+        hat_poly = QPolygon([
+            QPoint(24, 7),
+            QPoint(45, 17),
+            QPoint(24, 27),
+            QPoint(3, 17)
+        ])
+        grad_hat = QLinearGradient(3, 7, 45, 27)
+        grad_hat.setColorAt(0, QColor("#334155"))
+        grad_hat.setColorAt(1, QColor("#0F172A"))
+        p.setPen(QPen(QColor("#475569"), 1.2))
+        p.setBrush(QBrush(grad_hat))
+        p.drawPolygon(hat_poly)
+        
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(QColor("#F59E0B")))
+        p.drawEllipse(22.5, 15.5, 3.5, 3.5)
+        
+        p.setPen(QPen(QColor("#F59E0B"), 1.8, Qt.SolidLine, Qt.RoundCap))
+        tassel = QPainterPath()
+        tassel.moveTo(24, 17)
+        tassel.cubicTo(16, 18, 9, 23, 8, 29)
+        p.drawPath(tassel)
+        
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(QColor("#F59E0B")))
+        p.drawRoundedRect(6, 29, 4, 8, 1, 1)
         
     if selected:
-        # Yeşil Ok
-        p.setBrush(QColor("#4CAF50"))
-        p.setPen(QColor("#2E7D32"))
-        poly = QPolygon([
-            QPoint(12, 22), QPoint(32, 22), QPoint(32, 14),
-            QPoint(48, 26), QPoint(32, 38), QPoint(32, 30), QPoint(12, 30)
+        arrow = QPolygon([
+            QPoint(2, 20),
+            QPoint(20, 20),
+            QPoint(20, 12),
+            QPoint(36, 24),
+            QPoint(20, 36),
+            QPoint(20, 28),
+            QPoint(2, 28)
         ])
-        p.drawPolygon(poly)
+        grad_arrow = QLinearGradient(2, 12, 36, 36)
+        grad_arrow.setColorAt(0, QColor("#4ADE80"))
+        grad_arrow.setColorAt(1, QColor("#15803D"))
+        
+        p.setPen(QPen(QColor("#14532D"), 1.5))
+        p.setBrush(QBrush(grad_arrow))
+        p.drawPolygon(arrow)
         
     p.end()
     return pix
