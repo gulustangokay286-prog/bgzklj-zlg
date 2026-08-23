@@ -2966,13 +2966,7 @@ class HomeDashboard(QWidget):
             g.folder_id for g in self.findChildren(CollapsibleVersionGroup)
             if not g.is_collapsed
         }
-        # Repainting each intermediate state of a teardown-and-rebuild is pure waste;
-        # draw once at the end instead.
-        self.ver_list_widget.setUpdatesEnabled(False)
-        try:
-            self._rebuild_version_list(inst_dir, prev_open_folders)
-        finally:
-            self.ver_list_widget.setUpdatesEnabled(True)
+        self._rebuild_version_list(inst_dir, prev_open_folders)
 
         if scroll_bar is not None and prev_scroll:
             from PySide6.QtCore import QTimer
@@ -3003,8 +2997,7 @@ class HomeDashboard(QWidget):
             item = self.ver_list_layout.takeAt(0)
             w = item.widget()
             if w:
-                w.setParent(None)
-                w.hide()
+                w.deleteLater()
         versions = version_store.list_versions(self._selected_slug, source_filter="all")
         active_ver = version_store.get_active_version(self._selected_slug)
         
