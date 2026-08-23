@@ -1668,6 +1668,10 @@ class MainWindow(QMainWindow):
                 cur_item = self._tree.currentItem()
                 if cur_item and cur_item.parent():
                     target_entity = cur_item.data(0, Qt.UserRole)
+            if target_entity is None and hasattr(self._grid, "class_list") and self._grid.class_list and display_mode == "classes":
+                target_entity = self._grid.class_list[0]
+            elif target_entity is None and hasattr(self._grid, "teacher_list") and self._grid.teacher_list and display_mode == "teachers":
+                target_entity = self._grid.teacher_list[0]
         
         # Scope assignments based on target_entity (selected class or selected teacher)
         if target_entity:
@@ -1969,8 +1973,7 @@ class MainWindow(QMainWindow):
                     "combined_classes": list(target_classes) if is_comb else []
                 })
 
-        # Loose cards: group by (subject, class, teacher, duration)
-        loose_grouped = {}
+        # Loose cards: include any loose cards
         for lc in self.data_store.get("loose_unplaced_cards", []):
             if target_entity:
                 if display_mode == "classes":
@@ -1983,28 +1986,63 @@ class MainWindow(QMainWindow):
             c_name = lc.get("class_name", "")
             t_name = lc.get("teacher", "")
             dur = int(lc.get("duration", 1) or 1)
-            k = (format_tr_name(s_name), format_tr_name(c_name), format_tr_name(t_name), dur)
-            if k not in loose_grouped:
-                loose_grouped[k] = {
-                    "id": lc["id"],
+            unplaced.append({
+                "id": lc.get("id", f"{s_name}_{c_name}_{dur}"),
+                "subject_name": s_name,
+                "color": lc.get("color", "#94A3B8"),
+                "teacher": t_name,
+                "class_name": c_name,
+                "duration": dur,
+                "count": 1,
+                "is_combined": lc.get("is_combined", False),
+                "combined_classes": lc.get("combined_classes", []),
+                "blocked_reason": lc.get("blocked_reason", "")
+            })
+
+        # Final unified aggregation: merge any identical (subject, class, duration) items into single 3D stacks
+        deck_agg = {}
+        for item in unplaced:
+            s_name = item.get("subject_name", "").strip()
+            c_name = item.get("class_name", "").strip()
+            t_name = item.get("teacher", "").strip()
+            dur = int(item.get("duration", 1) or 1)
+            cnt = int(item.get("count", 1) or 1)
+            is_c = bool(item.get("is_combined", False))
+            comb_cls = list(item.get("combined_classes", []))
+            color = item.get("color", "#94A3B8")
+            
+            s_key = format_tr_name(s_name)
+            c_key = format_tr_name(c_name)
+            deck_key = (s_key, c_key, dur)
+            
+            if deck_key not in deck_agg:
+                deck_agg[deck_key] = {
+                    "id": item.get("id", f"{s_name}_{c_name}_{dur}"),
                     "subject_name": s_name,
-                    "color": lc.get("color", "#94A3B8"),
+                    "color": color,
                     "teacher": t_name,
                     "class_name": c_name,
                     "duration": dur,
                     "count": 0,
-                    "is_combined": lc.get("is_combined", False),
-                    "combined_classes": lc.get("combined_classes", []),
-                    "blocked_reason": lc.get("blocked_reason", "")
+                    "is_combined": is_c,
+                    "combined_classes": comb_cls,
+                    "blocked_reason": item.get("blocked_reason", "")
                 }
-            loose_grouped[k]["count"] += 1
+            deck_agg[deck_key]["count"] += cnt
+            if t_name and not deck_agg[deck_key]["teacher"]:
+                deck_agg[deck_key]["teacher"] = t_name
+            if is_c:
+                deck_agg[deck_key]["is_combined"] = True
+                if comb_cls and not deck_agg[deck_key]["combined_classes"]:
+                    deck_agg[deck_key]["combined_classes"] = comb_cls
 
-        for g in loose_grouped.values():
-            unplaced.append(g)
+        final_unplaced = list(deck_agg.values())
+        # Sort so same subject's 2h and 1h cards stay together, sorted alphabetically
+        final_unplaced.sort(key=lambda x: (format_tr_name(x.get("subject_name", "")), -x.get("duration", 1)))
 
         has_assignments = bool(scoped_atamalar) if target_entity else bool(atamalar)
         self._grid.unplaced_dock.load_unplaced(
-            unplaced, 
+            final_unplaced, 
             has_assignments=has_assignments, 
             display_mode=display_mode, 
             target_entity=target_entity or "",

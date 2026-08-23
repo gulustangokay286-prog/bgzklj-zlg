@@ -707,7 +707,7 @@ class DraggableLessonCard(QWidget):
             base_w = max(102, min(128, 7 * len(self.clean_cls_display) + 36)) if (self.is_comb and display_mode == "teachers") else 102
             
         self.card_w = base_w
-        self.card_h = 34
+        self.card_h = 32
         self.total_w = base_w + dx_stack + 3
         self.total_h = self.card_h + dy_stack + 3
         
@@ -1178,7 +1178,7 @@ class UnplacedLessonsDock(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
-        self.setFixedHeight(54)
+        self.setFixedHeight(64)
         
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(6, 0, 6, 0)
@@ -1201,8 +1201,8 @@ class UnplacedLessonsDock(QWidget):
         self.container.setAcceptDrops(True)
         self.container.setStyleSheet("background: transparent;")
         self.container_layout = QHBoxLayout(self.container)
-        self.container_layout.setContentsMargins(4, 0, 4, 0)
-        self.container_layout.setSpacing(8)
+        self.container_layout.setContentsMargins(6, 6, 6, 6)
+        self.container_layout.setSpacing(10)
         self.container_layout.setAlignment(Qt.AlignLeft)
         
         self.scroll.setWidget(self.container)
@@ -2975,6 +2975,7 @@ class TimetableGrid(QWidget):
         
         # ── Bottom area: info panel + unplaced dock
         bottom_frame = QFrame(self)
+        bottom_frame.setFixedHeight(72)
         bottom_frame.setStyleSheet("QFrame { background: #FFFFFF; border-top: 1px solid #E2E8F0; }")
         bottom_layout = QHBoxLayout(bottom_frame)
         bottom_layout.setContentsMargins(6, 4, 6, 4)
@@ -2982,7 +2983,7 @@ class TimetableGrid(QWidget):
         
         # Left: Lesson Info Panel (Apple Card Style)
         self.info_panel = QFrame(self)
-        self.info_panel.setFixedHeight(54)
+        self.info_panel.setFixedHeight(62)
         self.info_panel.setMinimumWidth(220)
         self.info_panel.setMaximumWidth(320)
         self.info_panel.setStyleSheet("QFrame { background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; }")
