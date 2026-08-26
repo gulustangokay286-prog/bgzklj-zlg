@@ -116,8 +116,42 @@ class TimeoffDialog(QDialog):
         _, self.periods = constraint_sync.grid_dimensions(self.data_store)
 
         self.timeoff_data = constraint_sync.get_matrix(self.entity_dict, name, self.data_store)
+        # Kişisel kısıt ayrı katman: "bu kurumda yok" ile "hiçbir yerde yok" aynı
+        # şey değil. İlki yalnız burayı, ikincisi bütün kurumları bağlar.
+        self.personal_data = constraint_sync.get_personal(
+            self.entity_dict, name, self.data_store)
 
         self._build_ui()
+
+    def _is_personal(self, d_idx, p_idx):
+        try:
+            return bool(self.personal_data[d_idx][p_idx])
+        except (IndexError, TypeError):
+            return False
+
+    def _set_personal(self, d_idx, p_idx, on):
+        self.personal_data[d_idx][p_idx] = bool(on)
+        if on:
+            self.timeoff_data[d_idx][p_idx] = 0
+        item = self.table.item(p_idx, d_idx)
+        if item:
+            self._update_item_visuals(item, self.timeoff_data[d_idx][p_idx], d_idx, p_idx)
+        self._update_counters()
+
+    def _apply_half_day(self, d_idx, first_half, personal):
+        """Yarım gün: günün ilk ya da ikinci yarısını kapatır."""
+        half = self.periods // 2 or 1
+        rng = range(0, half) if first_half else range(half, self.periods)
+        for p in rng:
+            if personal:
+                self._set_personal(d_idx, p, True)
+            else:
+                self.personal_data[d_idx][p] = False
+                self.timeoff_data[d_idx][p] = 0
+                item = self.table.item(p, d_idx)
+                if item:
+                    self._update_item_visuals(item, 0, d_idx, p)
+        self._update_counters()
         
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -293,8 +327,12 @@ class TimeoffDialog(QDialog):
                 elif state == 0: c_kapali += 1
                 elif state == 1: c_tercih += 1
                 
+        c_kisisel = sum(1 for d in range(len(self.days)) for p in range(self.periods)
+                        if self._is_personal(d, p))
+
         self.lbl_musait.setText(f"● Müsait: {c_musait}")
-        self.lbl_kapali.setText(f"● Kısıtlı: {c_kapali}")
+        self.lbl_kapali.setText(f"● Kısıtlı: {c_kapali}"
+                                + (f" ({c_kisisel} kişisel)" if c_kisisel else ""))
         self.lbl_tercih.setText(f"● Tercih Edilmez: {c_tercih}")
 
     def _update_item_visuals(self, item, state, d_idx, p_idx):
@@ -340,7 +378,16 @@ class TimeoffDialog(QDialog):
             base_text = "?"
             fg_color = "#D97706"
             bg_color = "#FFFBEB"
-            
+
+        # Kişisel kısıt kurum kısıtının üstünde durur ve farklı görünür: bu saat
+        # yalnız burada değil, öğretmenin çalıştığı BÜTÜN kurumlarda kapalıdır.
+        if self._is_personal(d_idx, p_idx):
+            base_text = "✕ Kişisel"
+            fg_color = "#FFFFFF"
+            bg_color = "#7F1D1D"
+            item.setToolTip("Kişisel kısıt: öğretmen bu saatte hiçbir kurumda müsait "
+                            "değil.\nKaldırmak için sağ tıklayın.")
+
         if is_mine:
             base_text += " [Rezerve]"
             bg_color = "#EFF6FF"
@@ -386,7 +433,39 @@ class TimeoffDialog(QDialog):
             act_toggle = menu.addAction("⚑ Bu Saati Kurumumuza Rezerve Et")
             want = True
 
+        act_personal = act_half_am = act_half_pm = act_half_clear = None
+        if self.is_teacher:
+            menu.addSeparator()
+            if self._is_personal(d_idx, p_idx):
+                act_personal = menu.addAction("🔓 Kişisel kısıtı kaldır")
+            else:
+                act_personal = menu.addAction("🔒 Kişisel: hiçbir kurumda müsait değil")
+            menu.addSeparator()
+            act_half_am = menu.addAction("🌅 Bu gün: sabah gelmiyor (yarım gün)")
+            act_half_pm = menu.addAction("🌇 Bu gün: öğleden sonra gelmiyor (yarım gün)")
+            act_half_clear = menu.addAction("↺ Bu günü tamamen aç")
+
         chosen = menu.exec_(self.table.viewport().mapToGlobal(pos))
+
+        if chosen is not None and chosen is act_personal:
+            self._set_personal(d_idx, p_idx, not self._is_personal(d_idx, p_idx))
+            return
+        if chosen is not None and chosen in (act_half_am, act_half_pm, act_half_clear):
+            if chosen is act_half_clear:
+                for p in range(self.periods):
+                    self.personal_data[d_idx][p] = False
+                    self.timeoff_data[d_idx][p] = 2
+                    it = self.table.item(p, d_idx)
+                    if it:
+                        self._update_item_visuals(it, 2, d_idx, p)
+                self._update_counters()
+            else:
+                # Yarım gün varsayılan olarak KURUM kısıtıdır: öğretmen o yarım
+                # günü büyük ihtimalle başka şubede geçiriyor, orada müsait olmalı.
+                self._apply_half_day(d_idx, first_half=(chosen is act_half_am),
+                                     personal=False)
+            return
+
         if chosen != act_toggle:
             return
 
@@ -459,9 +538,36 @@ class TimeoffDialog(QDialog):
         self._update_counters()
 
     def _save_data(self):
-        # Tek yazma noktası: timeoff ve kisitlamalar birlikte, 3 durumlu olarak yazılır.
         ent_name = (self.entity_dict.get("ad") or "").strip()
+
+        # ÖN KONTROL: kaydetmeden önce "bu ayarla plan dolar mı?" diye sor.
+        #
+        # Öğretmenler kısıtlamayı kendi kafalarına göre giriyor ve sonuç ancak
+        # otomatik planlayıcı çalıştığında ortaya çıkıyordu. Artık daha kaydet
+        # anında, kaç saatin nerede açıkta kalacağı sayıyla söyleniyor ve devam
+        # düğmesi 5 saniye kilitli kalıyor. Engellemiyoruz — sadece görmeden
+        # geçilmesin diye.
+        try:
+            from dialogs.preflight_dialog import run_preflight
+            probe = self._cs.candidate_store(
+                self.data_store, self.entity_dict, ent_name,
+                self.timeoff_data, self.personal_data)
+            note = ""
+            if self.is_teacher:
+                note = ("Bu saatleri BU kurum için kapattınız; öğretmen diğer "
+                        "kurumlarda bu saatlerde müsait sayılmaya devam eder. "
+                        "Hiçbir yerde olmadığı saatler için hücreye sağ tıklayıp "
+                        "'Kişisel' işaretleyin.")
+            if not run_preflight(probe, self.inst_slug, self, mode="save",
+                                 extra_note=note):
+                return
+        except Exception as exc:
+            print(f"[TIMEOFF_SAVE] ön kontrol atlandı: {exc}")
+
+        # Tek yazma noktası: timeoff ve kisitlamalar birlikte, 3 durumlu olarak yazılır.
         self._cs.set_matrix(self.entity_dict, ent_name, self.data_store, self.timeoff_data)
+        self._cs.set_personal(self.entity_dict, ent_name, self.data_store,
+                              self.personal_data)
 
         try:
             from database import trigger_save_db

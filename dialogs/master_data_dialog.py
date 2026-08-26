@@ -9,6 +9,7 @@ from PySide6.QtGui import QFont, QPixmap, QPainter, QColor, QPen, QBrush, QPolyg
 
 from dialogs.edit_forms import DersEditDialog, SinifEditDialog, OgretmenEditDialog, DerslikEditDialog
 from auto_scheduler import format_tr_name, matches_class
+import lesson_hours
 from database import trigger_save_db
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QAbstractItemView
@@ -1757,7 +1758,7 @@ class TeacherIndividualTimetableDialog(QDialog):
             print(f"[MasterDataDialog] Cross-institution scan notice: {e}")
 
         teacher_atamalar = [a for a in self.data_store.get("atamalar", []) if is_teacher_match(a.get("ogretmen") or a.get("teacher", ""), self.teacher_name, teacher_objs)]
-        total_assigned_hours = sum(int(a.get("ders_sayisi") or a.get("duration", 1)) for a in teacher_atamalar if str(a.get("ders_sayisi") or a.get("duration", 1)).isdigit())
+        total_assigned_hours = sum(lesson_hours.hours(a) for a in teacher_atamalar)
 
         # Summary footer bar
         banner_txt = f"Toplam Tanımlı Ders: {total_assigned_hours} Saat  |  Bu Kurumda Yerleşen: {placed_hours} Saat"

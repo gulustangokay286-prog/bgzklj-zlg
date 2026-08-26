@@ -298,7 +298,7 @@ class AppShell(QMainWindow):
 
 
 def main():
-    # Initialize the local SQLite database
+    # Initialize VDS Cloud and local version storage directories
     database.init_db()
 
     app = QApplication(sys.argv)

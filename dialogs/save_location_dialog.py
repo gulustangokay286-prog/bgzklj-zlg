@@ -1,52 +1,97 @@
 """
 dialogs/save_location_dialog.py — Kaydet / Ana Sayfa / Kapat işlemlerinden önce gösterilen,
-versiyonun hangi klasöre (örn. "Yaz Çizelgesi") kaydedileceğini soran seçim penceresi.
+versiyonun hangi klasöre (örn. "Yaz Çizelgesi") kaydedileceğini soran seçim penceresi (Apple Studio Minimalist UI).
 """
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QFrame, QWidget, QScrollArea, QGraphicsDropShadowEffect
 )
-from PySide6.QtGui import QFont, QColor
-from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont, QColor, QPixmap, QPainter, QLinearGradient, QBrush, QPen, QIcon, QPainterPath
+from PySide6.QtCore import Qt, QRectF, QPointF
 
 import version_store
 
+FONT_FAMILY = ".AppleSystemUIFont, SF Pro Text, Helvetica Neue, Segoe UI, sans-serif"
+
+
+def make_save_vector_icon(name: str, size: int = 16, color_hex: str = "#0071E3") -> QIcon:
+    scale = 2
+    pix = QPixmap(size * scale, size * scale)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.setRenderHint(QPainter.SmoothPixmapTransform)
+    p.scale(scale, scale)
+    color = QColor(color_hex)
+    
+    if name == "folder":
+        p.setBrush(QBrush(color))
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(QRectF(1, 2, size * 0.45, 4), 2, 2)
+        p.drawRoundedRect(QRectF(1, 4.5, size - 2, size - 6.5), 3, 3)
+    elif name == "plus":
+        p.setPen(QPen(color, 2.0, Qt.SolidLine, Qt.RoundCap))
+        p.drawLine(QPointF(size / 2.0, 3.5), QPointF(size / 2.0, size - 3.5))
+        p.drawLine(QPointF(3.5, size / 2.0), QPointF(size - 3.5, size / 2.0))
+    elif name == "check":
+        p.setPen(QPen(color, 2.0, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.drawLine(QPointF(3.5, size / 2.0), QPointF(size / 2.0 - 1, size - 4.5))
+        p.drawLine(QPointF(size / 2.0 - 1, size - 4.5), QPointF(size - 3.5, 4))
+        
+    p.end()
+    pix.setDevicePixelRatio(scale)
+    return QIcon(pix)
+
 
 class _FolderRow(QFrame):
-    clicked_folder_id = None  # set on the instance, not the class
+    clicked_folder_id = None
 
     def __init__(self, folder_id, name, count, is_selected, on_pick, parent=None):
         super().__init__(parent)
         self.folder_id = folder_id
         self._on_pick = on_pick
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedHeight(46)
+        self.setFixedHeight(50)
         self._selected = False
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(14, 0, 14, 0)
-        lay.setSpacing(10)
+        lay.setSpacing(12)
 
-        icon = QLabel("📁" if folder_id else "🗂️")
-        icon.setFont(QFont("Segoe UI", 13))
+        icon = QLabel()
+        folder_color = "#0071E3" if (folder_id is None) else "#F59E0B"
+        icon.setPixmap(make_save_vector_icon("folder", 18, folder_color).pixmap(18, 18))
         icon.setStyleSheet("background: transparent; border: none;")
         lay.addWidget(icon)
 
         name_lbl = QLabel(name)
-        name_lbl.setFont(QFont("Segoe UI", 10.5, QFont.Bold))
-        name_lbl.setStyleSheet("color: #1D1D1F; background: transparent; border: none;")
+        name_lbl.setFont(QFont(FONT_FAMILY, 10.5, QFont.Bold))
+        name_lbl.setStyleSheet("color: #0F172A; background: transparent; border: none;")
+        name_lbl.setTextFormat(Qt.PlainText)
         lay.addWidget(name_lbl, 1)
 
+        # Full Cylindrical Pill Version Count Badge
         count_txt = "1 versiyon" if count == 1 else f"{count} versiyon"
-        count_lbl = QLabel(count_txt)
-        count_lbl.setFont(QFont("Segoe UI", 9))
-        count_lbl.setStyleSheet("color: #86868B; background: transparent; border: none;")
-        lay.addWidget(count_lbl)
+        count_badge = QLabel(count_txt)
+        count_badge.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
+        count_badge.setAlignment(Qt.AlignCenter)
+        count_badge.setStyleSheet("""
+            QLabel {
+                background: #F1F5F9;
+                color: #475569;
+                border-radius: 13px;
+                min-height: 26px;
+                max-height: 26px;
+                padding: 0 12px;
+                border: 1px solid #E2E8F0;
+            }
+        """)
+        lay.addWidget(count_badge)
 
-        self.check_lbl = QLabel("")
-        self.check_lbl.setFont(QFont("Segoe UI", 11, QFont.Bold))
-        self.check_lbl.setStyleSheet("color: #0071E3; background: transparent; border: none;")
-        self.check_lbl.setFixedWidth(18)
+        self.check_lbl = QLabel()
+        self.check_lbl.setPixmap(make_save_vector_icon("check", 14, "#0071E3").pixmap(14, 14))
+        self.check_lbl.setStyleSheet("background: transparent; border: none;")
+        self.check_lbl.setFixedWidth(16)
         lay.addWidget(self.check_lbl)
 
         self.set_selected(is_selected)
@@ -58,15 +103,26 @@ class _FolderRow(QFrame):
 
     def set_selected(self, selected: bool):
         self._selected = selected
-        self.check_lbl.setText("✓" if selected else "")
+        self.check_lbl.setVisible(selected)
         if selected:
             self.setStyleSheet("""
-                QFrame { background: #EAF3FF; border: 1.5px solid #0071E3; border-radius: 10px; }
+                QFrame {
+                    background: #EFF6FF;
+                    border: 1.5px solid #0071E3;
+                    border-radius: 12px;
+                }
             """)
         else:
             self.setStyleSheet("""
-                QFrame { background: #F8FAFC; border: 1.5px solid #E5E5EA; border-radius: 10px; }
-                QFrame:hover { background: #F1F5F9; border-color: #CBD5E1; }
+                QFrame {
+                    background: #FFFFFF;
+                    border: 1px solid #E2E8F0;
+                    border-radius: 12px;
+                }
+                QFrame:hover {
+                    background: #F8FAFC;
+                    border-color: #CBD5E1;
+                }
             """)
 
 
@@ -76,21 +132,16 @@ class SaveLocationDialog(QDialog):
     def __init__(self, slug: str, parent=None):
         super().__init__(parent)
         self.slug = slug
-        self.selected_folder_id = None  # None == "Genel" (no folder)
+        self.selected_folder_id = None
         self._rows = []
 
         self.setWindowTitle("Nereye Kaydedilsin?")
-        self.setFixedSize(440, 520)
-        # NoDropShadowWindowHint: on macOS a frameless + translucent window still gets a
-        # native Cocoa shadow layer, and that layer is what paints as an opaque black
-        # rectangle when the compositor cannot resolve the window's alpha. The in-app
-        # QGraphicsDropShadowEffects were removed for this same symptom; this is the
-        # remaining shadow source. The cards draw their own border, so nothing is lost.
+        self.setFixedSize(500, 560)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool | Qt.NoDropShadowWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(15, 15, 15, 15)
+        outer.setContentsMargins(12, 12, 12, 12)
 
         container = QWidget(self)
         container.setObjectName("saveLocCard")
@@ -98,28 +149,28 @@ class SaveLocationDialog(QDialog):
             #saveLocCard {
                 background: #FFFFFF;
                 border: 1px solid #CBD5E1;
-                border-radius: 20px;
+                border-radius: 16px;
             }
         """)
 
         c_lay = QVBoxLayout(container)
-        c_lay.setContentsMargins(28, 24, 28, 22)
+        c_lay.setContentsMargins(24, 22, 24, 20)
         c_lay.setSpacing(12)
 
         t_lbl = QLabel("Nereye Kaydedilsin?")
-        t_lbl.setFont(QFont("Segoe UI", 13.5, QFont.Bold))
-        t_lbl.setStyleSheet("color: #1D1D1F; background: transparent; border: none;")
+        t_lbl.setFont(QFont(FONT_FAMILY, 13, QFont.Bold))
+        t_lbl.setStyleSheet("color: #0F172A; background: transparent; border: none;")
         c_lay.addWidget(t_lbl)
 
         sub_lbl = QLabel("Bu versiyonu bir klasörde düzenleyebilir (örn. \"Yaz Çizelgesi\") ya da klasörsüz bırakabilirsiniz.")
-        sub_lbl.setFont(QFont("Segoe UI", 9))
-        sub_lbl.setStyleSheet("color: #86868B; background: transparent; border: none;")
+        sub_lbl.setFont(QFont(FONT_FAMILY, 9.5))
+        sub_lbl.setStyleSheet("color: #64748B; background: transparent; border: none;")
         sub_lbl.setWordWrap(True)
         c_lay.addWidget(sub_lbl)
 
         div = QFrame()
         div.setFixedHeight(1)
-        div.setStyleSheet("background: #E5E5EA; border: none;")
+        div.setStyleSheet("background: #E2E8F0; border: none;")
         c_lay.addWidget(div)
 
         # Scrollable folder list
@@ -128,11 +179,12 @@ class SaveLocationDialog(QDialog):
         self.scroll.setFrameShape(QFrame.NoFrame)
         self.scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
         self.list_container = QWidget()
         self.list_container.setStyleSheet("background: transparent;")
         self.list_layout = QVBoxLayout(self.list_container)
-        self.list_layout.setContentsMargins(0, 4, 0, 4)
+        self.list_layout.setContentsMargins(2, 4, 2, 4)
         self.list_layout.setSpacing(8)
         self.list_layout.addStretch(1)
 
@@ -144,64 +196,92 @@ class SaveLocationDialog(QDialog):
         new_row.setSpacing(8)
         self.new_folder_edit = QLineEdit()
         self.new_folder_edit.setPlaceholderText("Yeni klasör adı (Örn: Yaz Çizelgesi)...")
-        self.new_folder_edit.setFixedHeight(36)
-        self.new_folder_edit.setStyleSheet("""
-            QLineEdit {
-                background: #F8FAFC; border: 1.5px solid #CBD5E1; border-radius: 8px;
-                padding: 4px 12px; font-size: 12px; color: #0F172A;
-            }
-            QLineEdit:focus { border: 1.5px solid #0071E3; background: #FFFFFF; }
+        self.new_folder_edit.setFixedHeight(34)
+        self.new_folder_edit.setStyleSheet(f"""
+            QLineEdit {{
+                background: #F8FAFC;
+                border: 1px solid #CBD5E1;
+                border-radius: 17px;
+                padding: 0 14px;
+                font-size: 12px;
+                font-family: {FONT_FAMILY};
+                color: #0F172A;
+            }}
+            QLineEdit:focus {{
+                border-color: #0071E3;
+                background: #FFFFFF;
+            }}
         """)
         self.new_folder_edit.returnPressed.connect(self._create_folder)
         new_row.addWidget(self.new_folder_edit, 1)
 
-        btn_new = QPushButton("+ Yeni Klasör")
+        btn_new = QPushButton("  Yeni Klasör")
+        btn_new.setIcon(make_save_vector_icon("plus", 12, "#0071E3"))
         btn_new.setCursor(Qt.PointingHandCursor)
-        btn_new.setFixedHeight(36)
-        btn_new.setStyleSheet("""
-            QPushButton {
-                background: #EEF2FF; color: #4F46E5; border: 1.5px dashed #6366F1;
-                border-radius: 8px; padding: 4px 14px; font-weight: bold; font-size: 11.5px;
-            }
-            QPushButton:hover { background: #E0E7FF; }
+        btn_new.setFixedHeight(34)
+        btn_new.setStyleSheet(f"""
+            QPushButton {{
+                background: #EFF6FF;
+                color: #0071E3;
+                border: 1px solid #BFDBFE;
+                border-radius: 17px;
+                padding: 0 16px;
+                font-weight: 700;
+                font-size: 11.5px;
+                font-family: {FONT_FAMILY};
+            }}
+            QPushButton:hover {{ background: #DBEAFE; }}
         """)
         btn_new.clicked.connect(self._create_folder)
         new_row.addWidget(btn_new)
         c_lay.addLayout(new_row)
 
         self.warn_lbl = QLabel("")
-        self.warn_lbl.setFont(QFont("Segoe UI", 8.5, QFont.Bold))
+        self.warn_lbl.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
         self.warn_lbl.setStyleSheet("color: #DC2626; background: transparent; border: none;")
         self.warn_lbl.setVisible(False)
         c_lay.addWidget(self.warn_lbl)
         self.new_folder_edit.textEdited.connect(lambda _: self.warn_lbl.setVisible(False))
 
-        # Bottom buttons
+        # Bottom buttons (Silindirik / Pill)
         btn_box = QHBoxLayout()
-        btn_box.setSpacing(12)
+        btn_box.setSpacing(10)
+        btn_box.addStretch()
 
         btn_cancel = QPushButton("Vazgeç")
-        btn_cancel.setFixedHeight(38)
+        btn_cancel.setFixedHeight(34)
         btn_cancel.setCursor(Qt.PointingHandCursor)
-        btn_cancel.setStyleSheet("""
-            QPushButton {
-                background: #F2F2F7; color: #1D1D1F; border: 1px solid #E5E5EA;
-                border-radius: 8px; padding: 6px 20px; font-weight: 500; font-size: 12px;
-            }
-            QPushButton:hover { background: #E5E5EA; }
+        btn_cancel.setStyleSheet(f"""
+            QPushButton {{
+                background: #FFFFFF;
+                color: #475569;
+                border: 1px solid #CBD5E1;
+                border-radius: 17px;
+                padding: 0 20px;
+                font-weight: 600;
+                font-size: 12px;
+                font-family: {FONT_FAMILY};
+            }}
+            QPushButton:hover {{ background: #F8FAFC; color: #0F172A; }}
         """)
         btn_cancel.clicked.connect(self.reject)
         btn_box.addWidget(btn_cancel)
 
         btn_ok = QPushButton("Kaydet")
-        btn_ok.setFixedHeight(38)
+        btn_ok.setFixedHeight(34)
         btn_ok.setCursor(Qt.PointingHandCursor)
-        btn_ok.setStyleSheet("""
-            QPushButton {
-                background: #0071E3; color: #FFFFFF; border: none;
-                border-radius: 8px; padding: 6px 26px; font-weight: 600; font-size: 12px;
-            }
-            QPushButton:hover { background: #0062C4; }
+        btn_ok.setStyleSheet(f"""
+            QPushButton {{
+                background: #0071E3;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 17px;
+                padding: 0 26px;
+                font-weight: 700;
+                font-size: 12px;
+                font-family: {FONT_FAMILY};
+            }}
+            QPushButton:hover {{ background: #0062C4; }}
         """)
         btn_ok.clicked.connect(self.accept)
         btn_box.addWidget(btn_ok)

@@ -230,7 +230,19 @@ def sanitize_atamalar(atamalar: list) -> list:
         clean_entry["class"] = cls_name
         clean_entry["duration"] = dur
         clean_entry["type"] = raw_type
-        
+
+        # Aynı bilgiyi taşıyan ESKİ alanları da güncelle. Satır bir kez öğretmen
+        # ekranından kaydedildiğinde ders_sayisi/saat/dagilim alanları da yazılıyor;
+        # sonra sınıf ekranı yalnızca duration+type güncellediği için o alanlar eski
+        # değerde kalıyordu. Öğretmen ekranı, öğretmen kartı ve otomatik planlayıcı
+        # ders_sayisi'ni ÖNCE okuduğundan, iki ekran aynı ders için farklı saat
+        # gösteriyor, planlayıcı da yanlış sayıda saat yerleştiriyordu.
+        try:
+            import lesson_hours
+            lesson_hours.sync_keys(clean_entry)
+        except Exception:
+            pass
+
         seen[key] = clean_entry
         
     return list(seen.values())
@@ -1262,7 +1274,14 @@ def _version_summary(filepath: str) -> dict:
         summary["folder_id"] = v_meta.get("folder_id")
         summary["last_modified"] = v_meta.get("last_modified")
         placed = sum(int(p.get("duration", 1) or 1) for p in d.get("grid_placements", []))
-        total = sum(int(a.get("duration", 2) or 2) for a in d.get("atamalar", []))
+        # Toplam saat, ekranlarla AYNI kaynaktan: dagilimi ("2+1") olan bir satirda
+        # duration bos ya da bayat olabiliyor; anasayfa kartinin "x/y saat" yazisi
+        # o zaman sinif ekranindakinden farkli cikiyordu.
+        try:
+            import lesson_hours
+            total = lesson_hours.total(d)
+        except Exception:
+            total = sum(int(a.get("duration", 2) or 2) for a in d.get("atamalar", []))
         summary["placed_hours"] = placed
         summary["total_hours"] = total
         summary["unplaced_hours"] = max(0, total - placed)

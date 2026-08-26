@@ -1946,9 +1946,6 @@ class CollapsibleVersionGroup(QFrame):
         event.accept()
         # Expanding on drop gives immediate confirmation that the version landed
         # where the user aimed it — folders render collapsed by default, so without
-        # this a successful drop looks identical to a failed one.
-        if self.is_collapsed:
-            self._set_collapsed(False)
         self.version_dropped.emit(slug, filename)
 
 # ── Apple Clean Version Row (Compact & Modern) ───────────────────────
@@ -1967,18 +1964,18 @@ class AppleVersionRow(QFrame):
         self._is_selected = False
         self._is_last = is_last
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedHeight(42)
+        self.setFixedHeight(46)
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 4, 16, 4)
+        layout.setContentsMargins(16, 5, 16, 5)
         layout.setSpacing(12)
         
         # Version title (e.g. Versiyon 82-C)
         num = version_info.get("number", 0)
         v_title = QLabel(version_info.get("label") or f"Versiyon {num}")
-        v_title.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
+        v_title.setFont(QFont(FONT_FAMILY, 9.5, QFont.Bold))
         v_title.setStyleSheet("color: #0F172A; background: transparent; border: none;")
-        v_title.setFixedWidth(100)
+        v_title.setFixedWidth(105)
         v_title.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         if version_info.get("has_number_collision"):
             v_title.setToolTip(
@@ -1991,7 +1988,7 @@ class AppleVersionRow(QFrame):
         d_str = version_info.get("date_str", "")
         t_str = version_info.get("time_str", "")
         dt_lbl = QLabel(f"{d_str}  {t_str}")
-        dt_lbl.setFont(QFont(FONT_FAMILY, 8))
+        dt_lbl.setFont(QFont(FONT_FAMILY, 8.5))
         dt_lbl.setStyleSheet("color: #64748B; background: transparent; border: none;")
         dt_lbl.setFixedWidth(140)
         dt_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
@@ -2009,22 +2006,22 @@ class AppleVersionRow(QFrame):
                 stats_badge.setFixedHeight(24)
                 stats_badge.setAlignment(Qt.AlignCenter)
                 stats_badge.setStyleSheet("""
-                    background: #DCFCE7;
-                    color: #166534;
-                    border: none;
-                    padding: 0 14px;
+                    background: #ECFDF5;
+                    color: #059669;
+                    border: 1px solid #A7F3D0;
+                    padding: 0 12px;
                     border-radius: 12px;
                 """)
             else:
-                stats_badge = QLabel(f"{plc}/{tot} Saat • {unp} Boşta")
+                stats_badge = QLabel(f"⚠ {unp} Yerleşemeyen")
                 stats_badge.setFont(QFont(FONT_FAMILY, 8, QFont.Bold))
                 stats_badge.setFixedHeight(24)
                 stats_badge.setAlignment(Qt.AlignCenter)
                 stats_badge.setStyleSheet("""
-                    background: #FEF3C7;
-                    color: #92400E;
-                    border: none;
-                    padding: 0 14px;
+                    background: #FFFBEB;
+                    color: #D97706;
+                    border: 1px solid #FDE68A;
+                    padding: 0 12px;
                     border-radius: 12px;
                 """)
         else:
@@ -2035,8 +2032,8 @@ class AppleVersionRow(QFrame):
             stats_badge.setStyleSheet("""
                 background: #F1F5F9;
                 color: #64748B;
-                border: none;
-                padding: 0 14px;
+                border: 1px solid #E2E8F0;
+                padding: 0 12px;
                 border-radius: 12px;
             """)
             
@@ -2083,21 +2080,22 @@ class AppleVersionRow(QFrame):
             """)
             layout.addWidget(act_badge)
             
-        # 3. Prominent Semicircular Pill "Aç" Button
+        # 3. Prominent Semicircular Pill "Aç" Button (Comfortable Clearance)
         btn_open = QPushButton("Aç")
-        btn_open.setFont(QFont(FONT_FAMILY, 8.5, QFont.Bold))
+        btn_open.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
         btn_open.setCursor(Qt.PointingHandCursor)
-        btn_open.setFixedHeight(24)
+        btn_open.setFixedHeight(26)
         btn_open.setStyleSheet("""
             QPushButton {
                 background: #0071E3;
                 color: #FFFFFF;
                 border: none;
-                border-radius: 12px;
-                padding: 0 16px;
+                border-radius: 13px;
+                padding: 0 18px;
+                font-weight: 700;
             }
             QPushButton:hover {
-                background: #005BB5;
+                background: #0062C4;
             }
         """)
         btn_open.clicked.connect(lambda: self.action_requested.emit("open", self.slug, self.filename))

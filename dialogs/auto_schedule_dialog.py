@@ -762,10 +762,23 @@ class AutoScheduleDialog(QDialog):
             False
         )
 
+        # Off by default, and deliberately worded so the cost is visible before it is
+        # switched on: it fills the grid by allowing the same teacher to be booked in
+        # two classes at the same hour. The result is a complete-LOOKING timetable
+        # that cannot actually be run, so every such lesson is flagged on the grid and
+        # counted in the summary rather than quietly blending in.
+        row_independent, self.sw_independent = make_switch_row(
+            "Sınıfları Bağımsız Doldur",
+            "Her sınıfı diğerlerinden bağımsız doldurur — öğretmen çakışmaları "
+            "oluşur ve işaretlenir",
+            False
+        )
+
         p_lay.addLayout(row_vds)
         p_lay.addLayout(row_zero)
         p_lay.addLayout(row_fill)
         p_lay.addLayout(row_ignore)
+        p_lay.addLayout(row_independent)
         
         root_layout.addWidget(param_card)
         
@@ -895,6 +908,13 @@ class AutoScheduleDialog(QDialog):
         self.skeleton.set_active(True)
         self.skeleton.set_placed_ratio(0.0)
         
+        # Check the input BEFORE building anything. Without this the run produces a
+        # grid with holes and the user cannot tell whether the scheduler gave up or
+        # the timetable is arithmetically impossible — two problems with completely
+        # different fixes. Say which it is, up front, and let them decide.
+        if not self._confirm_feasibility():
+            return
+
         from auto_scheduler import AutoSchedulerWorker
         fill_empty = True
         chosen_target = self.cb_target_class.currentData()
@@ -905,13 +925,32 @@ class AutoScheduleDialog(QDialog):
             self.data_store, target_class=chosen_target, parent=self,
             fill_empty=fill_empty, institution_slug=inst_slug, use_vds=use_vds,
             infinite_mode=True,
-            ignore_other_institutions=self.sw_ignore_cross.isChecked()
+            ignore_other_institutions=self.sw_ignore_cross.isChecked(),
+            independent_classes=self.sw_independent.isChecked(),
         )
         self.worker.progress_updated.connect(self._on_progress)
         self.worker.iteration_updated.connect(self._on_iteration)
         self.worker.finished_successfully.connect(self._on_finished)
         self.worker.failed.connect(self._on_failed)
         self.worker.start()
+
+    def _confirm_feasibility(self):
+        """Plan baslamadan once fizibilite kontrolu. Devam edilecekse True doner.
+
+        Kurulum tutarliysa hicbir sey sormaz, dogrudan doldurmaya baslar. Tutarsizsa
+        neyin neden sigmadigini sayiyla gosterip 5 saniyelik sayacin ardindan
+        "Yoksay ve Devam Et" secenegini sunar; hicbir zaman kullaniciyi durdurmaz.
+        """
+        try:
+            from dialogs.preflight_dialog import run_preflight
+        except Exception as exc:
+            print(f"[AUTO_SCHEDULE] on kontrol yuklenemedi: {exc}")
+            return True
+
+        slug = getattr(self.parent(), "institution_slug", None)
+        note = ("Devam ederseniz planlayici yine de mumkun olan EN COK saati yerlestirir; "
+                "yerlesemeyenler alttaki listeye duser, hicbiri silinmez.")
+        return run_preflight(self.data_store, slug, self, mode="plan", extra_note=note)
 
     def _on_cancel_or_stop(self):
         if self.worker and self.worker.isRunning():
@@ -1093,6 +1132,7 @@ class AutoScheduleDialog(QDialog):
             "target_hrs": target_hrs,
             "capacity_problems": result.get("capacity_problems", []),
             "unplaced_summary": result.get("unplaced_summary", []),
+            "teacher_clashes": result.get("teacher_clashes", []),
         }
         
         self.accept()
@@ -1131,6 +1171,46 @@ class AutoScheduleDialog(QDialog):
             def show_warning():
                 QMessageBox.warning(parent, "Kısıtlama Bildirimi", msg, QMessageBox.Ok)
             QTimer.singleShot(100, show_warning)
+        elif parent and summary.get("teacher_clashes"):
+            # Independent mode was on: the grid is fuller, but only because teachers
+            # were allowed to be in two places at once. Say so plainly and list them,
+            # so the schedule is not printed and handed out as if it were runnable.
+            clashes = summary["teacher_clashes"]
+            days_tr = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
+            per_teacher = {}
+            for c in clashes:
+                per_teacher.setdefault(c["teacher"], []).append(c)
+
+            lines = [
+                f"Çizelge oluşturuldu: {total_hrs}/{target_hrs} saat yerleşti.",
+                "",
+                f"⚠ 'Sınıfları Bağımsız Doldur' açıktı, bu yüzden {len(clashes)} saatte",
+                "öğretmen çakışması var — aynı öğretmen aynı saatte birden fazla sınıfta.",
+                "",
+                "Bu çizelge bu haliyle UYGULANAMAZ. Çakışan dersler gridde işaretli;",
+                "yazdırmadan önce elle düzeltmeniz gerekir.",
+                "",
+            ]
+            for teacher, items in sorted(per_teacher.items(), key=lambda kv: -len(kv[1]))[:8]:
+                sample = items[0]
+                d_name = days_tr[sample["day"]] if sample["day"] < len(days_tr) else "?"
+                lines.append(
+                    f"   • {teacher}: {len(items)} çakışma "
+                    f"(örn. {d_name} {sample['period'] + 1}. saat → "
+                    f"{', '.join(sample['classes'])})"
+                )
+            if len(per_teacher) > 8:
+                lines.append(f"   ... ve {len(per_teacher) - 8} öğretmen daha.")
+            lines += [
+                "",
+                "Çakışmasız bir çizelge için bu seçeneği kapatın; o zaman yerleşemeyen",
+                "dersler 'Yerleştirilmeyenler' listesine düşer.",
+            ]
+            msg = "\n".join(lines)
+
+            def show_clashes():
+                QMessageBox.warning(parent, "Öğretmen Çakışmaları Var", msg, QMessageBox.Ok)
+            QTimer.singleShot(100, show_clashes)
         elif parent and total_hrs < target_hrs and summary.get("unplaced_summary"):
             # The week did not fill and we know exactly why. Without this the user is
             # left staring at empty cells with no way to tell whether the scheduler
@@ -1160,8 +1240,11 @@ class AutoScheduleDialog(QDialog):
                 "",
                 f"{missing} saat yerleştirilemedi.",
                 "",
-                "Sebep: bir öğretmen aynı anda yalnızca tek sınıfta olabilir.",
-                "Aşağıdaki öğretmenlerin dersleri, müsait oldukları saatlere sığmıyor:",
+                "Sebep sınıflarda değil, ÖĞRETMEN yükünde.",
+                "",
+                "Bir öğretmen aynı anda tek sınıfta olabilir. Sınıflar haftada kaç saat",
+                "açıksa, bir öğretmen de en fazla o kadar saat ders verebilir.",
+                "Aşağıdakilere bu tavandan fazla ders atanmış:",
                 "",
             ]
             for name, info in ranked[:8]:

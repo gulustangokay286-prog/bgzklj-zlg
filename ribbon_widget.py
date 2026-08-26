@@ -5,7 +5,7 @@ Retina 2x Vektörel Çizim Motoru ile kristal netliğinde 3D ikonlar.
 """
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton,
-    QSizePolicy, QFrame, QCheckBox, QToolButton
+    QSizePolicy, QFrame, QCheckBox, QToolButton, QScrollArea
 )
 from PySide6.QtCore import Qt, QSize, Signal, QPoint, QPointF, QRectF
 from PySide6.QtGui import (
@@ -442,45 +442,51 @@ def icon_rooms(p: QPainter, s: int):
 
 
 def icon_teachers(p: QPainter, s: int):
-    """10. Öğretmenler: 3D Akademik Mezuniyet Kepi / Kep Başlığı"""
+    """10. Öğretmenler: 3D Akademik Mezuniyet Kepi (Büyük ve Net)"""
     p.setRenderHint(QPainter.Antialiasing, True)
+    p.save()
+    p.translate(0, 1.5)
     
-    # Cap skull base underneath
+    # Cap skull base underneath (large)
     p.setPen(Qt.NoPen)
     p.setBrush(QBrush(QColor("#0F172A")))
-    p.drawRect(10, 16, 12, 8)
-    p.drawRoundedRect(9, 14, 14, 10, 2, 2)
+    p.drawRoundedRect(QRectF(8, 13, 16, 12), 2, 2)
     
-    # Diamond Cap Top (Mortarboard) in 3D perspective
-    hat_poly = QPolygon([
-        QPoint(16, 5),
-        QPoint(30, 12),
-        QPoint(16, 19),
-        QPoint(2, 12)
+    # Inner skull volume shadow
+    p.setBrush(QBrush(QColor("#1E293B")))
+    p.drawRect(QRectF(10, 15, 12, 9))
+    
+    # Diamond Cap Top (Mortarboard) - Full width
+    hat_poly = QPolygonF([
+        QPointF(16, 2),
+        QPointF(30, 9),
+        QPointF(16, 16),
+        QPointF(2, 9)
     ])
-    grad_hat = QLinearGradient(2, 5, 30, 19)
-    grad_hat.setColorAt(0, QColor("#334155"))
+    grad_hat = QLinearGradient(2, 2, 30, 16)
+    grad_hat.setColorAt(0, QColor("#475569"))
     grad_hat.setColorAt(1, QColor("#0F172A"))
-    p.setPen(QPen(QColor("#475569"), 1.2))
+    p.setPen(QPen(QColor("#64748B"), 1.2))
     p.setBrush(QBrush(grad_hat))
     p.drawPolygon(hat_poly)
     
     # Golden Button at center of mortarboard
     p.setPen(Qt.NoPen)
     p.setBrush(QBrush(QColor("#F59E0B")))
-    p.drawEllipse(14.5, 10.5, 3, 3)
+    p.drawEllipse(QRectF(14, 7.5, 4, 4))
     
     # Golden Tassel Ribbon hanging left
-    p.setPen(QPen(QColor("#F59E0B"), 1.6, Qt.SolidLine, Qt.RoundCap))
+    p.setPen(QPen(QColor("#F59E0B"), 1.8, Qt.SolidLine, Qt.RoundCap))
     tassel_path = QPainterPath()
-    tassel_path.moveTo(16, 12)
-    tassel_path.cubicTo(10, 13, 6, 17, 5, 21)
+    tassel_path.moveTo(16, 9)
+    tassel_path.cubicTo(9, 10, 5, 14, 4, 19)
     p.drawPath(tassel_path)
     
     # Golden Tassel Brush
     p.setPen(Qt.NoPen)
     p.setBrush(QBrush(QColor("#F59E0B")))
-    p.drawRoundedRect(4, 21, 3, 6, 1, 1)
+    p.drawRoundedRect(QRectF(2, 19, 3.5, 7), 1, 1)
+    p.restore()
 
 
 def icon_electives(p: QPainter, s: int):
@@ -545,23 +551,22 @@ def icon_relations(p: QPainter, s: int):
 
 def icon_check_badge(p: QPainter, s: int):
     """13. Doğrula / Kontrol: Yeşil Daire Rozet ve Beyaz Onay İşareti"""
-    # Emerald green scalloped / circular seal
-    p.setPen(QPen(QColor("#059669"), 1))
-    grad = QLinearGradient(4, 4, 28, 28)
+    p.setPen(QPen(QColor("#059669"), 1.2))
+    grad = QLinearGradient(3, 3, 29, 29)
     grad.setColorAt(0, QColor("#6EE7B7"))
     grad.setColorAt(1, QColor("#059669"))
     p.setBrush(QBrush(grad))
-    p.drawEllipse(3, 3, 26, 26)
+    p.drawEllipse(QRectF(3, 3, 26, 26))
     
     # Inner white circle border
-    p.setPen(QPen(QColor(255, 255, 255, 120), 1))
+    p.setPen(QPen(QColor(255, 255, 255, 140), 1))
     p.setBrush(Qt.NoBrush)
-    p.drawEllipse(5.5, 5.5, 21, 21)
+    p.drawEllipse(QRectF(5, 5, 22, 22))
     
     # Crisp white checkmark
-    p.setPen(QPen(QColor("#FFFFFF"), 3, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-    p.drawLine(9, 16, 14, 21)
-    p.drawLine(14, 21, 23, 11)
+    p.setPen(QPen(QColor("#FFFFFF"), 2.8, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    p.drawLine(QPointF(9, 16), QPointF(14, 21))
+    p.drawLine(QPointF(14, 21), QPointF(23, 11))
 
 
 def icon_auto(p: QPainter, s: int):
@@ -763,16 +768,16 @@ def icon_home(p: QPainter, s: int):
 
 def icon_clear(p: QPainter, s: int):
     """Çizelgeyi Sıfırla: Kırmızı Silme / Sıfırlama Rozeti"""
-    p.setPen(QPen(QColor("#DC2626"), 1))
+    p.setPen(QPen(QColor("#DC2626"), 1.2))
     grad = QLinearGradient(3, 3, 29, 29)
     grad.setColorAt(0, QColor("#F87171"))
     grad.setColorAt(1, QColor("#EF4444"))
     p.setBrush(QBrush(grad))
-    p.drawEllipse(3, 3, 26, 26)
+    p.drawEllipse(QRectF(3, 3, 26, 26))
     
-    p.setPen(QPen(QColor("#FFFFFF"), 3, Qt.SolidLine, Qt.RoundCap))
-    p.drawLine(9, 9, 23, 23)
-    p.drawLine(23, 9, 9, 23)
+    p.setPen(QPen(QColor("#FFFFFF"), 2.8, Qt.SolidLine, Qt.RoundCap))
+    p.drawLine(QPointF(9, 9), QPointF(23, 23))
+    p.drawLine(QPointF(23, 9), QPointF(9, 23))
 
 
 def icon_wizard(p: QPainter, s: int):
@@ -837,6 +842,54 @@ def make_icon(key: str, size: int = 32) -> QIcon:
     return QIcon(_make_pixmap(size, fn))
 
 
+# ── Ribbon Scroll Area ────────────────────────────────────────────────────────
+class RibbonScrollArea(QScrollArea):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWidgetResizable(True)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setFrameShape(QFrame.NoFrame)
+        self.setStyleSheet("""
+            QScrollArea {
+                background: #FFFFFF;
+                border: none;
+            }
+            QScrollBar:horizontal {
+                height: 3px;
+                background: #F8FAFC;
+                border: none;
+                margin: 0px;
+            }
+            QScrollBar::handle:horizontal {
+                background: #CBD5E1;
+                min-width: 20px;
+                border-radius: 1.5px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background: #94A3B8;
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                width: 0px;
+            }
+        """)
+
+    def wheelEvent(self, event):
+        # Enable smooth horizontal scrolling with normal mouse wheel
+        if event.angleDelta().y() != 0:
+            self.horizontalScrollBar().setValue(
+                self.horizontalScrollBar().value() - event.angleDelta().y()
+            )
+            event.accept()
+        elif event.angleDelta().x() != 0:
+            self.horizontalScrollBar().setValue(
+                self.horizontalScrollBar().value() - event.angleDelta().x()
+            )
+            event.accept()
+        else:
+            super().wheelEvent(event)
+
+
 # ── Ribbon Button ─────────────────────────────────────────────────────────────
 class RibbonButton(QToolButton):
     """Vertical icon+label button matching aSc ribbon style"""
@@ -846,7 +899,10 @@ class RibbonButton(QToolButton):
         self.setIcon(make_icon(icon_key, 32))
         self.setIconSize(QSize(32, 32))
         self.setText(label)
-        self.setFixedSize(68, 70)
+        self.setMinimumWidth(56)
+        self.setMaximumWidth(76)
+        self.setFixedHeight(62)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.setCheckable(False)
         self.setCursor(Qt.PointingHandCursor)
         font = QFont(FONT_FAMILY, 7)
@@ -854,16 +910,17 @@ class RibbonButton(QToolButton):
         self.setStyleSheet("""
             QToolButton {
                 background: transparent;
-                border: none;
-                padding: 2px;
+                border: 1px solid transparent;
+                border-radius: 6px;
+                padding: 0px 2px;
                 color: #0F172A;
-                font-size: 7.5pt;
+                font-size: 7pt;
                 font-weight: 500;
+                text-align: center;
             }
             QToolButton:hover {
                 background: #DAE8FC;
                 border: 1px solid #B8CCE4;
-                border-radius: 4px;
             }
             QToolButton:pressed {
                 background: #B8D4F0;
@@ -881,7 +938,8 @@ class RibbonWideButton(QToolButton):
         self.setIcon(make_icon("geri", 32))
         self.setIconSize(QSize(32, 32))
         self.setText("Geri")
-        self.setFixedSize(54, 70)
+        self.setFixedSize(50, 62)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.setCursor(Qt.PointingHandCursor)
         font = QFont(FONT_FAMILY, 7.5, QFont.Bold)
         self.setFont(font)
@@ -889,8 +947,8 @@ class RibbonWideButton(QToolButton):
             QToolButton {
                 background: #1E6DB5;
                 border: none;
-                border-radius: 4px;
-                padding: 2px;
+                border-radius: 6px;
+                padding: 0px 2px;
                 color: #FFFFFF;
                 font-size: 7.5pt;
                 font-weight: bold;
@@ -928,32 +986,45 @@ def _divider(parent=None):
 class RibbonPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(82)
-        self.main_layout = QHBoxLayout(self)
-        self.main_layout.setContentsMargins(6, 3, 6, 3)
-        self.main_layout.setSpacing(2)
+        self.setFixedHeight(74)
+        
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+        
+        self.scroll_area = RibbonScrollArea(self)
+        self.content_widget = QWidget(self.scroll_area)
+        self.content_widget.setFixedHeight(72)
+        self.content_widget.setStyleSheet(f"background: {RIBBON_BG};")
+        
+        self.main_layout = QHBoxLayout(self.content_widget)
+        self.main_layout.setContentsMargins(6, 1, 6, 1)
+        self.main_layout.setSpacing(3)
         self.main_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        
+        self.scroll_area.setWidget(self.content_widget)
+        outer_layout.addWidget(self.scroll_area)
         self.setStyleSheet(f"background: {RIBBON_BG};")
 
     def add_button(self, label, icon_key, callback=None):
-        btn = RibbonButton(label, icon_key, callback, self)
+        btn = RibbonButton(label, icon_key, callback, self.content_widget)
         self.main_layout.addWidget(btn)
         return btn
 
     def add_back(self, callback=None):
-        btn = RibbonWideButton(callback, self)
+        btn = RibbonWideButton(callback, self.content_widget)
         self.main_layout.addWidget(btn)
-        self.main_layout.addWidget(_divider(self))
+        self.main_layout.addWidget(_divider(self.content_widget))
         return btn
 
     def add_divider(self):
-        self.main_layout.addWidget(_divider(self))
+        self.main_layout.addWidget(_divider(self.content_widget))
 
     def add_stretch(self):
         self.main_layout.addStretch(1)
 
     def add_checkbox(self, label, checked=True):
-        item = RibbonCheckItem(label, checked, self)
+        item = RibbonCheckItem(label, checked, self.content_widget)
         self.main_layout.addWidget(item)
         return item
 
@@ -1081,6 +1152,19 @@ class RibbonWidget(QWidget):
         self._page_layout = QVBoxLayout(self._page_area)
         self._page_layout.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(self._page_area)
+
+    def set_collapsed(self, collapsed: bool):
+        """Hides the button area, leaving only the tab strip.
+
+        The widget has a fixed height, so hiding the page area alone would leave an
+        82 px empty band; the height has to shrink with it.
+        """
+        self._collapsed = bool(collapsed)
+        self._page_area.setVisible(not self._collapsed)
+        self.setFixedHeight(34 if self._collapsed else 116)
+
+    def is_collapsed(self) -> bool:
+        return bool(getattr(self, "_collapsed", False))
 
     def add_tab(self, name: str) -> RibbonPage:
         idx = len(self._pages)

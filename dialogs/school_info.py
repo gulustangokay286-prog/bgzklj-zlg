@@ -1,105 +1,200 @@
-"""dialogs/school_info.py — Temel Okul Bilgileri (Ayarlar Sihirbazı)"""
+"""dialogs/school_info.py — Temel Okul Bilgileri ve Genel Ayarlar (Apple Studio Minimalist UI)"""
 import os, re
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QLineEdit, QComboBox, 
     QPushButton, QTabWidget, QWidget, QCheckBox, QRadioButton, QFrame, QButtonGroup,
-    QMessageBox
+    QMessageBox, QScrollArea, QGraphicsDropShadowEffect, QSizePolicy
 )
-from PySide6.QtCore import Qt, QPoint
-from PySide6.QtGui import QFont, QPixmap, QPainter, QColor, QPen, QLinearGradient
+from PySide6.QtCore import Qt, QPoint, QPointF, QRectF, QSize
+from PySide6.QtGui import QFont, QPixmap, QPainter, QColor, QPen, QBrush, QLinearGradient, QPainterPath, QIcon
 
-def draw_placeholder_icon(icon_type):
-    pix = QPixmap(64, 64)
+FONT_FAMILY = ".AppleSystemUIFont, SF Pro Text, Helvetica Neue, Segoe UI, sans-serif"
+
+
+def make_school_vector_badge(name: str, size: int = 38) -> QPixmap:
+    """Renders pure nude vector icons without enclosing background square/frame boxes."""
+    scale = 2
+    pix = QPixmap(size * scale, size * scale)
     pix.fill(Qt.transparent)
     p = QPainter(pix)
     p.setRenderHint(QPainter.Antialiasing)
+    p.setRenderHint(QPainter.SmoothPixmapTransform)
+    p.scale(scale, scale)
     
-    p.setPen(Qt.NoPen)
-    p.setBrush(QColor(0, 0, 0, 50))
-    p.drawRoundedRect(6, 6, 52, 52, 12, 12)
-    
-    if icon_type == "bank":
-        grad = QLinearGradient(10, 10, 54, 54)
-        grad.setColorAt(0, QColor("#E2E8F0"))
-        grad.setColorAt(1, QColor("#94A3B8"))
-        p.setBrush(grad)
-        p.setPen(QColor("#475569"))
-        p.drawRoundedRect(10, 10, 44, 44, 10, 10)
+    if name == "institution":
+        color = QColor("#0284C7")
+        p.setPen(QPen(color, 1.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.setBrush(Qt.NoBrush)
         
-        p.setBrush(QColor("#FFFFFF"))
-        p.drawPolygon([QPoint(32, 16), QPoint(18, 28), QPoint(46, 28)])
-        p.drawRect(20, 28, 24, 4)
-        for i in range(3):
-            p.drawRect(22 + i*8, 32, 4, 14)
-        p.drawRect(20, 46, 24, 4)
+        # Triangular Pediment Roof
+        roof = QPainterPath()
+        roof.moveTo(size / 2.0, 5)
+        roof.lineTo(size - 5, 13)
+        roof.lineTo(5, 13)
+        roof.closeSubpath()
+        p.drawPath(roof)
         
-    elif icon_type == "grid":
-        grad = QLinearGradient(10, 10, 54, 54)
-        grad.setColorAt(0, QColor("#BAE6FD"))
-        grad.setColorAt(1, QColor("#38BDF8"))
-        p.setBrush(grad)
-        p.setPen(QColor("#0284C7"))
-        p.drawRoundedRect(10, 10, 44, 44, 10, 10)
+        # Entablature Beam
+        p.drawLine(QPointF(4, 15), QPointF(size - 4, 15))
         
-        p.setPen(QPen(QColor("#FFFFFF"), 2))
-        p.drawLine(10, 25, 54, 25)
-        p.drawLine(10, 40, 54, 40)
-        p.drawLine(25, 10, 25, 54)
-        p.drawLine(40, 10, 40, 54)
-        
-        p.setBrush(QColor("#FDE047"))
-        p.setPen(Qt.NoPen)
-        p.drawRect(27, 27, 11, 11)
-        
-    elif icon_type == "list":
-        grad = QLinearGradient(10, 10, 54, 54)
-        grad.setColorAt(0, QColor("#A7F3D0"))
-        grad.setColorAt(1, QColor("#34D399"))
-        p.setBrush(grad)
-        p.setPen(QColor("#059669"))
-        p.drawRoundedRect(10, 10, 44, 44, 10, 10)
-        
-        p.setPen(QPen(QColor("#FFFFFF"), 3))
-        p.setBrush(QColor("#FFFFFF"))
-        for i in range(3):
-            p.drawEllipse(16, 18 + i*12, 4, 4)
-            p.drawLine(26, 20 + i*12, 46, 20 + i*12)
+        # 4 Classical Columns
+        col_tops = [8, 14, size - 14, size - 8]
+        for x in col_tops:
+            p.drawLine(QPointF(x, 17), QPointF(x, size - 9))
             
-    elif icon_type == "globe":
-        grad = QLinearGradient(10, 10, 54, 54)
-        grad.setColorAt(0, QColor("#DDD6FE"))
-        grad.setColorAt(1, QColor("#8B5CF6"))
-        p.setBrush(grad)
-        p.setPen(QColor("#6D28D9"))
-        p.drawRoundedRect(10, 10, 44, 44, 10, 10)
+        # Stepped Base (2 steps)
+        p.drawLine(QPointF(4, size - 8), QPointF(size - 4, size - 8))
+        p.drawLine(QPointF(2, size - 5), QPointF(size - 2, size - 5))
         
-        p.setPen(QPen(QColor("#FFFFFF"), 2))
-        p.drawEllipse(18, 18, 28, 28)
-        p.drawLine(18, 32, 46, 32)
-        p.drawEllipse(25, 18, 14, 28)
-            
+    elif name == "clock":
+        color = QColor("#7C3AED")
+        p.setPen(QPen(color, 1.6, Qt.SolidLine, Qt.RoundCap))
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(QRectF(4, 4, size - 8, size - 8))
+        p.drawLine(QPointF(size / 2.0, size / 2.0), QPointF(size / 2.0, 9))
+        p.drawLine(QPointF(size / 2.0, size / 2.0), QPointF(size / 2.0 + 6, size / 2.0 + 3))
+        
+    elif name == "globe":
+        color = QColor("#059669")
+        p.setPen(QPen(color, 1.6, Qt.SolidLine, Qt.RoundCap))
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(QRectF(4, 4, size - 8, size - 8))
+        p.drawEllipse(QRectF(size / 2.0 - (size - 8) / 4.0, 4, (size - 8) / 2.0, size - 8))
+        p.drawLine(QPointF(4, size / 2.0), QPointF(size - 4, size / 2.0))
+        
+    elif name == "document":
+        color = QColor("#D97706")
+        p.setPen(QPen(color, 1.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.setBrush(Qt.NoBrush)
+        p.drawRoundedRect(QRectF(6, 4, size - 12, size - 8), 3, 3)
+        p.drawLine(QPointF(11, 11), QPointF(size - 11, 11))
+        p.drawLine(QPointF(11, 17), QPointF(size - 11, 17))
+        p.drawLine(QPointF(11, 23), QPointF(size - 15, 23))
+        
     p.end()
+    pix.setDevicePixelRatio(scale)
     return pix
+
+
+def make_school_vector_icon(name: str, size: int = 16, color_hex: str = "#0071E3") -> QIcon:
+    scale = 2
+    pix = QPixmap(size * scale, size * scale)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.setRenderHint(QPainter.SmoothPixmapTransform)
+    p.scale(scale, scale)
+    color = QColor(color_hex)
+    
+    if name == "clock":
+        p.setPen(QPen(color, 1.4, Qt.SolidLine, Qt.RoundCap))
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(QRectF(2, 2, size - 4, size - 4))
+        p.drawLine(QPointF(size / 2.0, size / 2.0), QPointF(size / 2.0, 5))
+        p.drawLine(QPointF(size / 2.0, size / 2.0), QPointF(size / 2.0 + 3.5, size / 2.0 + 2))
+        
+    elif name == "calendar":
+        p.setPen(QPen(color, 1.4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.setBrush(Qt.NoBrush)
+        p.drawRoundedRect(QRectF(2.5, 3.5, size - 5, size - 6), 2, 2)
+        p.drawLine(QPointF(2.5, 7.5), QPointF(size - 2.5, 7.5))
+        p.drawLine(QPointF(5.5, 2), QPointF(5.5, 4.5))
+        p.drawLine(QPointF(size - 5.5, 2), QPointF(size - 5.5, 4.5))
+        
+    elif name == "key":
+        p.setPen(QPen(color, 1.4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(QRectF(1.5, 3.5, 6, 6))
+        p.drawLine(QPointF(7.5, 6.5), QPointF(size - 1.5, 6.5))
+        p.drawLine(QPointF(size - 4, 6.5), QPointF(size - 4, 9.5))
+        p.drawLine(QPointF(size - 1.5, 6.5), QPointF(size - 1.5, 9))
+        
+    elif name == "cloud_check":
+        p.setPen(QPen(color, 1.5, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.setBrush(Qt.NoBrush)
+        path = QPainterPath()
+        path.moveTo(4, size - 5)
+        path.quadTo(2, size - 5, 2, size - 8)
+        path.quadTo(2, size - 11, 5, size - 11)
+        path.quadTo(6, 3, 11, 4)
+        path.quadTo(size - 2, 4, size - 3, size - 8)
+        path.quadTo(size - 2, size - 5, size - 5, size - 5)
+        path.closeSubpath()
+        p.drawPath(path)
+        
+    p.end()
+    pix.setDevicePixelRatio(scale)
+    return QIcon(pix)
+
 
 class SchoolInfoDialog(QDialog):
     def __init__(self, parent=None, data_store=None):
         super().__init__(parent)
         self.data_store = data_store if data_store is not None else {}
-        self.setWindowTitle("Ayarlar")
-        self.resize(740, 540)
-        self.setStyleSheet("""
-            QDialog { background-color: #F0F0F0; font-family: 'Segoe UI', sans-serif; font-size: 12px; }
-            QTabWidget::pane { border: 1px solid #CCC; background: #FFFFFF; }
-            QTabBar::tab { background: #E5E5E5; border: 1px solid #CCC; padding: 6px 18px; margin-right: 2px; font-weight: 500; }
-            QTabBar::tab:selected { background: #FFFFFF; border-bottom-color: #FFFFFF; font-weight: bold; }
-            QLineEdit, QComboBox { border: 1px solid #B0B0B0; padding: 5px; background: white; border-radius: 3px; }
-            QLineEdit:focus, QComboBox:focus { border: 1.5px solid #0284C7; }
-            QPushButton { padding: 5px 14px; border: 1px solid #ADADAD; background: #E1E1E1; border-radius: 3px; font-weight: 500; }
-            QPushButton:hover { background: #E5F1FB; border: 1px solid #0078D7; }
-            QPushButton#btn_primary { border: 1px solid #005499; background: #0284C7; color: white; font-weight: bold; }
-            QPushButton#btn_primary:hover { background: #0369A1; }
-            QFrame#h_line { background: #E0E0E0; max-height: 1px; }
-            QLabel#status_lbl { background: #EFF6FF; border: 1px solid #93C5FD; color: #1E40AF; font-weight: bold; padding: 8px; border-radius: 6px; font-size: 12px; }
+        self.setWindowTitle("Temel Okul Bilgileri ve Genel Ayarlar")
+        self.resize(800, 580)
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: #F8FAFC;
+                font-family: {FONT_FAMILY};
+                font-size: 13px;
+                color: #0F172A;
+            }}
+            QTabWidget::pane {{
+                border: 1px solid #E2E8F0;
+                background: #FFFFFF;
+                border-radius: 12px;
+                top: -1px;
+            }}
+            QTabBar::tab {{
+                background: #F1F5F9;
+                color: #64748B;
+                border: 1px solid #E2E8F0;
+                border-bottom: none;
+                border-top-left-radius: 10px;
+                border-top-right-radius: 10px;
+                padding: 8px 22px;
+                margin-right: 4px;
+                font-weight: 600;
+                font-size: 12px;
+            }}
+            QTabBar::tab:hover {{
+                background: #E2E8F0;
+                color: #0F172A;
+            }}
+            QTabBar::tab:selected {{
+                background: #FFFFFF;
+                color: #0071E3;
+                border-color: #E2E8F0;
+                border-bottom: 2px solid #FFFFFF;
+                font-weight: 700;
+            }}
+            QFrame.card_frame {{
+                background-color: #FFFFFF;
+                border: 1px solid #E2E8F0;
+                border-radius: 10px;
+            }}
+            QLineEdit, QComboBox {{
+                border: 1px solid #CBD5E1;
+                padding: 6px 10px;
+                background: #FFFFFF;
+                border-radius: 7px;
+                font-size: 12.5px;
+                color: #0F172A;
+            }}
+            QLineEdit:focus, QComboBox:focus {{
+                border-color: #0071E3;
+            }}
+            QRadioButton, QCheckBox {{
+                font-size: 12.5px;
+                color: #334155;
+                font-weight: 500;
+                spacing: 8px;
+            }}
+            QRadioButton::indicator, QCheckBox::indicator {{
+                width: 16px;
+                height: 16px;
+            }}
         """)
         self._build_ui()
         self.cb_gun_sayisi.currentIndexChanged.connect(self._on_gun_sayisi_changed)
@@ -133,156 +228,246 @@ class SchoolInfoDialog(QDialog):
         
     def _build_ui(self):
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(12, 12, 12, 12)
-        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(20, 18, 20, 18)
+        main_layout.setSpacing(12)
+        
+        # Clean Unboxed Header Area (No Icon, No Box)
+        header_lay = QVBoxLayout()
+        header_lay.setContentsMargins(2, 0, 2, 2)
+        header_lay.setSpacing(3)
+
+        title_lbl = QLabel("Temel Okul Bilgileri ve Planlama Parametreleri")
+        title_lbl.setFont(QFont(FONT_FAMILY, 14, QFont.Bold))
+        title_lbl.setStyleSheet("color: #0F172A; background: transparent; border: none;")
+        header_lay.addWidget(title_lbl)
+
+        sub_lbl = QLabel("Ders çizelgesi zaman yapısı, kurum kimliği ve bulut senkronizasyon ayarları.")
+        sub_lbl.setFont(QFont(FONT_FAMILY, 9.5))
+        sub_lbl.setStyleSheet("color: #64748B; background: transparent; border: none;")
+        header_lay.addWidget(sub_lbl)
+
+        main_layout.addLayout(header_lay)
         
         self.tabs = QTabWidget()
         self.tab_genel = QWidget()
         self.tab_ulke = QWidget()
         self.tab_program = QWidget()
         
-        self.tabs.addTab(self.tab_genel, "Genel Bilgiler")
-        self.tabs.addTab(self.tab_ulke, "Ülke")
-        self.tabs.addTab(self.tab_program, "Program Türü")
+        self.tabs.addTab(self.tab_genel, "Genel Bilgiler ve Zaman")
+        self.tabs.addTab(self.tab_ulke, "Ülke ve Yerelleştirme")
+        self.tabs.addTab(self.tab_program, "Program ve Dönem Türü")
         
         self._build_genel_tab()
         self._build_ulke_tab()
         self._build_program_tab()
         
-        main_layout.addWidget(self.tabs)
+        main_layout.addWidget(self.tabs, 1)
         
-        self.lbl_status = QLabel("🏫 BGZ Eğitim Kurumları : Üyelik Durumu Aktif (Kalan Süre: 365 Gün / 1 Yıl — Lisanslı Kurum)")
-        self.lbl_status.setObjectName("status_lbl")
-        self.lbl_status.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(self.lbl_status)
+        # Centered License Status Strip (Nude Minimalist)
+        status_bar_layout = QHBoxLayout()
+        status_bar_layout.setContentsMargins(0, 4, 0, 4)
+        status_bar_layout.setSpacing(6)
+        status_bar_layout.addStretch()
         
+        key_icon = QLabel()
+        key_icon.setPixmap(make_school_vector_icon("key", 14, "#16A34A").pixmap(14, 14))
+        key_icon.setStyleSheet("background: transparent; border: none;")
+        status_bar_layout.addWidget(key_icon)
+        
+        self.lbl_status = QLabel("Lisans Türü: Sınırsız")
+        self.lbl_status.setFont(QFont(FONT_FAMILY, 9.5, QFont.Bold))
+        self.lbl_status.setStyleSheet("color: #166534; background: transparent; border: none;")
+        status_bar_layout.addWidget(self.lbl_status)
+        
+        status_bar_layout.addStretch()
+        main_layout.addLayout(status_bar_layout)
+        
+        # Bottom Buttons (Silindirik / Pill)
         btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(10)
         btn_layout.addStretch()
         
-        self.btn_ok = QPushButton("Tamam")
-        self.btn_ok.setObjectName("btn_primary")
-        self.btn_ok.setFixedSize(95, 32)
-        self.btn_ok.setCursor(Qt.PointingHandCursor)
-        self.btn_ok.clicked.connect(self._save_and_accept)
-        
-        self.btn_cancel = QPushButton("İptal")
-        self.btn_cancel.setFixedSize(95, 32)
+        self.btn_cancel = QPushButton("Vazgeç")
+        self.btn_cancel.setFixedHeight(34)
         self.btn_cancel.setCursor(Qt.PointingHandCursor)
+        self.btn_cancel.setStyleSheet("""
+            QPushButton {
+                background: #FFFFFF;
+                color: #475569;
+                border: 1px solid #CBD5E1;
+                border-radius: 17px;
+                font-size: 12px;
+                font-weight: 600;
+                padding: 0 20px;
+            }
+            QPushButton:hover { background: #F8FAFC; color: #0F172A; }
+        """)
         self.btn_cancel.clicked.connect(self.reject)
         
-        btn_layout.addWidget(self.btn_ok)
-        btn_layout.addWidget(self.btn_cancel)
-        main_layout.addLayout(btn_layout)
+        self.btn_ok = QPushButton(" Kaydet ve Uygula")
+        self.btn_ok.setIcon(make_school_vector_icon("cloud_check", 14, "#FFFFFF"))
+        self.btn_ok.setFixedHeight(34)
+        self.btn_ok.setCursor(Qt.PointingHandCursor)
+        self.btn_ok.setStyleSheet("""
+            QPushButton {
+                background: #0071E3;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 17px;
+                font-size: 12px;
+                font-weight: 700;
+                padding: 0 24px;
+            }
+            QPushButton:hover { background: #0062C4; }
+        """)
+        self.btn_ok.clicked.connect(self._on_save)
         
+        btn_layout.addWidget(self.btn_cancel)
+        btn_layout.addWidget(self.btn_ok)
+        main_layout.addLayout(btn_layout)
+
     def _build_genel_tab(self):
         layout = QVBoxLayout(self.tab_genel)
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(14)
         
-        # Section 1: Basic Info
-        sec1 = QHBoxLayout()
+        # Card 1: Kurum Kimlik Bilgileri
+        card1 = QFrame()
+        card1.setProperty("class", "card_frame")
+        card1_layout = QHBoxLayout(card1)
+        card1_layout.setContentsMargins(14, 14, 14, 14)
+        card1_layout.setSpacing(14)
+        
         icon1 = QLabel()
-        icon1.setPixmap(draw_placeholder_icon("bank"))
-        icon1.setFixedSize(70, 70)
-        sec1.addWidget(icon1)
+        icon1.setPixmap(make_school_vector_badge("institution", 38))
+        icon1.setStyleSheet("background: transparent; border: none;")
+        card1_layout.addWidget(icon1, 0, Qt.AlignTop)
         
         grid1 = QGridLayout()
-        grid1.setSpacing(8)
+        grid1.setSpacing(10)
         
-        grid1.addWidget(QLabel("Okul / Kurum Adı:"), 0, 0)
-        self.txt_kurum_adi = QLineEdit("BGZ Eğitim Kurumları")
-        grid1.addWidget(self.txt_kurum_adi, 0, 1, 1, 2)
+        lbl_name = QLabel("Okul / Kurum Adı:")
+        lbl_name.setStyleSheet("font-weight: 600; color: #334155;")
+        grid1.addWidget(lbl_name, 0, 0)
+        self.txt_okul_adi = QLineEdit()
+        self.txt_okul_adi.setPlaceholderText("Örn: Çeken Akademi / Anadolu Lisesi")
+        grid1.addWidget(self.txt_okul_adi, 0, 1, 1, 2)
         
-        grid1.addWidget(QLabel("Başlangıç Tarihi:"), 1, 0)
-        self.txt_baslangic = QLineEdit("12/09/2026")
-        grid1.addWidget(self.txt_baslangic, 1, 1, 1, 2)
+        lbl_year = QLabel("Akademik Eğitim Yılı:")
+        lbl_year.setStyleSheet("font-weight: 600; color: #334155;")
+        grid1.addWidget(lbl_year, 1, 0)
+        self.cb_egitim_yili = QComboBox()
+        self.cb_egitim_yili.addItems(["2025-2026", "2026-2027", "2024-2025", "2027-2028"])
+        grid1.addWidget(self.cb_egitim_yili, 1, 1, 1, 2)
         
-        grid1.addWidget(QLabel("Öğretim Yılı / Tebliğ Sayısı:"), 2, 0)
-        self.txt_yil = QLineEdit("2026 - 2027")
-        self.txt_teblig = QLineEdit()
-        self.txt_teblig.setPlaceholderText("Tebliğ No (Opsiyonel)")
-        grid1.addWidget(self.txt_yil, 2, 1)
+        lbl_reg = QLabel("Mevzuat / Tebliğ:")
+        lbl_reg.setStyleSheet("font-weight: 600; color: #334155;")
+        grid1.addWidget(lbl_reg, 2, 0)
+        self.cb_mevzuat = QComboBox()
+        self.cb_mevzuat.addItems(["MEB Standart Haftalık Çizelgesi", "Özel Öğretim Kurumları Yönetmeliği", "YÖK / Üniversite Standart"])
+        grid1.addWidget(self.cb_mevzuat, 2, 1)
+        self.txt_teblig = QLineEdit("2025/14 Tebliğler Dergisi")
         grid1.addWidget(self.txt_teblig, 2, 2)
         
-        grid1.addWidget(QLabel("Kurum Yetkilisi Ad/Unvan:"), 3, 0)
+        lbl_princ = QLabel("Kurum Yetkilisi / Unvan:")
+        lbl_princ.setStyleSheet("font-weight: 600; color: #334155;")
+        grid1.addWidget(lbl_princ, 3, 0)
         self.txt_yetkili_ad = QLineEdit("Ali ÇEKEN")
         self.txt_yetkili_unvan = QLineEdit("Okul Müdürü")
         grid1.addWidget(self.txt_yetkili_ad, 3, 1)
         grid1.addWidget(self.txt_yetkili_unvan, 3, 2)
         
-        sec1.addLayout(grid1)
-        sec1.addStretch()
-        layout.addLayout(sec1)
+        card1_layout.addLayout(grid1, 1)
+        layout.addWidget(card1)
         
-        line1 = QFrame(); line1.setObjectName("h_line"); layout.addWidget(line1)
+        # Card 2: Zaman ve Çizelge Parametreleri
+        card2 = QFrame()
+        card2.setProperty("class", "card_frame")
+        card2_layout = QHBoxLayout(card2)
+        card2_layout.setContentsMargins(14, 14, 14, 14)
+        card2_layout.setSpacing(14)
         
-        # Section 2: Time Settings
-        sec2 = QHBoxLayout()
         icon2 = QLabel()
-        icon2.setPixmap(draw_placeholder_icon("grid"))
-        icon2.setFixedSize(70, 70)
-        sec2.addWidget(icon2)
+        icon2.setPixmap(make_school_vector_badge("clock", 38))
+        icon2.setStyleSheet("background: transparent; border: none;")
+        card2_layout.addWidget(icon2, 0, Qt.AlignTop)
         
         grid2 = QGridLayout()
         grid2.setSpacing(8)
         
-        grid2.addWidget(QLabel("Çizelge Zamanı / Günlük Ders Saati:"), 0, 0)
+        lbl_period = QLabel("Günlük Ders Saati:")
+        lbl_period.setStyleSheet("font-weight: 600; color: #334155;")
+        grid2.addWidget(lbl_period, 0, 0)
         self.cb_ders_saati = QComboBox()
         self.cb_ders_saati.addItems([str(i) for i in range(1, 17)])
         self.cb_ders_saati.setCurrentText("8")
-        self.cb_ders_saati.setFixedWidth(70)
+        self.cb_ders_saati.setFixedWidth(80)
         grid2.addWidget(self.cb_ders_saati, 0, 1)
         
-        btn_zil = QPushButton("🔔 Zil / Teneffüs Saatlerini Ayarla")
+        btn_zil = QPushButton("  Zil ve Teneffüs Saatleri...")
+        btn_zil.setIcon(make_school_vector_icon("clock", 13, "#0071E3"))
+        btn_zil.setFixedHeight(28)
         btn_zil.setCursor(Qt.PointingHandCursor)
+        btn_zil.setStyleSheet("""
+            QPushButton {
+                background: #EFF6FF;
+                border: 1px solid #BFDBFE;
+                color: #0071E3;
+                border-radius: 14px;
+                font-weight: 600;
+                font-size: 11.5px;
+                padding: 0 14px;
+            }
+            QPushButton:hover { background: #DBEAFE; }
+        """)
         btn_zil.clicked.connect(self._open_zil_dialog)
         grid2.addWidget(btn_zil, 0, 2)
         
-        grid2.addWidget(QLabel("Haftalık Çalışma Gün Sayısı:"), 1, 0)
+        lbl_days = QLabel("Haftalık Çalışma Gün Sayısı:")
+        lbl_days.setStyleSheet("font-weight: 600; color: #334155;")
+        grid2.addWidget(lbl_days, 1, 0)
         self.cb_gun_sayisi = QComboBox()
         self.cb_gun_sayisi.addItems([str(i) for i in range(1, 8)])
         self.cb_gun_sayisi.setCurrentText("5")
-        self.cb_gun_sayisi.setFixedWidth(70)
+        self.cb_gun_sayisi.setFixedWidth(80)
         grid2.addWidget(self.cb_gun_sayisi, 1, 1)
         
-        btn_gunler = QPushButton("📅 Günler ve Tatil Günlerini Seç")
+        btn_gunler = QPushButton("  Günler ve Tatil Seçimi...")
+        btn_gunler.setIcon(make_school_vector_icon("calendar", 13, "#0071E3"))
+        btn_gunler.setFixedHeight(28)
         btn_gunler.setCursor(Qt.PointingHandCursor)
+        btn_gunler.setStyleSheet("""
+            QPushButton {
+                background: #EFF6FF;
+                border: 1px solid #BFDBFE;
+                color: #0071E3;
+                border-radius: 14px;
+                font-weight: 600;
+                font-size: 11.5px;
+                padding: 0 14px;
+            }
+            QPushButton:hover { background: #DBEAFE; }
+        """)
         btn_gunler.clicked.connect(self._open_gunler_dialog)
         grid2.addWidget(btn_gunler, 1, 2)
         
-        grid2.addWidget(QLabel("Hafta Sonu:"), 2, 0, 1, 2, Qt.AlignRight)
+        lbl_weekend = QLabel("Hafta Sonu Tatili:")
+        lbl_weekend.setStyleSheet("font-weight: 600; color: #334155;")
+        grid2.addWidget(lbl_weekend, 2, 0)
         self.cb_hafta_sonu = QComboBox()
-        self.cb_hafta_sonu.addItems(["Cumartesi - Pazar", "Pazar - Pazartesi", "Cuma - Cumartesi", "Yalnız Pazar", "Hafta Sonu Tatili Yok"])
-        grid2.addWidget(self.cb_hafta_sonu, 2, 2)
+        self.cb_hafta_sonu.addItems(["Cumartesi - Pazar", "Yalnız Pazar", "Hafta Sonu Tatili Yok", "Pazar - Pazartesi", "Cuma - Cumartesi"])
+        grid2.addWidget(self.cb_hafta_sonu, 2, 1, 1, 2)
         
-        sec2.addLayout(grid2)
-        sec2.addStretch()
-        layout.addLayout(sec2)
+        card2_layout.addLayout(grid2, 1)
+        layout.addWidget(card2)
         
-        line2 = QFrame(); line2.setObjectName("h_line"); layout.addWidget(line2)
+        # Card 3: Kurum Tipi
+        card3 = QFrame()
+        card3.setProperty("class", "card_frame")
+        card3_layout = QVBoxLayout(card3)
+        card3_layout.setContentsMargins(14, 12, 14, 12)
+        card3_layout.setSpacing(8)
         
-        # Section 3: Multi-week
-        sec3 = QHBoxLayout()
-        icon3 = QLabel()
-        icon3.setPixmap(draw_placeholder_icon("list"))
-        icon3.setFixedSize(70, 70)
-        sec3.addWidget(icon3)
-        
-        vbox3 = QVBoxLayout()
-        self.chk_cok_donem = QCheckBox("Çok Dönemli veya Çok Haftalı Program (Güz / Bahar)")
-        font_bold = QFont()
-        font_bold.setBold(True)
-        self.chk_cok_donem.setFont(font_bold)
-        vbox3.addWidget(self.chk_cok_donem)
-        
-        sec3.addLayout(vbox3)
-        sec3.addStretch()
-        layout.addLayout(sec3)
-        
-        line3 = QFrame(); line3.setObjectName("h_line"); layout.addWidget(line3)
-        
-        # Section 4: School Type
-        sec4 = QVBoxLayout()
         self.radio_okul = QRadioButton("Okul / Kolej / Kurs / Özel Öğretim")
         self.radio_fakulte = QRadioButton("Fakülte / Yüksek Okul / Üniversite")
         self.radio_okul.setChecked(True)
@@ -291,55 +476,83 @@ class SchoolInfoDialog(QDialog):
         btn_grp.addButton(self.radio_okul)
         btn_grp.addButton(self.radio_fakulte)
         
-        sec4.addWidget(self.radio_okul)
-        sec4.addWidget(self.radio_fakulte)
-        sec4.setContentsMargins(85, 0, 0, 0)
-        layout.addLayout(sec4)
+        card3_layout.addWidget(self.radio_okul)
+        card3_layout.addWidget(self.radio_fakulte)
         
+        self.chk_cok_donem = QCheckBox("Çok Dönemli veya Çok Haftalı Program (Güz / Bahar)")
+        self.chk_cok_donem.setStyleSheet("font-weight: 600; color: #1E293B;")
+        card3_layout.addWidget(self.chk_cok_donem)
+        card3_layout.addStretch()
+        
+        layout.addWidget(card3)
         layout.addStretch()
 
     def _build_ulke_tab(self):
         layout = QVBoxLayout(self.tab_ulke)
-        layout.setContentsMargins(25, 25, 25, 25)
-        layout.setSpacing(15)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(14)
         
-        sec = QHBoxLayout()
+        card = QFrame()
+        card.setProperty("class", "card_frame")
+        card_layout = QHBoxLayout(card)
+        card_layout.setContentsMargins(16, 16, 16, 16)
+        card_layout.setSpacing(16)
+        
         icon = QLabel()
-        icon.setPixmap(draw_placeholder_icon("globe"))
-        icon.setFixedSize(70, 70)
-        sec.addWidget(icon)
+        icon.setPixmap(make_school_vector_badge("globe", 38))
+        icon.setStyleSheet("background: transparent; border: none;")
+        card_layout.addWidget(icon, 0, Qt.AlignTop)
         
         grid = QGridLayout()
-        grid.setSpacing(10)
+        grid.setSpacing(12)
         
-        grid.addWidget(QLabel("Ülke Seçimi:"), 0, 0)
+        lbl_country = QLabel("Ülke Seçimi:")
+        lbl_country.setStyleSheet("font-weight: 600; color: #334155;")
+        grid.addWidget(lbl_country, 0, 0)
         self.cb_ulke = QComboBox()
         self.cb_ulke.addItems(["Türkiye (TR)", "Kuzey Kıbrıs Türk Cumhuriyeti (KKTC)", "Almanya (DE)", "İngiltere (UK)", "Azerbaycan (AZ)"])
         grid.addWidget(self.cb_ulke, 0, 1)
         
-        grid.addWidget(QLabel("Arayüz Dili:"), 1, 0)
+        lbl_lang = QLabel("Arayüz Dili:")
+        lbl_lang.setStyleSheet("font-weight: 600; color: #334155;")
+        grid.addWidget(lbl_lang, 1, 0)
         self.cb_dil = QComboBox()
         self.cb_dil.addItems(["Türkçe (Varsayılan)", "English", "Deutsch"])
         grid.addWidget(self.cb_dil, 1, 1)
         
-        grid.addWidget(QLabel("Saat Dilimi / Zaman:"), 2, 0)
+        lbl_tz = QLabel("Saat Dilimi / Zaman:")
+        lbl_tz.setStyleSheet("font-weight: 600; color: #334155;")
+        grid.addWidget(lbl_tz, 2, 0)
         self.cb_saat_dilimi = QComboBox()
         self.cb_saat_dilimi.addItems(["GMT+3 (İstanbul, Ankara)", "GMT+2 (Berlin, Paris)", "GMT+0 (Londra)", "GMT+4 (Bakü)"])
         grid.addWidget(self.cb_saat_dilimi, 2, 1)
         
-        sec.addLayout(grid)
-        sec.addStretch()
-        layout.addLayout(sec)
+        card_layout.addLayout(grid, 1)
+        layout.addWidget(card)
         layout.addStretch()
 
     def _build_program_tab(self):
         layout = QVBoxLayout(self.tab_program)
-        layout.setContentsMargins(25, 25, 25, 25)
-        layout.setSpacing(15)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(14)
         
-        lbl_info = QLabel("<b>Çizelge Programlama Modeli</b><br>Kurumunuz için geçerli olan haftalık dağılım türünü belirleyin.")
+        card = QFrame()
+        card.setProperty("class", "card_frame")
+        card_layout = QHBoxLayout(card)
+        card_layout.setContentsMargins(16, 16, 16, 16)
+        card_layout.setSpacing(16)
+        
+        icon = QLabel()
+        icon.setPixmap(make_school_vector_badge("document", 38))
+        icon.setStyleSheet("background: transparent; border: none;")
+        card_layout.addWidget(icon, 0, Qt.AlignTop)
+        
+        vbox = QVBoxLayout()
+        vbox.setSpacing(10)
+        
+        lbl_info = QLabel("<b>Çizelge Programlama Modeli</b><br>Kurumunuz için geçerli olan haftalık ders dağılım sistemini belirleyin.")
         lbl_info.setStyleSheet("color: #334155; font-size: 13px;")
-        layout.addWidget(lbl_info)
+        vbox.addWidget(lbl_info)
         
         self.radio_prog_standart = QRadioButton("Standart Tek Haftalık Çizelge (Haftalık Ders Dağılımı - Önerilen)")
         self.radio_prog_ab = QRadioButton("2 Haftalık Dönüşümlü Çizelge (A Haftası / B Haftası Çift Sistem)")
@@ -351,203 +564,164 @@ class SchoolInfoDialog(QDialog):
         prog_grp.addButton(self.radio_prog_ab)
         prog_grp.addButton(self.radio_prog_donem)
         
-        layout.addWidget(self.radio_prog_standart)
-        layout.addWidget(self.radio_prog_ab)
-        layout.addWidget(self.radio_prog_donem)
+        vbox.addWidget(self.radio_prog_standart)
+        vbox.addWidget(self.radio_prog_ab)
+        vbox.addWidget(self.radio_prog_donem)
+        
+        card_layout.addLayout(vbox, 1)
+        layout.addWidget(card)
         layout.addStretch()
-
+        
     def _open_zil_dialog(self):
+        try:
+            cnt = int(self.cb_ders_saati.currentText())
+        except Exception:
+            cnt = 8
         from dialogs.bell_times_dialog import BellAndBreakTimesDialog
-        cur_periods = int(self.cb_ders_saati.currentText())
-        dlg = BellAndBreakTimesDialog(self.data_store, periods=cur_periods, parent=self)
-        if dlg.exec():
-            win = self.window()
-            if hasattr(win, "save_db"):
-                win.save_db(sync_from_grid=False)
-
+        dlg = BellAndBreakTimesDialog(data_store=self.data_store, periods=cnt, parent=self)
+        dlg.exec()
+        
     def _open_gunler_dialog(self):
+        try:
+            cnt = int(self.cb_gun_sayisi.currentText())
+        except Exception:
+            cnt = 5
         from dialogs.days_dialog import DaysAndHolidaysDialog
-        dlg = DaysAndHolidaysDialog(self.data_store, parent=self)
+        dlg = DaysAndHolidaysDialog(data_store=self.data_store, days_count=cnt, parent=self)
         if dlg.exec():
-            sel_days = dlg.get_selected_days()
-            day_cnt = str(len(sel_days))
-            idx_d = self.cb_gun_sayisi.findText(day_cnt)
-            if idx_d >= 0:
-                self.cb_gun_sayisi.setCurrentIndex(idx_d)
-            weekend = self.data_store.get("settings", {}).get("weekend", "Cumartesi - Pazar")
-            idx_w = self.cb_hafta_sonu.findText(weekend)
-            if idx_w >= 0:
-                self.cb_hafta_sonu.setCurrentIndex(idx_w)
+            # Update days count combo if modified in days dialog
+            settings = self.data_store.get("settings", {})
+            d_list = settings.get("active_days_list", [])
+            if d_list:
+                active_c = len([d for d in d_list if d.get("active", True)])
+                if 1 <= active_c <= 7:
+                    self.cb_gun_sayisi.blockSignals(True)
+                    self.cb_gun_sayisi.setCurrentText(str(active_c))
+                    self.cb_gun_sayisi.blockSignals(False)
 
     def _load_data(self):
-        if not self.data_store: return
         settings = self.data_store.get("settings", {})
-        kurum = self.data_store.get("kurum", {})
         
-        # 1. Okul / Kurum Adı
-        school_name = settings.get("school_name") or kurum.get("isim") or self.data_store.get("okul_adi", "") or self.data_store.get("kurum_adi", "")
-        if school_name:
-            self.txt_kurum_adi.setText(str(school_name))
+        name = self.data_store.get("okul_adi") or settings.get("school_name", "")
+        if name:
+            self.txt_okul_adi.setText(name)
+        elif self.data_store.get("school_name"):
+            self.txt_okul_adi.setText(self.data_store["school_name"])
             
-        # 2. Başlangıç Tarihi
-        start_date = settings.get("start_date") or settings.get("baslangic") or kurum.get("baslangic") or "12/09/2026"
-        self.txt_baslangic.setText(str(start_date))
+        y = settings.get("academic_year", "2025-2026")
+        idx = self.cb_egitim_yili.findText(y)
+        if idx >= 0: self.cb_egitim_yili.setCurrentIndex(idx)
         
-        # 3. Öğretim Yılı & Tebliğ
-        acad_year = settings.get("academic_year") or settings.get("ogretim_yili") or kurum.get("yil") or "2026 - 2027"
-        self.txt_yil.setText(str(acad_year))
+        ds = str(self.data_store.get("ders_saati") or settings.get("periods_per_day", 8))
+        idx_ds = self.cb_ders_saati.findText(ds)
+        if idx_ds >= 0: self.cb_ders_saati.setCurrentIndex(idx_ds)
         
-        teblig = settings.get("bulletin_no") or settings.get("teblig") or kurum.get("teblig") or ""
-        self.txt_teblig.setText(str(teblig))
+        gs = str(self.data_store.get("gun_sayisi") or settings.get("days_count", 5))
+        idx_gs = self.cb_gun_sayisi.findText(gs)
+        if idx_gs >= 0: self.cb_gun_sayisi.setCurrentIndex(idx_gs)
         
-        # 4. Yetkili Ad & Unvan
-        principal = settings.get("principal") or kurum.get("yetkili", "") or "Ali ÇEKEN"
-        self.txt_yetkili_ad.setText(str(principal))
+        hs = settings.get("weekend_option", "Cumartesi - Pazar")
+        idx_hs = self.cb_hafta_sonu.findText(hs)
+        if idx_hs >= 0: self.cb_hafta_sonu.setCurrentIndex(idx_hs)
         
-        principal_title = settings.get("principal_title") or kurum.get("yetkili_unvan", "") or "Okul Müdürü"
-        self.txt_yetkili_unvan.setText(str(principal_title))
-        
-        # 5. Ders Saati
-        periods = str(settings.get("periods") or self.data_store.get("ders_saati", 8))
-        idx_p = self.cb_ders_saati.findText(periods)
-        if idx_p >= 0:
-            self.cb_ders_saati.setCurrentIndex(idx_p)
+        m = settings.get("mevzuat_tipi", "")
+        if m:
+            idx_m = self.cb_mevzuat.findText(m)
+            if idx_m >= 0: self.cb_mevzuat.setCurrentIndex(idx_m)
             
-        # 6. Gün Sayısı
-        day_count = str(settings.get("day_count") or settings.get("days_count") or self.data_store.get("gun_sayisi", 5))
-        idx_d = self.cb_gun_sayisi.findText(day_count)
-        if idx_d >= 0:
-            self.cb_gun_sayisi.setCurrentIndex(idx_d)
-            
-        # 7. Hafta Sonu
-        weekend = settings.get("weekend") or self.data_store.get("hafta_sonu", "Cumartesi - Pazar")
-        idx_w = self.cb_hafta_sonu.findText(weekend)
-        if idx_w >= 0:
-            self.cb_hafta_sonu.setCurrentIndex(idx_w)
-            
-        # 8. Çok Dönemli
-        multi_term = bool(settings.get("multi_term") or settings.get("cok_donem", False))
-        self.chk_cok_donem.setChecked(multi_term)
+        t = settings.get("teblig_bilgisi", "")
+        if t: self.txt_teblig.setText(t)
         
-        # 9. Okul / Fakülte Türü
-        s_type = settings.get("school_type") or self.data_store.get("kurum_turu", "okul")
-        if s_type == "fakulte":
+        ya = settings.get("yetkili_ad", "")
+        if ya: self.txt_yetkili_ad.setText(ya)
+        
+        yu = settings.get("yetkili_unvan", "")
+        if yu: self.txt_yetkili_unvan.setText(yu)
+        
+        kt = settings.get("kurum_tipi", "okul")
+        if kt == "fakulte":
             self.radio_fakulte.setChecked(True)
         else:
             self.radio_okul.setChecked(True)
+            
+        self.chk_cok_donem.setChecked(settings.get("multi_term", False))
+        
+        pm = settings.get("program_modeli", "standart")
+        if pm == "ab_haftalik":
+            self.radio_prog_ab.setChecked(True)
+        elif pm == "donemlik":
+            self.radio_prog_donem.setChecked(True)
+        else:
+            self.radio_prog_standart.setChecked(True)
 
-    def _save_and_accept(self):
-        if self.data_store is not None:
-            settings = self.data_store.setdefault("settings", {})
-            kurum = self.data_store.setdefault("kurum", {})
+    def _on_save(self):
+        name = self.txt_okul_adi.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Uyarı", "Lütfen okul veya kurum adını boş bırakmayınız.")
+            return
             
-            sch_name = self.txt_kurum_adi.text().strip() or "BGZ Eğitim Kurumları"
-            start_date = self.txt_baslangic.text().strip() or "12/09/2026"
-            acad_year = self.txt_yil.text().strip() or "2026 - 2027"
-            teblig = self.txt_teblig.text().strip()
-            princ = self.txt_yetkili_ad.text().strip() or "Ali ÇEKEN"
-            princ_title = self.txt_yetkili_unvan.text().strip() or "Okul Müdürü"
+        try:
+            p_count = int(self.cb_ders_saati.currentText())
+        except Exception:
+            p_count = 8
             
-            try:
-                periods = int(self.cb_ders_saati.currentText())
-            except Exception:
-                periods = 8
-                
-            try:
-                day_cnt = int(self.cb_gun_sayisi.currentText())
-            except Exception:
-                day_cnt = 5
-                
-            weekend = self.cb_hafta_sonu.currentText()
-            multi_term = self.chk_cok_donem.isChecked()
-            school_type = "fakulte" if self.radio_fakulte.isChecked() else "okul"
+        try:
+            d_count = int(self.cb_gun_sayisi.currentText())
+        except Exception:
+            d_count = 5
             
-            # Root keys update
-            self.data_store["okul_adi"] = sch_name
-            self.data_store["kurum_adi"] = sch_name
-            self.data_store["ders_saati"] = periods
-            self.data_store["gun_sayisi"] = day_cnt
-            self.data_store["hafta_sonu"] = weekend
-            self.data_store["kurum_turu"] = school_type
+        self.data_store["okul_adi"] = name
+        self.data_store["ders_saati"] = p_count
+        self.data_store["gun_sayisi"] = d_count
+        
+        settings = self.data_store.setdefault("settings", {})
+        settings["school_name"] = name
+        settings["academic_year"] = self.cb_egitim_yili.currentText()
+        settings["periods"] = p_count
+        settings["periods_per_day"] = p_count
+        settings["days_count"] = d_count
+        settings["day_count"] = d_count
+        settings["weekend_option"] = self.cb_hafta_sonu.currentText()
+        settings["mevzuat_tipi"] = self.cb_mevzuat.currentText()
+        settings["teblig_bilgisi"] = self.txt_teblig.text().strip()
+        settings["yetkili_ad"] = self.txt_yetkili_ad.text().strip()
+        settings["yetkili_unvan"] = self.txt_yetkili_unvan.text().strip()
+        settings["kurum_tipi"] = "fakulte" if self.radio_fakulte.isChecked() else "okul"
+        settings["multi_term"] = self.chk_cok_donem.isChecked()
+        
+        from timetable_grid import DAYS
+        # Sync active_days_list and days
+        active_list = settings.get("active_days_list", [])
+        if active_list and len(active_list) == 7 and sum(1 for d in active_list if d.get("active", True)) == d_count:
+            days_names = [d["name"] for d in active_list if d.get("active", True)]
+        else:
+            days_names = DAYS[:d_count]
+            settings["active_days_list"] = [{"day_index": i, "name": d, "active": (i < d_count)} for i, d in enumerate(DAYS)]
+        settings["days"] = days_names
+        
+        if self.radio_prog_ab.isChecked():
+            settings["program_modeli"] = "ab_haftalik"
+        elif self.radio_prog_donem.isChecked():
+            settings["program_modeli"] = "donemlik"
+        else:
+            settings["program_modeli"] = "standart"
             
-            # Kurum dict update
-            kurum["isim"] = sch_name
-            kurum["yetkili"] = princ
-            kurum["yetkili_unvan"] = princ_title
-            kurum["baslangic"] = start_date
-            kurum["yil"] = acad_year
-            kurum["teblig"] = teblig
+        # Direct and Reliable Real-Time Persistence (SQLite + JSON Version + VDS Cloud + UI Grid)
+        win = self.window()
+        main_win = None
+        curr = self
+        while curr:
+            if hasattr(curr, "save_db") and hasattr(curr, "_refresh_grid"):
+                main_win = curr
+                break
+            curr = curr.parent() if hasattr(curr, "parent") else None
             
-            # Settings dict update
-            settings["school_name"] = sch_name
-            settings["start_date"] = start_date
-            settings["academic_year"] = acad_year
-            settings["bulletin_no"] = teblig
-            settings["principal"] = princ
-            settings["principal_title"] = princ_title
-            settings["periods"] = periods
-            settings["day_count"] = day_cnt
-            settings["days_count"] = day_cnt
-            settings["weekend"] = weekend
-            settings["multi_term"] = multi_term
-            settings["school_type"] = school_type
+        if main_win:
+            main_win.save_db(sync_from_grid=False)
+            main_win._refresh_grid()
+            main_win._refresh_tree()
+        else:
+            from database import sync_data_store_to_vds
+            sync_data_store_to_vds(self.data_store)
             
-            all_days = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
-            active_days = all_days[:day_cnt]
-            settings["days"] = active_days
-            settings["days_list"] = active_days
-            
-            # Locate MainWindow
-            win = self.window()
-            if not win or not hasattr(win, "_grid"):
-                p = self.parent()
-                while p:
-                    if hasattr(p, "_grid"):
-                        win = p
-                        break
-                    p = p.parent()
-                    
-            if win:
-                if hasattr(win, "_grid"):
-                    win._grid.set_periods(periods)
-                    
-                slug = getattr(win, "institution_slug", None)
-                ver_fn = getattr(win, "version_filename", None)
-                if slug:
-                    try:
-                        import version_store
-                        version_store.rename_institution(slug, sch_name)
-                        if ver_fn:
-                            version_store.update_version_in_place(slug, ver_fn, self.data_store)
-                    except Exception as e:
-                        print("Error updating version_store from school_info:", e)
-                        
-                try:
-                    v_num = ""
-                    if ver_fn:
-                        m = re.match(r"v(\d+)_", ver_fn)
-                        if m: v_num = f"v{int(m.group(1))}"
-                    title_suffix = f" — {v_num}" if v_num else ""
-                    win.setWindowTitle(f"BGZ Ders Planlama — {sch_name}{title_suffix}")
-                except Exception:
-                    pass
-                    
-                if hasattr(win, "save_db"):
-                    win.save_db(sync_from_grid=False)
-                    
-                if hasattr(win, "_refresh_grid"): win._refresh_grid()
-                if hasattr(win, "_refresh_tree"): win._refresh_tree()
-                if hasattr(win, "_refresh_unplaced_lessons"): win._refresh_unplaced_lessons()
-                
         self.accept()
-
-    def get_data(self):
-        return {
-            "okul_adi": self.txt_kurum_adi.text().strip(),
-            "yil": self.txt_yil.text().strip() or "2026 - 2027",
-            "gun_sayisi": int(self.cb_gun_sayisi.currentText()),
-            "ders_saati": int(self.cb_ders_saati.currentText()),
-            "baslangic": self.txt_baslangic.text().strip(),
-            "yetkili": self.txt_yetkili_ad.text().strip(),
-            "yetkili_unvan": self.txt_yetkili_unvan.text().strip()
-        }

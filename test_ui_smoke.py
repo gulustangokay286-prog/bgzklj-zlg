@@ -208,7 +208,26 @@ def run():
 
     AppleVersionRow._update_style = counting
     try:
+        # Flush pending deleteLater()s first. _refresh_versions rebuilds the list by
+        # calling deleteLater() on the old rows, and Qt only destroys those when the
+        # event loop next processes deferred deletions — until then findChildren()
+        # still returns them. Counting restyles without flushing measures widgets
+        # that are already on their way out, not the cost of a selection.
+        from PySide6.QtCore import QEvent
+        app.processEvents()
+        app.sendPostedEvents(None, QEvent.DeferredDelete)
+        app.processEvents()
+
         rows = dash.findChildren(AppleVersionRow)
+        # Start from a clean slate: earlier steps in this file selected a version, and
+        # a row that is already selected has to be deselected here too — correct
+        # behaviour, but it would make the count below reflect the previous test's
+        # state rather than one selection.
+        dash._selected_version = None
+        for r in rows:
+            r.set_selected(False)
+        restyles["n"] = 0
+
         dash._on_version_selected(rows[0].filename)
         app.processEvents()
         first = restyles["n"]

@@ -1,8 +1,14 @@
+import math
+import os
 import random
 import time
 import re
 import uuid as _uuid
 from collections import defaultdict
+
+import lesson_hours
+
+_FILL_DEBUG = bool(os.environ.get("CHENKI_FILL_DEBUG"))
 from PySide6.QtCore import QThread, Signal
 
 def normalize_class_name(cls_name: str) -> str:
@@ -259,6 +265,245 @@ def _match_slot(open_classes, slot, grids, leftover_blocks, teacher_busy,
     return {
         cn: (blk, subject, display)
         for cn, blk, subject, display in teacher_to_class.values()
+    }
+
+
+def repair_conflicts(grids, teacher_timeoff, cross_inst_map, D, P, rounds=400):
+    """Settles a fully-filled grid into the best arrangement it allows.
+
+    Used after "fill everything first, sort it out afterwards": the grid arrives
+    complete but with the same teacher booked in several classes at the same hour.
+    Every open cell is already taken, so nothing can simply move to an empty slot —
+    the only legal move is to SWAP two lessons inside one class, which keeps that
+    class full while changing which hour each teacher is needed at.
+
+    A swap is applied only when it strictly reduces the total number of clashing
+    teacher-hours, so the grid can never get worse than it started. This is the
+    min-conflicts heuristic; it reaches arrangements that placing lessons one at a
+    time cannot, because it can move a lesson that was placed correctly earlier.
+
+    Some clashes are arithmetic rather than bad luck — a teacher owed more hours than
+    the timetable has slots for them can never be untangled — so this stops when no
+    improving swap is left rather than pretending it can always reach zero.
+
+    Returns (remaining_clash_hours, swaps_applied).
+    """
+    def teacher_at(cn, slot):
+        cell = grids[cn][slot[0]][slot[1]]
+        if cell is None or cell.get("is_blocked"):
+            return ""
+        return norm_teacher(cell.get("teacher", ""))
+
+    # (teacher, slot) -> how many classes want them then
+    load = defaultdict(int)
+    for cn in grids:
+        for d in range(D):
+            for p in range(P):
+                tk = teacher_at(cn, (d, p))
+                if tk:
+                    load[(tk, (d, p))] += 1
+
+    def clash_hours():
+        return sum(v - 1 for v in load.values() if v > 1)
+
+    def blocked(tk, slot):
+        return slot in teacher_timeoff.get(tk, ()) or (
+            tk in cross_inst_map and slot in cross_inst_map[tk])
+
+    swaps = 0
+    for _round in range(rounds):
+        # Work on an hour that is actually contended.
+        hot = [(tk, s) for (tk, s), n in load.items() if n > 1]
+        if not hot:
+            break
+        random.shuffle(hot)
+
+        improved = False
+        for tk, slot in hot:
+            holders = [cn for cn in grids if teacher_at(cn, slot) == tk]
+            random.shuffle(holders)
+            for cn in holders:
+                grid = grids[cn]
+                targets = [(d, p) for d in range(D) for p in range(P)
+                           if (d, p) != slot and grid[d][p] is not None
+                           and not grid[d][p].get("is_blocked")]
+                random.shuffle(targets)
+
+                for other in targets:
+                    other_tk = teacher_at(cn, other)
+                    if not other_tk or other_tk == tk:
+                        continue
+                    # Neither teacher may land on an hour they are closed for.
+                    if blocked(tk, other) or blocked(other_tk, slot):
+                        continue
+
+                    before = (max(0, load[(tk, slot)] - 1)
+                              + max(0, load[(other_tk, other)] - 1)
+                              + max(0, load[(tk, other)] - 1)
+                              + max(0, load[(other_tk, slot)] - 1))
+                    after = (max(0, load[(tk, slot)] - 2)
+                             + max(0, load[(other_tk, other)] - 2)
+                             + max(0, load[(tk, other)])
+                             + max(0, load[(other_tk, slot)]))
+                    if after >= before:
+                        continue
+
+                    grid[slot[0]][slot[1]], grid[other[0]][other[1]] = (
+                        grid[other[0]][other[1]], grid[slot[0]][slot[1]])
+                    load[(tk, slot)] -= 1
+                    load[(other_tk, other)] -= 1
+                    load[(tk, other)] += 1
+                    load[(other_tk, slot)] += 1
+                    swaps += 1
+                    improved = True
+                    break
+                if improved:
+                    break
+            if improved:
+                break
+
+        if not improved:
+            break  # no swap improves anything — this is as settled as it gets
+
+    return clash_hours(), swaps
+
+
+class _AlwaysFreeTeachers(dict):
+    """Stand-in for the teacher-busy map that reports every teacher as free.
+
+    Used only by "Sınıfları Bağımsız Doldur". Returning a NEW empty set on every read
+    means the placement passes see no clash, and the `.add(...)` they perform on the
+    returned set simply goes nowhere — so the mode needs no special cases anywhere
+    else in the scheduler.
+    """
+
+    def __getitem__(self, key):
+        return set()
+
+    def get(self, key, default=None):
+        return set()
+
+    def __contains__(self, key):
+        return False
+
+
+def check_feasibility(data_store, institution_slug=None):
+    """Says whether a full timetable is possible BEFORE spending time building one.
+
+    This is the step the app was missing. It would run, produce a grid with holes,
+    and leave the user guessing whether the scheduler had failed or the schedule was
+    impossible — two very different problems with very different fixes. Professional
+    timetabling tools check first and refuse to start on input that cannot work.
+
+    Three independent limits are tested, each of which caps the result on its own:
+
+      1. Demand vs cells   — more lesson-hours assigned than the open grid can hold.
+      2. Cover per hour    — every open hour needs one teacher per open class; if
+                             fewer are available then, those cells cannot be filled.
+      3. Load per teacher  — a teacher can be in one class at a time, so their hours
+                             cannot exceed the hours they are actually available.
+
+    Returns a dict with a 'max_fillable' figure and the specific problems behind it.
+    """
+    settings = data_store.get("settings", {}) or {}
+    days = settings.get("days")
+    if not days:
+        count = int(settings.get("day_count", data_store.get("gun_sayisi", 5)))
+        days = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"][:count]
+    D = len(days)
+    P = int(settings.get("periods", data_store.get("ders_saati", 8))) or 8
+
+    blocked_by_class, _ = _build_class_timeoff_map(data_store)
+    teacher_timeoff, _ = _build_teacher_timeoff_map(data_store, institution_slug)
+
+    classes = [(c.get("ad") or c.get("name") or "").strip()
+               for c in data_store.get("siniflar", []) or [] if isinstance(c, dict)]
+    classes = [c for c in classes if c]
+
+    open_by_class = {}
+    for cn in classes:
+        shut = blocked_by_class.get(cn, set())
+        open_by_class[cn] = {(d, p) for d in range(D) for p in range(P) if (d, p) not in shut}
+
+    total_cells = sum(len(v) for v in open_by_class.values())
+
+    load = defaultdict(int)
+    display = {}
+    for a in data_store.get("atamalar", []) or []:
+        if not isinstance(a, dict):
+            continue
+        name = format_tr_name(a.get("teacher") or a.get("ogretmen") or a.get("teacher_name") or "")
+        tk = norm_teacher(name)
+        if not tk:
+            continue
+        display.setdefault(tk, name)
+        raw_type = str(a.get("type") or a.get("dagilim") or "").strip()
+        hours = sum(parse_distribution_parts(
+            raw_type, lesson_hours.hours(a) or 2))
+        raw_c = (a.get("class") or a.get("sinif") or a.get("class_name") or "").strip()
+        for cn in classes:
+            if matches_class(raw_c, cn):
+                load[tk] += hours
+
+    total_demand = sum(load.values())
+
+    # 2 — cover per hour
+    understaffed = []
+    cover_gap = 0
+    for d in range(D):
+        for p in range(P):
+            slot = (d, p)
+            need = sum(1 for cn in classes if slot in open_by_class[cn])
+            if not need:
+                continue
+            free = sum(1 for tk in load if slot not in teacher_timeoff.get(tk, ()))
+            if free < need:
+                cover_gap += need - free
+                understaffed.append({
+                    "day": d, "period": p, "needed": need, "available": free,
+                    "shortfall": need - free,
+                })
+    understaffed.sort(key=lambda x: -x["shortfall"])
+
+    # 3 — load per teacher
+    overloaded = []
+    load_gap = 0
+    for tk, assigned in load.items():
+        usable = {s for s in set().union(*open_by_class.values()) if open_by_class} if classes else set()
+        usable = {s for s in usable if s not in teacher_timeoff.get(tk, ())}
+        cap = len(usable)
+        if assigned > cap:
+            load_gap += assigned - cap
+            overloaded.append({
+                "teacher": display.get(tk, tk), "assigned": assigned,
+                "available": cap, "shortfall": assigned - cap,
+            })
+    overloaded.sort(key=lambda x: -x["shortfall"])
+
+    # The binding limit is whichever bites hardest; they are not additive.
+    max_fillable = min(total_cells, total_demand, total_demand - load_gap,
+                       total_cells - cover_gap)
+
+    idle = []
+    for t in data_store.get("ogretmenler", []) or []:
+        if not isinstance(t, dict):
+            continue
+        name = (t.get("ad") or t.get("name") or "").strip()
+        if name and norm_teacher(name) not in load:
+            idle.append(name)
+
+    return {
+        "ok": max_fillable >= min(total_cells, total_demand),
+        "classes": len(classes),
+        "open_hours_per_class": len(open_by_class[classes[0]]) if classes else 0,
+        "total_cells": total_cells,
+        "total_demand": total_demand,
+        "max_fillable": max_fillable,
+        "teachers_with_lessons": len(load),
+        "idle_teachers": idle,
+        "understaffed_slots": understaffed,
+        "overloaded_teachers": overloaded,
+        "days": days,
     }
 
 
@@ -531,13 +776,547 @@ def _build_cross_institution_map(institution_slug: str) -> tuple:
     return dict(occupied), details
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# TAM DOLDURMA
+#
+# Sezgisel geçişler bloğu tek tek ve geri dönüşsüz yerleştirir: bir sınıfa erken
+# verilen saat, sonradan sıkışan bir öğretmenin tek boş saati çıkar ve o dersin
+# yerleşecek yeri kalmaz. Grid 171/180'de takılır, oysa çizelge matematiksel
+# olarak tamamen doldurulabilir durumdadır.
+#
+# Aşağıdaki arama aynı işi geri izlemeli olarak yapar:
+#   1) her blok ÖNCE bir güne atanır — sınıfın o gün kaç açık saati, öğretmenin
+#      o gün kaç müsait saati varsa o kadar (tavlama benzetimi),
+#   2) sonra her gün kendi içinde çözülür: o günün blokları açık saatlere,
+#      2 saatlikler bitişik kalacak ve hiçbir öğretmen aynı saatte iki sınıfta
+#      olmayacak şekilde dizilir (tam geri izleme).
+# Bir gün çözülemezse gün dağıtımı yeniden denenir. Sonuç ya EKSİKSİZ bir
+# çizelgedir ya da None: yarım sonuç döndürülmez, çünkü sezgisel sonuç zaten
+# elde vardır ve bu arama yalnızca onu geçmek için çalışır.
+# ─────────────────────────────────────────────────────────────────────────────
+def _day_layouts(open_periods, blocks, tk_free, day, cap=600, rng=None,
+                 allow_gaps=False):
+    """Bir sınıfın bir gününe düşen blokların o günün açık saatlerine dizilişleri.
+
+    Her diziliş {saat: blok} sözlüğüdür. Bir blok ancak açık ve ardışık saatlere,
+    öğretmeni o saatlerde müsaitse konur.
+
+    allow_gaps=False (varsayılan): dersler günün BAŞINDAN itibaren sıkışık dizilir,
+    boş saatler yalnızca günün sonunda kalır. Bunun iki sebebi var:
+      * sınıf günün ortasında boş saat görmez, erken çıkar — istenen budur,
+      * arama uzayı küçülür. Sınıfa 5 saat açıp 4 saat ders atandığında, boş saati
+        günün herhangi bir yerine koymayı denemek dizilişleri katlıyordu; arama
+        düğüm bütçesini aşıp EKSİKSİZ çözümü hiç bulamıyor ve sezgisel sonuca
+        düşüyordu. "5. saati açtım, artık dolduramıyor" şikâyetinin sebebi buydu.
+    allow_gaps=True: sıkışık diziliş bir günü çözemezse ikinci deneme için açılır.
+    """
+    ops = sorted(open_periods)
+    out, assign = [], {}
+    order = list(blocks)
+    if rng:
+        rng.shuffle(order)
+    used = [False] * len(order)
+
+    def rec(i):
+        if len(out) >= cap:
+            return
+        if i == len(ops):
+            # Bir gün ancak O GÜNE düşen bütün blokları yerleştirebiliyorsa
+            # geçerlidir; yarım diziliş üretmek, aramanın eksik bir çizelgeyi
+            # "eksiksiz" sanmasına yol açardı.
+            if all(used):
+                out.append(dict(assign))
+            return
+        p = ops[i]
+        seen = set()
+        for j, b in enumerate(order):
+            if used[j]:
+                continue
+            sig = (b.get("subject"), b.get("teacher"), b.get("duration"))
+            if sig in seen:          # aynı görünümlü blokları tekrar denemeyelim
+                continue
+            seen.add(sig)
+            k = max(1, int(b.get("duration") or 1))
+            if i + k > len(ops) or any(ops[i + o] != p + o for o in range(k)):
+                continue             # bitişik açık saat yok
+            tk = norm_teacher(b.get("teacher") or "")
+            if tk and not all(tk_free(tk, day, p + o) for o in range(k)):
+                continue
+            used[j] = True
+            for o in range(k):
+                assign[p + o] = b
+            rec(i + k)
+            used[j] = False
+            for o in range(k):
+                assign.pop(p + o, None)
+        remaining = sum(max(1, int(b.get("duration") or 1))
+                        for j, b in enumerate(order) if not used[j])
+        if remaining == 0 or (allow_gaps and remaining < len(ops) - i):
+            # remaining == 0: bütün bloklar yerleşti, günün kalanı boş kalabilir.
+            rec(i + 1)
+
+    rec(0)
+    if rng:
+        rng.shuffle(out)
+    return out
+
+
+def _solve_one_day(day_layouts, base_busy_day, rng, budget=200000):
+    """Bir günün bütün sınıflarına birer diziliş seçer; öğretmen çakışması olmaz."""
+    classes = sorted(day_layouts, key=lambda c: len(day_layouts[c]))
+    busy = {p: set(v) for p, v in base_busy_day.items()}
+    chosen, nodes = {}, [0]
+
+    def rec(i):
+        if i == len(classes):
+            return True
+        if nodes[0] > budget:
+            return False
+        cn = classes[i]
+        for lay in day_layouts[cn]:
+            nodes[0] += 1
+            keys = [(p, norm_teacher(b.get("teacher") or ""))
+                    for p, b in lay.items()]
+            if any(tk and tk in busy.setdefault(p, set()) for p, tk in keys):
+                continue
+            for p, tk in keys:
+                if tk:
+                    busy[p].add(tk)
+            chosen[cn] = lay
+            if rec(i + 1):
+                return True
+            for p, tk in keys:
+                if tk:
+                    busy[p].discard(tk)
+            chosen.pop(cn, None)
+        return False
+
+    return chosen if rec(0) else None
+
+
+def exact_fill(classes, class_blocks, blocked_by_class, teacher_timeoff,
+               cross_inst_map, base_busy, D, P, time_budget=25.0, seed=None):
+    """Bütün atanmış saatleri yerleştiren eksiksiz bir çizelge arar.
+
+    Bulursa yerleşim listesi, bulamazsa None döner.
+    """
+    empty = frozenset()
+    rng = random.Random(seed if seed is not None else 12345)
+    deadline = time.time() + max(1.0, float(time_budget))
+
+    blocks = []
+    for cn in classes:
+        for b in class_blocks.get(cn, []):
+            if b.get("is_combined"):
+                # Birleşik (eş zamanlı) dersler bu aramanın modelinde yok:
+                # aynı bloğun iki sınıfta aynı saate düşmesi gerekir. Sezgisel
+                # sonucu bozmamak için baştan çekiliyoruz.
+                return None
+            blocks.append({"cls": cn, "blk": b,
+                           "size": max(1, int(b.get("duration") or 1)),
+                           "tk": norm_teacher(b.get("teacher") or ""),
+                           "day": 0})
+    if not blocks:
+        return None
+
+    def tk_free(tk, d, p):
+        return ((d, p) not in teacher_timeoff.get(tk, empty)
+                and (d, p) not in cross_inst_map.get(tk, empty)
+                and (d, p) not in base_busy.get(tk, empty))
+
+    open_by_day = {}
+    for cn in classes:
+        closed = blocked_by_class.get(cn, set())
+        open_by_day[cn] = {d: [p for p in range(P) if (d, p) not in closed]
+                           for d in range(D)}
+    # Bir öğretmenin bir günde verebileceği azami ders saati, kendi müsait
+    # saatleriyle DEĞİL, o gün derse girdiği sınıfların açık saatleriyle sınırlıdır:
+    # sınıf 4 saat açıkken öğretmenin 8 saat müsait olması bir şey değiştirmez.
+    teacher_classes = defaultdict(set)
+    for b in blocks:
+        if b["tk"]:
+            teacher_classes[b["tk"]].add(b["cls"])
+    tcap = {}
+    for tk, cls_set in teacher_classes.items():
+        per_day = {}
+        for d in range(D):
+            usable = set()
+            for cn in cls_set:
+                usable.update(open_by_day[cn][d])
+            per_day[d] = sum(1 for p in usable if tk_free(tk, d, p))
+        tcap[tk] = per_day
+
+    by_class = defaultdict(list)
+    for b in blocks:
+        by_class[b["cls"]].append(b)
+
+    # Aritmetik olarak imkânsız kurulumda hiç aramaya girmeyelim: bir sınıfa açık
+    # saatinden çok ders, bir öğretmene müsait saatinden çok ders atanmışsa
+    # EKSİKSİZ bir çizelge yoktur; sezgisel sonuç neyse odur.
+    for cn, blks in by_class.items():
+        if sum(b["size"] for b in blks) > sum(len(v) for v in open_by_day[cn].values()):
+            return None
+    t_hours = defaultdict(int)
+    for b in blocks:
+        if b["tk"]:
+            t_hours[b["tk"]] += b["size"]
+    for tk, hours in t_hours.items():
+        if hours > sum(tcap.get(tk, {}).get(d, 0) for d in range(D)):
+            return None
+
+    # ── SAAT PENCERESİ ────────────────────────────────────────────────────
+    #
+    # Bir sınıfa haftada 20 saat ders varsa ve 5 gün açıksa, günlük payı 4'tür.
+    # Sınıfın 5. saatini açmak bu payı değiştirmez — koyacak 21. ders yoktur.
+    # Ama açık bırakılan o fazladan saat aramayı bozuyordu: YALNIZ o sınıfın açık
+    # olduğu bir saate ancak o sınıfın dersi konabilir; gün dağıtımı ise bir
+    # öğretmene o gün 5 saat verebiliyor ve beşinci saat zorunlu olarak o tek
+    # hücreye düşmek zorunda kalıyordu. Gün çözülemiyor, EKSİKSİZ çözüm hiç
+    # bulunamıyor, çizelge sezgisel sonuca — yani boşluklara — düşüyordu.
+    # "5. saati açtım, artık dolduramıyor" tam olarak buydu.
+    #
+    # Çözüm: her sınıf için günün İLK payı kadar saati pencere kabul edilir.
+    # Dersler günün başından sıkışık dizilir, fazladan açık saatler günün sonunda
+    # boş kalır — okulun zaten istediği şey budur. Pencere bir çözüm bulmayı
+    # engellerse (öğretmen ancak öğleden sonra müsaitse) sonraki denemelerde
+    # pencere kaldırılıp bütün açık saatler kullanılır.
+    window_by_day = {}
+    for cn in classes:
+        need = sum(b["size"] for b in by_class.get(cn, []))
+        share = max(1, -(-need // D)) if D else need
+        window_by_day[cn] = {d: open_by_day[cn][d][:max(share, 1)] for d in range(D)}
+
+    def build_tcap(win):
+        out = {}
+        for tk2, cls_set in teacher_classes.items():
+            per_day2 = {}
+            for d in range(D):
+                usable = set()
+                for cn2 in cls_set:
+                    usable.update(win[cn2][d])
+                per_day2[d] = sum(1 for p in usable if tk_free(tk2, d, p))
+            out[tk2] = per_day2
+        return out
+
+    tcap_win = build_tcap(window_by_day)
+    tcap_full = tcap
+
+    active = {"win": window_by_day, "tcap": tcap_win}
+
+    def hard_cost(cload, tload):
+        h = 0
+        win, tc = active["win"], active["tcap"]
+        for (cn, d), v in cload.items():
+            h += max(0, v - len(win[cn][d]))
+        for (tk, d), v in tload.items():
+            h += max(0, v - tc.get(tk, {}).get(d, P))
+        return h
+
+
+
+    for attempt in range(60):
+        if time.time() > deadline:
+            break
+        # İlk yarıda sıkışık pencere, sonra bütün açık saatler.
+        if attempt < 30:
+            active["win"], active["tcap"] = window_by_day, tcap_win
+        else:
+            active["win"], active["tcap"] = open_by_day, tcap_full
+        win = active["win"]
+
+        # ── 1) blokları günlere dağıt ────────────────────────────────
+        #
+        # Günlük yük, açık saat sayısına değil DENGELİ PAYA göre sınırlanır.
+        # Sınıfa haftada 20 saat ders var ve 5 gün açıksa günlük pay 4'tür;
+        # sınıfın 5. saati açık olsa bile bir güne 5 saat yığmanın anlamı yok.
+        #
+        # Bunun ikinci ve asıl sebebi teknik: sınıfların açık saatleri farklı
+        # olduğunda (biri 5, diğerleri 4 saat) yalnız o tek sınıfın açık olduğu
+        # saate ancak o sınıfın dersi konabilir. Bir öğretmene o gün 5 saat
+        # düşerse, beşincisi zorunlu olarak o hücreye denk gelmek zorundadır —
+        # gün çoğu zaman çözülemez hale gelir. Dengeli pay bu tuzağı baştan
+        # kurutur; sığmadığı durumda aşağıdaki gevşetme devreye girer.
+        for cn, blks in by_class.items():
+            cap = {d: len(win[cn][d]) for d in range(D)}
+            for b in sorted(blks, key=lambda x: (-x["size"], rng.random())):
+                days = [d for d in range(D) if cap[d] >= b["size"]] or list(range(D))
+                rng.shuffle(days)
+                days.sort(key=lambda d: -cap[d])
+                b["day"] = days[0]
+                cap[b["day"]] -= b["size"]
+
+        cload, tload, sday = defaultdict(int), defaultdict(int), defaultdict(int)
+        for b in blocks:
+            cload[(b["cls"], b["day"])] += b["size"]
+            if b["tk"]:
+                tload[(b["tk"], b["day"])] += b["size"]
+            sday[(b["cls"], b["day"], b["blk"].get("subject"))] += 1
+        hard = hard_cost(cload, tload)
+        soft = sum(v - 1 for v in sday.values() if v > 1)
+
+        # Tavlama yokuş yukarı hamleyi de kabul eder, dolayısıyla BİTTİĞİ yer en
+        # iyi bulduğu yer olmayabilir. En iyi gün dağıtımı ayrıca saklanır ve
+        # sonunda ona dönülür; yoksa hard=0'a bir kez düşmüş bir deneme, sırf
+        # yumuşak maliyeti kovalarken bozulup çöpe gidiyordu.
+        best_state = (hard, soft, [b["day"] for b in blocks])
+        rounds = 30000
+        for it in range(rounds):
+            if hard == 0 and soft == 0:
+                break
+            if (it & 1023) == 0 and time.time() > deadline:
+                break
+            b = rng.choice(blocks)
+            d1 = b["day"]
+            d2 = rng.randrange(D)
+            if d1 == d2:
+                continue
+            cn, tk, k = b["cls"], b["tk"], b["size"]
+            subj = b["blk"].get("subject")
+
+            def over(v, cap_):
+                return max(0, v - cap_)
+
+            ccap1, ccap2 = len(win[cn][d1]), len(win[cn][d2])
+            dh = (over(cload[(cn, d1)] - k, ccap1) - over(cload[(cn, d1)], ccap1)
+                  + over(cload[(cn, d2)] + k, ccap2) - over(cload[(cn, d2)], ccap2))
+            if tk:
+                t1 = active["tcap"].get(tk, {}).get(d1, P)
+                t2 = active["tcap"].get(tk, {}).get(d2, P)
+                dh += (over(tload[(tk, d1)] - k, t1) - over(tload[(tk, d1)], t1)
+                       + over(tload[(tk, d2)] + k, t2) - over(tload[(tk, d2)], t2))
+            # Aynı dersin bir sınıfa aynı gün iki kez düşmesi: taşımanın bu
+            # sayaca etkisi (her gün için max(0, adet-1) toplanır).
+            s1, s2 = sday[(cn, d1, subj)], sday[(cn, d2, subj)]
+            ds = (max(0, s1 - 2) - max(0, s1 - 1)
+                  + max(0, s2) - max(0, s2 - 1))
+
+            temp = max(0.05, 3.0 * (1.0 - it / rounds))
+            delta = dh * 50 + ds
+            if delta <= 0 or rng.random() < math.exp(-min(50.0, delta) / temp):
+                cload[(cn, d1)] -= k
+                cload[(cn, d2)] += k
+                if tk:
+                    tload[(tk, d1)] -= k
+                    tload[(tk, d2)] += k
+                sday[(cn, d1, subj)] -= 1
+                sday[(cn, d2, subj)] += 1
+                b["day"] = d2
+                hard += dh
+                soft += ds
+                if (hard, soft) < best_state[:2]:
+                    best_state = (hard, soft, [x["day"] for x in blocks])
+
+        if best_state[:2] < (hard, soft):
+            for b, d0 in zip(blocks, best_state[2]):
+                b["day"] = d0
+            hard, soft = best_state[0], best_state[1]
+            cload, tload, sday = defaultdict(int), defaultdict(int), defaultdict(int)
+            for b in blocks:
+                cload[(b["cls"], b["day"])] += b["size"]
+                if b["tk"]:
+                    tload[(b["tk"], b["day"])] += b["size"]
+                sday[(b["cls"], b["day"], b["blk"].get("subject"))] += 1
+
+        if _FILL_DEBUG:
+            cls_over = {(cn, d): (v, len(active["win"][cn][d]))
+                        for (cn, d), v in cload.items() if v > len(active["win"][cn][d])}
+            t_over = {(tk, d): (v, active["tcap"].get(tk, {}).get(d, P))
+                      for (tk, d), v in tload.items()
+                      if v > active["tcap"].get(tk, {}).get(d, P)}
+            print(f"    [fill] deneme {attempt}: hard={hard} soft={soft} "
+                  f"sinif_asimi={list(cls_over.items())[:3]} ogr_asimi={list(t_over.items())[:3]}")
+        if hard > 0:
+            continue
+
+        # ── 2) her günü kendi içinde çöz ─────────────────────────────
+        #
+        # Önce sıkışık dizilişle (boş saatler günün sonunda) denenir; o gün
+        # çözülemezse aynı gün için boşluklu dizilişlere izin verilip bir kez daha
+        # denenir. Sıkışık deneme hem daha güzel bir çizelge verir hem de aramayı
+        # hızlandırır; gevşek deneme ise bir öğretmen kısıtı gerçekten günün
+        # ortasında boşluk gerektirdiğinde çözümü kurtarır.
+        def solve_day(d):
+            base_day = defaultdict(set)
+            for tk, slots in base_busy.items():
+                for (bd, bp) in slots:
+                    if bd == d:
+                        base_day[bp].add(tk)
+            # Sıkışık diziliş küçük bir bütçeyle denenir: amaç, çözülemeyen günü
+            # HIZLA anlayıp onarıma geçmek. Büyük bütçe yalnız son denemede
+            # harcanır, yoksa tek bir çıkmaz gün bütün süreyi yiyor.
+            for allow_gaps, budget in ((False, 20000), (True, 120000)):
+                layouts, buildable = {}, True
+                for cn in classes:
+                    day_blocks = [b["blk"] for b in by_class[cn] if b["day"] == d]
+                    if not day_blocks:
+                        layouts[cn] = [{}]
+                        continue
+                    lays = _day_layouts(win[cn][d], day_blocks, tk_free, d,
+                                        rng=rng, allow_gaps=allow_gaps)
+                    if not lays:
+                        buildable = False
+                        break
+                    layouts[cn] = lays
+                if not buildable:
+                    continue
+                solved = _solve_one_day(layouts, base_day, rng, budget=budget)
+                if solved is not None:
+                    return solved
+                if time.time() > deadline:
+                    break
+            return None
+
+        def relocate_from(day):
+            """Çözülemeyen günden bir bloğu, sığdığı başka bir güne taşır.
+
+            Gün dağıtımının marjinal kontrolleri (sınıf-gün ve öğretmen-gün yükü)
+            bir günün gerçekten kurulabilir olduğunu GARANTİ ETMEZ. Örnek: yalnız
+            9A'nın 5. saati açıksa, o saatte ancak 9A'ya ders konabilir; bir
+            öğretmenin o güne düşen 5 saatinin dördü başka sınıflardaysa gün
+            çözülemez, ama marjinaller sorunsuz görünür.
+
+            Bu yüzden çözülemeyen gün, denemeyi çöpe atmak yerine onarılır: o
+            günden bir blok başka bir güne taşınır ve tekrar denenir. Aramanın
+            "5. saati açınca hiç dolduramama" hâli tam olarak buydu.
+            """
+            movable = [b for b in blocks if b["day"] == day]
+            rng.shuffle(movable)
+
+            # Hedefli onarım: o gün, öğretmenin GERÇEKTEN kullanabileceği saatten
+            # fazla dersi varsa gün asla çözülmez. Kullanılabilir saat, öğretmenin
+            # o gün ders verdiği sınıfların açık olduğu saatlerdir — sınıfların
+            # açık saatleri farklıysa (biri 5, diğerleri 4 saat) bu, gün dağıtımının
+            # baktığı üst sınırdan küçük olabilir. Önce bu öğretmenlerin bloklarını
+            # taşırız; rastgele blok taşımak aynı çıkmazda dönüp duruyordu.
+            usable_today = {}
+            for b in movable:
+                tk = b["tk"]
+                if not tk or tk in usable_today:
+                    continue
+                own = {x["cls"] for x in movable if x["tk"] == tk}
+                slots = set()
+                for cn2 in own:
+                    slots.update(win[cn2][day])
+                usable_today[tk] = sum(1 for p in slots if tk_free(tk, day, p))
+            movable.sort(key=lambda b: 0 if (b["tk"] and tload[(b["tk"], day)]
+                                             > usable_today.get(b["tk"], P)) else 1)
+
+            for b in movable:
+                cn, tk, k = b["cls"], b["tk"], b["size"]
+                targets = [d2 for d2 in range(D) if d2 != day]
+                rng.shuffle(targets)
+                for d2 in targets:
+                    if cload[(cn, d2)] + k > len(win[cn][d2]):
+                        continue
+                    if tk and tload[(tk, d2)] + k > tcap.get(tk, {}).get(d2, P):
+                        continue
+                    cload[(cn, day)] -= k
+                    cload[(cn, d2)] += k
+                    if tk:
+                        tload[(tk, day)] -= k
+                        tload[(tk, d2)] += k
+                    b["day"] = d2
+                    return True
+
+            # Hiçbir blok taşınamıyorsa (her gün tam dolu olduğunda olur) TAKAS
+            # dene: bu günden bir blokla başka gündeki bir bloğun yerini değiştir.
+            # Taşıma yeri olmayan tam dolu çizelgelerde onarımın tek hamlesi budur.
+            others = [x for x in blocks if x["day"] != day]
+            rng.shuffle(others)
+            for b in movable:
+                cn, tk, k = b["cls"], b["tk"], b["size"]
+                for b2 in others:
+                    cn2, tk2, k2, d2 = b2["cls"], b2["tk"], b2["size"], b2["day"]
+                    if cn2 == cn and k2 == k and tk2 == tk:
+                        continue                     # aynı şeyi geri koymak
+                    if cload[(cn, day)] - k + (k2 if cn2 == cn else 0) > len(win[cn][day]):
+                        continue
+                    if cload[(cn2, d2)] - k2 + (k if cn2 == cn else 0) > len(win[cn2][d2]):
+                        continue
+                    if cn != cn2:
+                        if cload[(cn, d2)] + k > len(win[cn][d2]):
+                            continue
+                        if cload[(cn2, day)] + k2 > len(win[cn2][day]):
+                            continue
+                    if tk and tk != tk2:
+                        if tload[(tk, d2)] + k > active["tcap"].get(tk, {}).get(d2, P):
+                            continue
+                    if tk2 and tk2 != tk:
+                        if tload[(tk2, day)] + k2 > active["tcap"].get(tk2, {}).get(day, P):
+                            continue
+                    cload[(cn, day)] -= k
+                    cload[(cn, d2)] += k
+                    cload[(cn2, d2)] -= k2
+                    cload[(cn2, day)] += k2
+                    if tk:
+                        tload[(tk, day)] -= k
+                        tload[(tk, d2)] += k
+                    if tk2:
+                        tload[(tk2, d2)] -= k2
+                        tload[(tk2, day)] += k2
+                    b["day"], b2["day"] = d2, day
+                    return True
+            return False
+
+        result, ok = {}, False
+        for _repair in range(400):
+            if time.time() > deadline:
+                break
+            result, failed_day = {}, None
+            for d in range(D):
+                if time.time() > deadline:
+                    failed_day = d
+                    break
+                solved = solve_day(d)
+                if solved is None:
+                    failed_day = d
+                    break
+                result[d] = solved
+            if failed_day is None:
+                ok = True
+                break
+            if _FILL_DEBUG:
+                print(f"    [fill] gun {failed_day} cozulemedi, blok tasiniyor")
+            if not relocate_from(failed_day):
+                break
+        if not ok:
+            continue
+
+        placements = []
+        for d, per_class in result.items():
+            for cn, lay in per_class.items():
+                done = set()
+                for p in sorted(lay):
+                    b = lay[p]
+                    bid = b.get("block_id")
+                    if (cn, d, id(b)) in done:
+                        continue
+                    done.add((cn, d, id(b)))
+                    k = max(1, int(b.get("duration") or 1))
+                    placements.append({
+                        "class_name": cn, "class": cn,
+                        "subject_name": b.get("subject"), "subject": b.get("subject"),
+                        "teacher_name": b.get("teacher"), "teacher": b.get("teacher"),
+                        "day": d, "day_idx": d, "col": d,
+                        "period": p, "row": p,
+                        "duration": k,
+                        "is_combined": False,
+                        "block_id": bid,
+                        "is_filler": False,
+                        "needs_review": False,
+                    })
+        return placements
+
+    return None
+
+
 class AutoSchedulerWorker(QThread):
     progress_updated = Signal(int, int)
     iteration_updated = Signal(int, int, int)
     finished_successfully = Signal(dict)
     failed = Signal(str)
 
-    def __init__(self, data_store, target_class=None, parent=None, fill_empty=True, institution_slug=None, use_vds=False, infinite_mode=True, ignore_other_institutions=False):
+    def __init__(self, data_store, target_class=None, parent=None, fill_empty=True, institution_slug=None, use_vds=False, infinite_mode=True, ignore_other_institutions=False, independent_classes=False):
         super().__init__(parent)
         self.data_store = data_store
         self.target_class = target_class if target_class and str(target_class).strip() and "Tum" not in str(target_class) and "Tüm" not in str(target_class) else None
@@ -550,6 +1329,13 @@ class AutoSchedulerWorker(QThread):
         # its own terms. Off by default — double-booking a teacher is normally a
         # mistake, not a preference.
         self.ignore_other_institutions = ignore_other_institutions
+        # "Sınıfları bağımsız doldur": each class is filled as if it were the only one,
+        # so a teacher may end up booked in two classes at the same hour. That fills
+        # the grid, and it is sometimes what the user wants — they will resolve the
+        # clashes by hand afterwards. Off by default, and every lesson placed this way
+        # is marked has_conflict so the result is honest about what it is rather than
+        # looking finished when it cannot be run.
+        self.independent_classes = independent_classes
         self._is_running = True
 
     def run(self):
@@ -641,7 +1427,12 @@ class AutoSchedulerWorker(QThread):
             t_name = format_tr_name(asgn.get("ogretmen") or asgn.get("teacher") or asgn.get("teacher_name") or "")
             s_name = (asgn.get("ders") or asgn.get("subject") or "").strip()
             raw_type = str(asgn.get("dagilim") or asgn.get("type") or "").strip()
-            h_dur = int(asgn.get("ders_sayisi") or asgn.get("duration") or asgn.get("saat") or asgn.get("toplam_saat") or 2)
+            # Saat, sınıf ekranındaki toplu atamanın gösterdiği değerle AYNI
+            # kaynaktan okunur (lesson_hours). Eskiden ders_sayisi önce
+            # okunuyordu; sınıf ekranından değiştirilen bir ders için o alan eski
+            # değerinde kaldığından planlayıcı sınıfa atanandan farklı sayıda saat
+            # yerleştiriyordu.
+            h_dur = lesson_hours.hours(asgn) or 2
             is_comb = bool(asgn.get("is_combined") or len(target_cls) > 1 or "+" in raw_c or "&" in raw_c or "," in raw_c)
             
             durs = parse_distribution_parts(raw_type, h_dur)
@@ -749,7 +1540,7 @@ class AutoSchedulerWorker(QThread):
         }
 
         best_result = None
-        best_score = (-1, -1)
+        best_score = (-1, 0, -1)
         best_violations = []
         best_leftovers = {}
 
@@ -759,9 +1550,16 @@ class AutoSchedulerWorker(QThread):
             
             attempt_placements = list(other_placements)
             attempt_violations = []  # Track constraint bypasses
-            attempt_teacher_busy = defaultdict(set)
-            for t, slots in global_teacher_busy.items():
-                attempt_teacher_busy[t] = set(slots)  # copy
+            if self.independent_classes:
+                # Every teacher always looks free, so each class fills without regard
+                # to what the others took. Reads return a fresh empty set, which also
+                # makes the .add() calls scattered through the passes harmless no-ops
+                # — no other code has to know this mode exists.
+                attempt_teacher_busy = _AlwaysFreeTeachers()
+            else:
+                attempt_teacher_busy = defaultdict(set)
+                for t, slots in global_teacher_busy.items():
+                    attempt_teacher_busy[t] = set(slots)  # copy
             attempt_placed = 0
             attempt_real = 0   # spans that satisfy an actual assignment
 
@@ -795,7 +1593,13 @@ class AutoSchedulerWorker(QThread):
                     grid[bd][bp] = BLOCKED_CELL
                 grids[cn] = grid
 
-                blocks = list(class_blocks.get(cn, []))
+                # Blokların KOPYASI alınır. Yerleştirme geçişleri kısmen konan bir
+                # bloğun kalan saatini blk["duration"] -= 1 ile düşürüyor; liste
+                # yüzeysel kopyalandığında bu, class_blocks içindeki asıl sözlüğü
+                # değiştiriyordu. Sonuç: her deneme bir öncekinden daha az ders
+                # saatiyle başlıyor, 50 denemenin çoğu daha en baştan eksik veriyle
+                # koşuyordu (180 saatlik plan 6. denemede 161 saate düşüyordu).
+                blocks = [dict(b) for b in class_blocks.get(cn, [])]
                 random.shuffle(blocks)
                 # Sort: bigger blocks first for better distribution
                 blocks.sort(key=lambda b: (-b["duration"], random.random()))
@@ -1140,6 +1944,21 @@ class AutoSchedulerWorker(QThread):
                 if not placed_this_sweep:
                     break  # a full sweep changed nothing; further sweeps cannot either
 
+            # ── SETTLE PHASE ──────────────────────────────────────────
+            # Independent mode fills every cell first and only then worries about who
+            # can actually be where. The grid at this point is complete but has the
+            # same teacher booked in several classes at once; swapping lessons WITHIN
+            # a class keeps it full while moving those demands to different hours.
+            # Whatever survives is arithmetic — a teacher owed more hours than there
+            # are slots for them — not something a better arrangement could fix.
+            if self.independent_classes:
+                remaining, swaps = repair_conflicts(
+                    grids, teacher_timeoff, cross_inst_map, D, P,
+                )
+                if swaps:
+                    print(f"[AutoScheduler] yerleştirme sonrası {swaps} takas yapıldı, "
+                          f"{remaining} saatlik çakışma kaldı")
+
             # ── CONVERT PHASE ─────────────────────────────────────────
             for cn in attempt_classes:
                 grid = grids.get(cn)
@@ -1169,18 +1988,41 @@ class AutoSchedulerWorker(QThread):
                             "duration": span,
                             "is_combined": cell["is_combined"],
                             "block_id": bid,
-                            "is_filler": bool(cell.get("is_filler", False))
+                            "is_filler": bool(cell.get("is_filler", False)),
+                            # Independent mode places without checking whether the
+                            # teacher is already busy, so anything it produces has to
+                            # be reviewed. Marking it here is what lets the grid show
+                            # it and the summary count it.
+                            "needs_review": bool(self.independent_classes),
                         })
                         attempt_placed += span
                         if not cell.get("is_filler"):
                             attempt_real += span
                         p += span
 
-            # Rank by cells filled FIRST, then by how many of them are real assignment
-            # hours. Without the tie-break every attempt scored the same whether it
-            # placed a lesson the class actually owes or padded the cell, so the run
-            # had no reason to prefer emptying the unplaced dock.
-            attempt_score = (attempt_placed, attempt_real)
+            # Rank by cells filled FIRST, then — in independent mode — by how FEW
+            # teacher clashes the arrangement leaves, then by real assignment hours.
+            #
+            # Without the clash term the run threw away its own best work: the settle
+            # phase would get one attempt down to 32 clashing hours, and the attempt
+            # chosen as "best" would be a different one with the same number of cells
+            # and 45. Cells still come first, so this never trades a filled hour for a
+            # tidier one — it only decides between equally full grids.
+            attempt_clashes = 0
+            if self.independent_classes:
+                seen_load = defaultdict(set)
+                for pl in attempt_placements:
+                    tkey = norm_teacher(pl.get("teacher_name") or pl.get("teacher") or "")
+                    if not tkey:
+                        continue
+                    d0 = int(pl.get("day", pl.get("col", 0)))
+                    p0 = int(pl.get("period", pl.get("row", 0)))
+                    cls0 = (pl.get("class_name") or pl.get("class") or "").strip()
+                    for off in range(int(pl.get("duration", 1) or 1)):
+                        seen_load[(tkey, d0, p0 + off)].add(cls0)
+                attempt_clashes = sum(len(v) - 1 for v in seen_load.values() if len(v) > 1)
+
+            attempt_score = (attempt_placed, -attempt_clashes, attempt_real)
             if attempt_score > best_score:
                 best_score = attempt_score
                 best_result = attempt_placements
@@ -1193,10 +2035,34 @@ class AutoSchedulerWorker(QThread):
             if attempt_placed >= total_target and attempt_real >= total_assigned_hours:
                 break
 
+        # ── TAM DOLDURMA ──────────────────────────────────────────────
+        # Sezgisel geçişler bir ders saatini bile açıkta bıraktıysa, çizelgeyi
+        # bütün olarak kuran geri izlemeli arama devreye girer (exact_fill).
+        # Yalnızca EKSİKSİZ bir sonuç döndürür; döndürdüğünde de ancak daha çok
+        # gerçek ders saati yerleştiriyorsa sezgisel sonucun yerine geçer.
+        if (best_score[2] < total_assigned_hours and self._is_running
+                and not self.independent_classes):
+            t_fill = time.time()
+            exact = exact_fill(
+                classes_to_schedule, class_blocks, blocked_by_class,
+                teacher_timeoff, cross_inst_map, global_teacher_busy, D, P,
+                time_budget=25.0,
+            )
+            exact_real = sum(int(p.get("duration", 1) or 1) for p in (exact or []))
+            print(f"[AutoScheduler] tam doldurma {time.time() - t_fill:.1f}s — "
+                  f"{exact_real if exact else 0}/{total_assigned_hours} ders saati")
+            if exact and exact_real > best_score[2]:
+                best_result = list(other_placements) + exact
+                best_score = (exact_real, 0, exact_real)
+                best_violations = []
+                best_leftovers = {}
+
         if best_result is None:
             best_result = list(other_placements)
             best_violations = []
-        placed_cells, placed_real = best_score if best_score[0] >= 0 else (0, 0)
+        # (cells, -clashes, real hours) — see the scoring note above.
+        placed_cells, _neg_clashes, placed_real = (
+            best_score if best_score[0] >= 0 else (0, 0, 0))
 
         # Which of this institution's own teachers were held back because they are
         # already teaching elsewhere. Reported so an unexpectedly gappy schedule can
@@ -1250,6 +2116,30 @@ class AutoSchedulerWorker(QThread):
                 print(f"    gün {u['day'] + 1}, {u['period'] + 1}. saat: "
                       f"{u['classes']} sınıf açık ama {u['teachers']} öğretmen müsait")
 
+        # In independent mode, count the clashes that were deliberately allowed so the
+        # user is told exactly what they traded the full grid for.
+        teacher_clashes = []
+        if self.independent_classes:
+            occupied = defaultdict(set)
+            for pl in (best_result or []):
+                tkey = norm_teacher(pl.get("teacher_name") or pl.get("teacher") or "")
+                if not tkey:
+                    continue
+                d0 = int(pl.get("day", pl.get("col", 0)))
+                p0 = int(pl.get("period", pl.get("row", 0)))
+                for off in range(int(pl.get("duration", 1) or 1)):
+                    occupied[(tkey, d0, p0 + off)].add(
+                        (pl.get("class_name") or pl.get("class") or "").strip())
+            for (tkey, d0, p0), classes in occupied.items():
+                if len(classes) > 1:
+                    teacher_clashes.append({
+                        "teacher": tkey, "day": d0, "period": p0,
+                        "classes": sorted(classes),
+                    })
+            if teacher_clashes:
+                print(f"[AutoScheduler] BAĞIMSIZ MOD: {len(teacher_clashes)} öğretmen "
+                      f"çakışması oluşturuldu (elle düzeltilmeli)")
+
         # Why the week cannot fill, in the terms the user can act on.
         #
         # The assignment screen shows hours per CLASS, so a class can look perfectly
@@ -1301,6 +2191,7 @@ class AutoSchedulerWorker(QThread):
             "understaffed_slots": understaffed,
             "unplaced_summary": unplaced_summary,
             "capacity_problems": capacity_problems,
+            "teacher_clashes": teacher_clashes,
             "elapsed_seconds": round(elapsed, 2)
         })
 

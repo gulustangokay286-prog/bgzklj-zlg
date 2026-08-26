@@ -302,6 +302,23 @@ class ConstraintsDialog(QDialog):
                     sub_windows[s_name] = "afternoon"
         c["subject_windows"] = sub_windows
 
+        # ÖN KONTROL: bu ekranda yapılan kısıtlamalar çizelgeyi imkânsız hale
+        # getiriyorsa, kaydetmeden önce kaç saatin açıkta kalacağını söyle ve
+        # devam düğmesini 5 saniye kilitle (bkz. dialogs/preflight_dialog.py).
+        try:
+            from dialogs.preflight_dialog import run_preflight
+            probe = None
+            for name, matrix in self._matrices.items():
+                entity = self._entity_for(name)
+                probe = self._cs.candidate_store(probe or self.data_store, entity,
+                                                 name, matrix)
+            if probe is not None:
+                slug = (self.data_store.get("settings", {}) or {}).get("institution_slug")
+                if not run_preflight(probe, slug, self, mode="save"):
+                    return
+        except Exception as exc:
+            print(f"[CONSTRAINTS_SAVE] ön kontrol atlandı: {exc}")
+
         # Yalnızca bu ekranda GERÇEKTEN düzenlenen birimler yazılır. Eskiden burası
         # kisitlamalar sözlüğündeki her birimin timeoff'unu bool'lardan yeniden
         # üretiyordu; bu, 3 durumlu "? tercih edilmez" işaretlerini sessizce "açık"a

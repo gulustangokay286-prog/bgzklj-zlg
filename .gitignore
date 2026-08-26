@@ -1,6 +1,9 @@
 build/
 dist/
+build_new/
+dist_new/
 __pycache__/
 *.pyc
 .DS_Store
 *.bak
+test_*.png

@@ -102,6 +102,78 @@ def day_names(data_store: dict) -> list:
     return list(DAYS[:day_count])
 
 
+# ── KİŞİSEL KISIT (bütün kurumları bağlar) ───────────────────────────────────
+#
+# Bir öğretmenin bir saatinin kapalı olmasının İKİ ayrı sebebi var ve bunlar
+# birbirinin yerine geçemez:
+#
+#   1) "Bu kurumda o saatte ders vermiyor"  → yalnızca BU kurumu bağlar.
+#      Yarım gün burada, öğleden sonra başka şubede çalışan bir öğretmenin
+#      durumu budur. Burada kapattığınız saat, diğer kurumda AÇIK olmalıdır —
+#      zaten oraya gittiği için burada yok.
+#
+#   2) "Bu saatte hiçbir yerde yok"          → BÜTÜN kurumları bağlar.
+#      Rapor, izin, kendi işi, okula hiç gelmediği yarım gün. Buna "kişisel
+#      kısıt" diyoruz ve kurumlar arası ortak deftere yalnızca bu yazılır.
+#
+# Eskiden ayrım yoktu: bir kurumda kapatılan her saat bütün kurumlarda kapalı
+# sayılıyordu. Sonuç, üç dört kurumda çalışan bir öğretmenin hiçbir yerde
+# yerleşememesiydi — herkesin kendi kapattığı saatler toplanıp öğretmeni
+# tamamen bloke ediyordu.
+#
+# Kişisel kısıt ayrı bir katmanda tutulur:
+#   entity["personal_off"]                        -> [gun][saat] 0/1
+#   data_store["kisitlamalar_kisisel"][ad]        -> {"gun,saat": 1}
+PERSONAL_KEY = "personal_off"
+PERSONAL_STORE = "kisitlamalar_kisisel"
+
+
+def get_personal(entity: dict, name: str, data_store: dict) -> list:
+    """Öğretmenin KİŞİSEL kapalı saatleri: [gun][saat] -> True/False."""
+    day_count, periods = grid_dimensions(data_store)
+    grid = [[False for _ in range(periods)] for _ in range(day_count)]
+
+    raw = (entity or {}).get(PERSONAL_KEY) or []
+    for d in range(day_count):
+        if d < len(raw) and isinstance(raw[d], list):
+            for p in range(periods):
+                if p < len(raw[d]) and raw[d][p]:
+                    grid[d][p] = True
+
+    entry = ((data_store or {}).get(PERSONAL_STORE) or {}).get(name)
+    if isinstance(entry, dict):
+        for key, val in entry.items():
+            try:
+                d, p = (int(x) for x in str(key).split(","))
+            except (ValueError, TypeError):
+                continue
+            if 0 <= d < day_count and 0 <= p < periods and val:
+                grid[d][p] = True
+    return grid
+
+
+def set_personal(entity: dict, name: str, data_store: dict, grid: list):
+    """Kişisel kısıtları her iki gösterime birden yazar."""
+    if entity is None or not name:
+        return
+    day_count, periods = grid_dimensions(data_store)
+    rows, cells = [], {}
+    for d in range(day_count):
+        row = []
+        for p in range(periods):
+            on = bool(grid[d][p]) if (d < len(grid) and p < len(grid[d])) else False
+            row.append(1 if on else 0)
+            if on:
+                cells[f"{d},{p}"] = 1
+        rows.append(row)
+    entity[PERSONAL_KEY] = rows
+    store = data_store.setdefault(PERSONAL_STORE, {})
+    if cells:
+        store[name] = cells
+    else:
+        store.pop(name, None)
+
+
 def get_matrix(entity: dict, name: str, data_store: dict) -> list:
     """Bir birimin (öğretmen/sınıf/derslik) 3 durumlu müsaitlik matrisini döndürür.
 
@@ -132,6 +204,14 @@ def get_matrix(entity: dict, name: str, data_store: dict) -> list:
                 continue
             if 0 <= d < day_count and 0 <= p < periods:
                 matrix[d][p] = min(matrix[d][p], _coerce_state(raw))
+
+    # Kişisel kısıt her şeyin üstündedir: öğretmen o saatte hiçbir yerde yoksa
+    # burada da yoktur.
+    personal = get_personal(entity, name, data_store)
+    for d in range(day_count):
+        for p in range(periods):
+            if personal[d][p]:
+                matrix[d][p] = CLOSED
 
     return matrix
 
@@ -253,13 +333,68 @@ def load_global() -> dict:
     return data
 
 
+def candidate_store(data_store: dict, entity: dict, name: str, matrix: list,
+                    personal: list = None) -> dict:
+    """Henüz KAYDEDİLMEMİŞ bir kısıtlama değişikliğinin uygulanmış hâlini üretir.
+
+    Ekranlar "kaydedersem ne olur?" sorusunu bunun üzerinden sorar: gerçek veriye
+    dokunmadan, yalnızca planlayıcının bakacağı alanları kopyalayıp yeni matrisi
+    işler. Kopya sığdır — grid_placements gibi büyük listeler taşınmaz, çünkü
+    fizibilite hesabı onlara bakmaz.
+    """
+    import copy as _copy
+
+    probe = {
+        "settings": (data_store or {}).get("settings", {}),
+        "atamalar": (data_store or {}).get("atamalar", []),
+        "siniflar": _copy.deepcopy((data_store or {}).get("siniflar", []) or []),
+        "ogretmenler": _copy.deepcopy((data_store or {}).get("ogretmenler", []) or []),
+        "derslikler": (data_store or {}).get("derslikler", []),
+        "kisitlamalar": _copy.deepcopy((data_store or {}).get("kisitlamalar", {}) or {}),
+        PERSONAL_STORE: _copy.deepcopy((data_store or {}).get(PERSONAL_STORE, {}) or {}),
+        "gun_sayisi": (data_store or {}).get("gun_sayisi"),
+        "ders_saati": (data_store or {}).get("ders_saati"),
+    }
+
+    target = None
+    for group in ("ogretmenler", "siniflar"):
+        for item in probe.get(group) or []:
+            if isinstance(item, dict) and (item.get("ad") or item.get("name") or "").strip() == name:
+                target = item
+                break
+        if target:
+            break
+    if target is None:
+        target = _copy.deepcopy(entity) if entity else {"ad": name}
+
+    if personal is not None:
+        set_personal(target, name, probe, personal)
+    if matrix is not None:
+        set_matrix(target, name, probe, matrix)
+        if personal is not None:
+            # set_matrix kisitlamalar'ı yeniden yazdığı için kişisel katman
+            # tekrar uygulanmalı; kişisel kısıt her zaman en kısıtlayıcıdır.
+            set_personal(target, name, probe, personal)
+    return probe
+
+
+SHARE_KIND = "personal"     # ortak deftere yalnızca kişisel kısıt yazılır
+
+
 def publish(slug: str, data_store: dict):
-    """Bu kurumun ÖĞRETMEN kısıtlamalarını kurumlar arası ortak dosyaya yazar.
+    """Bu kurumun ÖĞRETMEN KİŞİSEL kısıtlarını kurumlar arası ortak deftere yazar.
 
     Sadece öğretmenler paylaşılır: aynı öğretmen birden çok kurumda ders verebilir,
     ama bir sınıf yalnızca kendi kurumuna aittir — sınıf kısıtlamalarını paylaşmak
     farklı kurumlardaki aynı adlı sınıfları (ör. her kurumda bir "9A") yanlışlıkla
     birbirine bağlardı.
+
+    YALNIZCA kişisel kısıt yayınlanır. Bu kurumun kendi çalışma saatleri (öğretmen
+    burada sabahçı, orada öğleden sonracı) diğer kurumları ilgilendirmez; onları da
+    kapatmak, üç dört kurumda çalışan bir öğretmeni hiçbir yere yerleştirilemez hale
+    getiriyordu. Başka kurumun saatini kapatan iki meşru şey vardır ve ikisi de
+    ayrıca yürür: kişisel kısıt (burası) ve o kurumun gerçekten ders koyduğu /
+    rezerve ettiği saat (rezervasyon defteri).
     """
     if not slug or not isinstance(data_store, dict) or not _institution_exists(slug):
         return
@@ -272,12 +407,12 @@ def publish(slug: str, data_store: dict):
         name = (teacher.get("ad") or teacher.get("name") or "").strip()
         if not name:
             continue
-        matrix = get_matrix(teacher, name, data_store)
-        cells = {}
-        for d in range(day_count):
-            for p in range(periods):
-                cells[f"{d},{p}"] = matrix[d][p]
-        payload[name] = cells
+        personal = get_personal(teacher, name, data_store)
+        cells = {f"{d},{p}": CLOSED
+                 for d in range(day_count) for p in range(periods)
+                 if personal[d][p]}
+        if cells:
+            payload[name] = cells
 
     # Also store it on the institution itself. meta.json rides the existing VDS sync,
     # so another computer sees this institution's teacher availability without having
@@ -288,7 +423,8 @@ def publish(slug: str, data_store: dict):
             meta = _read_inst_meta(slug, strict=True)
             if meta:
                 from datetime import datetime as _dt
-                meta["teacher_availability"] = {"updated": _dt.now().isoformat(), "slots": payload}
+                meta["teacher_availability"] = {"updated": _dt.now().isoformat(),
+                                                "kind": SHARE_KIND, "slots": payload}
                 _write_shared(_inst_meta_path(slug), meta)
         except SharedStoreUnreadable as e:
             print(f"[constraint_sync] meta okunamadı, müsaitlik yazılmadı: {e}")
@@ -308,7 +444,11 @@ def publish(slug: str, data_store: dict):
         if global_data and any(" " in k or len(k) > 30 for k in global_data.keys()):
             global_data = {"bogazici_egitim_kurumlari": global_data}
 
-        global_data[slug] = payload
+        # Zarflı yazım: okuyan taraf bunun KİŞİSEL kısıt olduğunu bilmeli. Eski
+        # düz kayıtlar (zarfsız) kurum kısıtlarını taşıyordu ve okunduklarında
+        # diğer kurumları haksız yere kapatıyorlardı; okuma tarafı artık onları
+        # yok sayıyor, ilk kayıtta da bu zarfla değişiyorlar.
+        global_data[slug] = {"kind": SHARE_KIND, "slots": payload}
         try:
             _write_shared(path, global_data)
         except Exception as e:
@@ -586,6 +726,18 @@ def shared_teacher_states(exclude_slug: str, day_count: int, periods: int) -> di
     def absorb(slug, entries):
         if slug == exclude_slug or not isinstance(entries, dict):
             return
+        # Yalnızca KİŞİSEL kısıt zarfı başka kurumu bağlar. Zarfsız (eski) kayıt,
+        # o kurumun kendi çalışma saatleridir; onu buraya taşımak, öğretmenin
+        # her kurumdaki kapalı saatlerini üst üste bindirip kimsenin ders
+        # koyamamasına yol açıyordu.
+        if "kind" in entries or "slots" in entries:
+            if entries.get("kind") != SHARE_KIND:
+                return
+            entries = entries.get("slots") or {}
+            if not isinstance(entries, dict):
+                return
+        else:
+            return
         for name, cells in entries.items():
             if not isinstance(cells, dict):
                 continue
@@ -615,6 +767,8 @@ def shared_teacher_states(exclude_slug: str, day_count: int, periods: int) -> di
     for slug in _all_institution_slugs():
         block = (_read_inst_meta(slug) or {}).get("teacher_availability") or {}
         if isinstance(block, dict):
-            absorb(slug, block.get("slots") or {})
+            # Zarfın kendisi geçilir: absorb, "kind" etiketine bakarak bunun
+            # kişisel kısıt mı yoksa o kurumun kendi saatleri mi olduğunu ayırır.
+            absorb(slug, block)
 
     return result

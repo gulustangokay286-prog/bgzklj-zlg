@@ -251,6 +251,92 @@ def run():
     fillers = [p for p in placements if p.get("is_filler")]
     check("uydurma (filler) ders üretilmedi", not fillers, f"{len(fillers)} filler")
 
+    print("\n[bağımsız mod: grid dolar ama çakışmalar işaretlenir]")
+    # Kullanıcının istediği "diğer sınıfları görmesin" seçeneği. Grid daha çok doluyor
+    # ama aynı öğretmen iki sınıfta olabiliyor — bu KABUL EDİLEN bir takas, gizlenmemek
+    # şartıyla: her yerleşim işaretli ve çakışmalar rapor ediliyor.
+    store = build_store()
+    for t in store["ogretmenler"]:
+        t["timeoff"] = make_timeoff(closed_periods=(4, 5, 6, 7))
+
+    normal = run_scheduler(store)
+    indep_worker = AutoSchedulerWorker(store, fill_empty=False, institution_slug=None,
+                                       independent_classes=True)
+    indep = {}
+    indep_worker.finished_successfully.connect(lambda r: indep.update(r))
+    indep_worker.run()
+
+    def count_clashes(result):
+        # Süreyi açarak say: 2 saatlik bir bloğun çakışması İKİ saatlik çakışmadır,
+        # bir tane değil. Planlayıcı da böyle sayıyor.
+        seen = {}
+        for p in result.get("placements", []):
+            teacher = str(p.get("teacher_name") or p.get("teacher") or "").upper()
+            day = int(p.get("day", 0))
+            start = int(p.get("period", 0))
+            for off in range(int(p.get("duration", 1) or 1)):
+                seen.setdefault((teacher, day, start + off), set()).add(
+                    str(p.get("class_name") or p.get("class")))
+        return sum(1 for v in seen.values() if len(v) > 1)
+
+    check("normal modda öğretmen çakışması YOK", count_clashes(normal) == 0,
+          f"{count_clashes(normal)} çakışma")
+    check("bağımsız mod en az normal kadar yerleştiriyor",
+          indep.get("placed_hours", 0) >= normal.get("placed_hours", 0),
+          f"{normal.get('placed_hours')} -> {indep.get('placed_hours')}")
+    check("oluşan çakışmalar eksiksiz raporlanıyor",
+          len(indep.get("teacher_clashes", [])) == count_clashes(indep),
+          f"raporlanan={len(indep.get('teacher_clashes', []))}, "
+          f"gerçek={count_clashes(indep)}")
+    check("bağımsız mod yerleşimleri gözden geçirilmek üzere işaretli",
+          all(p.get("needs_review") for p in indep.get("placements", [])),
+          "işaretsiz yerleşim var")
+    check("normal mod yerleşimleri işaretli DEĞİL",
+          not any(p.get("needs_review") for p in normal.get("placements", [])))
+
+    # Bagimsiz mod sadece OGRETMEN cakismasini serbest birakir; sinifin kapali
+    # saatleri yine dokunulmaz olmali.
+    closed_hit = [
+        p for p in indep.get("placements", [])
+        if int(p.get("period", 0)) in (4, 5, 6, 7)
+    ]
+    check("bağımsız modda bile kapalı saatlere ders konmuyor", not closed_hit,
+          f"{len(closed_hit)} ders kapalı saatte")
+
+    print("\n[ön kontrol: çalıştırmadan önce doğru tahmin]")
+    # aSc'nin "Kontrol" adiminin karsiligi. Degeri, planlayiciyi calistirmadan
+    # ONCE "bu doldurulamaz" diyebilmesinde — ve tahmininin gercekle tutmasinda.
+    from auto_scheduler import check_feasibility
+
+    healthy = build_store()
+    rep = check_feasibility(healthy)
+    check("sorunsuz kurulumda 'uygun' diyor", rep["ok"], str(rep["max_fillable"]))
+    check("hücre sayısını doğru buluyor", rep["total_cells"] == 2 * 40,
+          str(rep["total_cells"]))
+
+    # Tek ogretmen, iki sinif, herkes ayni 5 saatte -> yapisal olarak dolmaz.
+    tight = build_store()
+    tight["ogretmenler"] = [{"ad": "Ahmet Yılmaz",
+                             "timeoff": make_timeoff(closed_periods=tuple(range(1, 8)))}]
+    for cls in tight["siniflar"]:
+        cls["timeoff"] = make_timeoff(closed_periods=tuple(range(1, 8)))
+    tight["atamalar"] = [
+        {"subject": "Matematik", "teacher": "Ahmet Yılmaz", "class": c["ad"],
+         "duration": 5, "type": "1+1+1+1+1"}
+        for c in tight["siniflar"]
+    ]
+    rep2 = check_feasibility(tight)
+    check("imkansız kurulumu ÖNCEDEN yakalıyor", not rep2["ok"], str(rep2))
+    check("aşırı yüklü öğretmeni isimlendiriyor",
+          any("Ahmet" in o["teacher"] for o in rep2["overloaded_teachers"]),
+          str(rep2["overloaded_teachers"]))
+
+    # Tahmin gercekle tutmali: tahminden fazlasi yerlesmemeli.
+    actual = run_scheduler(tight)
+    check("tahmin gerçeği aşmıyor",
+          actual.get("placed_hours", 0) <= rep2["max_fillable"],
+          f"tahmin={rep2['max_fillable']}, gerçek={actual.get('placed_hours')}")
+
     print("\n[yardımcı fonksiyonlar]")
     blocked, avoid = auto_scheduler._build_class_timeoff_map(
         build_store(class_timeoff={"9A": make_timeoff(closed_periods=(4,), avoid_periods=(5,))})

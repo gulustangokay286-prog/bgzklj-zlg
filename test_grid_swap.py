@@ -89,7 +89,11 @@ def run():
     from main_window import MainWindow
 
     print("\n[pencere kurulumu]")
-    win = MainWindow()
+    # override_db_path ZORUNLU. Kurumsuz bir MainWindow, yapici icinde son
+    # kullanilan .roz yolunu okuyup ona baglaniyor — yani KULLANICININ aktif
+    # versiyonuna. Yolu yapicidan SONRA degistirmek gec kaliyor: kurulum sirasinda
+    # gercek dosyaya yaziliyor (iki kez oldu, v082 yedekten geri alindi).
+    win = MainWindow(override_db_path=SANDBOX_DB)
     win._is_loading = False
 
     # MainWindow'u kurumsuz acmak, onu son kullanilan .roz dosyasina baglıyor —
@@ -180,6 +184,43 @@ def run():
     conflicted = [p for p in after if p.get("has_conflict")]
     check("çakışma kayda geçti (sonra düzenlenebilsin)", bool(conflicted),
           "has_conflict işareti yok")
+
+    print("\n[2 saatlik ders 1 saatlikleri YUTMAMALI]")
+    store = make_store()
+    # 3. ve 4. saatte birer 1 saatlik ders
+    store["grid_placements"] = [
+        placement(0, 3, "Fizik", "Ayşe Demir", "9A", "blk_f"),
+        placement(0, 4, "Kimya", "Ayşe Demir", "9A", "blk_k"),
+    ]
+    store["loose_unplaced_cards"] = []
+    win.data_store = store
+
+    # 2 saatlik Matematik'i 3. saate birak -> 3 ve 4'u kaplar
+    win._on_lesson_dropped(0, 0 * periods + 3, {
+        "subject_name": "Matematik", "teacher_name": "Ahmet Yılmaz",
+        "class_name": "9A", "duration": 2,
+    })
+
+    dock_subjects = [(c.get("subject_name") or c.get("subject"))
+                     for c in win.data_store.get("loose_unplaced_cards", [])]
+    grid_subjects = [(p.get("subject_name") or p.get("subject"))
+                     for p in win.data_store["grid_placements"]]
+
+    check("2 saatlik ders yerleşti", "Matematik" in grid_subjects, str(grid_subjects))
+    check("İLK 1 saatlik ders kurtarıldı", "Fizik" in dock_subjects, str(dock_subjects))
+    check("İKİNCİ 1 saatlik ders de kurtarıldı (yutulmadı)",
+          "Kimya" in dock_subjects, f"dock={dock_subjects} grid={grid_subjects}")
+    check("hiçbir ders yok olmadı",
+          len(set(dock_subjects) | set(grid_subjects)) >= 3,
+          f"dock={dock_subjects} grid={grid_subjects}")
+
+    print("\n[dock kartı sürüklerken tutma noktası taşınıyor]")
+    from timetable_grid import DraggableLessonCard
+    import inspect
+    src = inspect.getsource(DraggableLessonCard._start_standard_drag)
+    check("standart sürüklemede grab_dx gönderiliyor", "grab_dx" in src, src[:100])
+    src2 = inspect.getsource(DraggableLessonCard._start_sticky_drag)
+    check("yapışkan sürüklemede grab_dx gönderiliyor", "grab_dx" in src2, src2[:100])
 
     win.close()
 

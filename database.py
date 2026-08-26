@@ -1,6 +1,13 @@
-import sqlite3
+"""
+database.py — VDS Bulut Tabanlı ve Yerel Kurum Versiyon Yönetim Modülü
+Bu modül tüm veri kalıcılığını VDS (Firebase Realtime Cloud Backend) ve
+yerel .roz / JSON versiyon deposu üzerinden yönetir.
+"""
 import os
 import json
+import zipfile
+from datetime import datetime
+import shutil
 
 def get_base_dir():
     base = os.path.join(os.path.expanduser("~"), ".chenki_akademi")
@@ -10,275 +17,71 @@ def get_base_dir():
         pass
     return base
 
-DB_PATH = os.path.join(get_base_dir(), "bgz_local_database.sqlite")
 
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    # Kapsamlı Öğretmenler Tablosu
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS teachers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            short_name TEXT,
-            gender TEXT,
-            color TEXT,
-            max_hours_day INTEGER DEFAULT 8,
-            max_hours_week INTEGER DEFAULT 40,
-            constraints_json TEXT
-        )
-    """)
-    
-    # Dersler Tablosu
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS subjects (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            short_name TEXT,
-            color TEXT,
-            difficulty INTEGER DEFAULT 1
-        )
-    """)
-    
-    # Sınıflar Tablosu
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS classes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            capacity INTEGER DEFAULT 30,
-            grade_level TEXT
-        )
-    """)
-    
-    # Derslikler Tablosu
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS rooms (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            short_name TEXT,
-            capacity INTEGER,
-            building TEXT
-        )
-    """)
-    
-    # Çoklu Öğretmen/Sınıf desteki Atamalar (Lessons)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS lessons (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            subject_id INTEGER,
-            duration INTEGER DEFAULT 1,
-            locked BOOLEAN DEFAULT 0,
-            teacher_ids_json TEXT, -- ["T1", "T2"]
-            class_ids_json TEXT,   -- ["C1", "C2"]
-            FOREIGN KEY(subject_id) REFERENCES subjects(id)
-        )
-    """)
-    
-    # Grid Hücreleri (Placements)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS grid_placements (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            lesson_id INTEGER,
-            day_index INTEGER,
-            period_index INTEGER,
-            room_id INTEGER,
-            FOREIGN KEY(lesson_id) REFERENCES lessons(id)
-        )
-    """)
-    
-    # Global Ayarlar (Ziller, Günler)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS settings (
-            key TEXT PRIMARY KEY,
-            value TEXT
-        )
-    """)
-    
-    conn.commit()
-    conn.close()
+    """Ensures necessary local directories exist for VDS and version storage."""
+    get_base_dir()
+    import version_store
+    version_store._ensure_base()
 
-def get_connection():
-    conn = sqlite3.connect(DB_PATH, timeout=30.0, check_same_thread=False)
-    try:
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
-    except Exception:
-        pass
-    return conn
 
-def safe_int(val, default=0):
-    try:
-        if val is None or val == "":
-            return default
-        if isinstance(val, (int, float)):
-            return int(val)
-        if isinstance(val, str):
-            digits = "".join(c for c in val if c.isdigit() or c == '-')
-            return int(digits) if digits and digits != '-' else default
-        return int(val)
-    except Exception:
-        return default
-
-def fetch_all(table_name):
-    try:
-        conn = get_connection()
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute(f"SELECT * FROM {table_name}")
-        rows = cursor.fetchall()
-        conn.close()
-        return [dict(row) for row in rows]
-    except Exception as e:
-        print(f"[SQLITE_FETCH_ERR] {e}")
-        return []
-
-def insert_record(table_name, data_dict):
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        columns = ', '.join(data_dict.keys())
-        placeholders = ', '.join(['?' for _ in data_dict])
-        sql = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
-        cursor.execute(sql, tuple(data_dict.values()))
-        last_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-        return last_id
-    except Exception as e:
-        print(f"[SQLITE_INSERT_ERR] {e}")
-        return None
-
-def update_record(table_name, record_id, data_dict):
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        set_clause = ', '.join([f"{k} = ?" for k in data_dict.keys()])
-        sql = f"UPDATE {table_name} SET {set_clause} WHERE id = ?"
-        values = list(data_dict.values()) + [record_id]
-        cursor.execute(sql, tuple(values))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        print(f"[SQLITE_UPDATE_ERR] {e}")
-
-def sync_data_store_to_sqlite(data_store: dict):
-    """Syncs the entire JSON data_store into local SQLite tables safely."""
+def sync_data_store_to_vds(data_store: dict, auth_data: dict = None):
+    """
+    Syncs the entire data_store directly to VDS Cloud Backend (Firebase RTDB)
+    and persists to institution version file.
+    """
     if not isinstance(data_store, dict):
         return
+        
+    settings = data_store.get("settings", {})
+    slug = settings.get("institution_slug") or data_store.get("institution_slug")
+    ver_fn = settings.get("version_filename") or data_store.get("version_filename")
+    
+    # 1. Update version file
     try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        # Clear existing data
-        cursor.execute("DELETE FROM teachers")
-        cursor.execute("DELETE FROM subjects")
-        cursor.execute("DELETE FROM classes")
-        cursor.execute("DELETE FROM rooms")
-        cursor.execute("DELETE FROM lessons")
-        cursor.execute("DELETE FROM grid_placements")
-        cursor.execute("DELETE FROM settings")
-        
-        # Insert teachers
-        for t in data_store.get("ogretmenler", []):
-            if isinstance(t, dict):
-                cursor.execute(
-                    "INSERT INTO teachers (name, short_name, gender, color, max_hours_day, max_hours_week, constraints_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        str(t.get("ad", t.get("name", ""))),
-                        str(t.get("kisa", t.get("short_name", ""))),
-                        str(t.get("cinsiyet", t.get("gender", ""))),
-                        str(t.get("renk", t.get("color", ""))),
-                        safe_int(t.get("max_gunluk", t.get("max_hours_day", 8)), 8),
-                        safe_int(t.get("max_haftalik", t.get("max_hours_week", 40)), 40),
-                        json.dumps(t.get("kisitlamalar", t.get("timeoff", [])), ensure_ascii=False)
-                    )
-                )
-                
-        # Insert subjects
-        for s in data_store.get("dersler", []):
-            if isinstance(s, dict):
-                cursor.execute(
-                    "INSERT INTO subjects (name, short_name, color, difficulty) VALUES (?, ?, ?, ?)",
-                    (
-                        str(s.get("ad", s.get("name", ""))),
-                        str(s.get("kisa", s.get("short_name", ""))),
-                        str(s.get("renk", s.get("color", ""))),
-                        safe_int(s.get("zorluk", s.get("difficulty", 1)), 1)
-                    )
-                )
-                
-        # Insert classes
-        for c in data_store.get("siniflar", []):
-            if isinstance(c, dict):
-                cursor.execute(
-                    "INSERT INTO classes (name, capacity, grade_level) VALUES (?, ?, ?)",
-                    (
-                        str(c.get("ad", c.get("name", ""))),
-                        safe_int(c.get("kapasite", c.get("capacity", 30)), 30),
-                        str(c.get("seviye", c.get("grade_level", "")))
-                    )
-                )
-                
-        # Insert rooms
-        for r in data_store.get("derslikler", []):
-            if isinstance(r, dict):
-                cursor.execute(
-                    "INSERT INTO rooms (name, short_name, capacity, building) VALUES (?, ?, ?, ?)",
-                    (
-                        str(r.get("ad", r.get("name", ""))),
-                        str(r.get("kisa", r.get("short_name", ""))),
-                        safe_int(r.get("kapasite", r.get("capacity", 30)), 30),
-                        str(r.get("bina", r.get("building", "")))
-                    )
-                )
-                
-        # Insert lessons (atamalar)
-        for a in data_store.get("atamalar", []):
-            if isinstance(a, dict):
-                t_list = [a.get("teacher")] if a.get("teacher") else a.get("teachers", [])
-                c_list = [a.get("class")] if a.get("class") else a.get("classes", [])
-                cursor.execute(
-                    "INSERT INTO lessons (subject_id, duration, locked, teacher_ids_json, class_ids_json) VALUES (?, ?, ?, ?, ?)",
-                    (
-                        1,
-                        safe_int(a.get("duration", 1), 1),
-                        1 if a.get("locked") else 0,
-                        json.dumps(t_list, ensure_ascii=False),
-                        json.dumps(c_list, ensure_ascii=False)
-                    )
-                )
-                
-        # Insert grid placements
-        for p in data_store.get("grid_placements", []):
-            if isinstance(p, dict):
-                cursor.execute(
-                    "INSERT INTO grid_placements (lesson_id, day_index, period_index, room_id) VALUES (?, ?, ?, ?)",
-                    (
-                        safe_int(p.get("lesson_id", 1), 1),
-                        safe_int(p.get("day", p.get("col", 0)), 0),
-                        safe_int(p.get("period", p.get("row", 0)), 0),
-                        1
-                    )
-                )
-                
-        # Insert settings
-        settings = data_store.get("settings", {})
-        if isinstance(settings, dict):
-            for k, v in settings.items():
-                cursor.execute(
-                    "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
-                    (str(k), json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else str(v))
-                )
-                
-        conn.commit()
-        conn.close()
+        import version_store
+        if slug and ver_fn:
+            version_store.update_version_in_place(slug, ver_fn, data_store)
+            version_store.touch_institution_timestamp(slug)
     except Exception as e:
-        print(f"[SQLITE_SYNC_ERR] {e}")
+        print(f"[VDS_SYNC] Version file update error: {e}")
+        
+    # 2. Push to VDS Cloud Backend
+    try:
+        from cloud_sync import push_version_to_rtdb, push_institution_to_rtdb
+        auth = auth_data
+        if not auth:
+            try:
+                from api_client import token_manager
+                token = token_manager.get_token()
+                if token:
+                    auth = {"token": token}
+            except Exception:
+                pass
+                
+        if slug and ver_fn:
+            push_version_to_rtdb(slug, ver_fn, data_store, auth)
+        elif slug:
+            push_institution_to_rtdb(slug, auth)
+    except Exception as e:
+        print(f"[VDS_SYNC] Cloud push error: {e}")
+        
+    # 3. Publish cross-institution constraint sync
+    try:
+        import constraint_sync
+        if slug:
+            constraint_sync.publish(slug, data_store)
+    except Exception:
+        pass
+
+
+def sync_data_store_to_sqlite(data_store: dict):
+    """Compatibility alias routing directly to VDS sync."""
+    sync_data_store_to_vds(data_store)
 
 
 def trigger_save_db(widget, data_store=None):
-    """Walks up the Qt parent hierarchy or top-level windows to find MainWindow/AppShell and call save_db()."""
+    """Walks up the Qt parent hierarchy to find MainWindow/AppShell and trigger save_db()."""
     saved = False
     curr = widget
     while curr is not None:
@@ -311,23 +114,22 @@ def trigger_save_db(widget, data_store=None):
         except Exception:
             pass
         
+    if not saved and data_store:
+        sync_data_store_to_vds(data_store)
+        
     return saved
 
-
-import zipfile
-from datetime import datetime
-import shutil
 
 def get_backup_dir():
     b_dir = os.path.join(get_base_dir(), "backups")
     os.makedirs(b_dir, exist_ok=True)
     return b_dir
 
+
 def create_database_backup(slug=None, note="auto"):
     """
-    Creates a full compressed ZIP backup snapshot of all institutions,
-    version files (.roz), metadata, and SQLite database.
-    Rotates automatically to keep the last 50 snapshots.
+    Creates a compressed ZIP backup snapshot of all institutions,
+    version files (.roz), and metadata.
     """
     b_dir = get_backup_dir()
     now_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -340,20 +142,14 @@ def create_database_backup(slug=None, note="auto"):
         inst_base = version_store._ensure_base()
         
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-            # 1. Backup institutions & versions
             if os.path.exists(inst_base):
                 for root, _, files in os.walk(inst_base):
                     for f in files:
-                        if f.endswith((".roz", ".json", ".sqlite", ".bak")):
+                        if f.endswith((".roz", ".json", ".bak")):
                             full_p = os.path.join(root, f)
                             rel_p = os.path.relpath(full_p, inst_base)
                             zipf.write(full_p, arcname=os.path.join("institutions", rel_p))
                             
-            # 2. Backup SQLite database
-            if os.path.exists(DB_PATH):
-                zipf.write(DB_PATH, arcname="bgz_local_database.sqlite")
-                
-        # Auto-rotate: keep latest 50 backups
         all_backups = sorted([
             os.path.join(b_dir, f) for f in os.listdir(b_dir) if f.startswith("backup_") and f.endswith(".zip")
         ], key=os.path.getmtime)
@@ -370,17 +166,14 @@ def create_database_backup(slug=None, note="auto"):
         print(f"[BACKUP_ERROR] Failed to create database backup: {e}")
         return ""
 
+
 def restore_database_backup(backup_zip_path: str) -> bool:
-    """
-    Restores institutions, versions and SQLite database from a backup ZIP archive safely.
-    """
+    """Restores institutions and versions from a backup ZIP archive safely."""
     if not os.path.exists(backup_zip_path):
         return False
     try:
         import version_store
         inst_base = version_store._ensure_base()
-        
-        # Pre-restore safety backup
         create_database_backup(note="pre_restore_snapshot")
         
         with zipfile.ZipFile(backup_zip_path, "r") as zipf:
@@ -391,14 +184,12 @@ def restore_database_backup(backup_zip_path: str) -> bool:
                     os.makedirs(os.path.dirname(target), exist_ok=True)
                     with zipf.open(member) as src, open(target, "wb") as dst:
                         shutil.copyfileobj(src, dst)
-                elif member == "bgz_local_database.sqlite":
-                    with zipf.open(member) as src, open(DB_PATH, "wb") as dst:
-                        shutil.copyfileobj(src, dst)
                         
         return True
     except Exception as e:
         print(f"[RESTORE_ERROR] Failed to restore database backup: {e}")
         return False
+
 
 def list_database_backups() -> list:
     """Lists all available backup files with timestamps, sizes, and notes."""

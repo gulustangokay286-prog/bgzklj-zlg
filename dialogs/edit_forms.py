@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt, QPointF
 from PySide6.QtGui import QFont, QColor, QBrush, QPainter, QPen, QPainterPath, QPixmap, QIcon
 from database import trigger_save_db
 from auto_scheduler import matches_class
+import lesson_hours
 
 def get_asset_path(rel_path):
     if hasattr(sys, '_MEIPASS'):
@@ -1599,8 +1600,10 @@ class LessonAssignmentDialog(QDialog):
             s_name = (a.get("ders") or a.get("subject") or "").strip()
             if not s_name: continue
             c_name = (a.get("sinif") or a.get("class") or "").strip()
-            dur = a.get("ders_sayisi") or a.get("duration") or 2
-            typ = a.get("dagilim") or a.get("type") or str(dur)
+            # Saat ve dağılım, sınıf ekranıyla aynı kaynaktan okunur; eski
+            # ders_sayisi alanı bayatlamış olabilir (bkz. lesson_hours).
+            dur = lesson_hours.hours(a) or 2
+            typ = lesson_hours.type_str(a) or str(dur)
             is_comb = bool(a.get("is_combined") or ("+" in c_name or "&" in c_name))
             
             if is_comb:
@@ -2053,8 +2056,8 @@ class DersEditDialog(QDialog):
         for a in my_atamalar:
             t_str = a.get("ogretmen") or a.get("teacher") or "Atanmadı"
             c_str = a.get("sinif") or a.get("class") or ""
-            dur_str = a.get("ders_sayisi") or a.get("duration", 0)
-            tip_str = a.get("dagilim") or a.get("type", "-")
+            dur_str = lesson_hours.hours(a)
+            tip_str = lesson_hours.type_str(a) or "-"
             item_text = f"• {t_str}  →  {c_str} ({dur_str} Saat, Tip: {tip_str})"
             item = QListWidgetItem(item_text)
             self.list_assignments.addItem(item)
@@ -4053,8 +4056,8 @@ class OgretmenEditDialog(BaseEditForm):
         for a in my_atamalar:
             s_name = a.get("ders") or a.get("subject", "")
             c_name = a.get("sinif") or a.get("class", "")
-            dur = a.get("ders_sayisi") or a.get("duration", 0)
-            tip = a.get("dagilim") or a.get("type", str(dur))
+            dur = lesson_hours.hours(a)
+            tip = lesson_hours.type_str(a) or str(dur)
             item_text = f"•  {s_name}  →  {c_name}  ({dur} Saat: {tip})"
             self.list_assignments.addItem(QListWidgetItem(item_text))
             
@@ -4190,7 +4193,17 @@ class DerslikEditDialog(BaseEditForm):
         d_lay = QHBoxLayout(d_frame)
         d_lay.addWidget(QLabel("Derslik Kapasitesi:"))
         self.w_cap = QLineEdit(self.existing_data.get("kapasite", ""))
+        self.w_cap.setPlaceholderText("örn. 30")
         d_lay.addWidget(self.w_cap)
+        d_lay.addWidget(QLabel("Türü:"))
+        self.w_tur = QComboBox()
+        # Type is what lets "Dersliklere Atama" refuse to put a lab lesson in a
+        # normal classroom; it is stored as plain text so old files stay readable.
+        self.w_tur.setEditable(True)
+        self.w_tur.addItems(["Normal", "Laboratuvar", "Spor Salonu", "Atölye",
+                             "Bilgisayar", "Müzik", "Resim", "Konferans"])
+        self.w_tur.setCurrentText(self.existing_data.get("tur", "") or "Normal")
+        d_lay.addWidget(self.w_tur)
         self.main_layout.addWidget(d_frame)
         
         self._add_bottom_buttons()
@@ -4219,6 +4232,7 @@ class DerslikEditDialog(BaseEditForm):
             "kisa": self.w_kisa.text().strip(),
             "renk": self._color,
             "kapasite": self.w_cap.text().strip(),
+            "tur": self.w_tur.currentText().strip(),
             "ozel_alanlar": self.existing_data.get("ozel_alanlar", {})
         }
 

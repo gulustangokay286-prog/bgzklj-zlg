@@ -3,6 +3,7 @@ main_window.py  –  Ana pencere
 Pixel-perfect aSc k12 Bilişim Ders Planlama 2020 ribbon + workspace
 """
 import os
+import sys
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QLabel,
     QSplitter, QTreeWidget, QTreeWidgetItem, QStatusBar,
@@ -736,15 +737,15 @@ class MainWindow(QMainWindow):
         p2.add_button("Yeni",       "yeni",   self._act_new)
         p2.add_button("Aç",         "ac",     self._act_open)
         p2.add_button("Kapat",      "temizle",self._act_close)
-        p2.add_button("Demo\nDosyaları","okul",self._act_nyi)
+        p2.add_button("Demo\nDosyaları","okul",self._act_demo_files)
         p2.add_divider()
         p2.add_button("Kaydet",     "kaydet", self._act_save)
         p2.add_button("Yazdır",     "yazdir", self._act_print)
         p2.add_button("Ön İzleme",  "on_izleme",self._act_preview)
-        p2.add_button("Bilgi Al",   "okul",   self._act_nyi)
-        p2.add_button("Aktar",      "internet",self._act_nyi)
+        p2.add_button("Bilgi Al",   "okul",   self._act_school_info)
+        p2.add_button("Aktar",      "internet",self._act_export)
         p2.add_button("Karşılaştırma", "kontrol", self._act_compare)
-        p2.add_button("E-Mail\nGönder","internet",self._act_nyi)
+        p2.add_button("E-Mail\nGönder","internet",self._act_email)
         p2.add_button("İnternet\nHesabı","internet", lambda: __import__('webbrowser').open("https://chenki.net/"))
         p2.add_stretch()
 
@@ -772,11 +773,11 @@ class MainWindow(QMainWindow):
         p4.add_button("Geri Al\nCtrl+Z","geri_al",self._act_undo)
         p4.add_button("Tekrarla\nCtrl+Y","yinele",self._act_redo)
         p4.add_divider()
-        p4.add_button("Görünüm",    "iliskiler",   self._act_nyi)
-        p4.add_button("Yakınlaştır","on_izleme",self._act_nyi)
-        p4.add_button("Hafta",      "iliskiler",   self._act_nyi)
-        p4.add_button("Sekmeleri\nGöster","okul",self._act_nyi)
-        p4.add_button("Ders Programı\nİle İlgili","iliskiler",self._act_nyi)
+        p4.add_button("Görünüm",    "iliskiler",   self._act_view_mode)
+        p4.add_button("Yakınlaştır","on_izleme",self._act_zoom)
+        p4.add_button("Hafta",      "iliskiler",   self._act_week)
+        p4.add_button("Sekmeleri\nGöster","okul",self._act_toggle_tabs)
+        p4.add_button("Ders Programı\nİle İlgili","iliskiler",self._act_school_info)
         p4.add_stretch()
 
         # ── 5. Planlama / Yerleştirme ────────────────────────────────────────
@@ -786,15 +787,15 @@ class MainWindow(QMainWindow):
         p5.add_button("Otomatik\nPlanlamayı Başlat","otomatik",self._act_auto_schedule)
         p5.add_button("Bulut Tabanlı\nPlanlama","bulut_olustur",self._act_cloud_timetable)
         p5.add_divider()
-        p5.add_button("İyileştirme\nUygula","otomatik",self._act_nyi)
-        p5.add_button("Analiz",     "kontrol",self._act_nyi)
-        p5.add_button("Tanımlanan\nKısıtlamalar","sartlar",self._act_nyi)
+        p5.add_button("İyileştirme\nUygula","otomatik",self._act_improve)
+        p5.add_button("Analiz",     "kontrol",self._act_statistics)
+        p5.add_button("Tanımlanan\nKısıtlamalar","sartlar",self._act_constraints_overview)
         p5.add_divider()
         p5.add_button("Planlama Sonrası\nKontrol","kontrol",self._act_verify_timetable)
-        p5.add_button("Danışman",   "yardim",self._act_nyi)
+        p5.add_button("Danışman",   "yardim",self._act_advisor)
         p5.add_button("İstatistik", "iliskiler", self._act_statistics)
         p5.add_divider()
-        p5.add_button("Dersliklere\nAtama","derslik",self._act_nyi)
+        p5.add_button("Dersliklere\nAtama","derslik",self._act_rooms_assign)
         p5.add_button("Tabloyu\nTemizle","temizle",self._act_clear_schedule)
         p5.add_stretch()
 
@@ -812,13 +813,13 @@ class MainWindow(QMainWindow):
         # ── 7. Yardım ────────────────────────────────────────────────────────
         p7 = r.add_tab("Yardım")
         p7.add_back(self._go_main_tab)
-        p7.add_button("Tanıtım Ve\nÖğrenme","okul",self._act_nyi)
-        p7.add_button("Günlük\nİpucu","yardim",self._act_nyi)
-        p7.add_button("Demo Dosyaları\nGöster","okul",self._act_nyi)
+        p7.add_button("Tanıtım Ve\nÖğrenme","okul",self._act_help)
+        p7.add_button("Günlük\nİpucu","yardim",self._act_tip_of_day)
+        p7.add_button("Demo Dosyaları\nGöster","okul",self._act_demo_files)
         p7.add_divider()
-        p7.add_button("Teknik\nDestek","yardim",self._act_nyi)
-        p7.add_button("Yeni Versiyon\nKontrolü","internet",self._act_nyi)
-        p7.add_button("Hizmet Yenilemek\nİçin Tıklayınız","internet",self._act_nyi)
+        p7.add_button("Teknik\nDestek","yardim",self._act_support)
+        p7.add_button("Yeni Versiyon\nKontrolü","internet",self._act_check_updates)
+        p7.add_button("Hizmet Yenilemek\nİçin Tıklayınız","internet",self._act_account)
         p7.add_button("Online\nYardım","yardim",lambda: __import__('webbrowser').open("https://chenki.net/"))
         p7.add_button("Sorular?\nYorumlar?","yardim",lambda: __import__('dialogs.faq_dialog', fromlist=['FAQDialog']).FAQDialog(self).exec())
         p7.add_stretch()
@@ -841,10 +842,10 @@ class MainWindow(QMainWindow):
             }
         """)
 
-        # Left panel (Modern Sidebar)
+        # Left panel (Sleek Apple-style Sidebar)
         left = QFrame(splitter)
-        left.setMinimumWidth(240)
-        left.setMaximumWidth(320)
+        left.setMinimumWidth(155)
+        left.setMaximumWidth(210)
         left.setStyleSheet("""
             QFrame {
                 background-color: #F8FAFC;
@@ -852,17 +853,17 @@ class MainWindow(QMainWindow):
             }
         """)
         l_layout = QVBoxLayout(left)
-        l_layout.setContentsMargins(8, 8, 8, 8)
-        l_layout.setSpacing(6)
+        l_layout.setContentsMargins(6, 6, 6, 6)
+        l_layout.setSpacing(4)
 
         self._tree = QTreeWidget(left)
         from PySide6.QtWidgets import QAbstractItemView
         self._tree.setMouseTracking(True)
         self._tree.setHeaderHidden(True)
         self._tree.setRootIsDecorated(False)
-        self._tree.setIndentation(10)
+        self._tree.setIndentation(6)
         self._tree.setAnimated(True)
-        self._tree.setIconSize(QSize(48, 28))
+        self._tree.setIconSize(QSize(26, 20))
         self._tree.setSelectionBehavior(QAbstractItemView.SelectRows)
         self._tree.setStyleSheet(f"""
             QTreeWidget {{
@@ -1000,7 +1001,7 @@ class MainWindow(QMainWindow):
 
         splitter.addWidget(left)
         splitter.addWidget(right)
-        splitter.setSizes([220, 1060])
+        splitter.setSizes([175, 1100])
 
         self._grid.view_mode_changed.connect(lambda mode: self._refresh_grid())
 
@@ -1008,12 +1009,12 @@ class MainWindow(QMainWindow):
         def toggle_sidebar():
             is_vis = left.isVisible()
             left.setVisible(not is_vis)
-            splitter.setSizes([220, 1060] if not is_vis else [0, 1060])
+            splitter.setSizes([175, 1100] if not is_vis else [0, 1100])
             
         self._grid.toggle_panel_btn.clicked.connect(toggle_sidebar)
         # Set initial left panel hidden (kapalı başlasın)
         left.setVisible(False)
-        splitter.setSizes([0, 1060])
+        splitter.setSizes([0, 1100])
         
         return splitter
 
@@ -1222,12 +1223,35 @@ class MainWindow(QMainWindow):
             return
             
         settings = self.data_store.get("settings", {})
-        periods = int(settings.get("periods", 8))
-        days_list = settings.get("days")
-        if not days_list:
-            days_count = int(settings.get("days_count", settings.get("day_count", self.data_store.get("gun_sayisi", 5))))
-            from timetable_grid import DAYS
+        try:
+            periods = int(settings.get("periods") or settings.get("periods_per_day") or self.data_store.get("ders_saati") or 8)
+        except Exception:
+            periods = 8
+            
+        try:
+            days_count = int(settings.get("days_count") or settings.get("day_count") or self.data_store.get("gun_sayisi") or 5)
+        except Exception:
+            days_count = 5
+            
+        days_count = max(1, min(7, days_count))
+        from timetable_grid import DAYS
+        active_list = settings.get("active_days_list", [])
+        if active_list and len(active_list) == 7:
+            days_list = [d["name"] for d in active_list if d.get("active", True)]
+            if not days_list:
+                days_list = DAYS[:days_count]
+        elif settings.get("days") and len(settings.get("days")) == days_count:
+            days_list = list(settings.get("days"))
+        else:
             days_list = DAYS[:days_count]
+            
+        settings["periods"] = periods
+        settings["periods_per_day"] = periods
+        settings["days_count"] = len(days_list)
+        settings["day_count"] = len(days_list)
+        settings["days"] = days_list
+        self.data_store["ders_saati"] = periods
+        self.data_store["gun_sayisi"] = len(days_list)
         
         mode = getattr(self._grid, "current_view_mode", "classes")
         grid_data = self.data_store.get("grid_placements", [])
@@ -1487,14 +1511,9 @@ class MainWindow(QMainWindow):
             fname = os.path.basename(self.current_roz_path)
             self.statusBar().showMessage(f"💾 Tüm değişiklikler '{fname}' dosyasına anlık kaydedildi.", 2000)
             
-            # Offload SQLite & background tasks asynchronously without UI stutter
+            # Offload VDS Cloud sync & background tasks asynchronously without UI stutter
             import threading
             def _async_bg_sync(store_copy, s_slug, v_fn, auth_copy):
-                try:
-                    from database import sync_data_store_to_sqlite
-                    sync_data_store_to_sqlite(store_copy)
-                except Exception:
-                    pass
                 try:
                     from cloud_sync import push_version_to_rtdb, push_institution_to_rtdb
                     if s_slug and v_fn:
@@ -1973,8 +1992,9 @@ class MainWindow(QMainWindow):
                     "combined_classes": list(target_classes) if is_comb else []
                 })
 
-        # Loose cards: include any loose cards
-        for lc in self.data_store.get("loose_unplaced_cards", []):
+        # Loose cards & manual added cards: include any loose or manually added cards
+        combined_loose = list(self.data_store.get("loose_unplaced_cards", [])) + list(self.data_store.get("manual_unplaced_cards", []))
+        for lc in combined_loose:
             if target_entity:
                 if display_mode == "classes":
                     if not matches_class(lc.get("class_name", ""), target_entity):
@@ -2324,7 +2344,7 @@ class MainWindow(QMainWindow):
         #   pending_swap      -> send it back to where the dragged lesson came from
         #   pending_displaced -> return it to the unplaced dock, still re-placeable
         pending_swap = None
-        pending_displaced = None
+        pending_displaced = []   # every lesson the drop displaces, never just the first
         # Recorded on the placement so the grid can flag it, rather than blocking it.
         has_teacher_conflict = False
 
@@ -2348,7 +2368,13 @@ class MainWindow(QMainWindow):
         # ── 1. KESİN KONTROL: Sınıf Çizelgesi Dolu mu?
         target_check_classes = combined_classes if (is_comb and combined_classes) else [cls_name] if cls_name else []
         if target_check_classes:
-            class_occupied = None
+            # EVERY lesson the incoming block lands on, not just the first.
+            #
+            # This used to stop at the first overlap. A 2-hour block dropped across
+            # two 1-hour lessons therefore rescued only one of them — the second was
+            # silently erased by the placement loop below, which clears each target
+            # cell in turn. The longer lesson literally ate the shorter one.
+            occupied_all = []
             for p_item in self.data_store.get("grid_placements", []):
                 if is_origin_placement(p_item):
                     continue
@@ -2356,17 +2382,33 @@ class MainWindow(QMainWindow):
                 p_period = int(p_item.get("period") if "period" in p_item else p_item.get("row", 0))
                 p_dur = int(p_item.get("duration", 1))
                 p_cls = (p_item.get("class_name") or p_item.get("class") or "").strip()
-                
-                if p_day == day_idx:
-                    overlap = max(0, min(p_period + p_dur, period_idx + duration) - max(p_period, period_idx))
-                    if overlap > 0:
-                        for chk_c in target_check_classes:
-                            if matches_class(p_cls, chk_c) or matches_class(chk_c, p_cls) or p_cls == chk_c:
-                                class_occupied = p_item
-                                break
-                        if class_occupied:
-                            break
-                    
+
+                if p_day != day_idx:
+                    continue
+                overlap = max(0, min(p_period + p_dur, period_idx + duration) - max(p_period, period_idx))
+                if overlap <= 0:
+                    continue
+                if any(matches_class(p_cls, chk_c) or matches_class(chk_c, p_cls) or p_cls == chk_c
+                       for chk_c in target_check_classes):
+                    occupied_all.append(p_item)
+
+            # De-duplicate by block: a multi-hour lesson is stored as one record per
+            # hour, and each of those must not be reported (or re-docked) separately.
+            seen_blocks = set()
+            unique_occupied = []
+            for p_item in occupied_all:
+                bid = p_item.get("block_id")
+                key = bid or (
+                    int(p_item.get("period", p_item.get("row", 0))),
+                    (p_item.get("class_name") or p_item.get("class") or "").strip(),
+                )
+                if key in seen_blocks:
+                    continue
+                seen_blocks.add(key)
+                unique_occupied.append(p_item)
+
+            class_occupied = unique_occupied[0] if unique_occupied else None
+
             if class_occupied:
                 occ_s = class_occupied.get("subject_name") or class_occupied.get("subject") or "Ders"
                 occ_t = class_occupied.get("teacher_name") or class_occupied.get("teacher") or "Öğretmen"
@@ -2378,12 +2420,17 @@ class MainWindow(QMainWindow):
                 # two, and losing a lesson because of it is destructive and hard to
                 # undo. Nothing is removed here any more.
                 #
-                # Dragged from elsewhere on the grid -> swap the two lessons.
-                # Dragged in from the dock -> the displaced lesson goes BACK to the
-                # dock, where it can be re-placed, instead of disappearing.
+                # A clean 1:1 exchange is only possible when the incoming lesson
+                # displaces exactly ONE lesson of the same length. A 2-hour block
+                # landing across two 1-hour lessons has no single partner to trade
+                # with, so every displaced lesson goes back to the dock instead —
+                # which is what stops the longer lesson from eating the shorter ones.
                 occ_dur = int(class_occupied.get("duration", 1) or 1)
+                can_swap = (is_move and orig_c >= 0
+                            and len(unique_occupied) == 1
+                            and occ_dur == duration)
 
-                if is_move and orig_c >= 0 and occ_dur == duration:
+                if can_swap:
                     ret = QMessageBox.question(
                         self, "Dersleri Yer Değiştir",
                         f"<b>{occ_c}</b> sınıfının <b>{day_name}</b> günü "
@@ -2397,18 +2444,27 @@ class MainWindow(QMainWindow):
                         return
                     pending_swap = class_occupied
                 else:
+                    if len(unique_occupied) == 1:
+                        detail = f"zaten <b>{occ_s}</b> ({occ_t}) dersi var"
+                    else:
+                        listed = ", ".join(
+                            (o.get("subject_name") or o.get("subject") or "Ders")
+                            for o in unique_occupied[:4]
+                        )
+                        detail = (f"<b>{len(unique_occupied)}</b> ders var "
+                                  f"({listed}{'...' if len(unique_occupied) > 4 else ''})")
                     ret = QMessageBox.question(
                         self, "Bu Saat Dolu",
                         f"<b>{occ_c}</b> sınıfının <b>{day_name}</b> günü "
-                        f"<b>{period_idx+1}. saatinde</b> zaten <b>{occ_s}</b> ({occ_t}) dersi var.<br><br>"
+                        f"<b>{period_idx+1}. saatinden</b> itibaren {detail}.<br><br>"
                         f"Yeni ders buraya yerleştirilsin mi?<br>"
-                        f"<i>Mevcut ders silinmez; yerleştirilmeyenler listesine geri döner.</i>",
+                        f"<i>Hiçbiri silinmez; hepsi yerleştirilmeyenler listesine geri döner.</i>",
                         QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
                     )
                     if ret != QMessageBox.Yes:
                         self.statusBar().showMessage(f"İptal edildi: {cls_name} — {day_name} {period_idx+1}. saat dolu.")
                         return
-                    pending_displaced = class_occupied
+                    pending_displaced = list(unique_occupied)
 
         # ── 2. KONTROL: Öğretmen Kapalı/Kısıtlı Saat Kontrolü
         kisitlamalar = self.data_store.get("kisitlamalar", {})
@@ -2629,41 +2685,51 @@ class MainWindow(QMainWindow):
 
         # Take the displaced lesson off the grid — it is about to be re-added either
         # at the origin slot (swap) or in the dock (displaced).
-        if pending_swap is not None or pending_displaced is not None:
-            victim = pending_swap if pending_swap is not None else pending_displaced
-            v_block = victim.get("block_id")
-            v_day = int(victim.get("day") if "day" in victim else victim.get("col", 0))
-            v_per = int(victim.get("period") if "period" in victim else victim.get("row", 0))
-            v_cls = (victim.get("class_name") or victim.get("class") or "").strip()
+        # Every displaced lesson is handled, not just the first one found. Dropping a
+        # 2-hour block across two 1-hour lessons rescues BOTH.
+        victims = []
+        if pending_swap is not None:
+            victims = [pending_swap]
+        elif pending_displaced:
+            victims = list(pending_displaced)
 
-            def _is_victim(p):
+        if victims:
+            def _belongs_to(p, victim):
+                v_block = victim.get("block_id")
                 if v_block and p.get("block_id") == v_block:
                     return True
                 p_d = int(p.get("day") if "day" in p else p.get("col", 0))
                 p_p = int(p.get("period") if "period" in p else p.get("row", 0))
                 p_c = (p.get("class_name") or p.get("class") or "").strip()
-                return p_d == v_day and p_p == v_per and p_c == v_cls
+                v_d = int(victim.get("day") if "day" in victim else victim.get("col", 0))
+                v_p = int(victim.get("period") if "period" in victim else victim.get("row", 0))
+                v_c = (victim.get("class_name") or victim.get("class") or "").strip()
+                return p_d == v_d and p_p == v_p and p_c == v_c
 
             self.data_store["grid_placements"] = [
-                p for p in self.data_store.get("grid_placements", []) if not _is_victim(p)
+                p for p in self.data_store.get("grid_placements", [])
+                if not any(_belongs_to(p, v) for v in victims)
             ]
 
-            if pending_displaced is not None:
-                # Back to the dock as a loose, re-placeable card rather than deleted.
+            if pending_displaced:
+                # Back to the dock as loose, re-placeable cards rather than deleted.
                 import uuid as _uuid_d
-                self.data_store.setdefault("loose_unplaced_cards", []).append({
-                    "id": f"loose_{_uuid_d.uuid4().hex[:8]}",
-                    "subject_name": victim.get("subject_name") or victim.get("subject") or "",
-                    "subject": victim.get("subject_name") or victim.get("subject") or "",
-                    "teacher_name": victim.get("teacher_name") or victim.get("teacher") or "",
-                    "teacher": victim.get("teacher_name") or victim.get("teacher") or "",
-                    "class_name": v_cls, "class": v_cls,
-                    "duration": int(victim.get("duration", 1) or 1),
-                    "color": victim.get("color", ""),
-                    "is_filler": bool(victim.get("is_filler", False)),
-                    "is_combined": bool(victim.get("is_combined", False)),
-                    "combined_classes": list(victim.get("combined_classes", []) or []),
-                })
+                dock = self.data_store.setdefault("loose_unplaced_cards", [])
+                for victim in victims:
+                    v_cls = (victim.get("class_name") or victim.get("class") or "").strip()
+                    subject = victim.get("subject_name") or victim.get("subject") or ""
+                    v_teacher = victim.get("teacher_name") or victim.get("teacher") or ""
+                    dock.append({
+                        "id": f"loose_{_uuid_d.uuid4().hex[:8]}",
+                        "subject_name": subject, "subject": subject,
+                        "teacher_name": v_teacher, "teacher": v_teacher,
+                        "class_name": v_cls, "class": v_cls,
+                        "duration": int(victim.get("duration", 1) or 1),
+                        "color": victim.get("color", ""),
+                        "is_filler": bool(victim.get("is_filler", False)),
+                        "is_combined": bool(victim.get("is_combined", False)),
+                        "combined_classes": list(victim.get("combined_classes", []) or []),
+                    })
 
 
         # Yeni yerleşimi ekle (her saat bloğu için)
@@ -2765,12 +2831,16 @@ class MainWindow(QMainWindow):
         if "auto_schedule_results" in self.data_store:
             self.data_store["auto_schedule_results"] = list(self.data_store.get("grid_placements", []))
 
-        # It's now back on the grid — remove it from the loose pool so it doesn't also linger
-        # in the dock as a duplicate.
-        if _dropped_loose_card and "loose_unplaced_cards" in self.data_store:
-            self.data_store["loose_unplaced_cards"] = [
-                lc for lc in self.data_store["loose_unplaced_cards"] if lc.get("id") != _dropped_loose_id
-            ]
+        # It's now back on the grid — remove it from the loose/manual pool so it doesn't linger
+        if _dropped_loose_id:
+            if "loose_unplaced_cards" in self.data_store:
+                self.data_store["loose_unplaced_cards"] = [
+                    lc for lc in self.data_store["loose_unplaced_cards"] if lc.get("id") != _dropped_loose_id
+                ]
+            if "manual_unplaced_cards" in self.data_store:
+                self.data_store["manual_unplaced_cards"] = [
+                    mc for mc in self.data_store["manual_unplaced_cards"] if mc.get("id") != _dropped_loose_id
+                ]
 
         self._refresh_grid(skip_unplaced=True)
         self.save_db(sync_from_grid=False)
@@ -2784,9 +2854,15 @@ class MainWindow(QMainWindow):
             other = swap_payload.get("subject_name") or swap_payload.get("subject") or "ders"
             msg = (f"'{subject_name}' ile '{other}' yer değiştirdi "
                    f"({day_name} {period_idx+1}. saat).")
-        elif pending_displaced is not None:
-            other = pending_displaced.get("subject_name") or pending_displaced.get("subject") or "ders"
-            msg = (f"'{subject_name}' yerleştirildi. '{other}' yerleştirilmeyenler "
+        elif pending_displaced:
+            names = [
+                (o.get("subject_name") or o.get("subject") or "ders")
+                for o in pending_displaced
+            ]
+            listed = ", ".join(f"'{n}'" for n in names[:3])
+            if len(names) > 3:
+                listed += f" ve {len(names) - 3} ders daha"
+            msg = (f"'{subject_name}' yerleştirildi. {listed} yerleştirilmeyenler "
                    f"listesine taşındı — silinmedi.")
         else:
             msg = (f"'{subject_name}' ({cls_name} - {teacher}) dersi {day_name} günü "
@@ -3516,6 +3592,11 @@ class MainWindow(QMainWindow):
         d = VerifyTimetableDialog(self.data_store, self)
         d.exec()
 
+    def _act_advisor(self):
+        """Danışman: çizelge neden bu hâlde, sayılarıyla birlikte anlatır."""
+        from dialogs.advisor_dialog import AdvisorDialog
+        AdvisorDialog(self.data_store, self).exec()
+
     def _act_cloud_timetable(self):
         QMessageBox.information(self, "Bulut Tabanlı Planlama", "Bulut tabanlı planlama modülünü kullanabilmek için aktif bir Dijisa hesabı gereklidir.")
 
@@ -3530,6 +3611,8 @@ class MainWindow(QMainWindow):
             self.data_store["grid_placements"] = []
             self.data_store["auto_schedule_results"] = []
             self.data_store["yerlesim"] = {}
+            self.data_store["loose_unplaced_cards"] = []
+            self.data_store["manual_unplaced_cards"] = []
             if hasattr(self, "_grid"):
                 self._grid.clear_grid()
             slug = getattr(self, "institution_slug", None)
@@ -3548,9 +3631,241 @@ class MainWindow(QMainWindow):
         from dialogs.extracted_dialog import open_extracted_dialog
         open_extracted_dialog(dialog_id, self)
 
-    def _act_nyi(self):
-        msg = QMessageBox(self)
-        msg.setWindowTitle("Bulut Tabanlı Planlama")
-        msg.setIcon(QMessageBox.Information)
-        msg.exec()
+    # ── Actions that used to be dead ─────────────────────────────────────
+    #
+    # These 20 buttons were all wired to a single handler (`_act_nyi`) that opened an
+    # EMPTY message box titled "Bulut Tabanlı Planlama" — no text, and a title
+    # belonging to an unrelated feature. Pressing any of them looked like a bug. That
+    # handler is gone; each button now does the thing its label promises.
+    # test_no_dead_buttons.py fails the build if a stub ever comes back.
+
+    # -- View controls -------------------------------------------------
+
+    def _act_view_mode(self):
+        """Cycles the grid between class, teacher and room views."""
+        grid = getattr(self, "_grid", None)
+        if grid is None or not hasattr(grid, "_set_view_mode"):
+            return
+        order = ["classes", "teachers"]
+        if self.data_store.get("derslikler"):
+            order.append("rooms")
+        current = getattr(grid, "current_view_mode", "classes")
+        nxt = order[(order.index(current) + 1) % len(order)] if current in order else order[0]
+        grid._set_view_mode(nxt)
+        label = {"classes": "Sınıflar", "teachers": "Öğretmenler", "rooms": "Derslikler"}
+        self.statusBar().showMessage(f"Görünüm: {label.get(nxt, nxt)}", 3000)
+
+    def _act_zoom(self):
+        """Steps the grid font/row size through three levels and wraps around."""
+        grid = getattr(self, "_grid", None)
+        table = getattr(grid, "table", None) if grid else None
+        if table is None:
+            return
+        levels = [0.85, 1.0, 1.25, 1.5]
+        current = getattr(self, "_zoom_level", 1.0)
+        try:
+            nxt = levels[(levels.index(current) + 1) % len(levels)]
+        except ValueError:
+            nxt = 1.0
+        self._zoom_level = nxt
+
+        base_row = getattr(self, "_base_row_height", None)
+        if base_row is None:
+            base_row = table.rowHeight(0) if table.rowCount() else 34
+            self._base_row_height = base_row
+        base_col = getattr(self, "_base_col_width", None)
+        if base_col is None:
+            base_col = table.columnWidth(0) if table.columnCount() else 34
+            self._base_col_width = base_col
+
+        for r in range(table.rowCount()):
+            table.setRowHeight(r, max(18, int(base_row * nxt)))
+        for c in range(table.columnCount()):
+            table.setColumnWidth(c, max(18, int(base_col * nxt)))
+        self.statusBar().showMessage(f"Yakınlaştırma: %{int(nxt * 100)}", 3000)
+
+    def _act_toggle_tabs(self):
+        """Collapses the ribbon to give the grid the full window."""
+        ribbon = getattr(self, "_ribbon", None)
+        if ribbon is None or not hasattr(ribbon, "set_collapsed"):
+            return
+        collapsed = not ribbon.is_collapsed()
+        ribbon.set_collapsed(collapsed)
+        self.statusBar().showMessage(
+            "Şerit gizlendi — tekrar göstermek için aynı düğmeye basın."
+            if collapsed else "Şerit gösteriliyor.", 4000)
+
+    def _act_week(self):
+        """Switches between A and B weeks for schools running alternating weeks."""
+        settings = self.data_store.setdefault("settings", {})
+        if not settings.get("uses_ab_weeks"):
+            ret = QMessageBox.question(
+                self, "A/B Hafta Düzeni",
+                "Bu kurum için A/B haftası tanımlı değil.<br><br>"
+                "Çift haftalık (A/B) düzeni açılsın mı?<br>"
+                "<i>Açıldığında dersleri A haftası, B haftası veya her hafta olarak "
+                "işaretleyebilirsiniz.</i>",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+            if ret != QMessageBox.Yes:
+                return
+            settings["uses_ab_weeks"] = True
+            settings["current_week"] = "A"
+            self.mark_dirty()
+            self.save_db(sync_from_grid=False)
+            self.statusBar().showMessage("A/B hafta düzeni açıldı. Şu an: A haftası", 5000)
+            return
+
+        current = settings.get("current_week", "A")
+        settings["current_week"] = "B" if current == "A" else "A"
+        self.mark_dirty()
+        self.save_db(sync_from_grid=False)
+        self._refresh_grid()
+        self.statusBar().showMessage(f"{settings['current_week']} haftası gösteriliyor", 4000)
+
+    # -- Data / info ---------------------------------------------------
+
+    def _act_school_info(self):
+        # "Bilgi Al" and "Ders Programı İle İlgili" both land here: the school's own
+        # details are the thing the user is asking about in each case.
+        self._open_school_info()
+
+    def _act_constraints_overview(self):
+        from dialogs.constraints_dialog import ConstraintsDialog
+        d = ConstraintsDialog(self.data_store, target_type="ogretmen", parent=self)
+        if d.exec():
+            self.mark_dirty()
+            self.save_db(sync_from_grid=False)
+
+    def _act_rooms_assign(self):
+        from dialogs.room_assign_dialog import RoomAssignDialog
+        if not self.data_store.get("derslikler"):
+            ret = QMessageBox.question(
+                self, "Derslik Tanımlı Değil",
+                "Henüz hiç derslik tanımlanmamış.<br><br>"
+                "Derslik tanımlama ekranı açılsın mı?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+            if ret != QMessageBox.Yes:
+                return
+            self._open_rooms()
+            if not self.data_store.get("derslikler"):
+                return
+        self._push_undo_state()
+        d = RoomAssignDialog(self.data_store, self)
+        if d.exec():
+            self.mark_dirty()
+            self.save_db(sync_from_grid=False)
+            self._refresh_grid()
+
+    def _act_help(self):
+        from dialogs.faq_dialog import FAQDialog
+        FAQDialog(self).exec()
+
+    def _act_tip_of_day(self):
+        import random as _random
+        tips = [
+            "Bir dersi gridde başka bir dersin üzerine sürüklerseniz ikisi yer değiştirir; "
+            "hiçbir ders silinmez.",
+            "Zaman Tablosu ekranından bir sınıfın saatlerini kapatırsanız, otomatik "
+            "planlayıcı oraya asla ders koymaz.",
+            "Otomatik planlayıcı çalışmadan önce 'Planlama Öncesi Kontrol' size çizelgenin "
+            "dolup dolamayacağını söyler.",
+            "Yerleştirilemeyen dersler alttaki listeye düşer; oradan sürükleyerek elle "
+            "yerleştirebilirsiniz.",
+            "Bir öğretmene, sınıfların açık olduğu saat sayısından fazla ders atarsanız "
+            "fazlası hiçbir şekilde yerleşemez.",
+            "Aktar düğmesiyle çizelgeyi Excel veya CSV olarak dışa aktarabilirsiniz.",
+            "Ctrl+Z ile son işlemi geri alabilirsiniz.",
+        ]
+        QMessageBox.information(self, "Günün İpucu", _random.choice(tips))
+
+    def _act_support(self):
+        from version import APP_BUILD, APP_VERSION
+        QMessageBox.information(
+            self, "Teknik Destek",
+            f"Chenki Akademi Ders Planlama\n"
+            f"Sürüm: {APP_VERSION} (build {APP_BUILD})\n\n"
+            f"Destek: destek@chenki.net\n\n"
+            f"Bir sorun bildirirken sürüm numarasını ve yaptığınız son işlemi "
+            f"belirtmeniz çözümü hızlandırır.")
+
+    def _act_account(self):
+        from api_client import api_client
+        role = "Yönetici" if api_client.is_admin() else "Kullanıcı"
+        email = (self.auth_data or {}).get("email", "—")
+        QMessageBox.information(
+            self, "Hesap Bilgisi",
+            f"E-posta: {email}\nYetki: {role}\nSunucu: {api_client.base_url}")
+
+    def _act_demo_files(self):
+        """Opens the folder holding the institution's saved schedules."""
+        import subprocess
+        import version_store
+        slug = getattr(self, "institution_slug", None)
+        folder = (version_store._versions_dir(slug) if slug
+                  else os.path.join(os.path.expanduser("~"), ".chenki_akademi"))
+        if not os.path.isdir(folder):
+            QMessageBox.information(self, "Klasör Bulunamadı",
+                                    f"Kayıt klasörü henüz oluşmamış:\n{folder}")
+            return
+        try:
+            if sys.platform == "win32":
+                os.startfile(folder)          # noqa: S606 - opening a local folder
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", folder])
+            else:
+                subprocess.Popen(["xdg-open", folder])
+        except Exception as exc:
+            QMessageBox.warning(self, "Klasör Açılamadı", f"{folder}\n\n{exc}")
+
+    def _act_improve(self):
+        """Re-runs the scheduler to fill what is still empty, keeping placed lessons."""
+        placed = len(self.data_store.get("grid_placements", []) or [])
+        if not placed:
+            QMessageBox.information(
+                self, "İyileştirme",
+                "Çizelge boş. Önce 'Otomatik Planlamayı Başlat' ile bir çizelge oluşturun.")
+            return
+        ret = QMessageBox.question(
+            self, "İyileştirme Uygula",
+            f"Mevcut çizelge ({placed} yerleşim) korunarak boş saatler doldurulmaya "
+            f"çalışılacak.<br><br>Devam edilsin mi?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+        if ret == QMessageBox.Yes:
+            self._act_auto_schedule()
+
+    def _act_export(self):
+        from dialogs.export_dialog import ExportDialog
+        ExportDialog(self.data_store, self).exec()
+
+    def _act_email(self):
+        """Exports the timetable, then hands it to the user's mail client."""
+        import tempfile
+        import webbrowser
+        from urllib.parse import quote
+
+        import exporters
+        try:
+            folder = tempfile.mkdtemp(prefix="chenki_")
+            name = (self.institution_name or "cizelge").replace(" ", "_")
+            ext = ".xlsx" if exporters.HAS_XLSX else ".csv"
+            path = os.path.join(folder, f"{name}{ext}")
+            exporters.export_to_file(
+                self.data_store, path,
+                ["timetable_classes", "timetable_teachers", "lessons"])
+        except Exception as exc:
+            QMessageBox.warning(self, "Dışa Aktarma Hatası", str(exc))
+            return
+
+        subject = quote(f"{self.institution_name or 'Kurum'} — Ders Programı")
+        body = quote(
+            f"Ders programı ektedir.\n\nDosya: {path}\n\n"
+            f"(E-posta programınız eki otomatik almadıysa dosyayı bu konumdan ekleyin.)")
+        try:
+            webbrowser.open(f"mailto:?subject={subject}&body={body}")
+        except Exception:
+            pass
+        QMessageBox.information(
+            self, "E-Mail Gönder",
+            f"Çizelge dışa aktarıldı:\n{path}\n\n"
+            f"E-posta programınız açıldı; dosyayı ek olarak eklemeniz yeterli.")
 

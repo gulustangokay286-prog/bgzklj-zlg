@@ -11,6 +11,7 @@ from PySide6.QtPrintSupport import QPrintPreviewWidget, QPrinter
 from PySide6.QtGui import QPainter, QPen, QFont, QColor, QPageLayout, QBrush, QPageSize
 from PySide6.QtCore import Qt, QRectF, QPointF
 from auto_scheduler import matches_class
+import lesson_hours
 
 SUBJECT_COLORS = [
     "#2196F3", "#4CAF50", "#FF9800", "#9C27B0", "#E91E63",
@@ -195,10 +196,11 @@ def _group_teacher_atamalar_by_subject(atamalar):
             if cls_str and cls_str not in grouped[subj]["classes"]:
                 grouped[subj]["classes"].append(cls_str)
                 
-        dur_raw = a.get("ders_sayisi") or a.get("duration", 1)
-        dur_val = int(dur_raw) if str(dur_raw).isdigit() else 1
-        grouped[subj]["duration"] += dur_val
-        typ = str(a.get("dagilim") or a.get("type", "")).strip()
+        # Saat, ekranlarla ayni kaynaktan (lesson_hours): eski ders_sayisi alani
+        # sinif ekranindan yapilan bir degisiklikten sonra bayat kalabiliyor ve
+        # basilan ogretmen raporu sinif raporundan az saat gosteriyordu.
+        grouped[subj]["duration"] += lesson_hours.hours(a) or 1
+        typ = lesson_hours.type_str(a)
         if typ and typ not in grouped[subj]["types"]:
             grouped[subj]["types"].append(typ)
             
@@ -907,13 +909,13 @@ class TimetablePrintPreview(QDialog):
                 t_brans = t_obj.get("brans") or t_obj.get("branch") or "Öğretmen"
                 ent_sub = f"{t_brans.upper()} ÖĞRETMENİ"
                 atamalar = _group_teacher_atamalar_by_subject(raw_teacher_atamalar)
-                tot_h = sum(int(a.get("duration", 1)) for a in atamalar if str(a.get("duration", 1)).isdigit())
+                tot_h = sum(lesson_hours.hours(a) for a in atamalar)
             else:
                 atamalar = [a for a in raw_atamalar if matches_class(a.get("sinif") or a.get("class", ""), ent_name) or (a.get("is_combined") and any(matches_class(cc, ent_name) for cc in a.get("combined_classes", [])))]
                 ent_sub = f"{ent_name.upper()} SINIF PROGRAMI"
                 t_brans = "Öğretmen"
-                tot_h = sum(int(a.get("duration", 1)) for a in atamalar if str(a.get("duration", 1)).isdigit())
-                
+                tot_h = sum(lesson_hours.hours(a) for a in atamalar)
+
             grand_total_lessons += len(atamalar)
             grand_total_hours += tot_h
             
@@ -1298,7 +1300,7 @@ class TimetablePrintPreview(QDialog):
             cur_y += row_h
             
         # Summary footer
-        total_hours = sum(int(a.get("duration", 1)) for a in atamalar if str(a.get("duration", 1)).isdigit())
+        total_hours = sum(lesson_hours.hours(a) for a in atamalar)
         painter.setFont(make_font(8.5, False))
         painter.setPen(QPen(QColor("#64748B"), 1))
         painter.drawText(QRectF(tbl_x, VH - 35, 450, 20), Qt.AlignLeft, f"Toplam Atanan Ders Sayısı: {len(atamalar)} | Toplam Ders Saati: {total_hours} Saat")
@@ -1384,7 +1386,7 @@ class TimetablePrintPreview(QDialog):
             tkisa = t.get("kisa", "")
             t_atamalar = [a for a in atamalar if format_tr_name(a.get("ogretmen") or a.get("teacher", "")) == format_tr_name(tname)]
             subs_str = ", ".join(list({(a.get("ders") or a.get("subject", "")) for a in t_atamalar if (a.get("ders") or a.get("subject"))})) or "—"
-            tot_hours = sum(int(a.get("ders_sayisi") or a.get("duration", 1)) for a in t_atamalar if str(a.get("ders_sayisi") or a.get("duration", 1)).isdigit())
+            tot_hours = sum(lesson_hours.hours(a) for a in t_atamalar)
             
             # Text pen MUST be high-contrast crisp black / dark slate
             painter.setPen(QPen(QColor("#0F172A"), 1))

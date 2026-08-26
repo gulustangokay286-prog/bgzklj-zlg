@@ -131,7 +131,11 @@ def run():
     QMessageBox.critical = staticmethod(lambda *a, **k: QMessageBox.Yes)
     QMessageBox.information = staticmethod(lambda *a, **k: QMessageBox.Ok)
 
-    win = MainWindow()
+    # override_db_path ZORUNLU. Kurumsuz bir MainWindow, yapici icinde son
+    # kullanilan .roz yolunu okuyup ona baglaniyor — yani KULLANICININ aktif
+    # versiyonuna. Yolu yapicidan SONRA degistirmek gec kaliyor: kurulum sirasinda
+    # gercek dosyaya yaziliyor (iki kez oldu, v082 yedekten geri alindi).
+    win = MainWindow(override_db_path=SANDBOX_DB)
     win._is_loading = False
     win.db_path = SANDBOX_DB
     win.current_roz_path = SANDBOX_DB
