@@ -18,6 +18,8 @@ Fails silent everywhere: a dev run of `python main.py` (no Launcher, no
 State/ directory) simply never shows the toast, and any I/O or network
 error is swallowed — this must never be able to crash or block the app.
 """
+from __future__ import annotations
+
 import json
 import sys
 from pathlib import Path

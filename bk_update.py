@@ -31,6 +31,8 @@ background processes, that's the right trade for this app.
 Everything here no-ops safely under `python main.py` (dev, unfrozen) —
 install_root() returns None and every public function checks for that.
 """
+from __future__ import annotations
+
 import os
 import sys
 from pathlib import Path

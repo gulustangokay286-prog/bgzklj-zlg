@@ -127,35 +127,18 @@ def normalize_subject_match(s1, s2) -> bool:
     from auto_scheduler import normalize_clean
     n1 = normalize_clean(str1)
     n2 = normalize_clean(str2)
-    if n1 == n2 and n1:
+    if n1 and n2 and n1 == n2:
         return True
 
-    # Check known acronyms & reverse lookup
+    # Check known acronyms & reverse lookup (Strict 1-to-1 matching only)
     for full_name, abbr in ACRONYM_MAP.items():
         fn_norm = normalize_clean(full_name)
         ab_norm = normalize_clean(abbr)
-        if (n1 == fn_norm or fn_norm in n1 or n1.startswith(fn_norm)) and (n2 == ab_norm or ab_norm in n2 or n2.startswith(ab_norm)):
+        if (n1 == fn_norm and n2 == ab_norm) or (n2 == fn_norm and n1 == ab_norm):
             return True
-        if (n2 == fn_norm or fn_norm in n2 or n2.startswith(fn_norm)) and (n1 == ab_norm or ab_norm in n1 or n1.startswith(ab_norm)):
-            return True
-
-    # Substring containment (e.g. "biyoloji" in "biyoloji9", "mat" in "matematik")
-    if n1 in n2 or n2 in n1:
-        return True
-
-    # Exact stem / letter-only match
-    s1_letters = "".join(c for c in n1 if c.isalpha())
-    s2_letters = "".join(c for c in n2 if c.isalpha())
-    if s1_letters and s2_letters:
-        if s1_letters == s2_letters:
-            return True
-        if len(s1_letters) >= 3 and len(s2_letters) >= 3:
-            if s1_letters[:3] == s2_letters[:3]:
-                return True
-            if s1_letters.startswith(s2_letters) or s2_letters.startswith(s1_letters):
-                return True
 
     return False
+
 
 
 def resolve_subject_color(subject_name: str, data_store: dict = None) -> str:

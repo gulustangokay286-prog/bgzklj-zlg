@@ -1,16 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
+import sys
+import os
+from PyInstaller.utils.hooks import collect_all
 
+try:
+    ortools_datas, ortools_binaries, ortools_hiddenimports = collect_all('ortools')
+except Exception:
+    ortools_datas, ortools_binaries, ortools_hiddenimports = [], [], []
 
-# Bu liste dialogs/ klasoruyle birebir tutulur: birkac ekran (Danisman,
-# Aktar, Dersliklere Atama ...) yalnizca calisirken import edildigi icin
-# listede olmayan bir modul derlemede disarida kalip dugmeyi olduruyordu.
 hidden_modules = [
-    'ortools',
-    'ortools.sat',
-    'ortools.sat.python',
-    'ortools.sat.python.cp_model',
-    'ortools.init',
-    'ortools.init.python',
     'perfect_scheduler',
     'kempe_scheduler',
     'tabu_repair',
@@ -27,6 +25,7 @@ hidden_modules = [
     'dialogs.color_picker_dialog',
     'dialogs.compare_dialog',
     'dialogs.constraints_dialog',
+    'dialogs.customer_account_dialog',
     'dialogs.days_dialog',
     'dialogs.edit_forms',
     'dialogs.electives_dialog',
@@ -64,6 +63,8 @@ hidden_modules = [
     'lesson_hours',
     'login_dialog',
     'main_window',
+    'bk_branding',
+    'bk_update',
     'release_telemetry',
     'update_notifications',
     'ribbon_widget',
@@ -75,10 +76,7 @@ hidden_modules = [
     'version',
     'version_store',
     'core.timetable_data',
-]
-
-import sys
-import os
+] + ortools_hiddenimports
 
 icon_file = 'app_icon.icns' if sys.platform == 'darwin' and os.path.exists('app_icon.icns') else 'app_icon.ico'
 
@@ -89,17 +87,19 @@ app_datas = [
     ('app_icon.ico', '.'),
     ('app_icon.png', '.'),
     ('app_icon.icns', '.'),
-]
+    ('bk_icon.png', '.'),
+    ('bk_icon.ico', '.'),
+    ('bk_inner_logo.png', '.'),
+    ('bk_dashboard_brand.png', '.'),
+] + ortools_datas
+
 if os.path.exists('release_system_ca.pem'):
-    # Only present when pinning against a self-signed release-system cert
-    # for local/dev testing — see release_telemetry.py's docstring. Not
-    # needed against updates.chenki.net's real Let's Encrypt cert.
     app_datas.append(('release_system_ca.pem', '.'))
 
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[],
+    binaries=ortools_binaries,
     datas=app_datas,
     hiddenimports=hidden_modules,
     hookspath=[],

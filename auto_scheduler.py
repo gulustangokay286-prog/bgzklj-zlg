@@ -1079,11 +1079,11 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                 if cn in b["classes"]:
                     subj_blocks[_norm_s(b["subject"])].append(b)
             for s_k, b_list in subj_blocks.items():
-                if len(b_list) <= D:
-                    for d in range(D):
-                        day_vars = [x1[b["id"], d, p] for b in b_list for p in range(P - b["duration"] + 1) if (b["id"], d, p) in x1]
-                        if len(day_vars) > 1:
-                            model1.Add(sum(day_vars) <= 1)
+                max_d_allowed = max(1, math.ceil(len(b_list) / D)) if len(b_list) > D else 1
+                for d in range(D):
+                    day_vars = [x1[b["id"], d, p] for b in b_list for p in range(P - b["duration"] + 1) if (b["id"], d, p) in x1]
+                    if len(day_vars) > max_d_allowed:
+                        model1.Add(sum(day_vars) <= max_d_allowed)
 
         # ── 2. Kullanıcı Tanımlı Planlama İlişkileri (Planning Relations) Sert Kısıtları ──
         for rel in (planning_relations or []):
@@ -1096,7 +1096,7 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
             f_classes = rel.get("siniflar", [])
             
             # Rule 1: Aynı ders aynı gün tekrar etmesin (Tek blok kuralı)
-            if "tekrar etmesin" in r_type or "aynı gün tekrar" in r_type:
+            if "tekrar etmesin" in r_type or "aynı gün tekrar" in r_type or "tek blok" in r_type or "aynı ders aynı gün" in r_type:
                 for cn in classes_to_schedule:
                     if not _match_relation_class(cn, f_classes):
                         continue
@@ -1105,13 +1105,14 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                         if cn in b["classes"] and _match_relation_subject(b["subject"], f_subjs) and _match_relation_teacher(b["teacher"], f_teach):
                             subj_blocks[_norm_s(b["subject"])].append(b)
                     for s_k, b_list in subj_blocks.items():
+                        max_allowed = max(1, math.ceil(len(b_list) / D)) if len(b_list) > D else 1
                         for d in range(D):
                             day_vars = [x1[b["id"], d, p] for b in b_list for p in range(P - b["duration"] + 1) if (b["id"], d, p) in x1]
-                            if len(day_vars) > 1:
-                                model1.Add(sum(day_vars) <= 1)
+                            if len(day_vars) > max_allowed:
+                                model1.Add(sum(day_vars) <= max_allowed)
                                 
             # Rule 2: Günde maksimum ders sayısı
-            elif "Günde maksimum" in r_type or "Günlük maksimum" in r_type:
+            elif "Günde maksimum" in r_type or "Günlük maksimum" in r_type or "maksimum ders" in r_type:
                 max_h = int(val) if str(val).isdigit() else 2
                 for cn in classes_to_schedule:
                     if not _match_relation_class(cn, f_classes):
@@ -1131,7 +1132,7 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                 for cn in classes_to_schedule:
                     if not _match_relation_class(cn, f_classes):
                         continue
-                    app_blocks = [b for b in raw_blocks if cn in b["classes"] and any(k in b["subject"].upper() for k in ["BEDEN", "MÜZİK", "MUZIK", "GÖRSEL", "GORSEL", "RESİM", "RESIM"])]
+                    app_blocks = [b for b in raw_blocks if cn in b["classes"] and any(k in b["subject"].upper() for k in ["BEDEN", "MÜZİK", "MUZIK", "GÖRSEL", "GORSEL", "RESİM", "RESIM", "SPOR"])]
                     if app_blocks:
                         for d in range(D):
                             day_terms = [x1[b["id"], d, p] * b["duration"] for b in app_blocks for p in range(P - b["duration"] + 1) if (b["id"], d, p) in x1]
@@ -1139,44 +1140,83 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                                 model1.Add(sum(day_terms) <= 2)
                                 
             # Rule 4: İki ders aynı güne gelmesin
-            elif "aynı güne gelmesin" in r_type:
-                if len(f_subjs) >= 2:
+            elif "aynı güne gelmesin" in r_type or "İki ders aynı güne" in r_type:
+                target_subjs = f_subjs if f_subjs else []
+                if len(target_subjs) >= 2:
                     for cn in classes_to_schedule:
                         if not _match_relation_class(cn, f_classes):
                             continue
-                        for d in range(D):
-                            vars_s1 = [x1[b["id"], d, p] for b in raw_blocks if cn in b["classes"] and _norm_s(b["subject"]) == _norm_s(f_subjs[0]) for p in range(P - b["duration"] + 1) if (b["id"], d, p) in x1]
-                            vars_s2 = [x1[b["id"], d, p] for b in raw_blocks if cn in b["classes"] and _norm_s(b["subject"]) == _norm_s(f_subjs[1]) for p in range(P - b["duration"] + 1) if (b["id"], d, p) in x1]
-                            if vars_s1 and vars_s2:
-                                model1.Add(sum(vars_s1) + sum(vars_s2) <= 1)
+                        for i1 in range(len(target_subjs)):
+                            for i2 in range(i1 + 1, len(target_subjs)):
+                                s1, s2 = target_subjs[i1], target_subjs[i2]
+                                for d in range(D):
+                                    vars_s1 = [x1[b["id"], d, p] for b in raw_blocks if cn in b["classes"] and _match_relation_subject(b["subject"], [s1]) for p in range(P - b["duration"] + 1) if (b["id"], d, p) in x1]
+                                    vars_s2 = [x1[b["id"], d, p] for b in raw_blocks if cn in b["classes"] and _match_relation_subject(b["subject"], [s2]) for p in range(P - b["duration"] + 1) if (b["id"], d, p) in x1]
+                                    if vars_s1 and vars_s2:
+                                        has_s1 = model1.NewBoolVar(f"has_{cn}_{d}_{i1}_{i2}_1")
+                                        has_s2 = model1.NewBoolVar(f"has_{cn}_{d}_{i1}_{i2}_2")
+                                        for v in vars_s1: model1.Add(has_s1 >= v)
+                                        for v in vars_s2: model1.Add(has_s2 >= v)
+                                        model1.Add(has_s1 + has_s2 <= 1)
 
             # Rule 5: Öğretmenin dersleri öğleden önce toplansın
-            elif "öğleden önce toplansın" in r_type:
+            elif "öğleden önce toplansın" in r_type or "öğleden önce" in r_type:
+                split_p = max(4, P // 2)
                 for b in raw_blocks:
                     if _match_relation_teacher(b["teacher"], f_teach) and _match_relation_subject(b["subject"], f_subjs):
                         for d in range(D):
-                            for p in range(4, P - b["duration"] + 1):
+                            for p in range(split_p, P - b["duration"] + 1):
                                 if (b["id"], d, p) in x1:
                                     model1.Add(x1[b["id"], d, p] == 0)
 
             # Rule 6: Öğretmenin dersleri öğleden sonra toplansın
-            elif "öğleden sonra toplansın" in r_type:
+            elif "öğleden sonra toplansın" in r_type or "öğleden sonra" in r_type:
+                split_p = max(4, P // 2)
                 for b in raw_blocks:
                     if _match_relation_teacher(b["teacher"], f_teach) and _match_relation_subject(b["subject"], f_subjs):
                         for d in range(D):
-                            for p in range(0, min(4, P - b["duration"] + 1)):
+                            for p in range(0, min(split_p, P - b["duration"] + 1)):
                                 if (b["id"], d, p) in x1:
                                     model1.Add(x1[b["id"], d, p] == 0)
 
             # Rule 7: Son ders saatine zor ders konulmasın
-            elif "Son ders saatine zor ders" in r_type:
+            elif "Son ders saatine zor ders" in r_type or "son saat" in r_type:
                 HARD_KWS = ["MAT", "FİZ", "FIZ", "KİM", "KIM", "BİYO", "BIYO", "GEO"]
                 for b in raw_blocks:
-                    if any(k in b["subject"].upper() for k in HARD_KWS) and _match_relation_subject(b["subject"], f_subjs):
+                    if (any(k in b["subject"].upper() for k in HARD_KWS) or _match_relation_subject(b["subject"], f_subjs)):
                         for d in range(D):
                             for p in range(P - b["duration"] + 1):
-                                if p + b["duration"] - 1 >= P - 1 and (b["id"], d, p) in x1:
+                                if p + b["duration"] >= P and (b["id"], d, p) in x1:
                                     model1.Add(x1[b["id"], d, p] == 0)
+
+            # Rule 8: X dersi belirli saatlerde kalmalı
+            elif "belirli saatlerde" in r_type:
+                p_start = max(0, int(rel.get("period_start", 1) or 1) - 1)
+                p_end = min(P, int(rel.get("period_end", P) or P))
+                for b in raw_blocks:
+                    if _match_relation_subject(b["subject"], f_subjs) and _match_relation_teacher(b["teacher"], f_teach):
+                        for cn in b["classes"]:
+                            if _match_relation_class(cn, f_classes):
+                                for d in range(D):
+                                    for p in range(P - b["duration"] + 1):
+                                        if (p < p_start or p + b["duration"] > p_end) and (b["id"], d, p) in x1:
+                                            model1.Add(x1[b["id"], d, p] == 0)
+
+            # Rule 9: Dersler haftanın günlerine eşit dağıtılsın
+            elif "eşit dağıtılsın" in r_type or "esit dagitilsin" in r_type:
+                for cn in classes_to_schedule:
+                    if not _match_relation_class(cn, f_classes):
+                        continue
+                    subj_blocks = defaultdict(list)
+                    for b in raw_blocks:
+                        if cn in b["classes"] and _match_relation_subject(b["subject"], f_subjs) and _match_relation_teacher(b["teacher"], f_teach):
+                            subj_blocks[_norm_s(b["subject"])].append(b)
+                    for s_k, b_list in subj_blocks.items():
+                        max_allowed = max(1, math.ceil(len(b_list) / D))
+                        for d in range(D):
+                            day_vars = [x1[b["id"], d, p] for b in b_list for p in range(P - b["duration"] + 1) if (b["id"], d, p) in x1]
+                            if len(day_vars) > max_allowed:
+                                model1.Add(sum(day_vars) <= max_allowed)
             
         # Yumuşak tercihler (Avoid slot cezaları)
         obj1 = []
@@ -1311,16 +1351,21 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                                 model_soft.Add(exc_m >= sum(day_terms) - max_h)
                                 obj_soft.append(exc_m * 50000)
 
-            elif "aynı güne gelmesin" in r_type and len(f_subjs) >= 2:
-                for cn in classes_to_schedule:
-                    if not _match_relation_class(cn, f_classes): continue
-                    for d in range(D):
-                        vars_s1 = [xs[b["id"], d, p] for b in raw_blocks if cn in b["classes"] and _norm_s(b["subject"]) == _norm_s(f_subjs[0]) for p in range(P - b["duration"] + 1) if (b["id"], d, p) in xs]
-                        vars_s2 = [xs[b["id"], d, p] for b in raw_blocks if cn in b["classes"] and _norm_s(b["subject"]) == _norm_s(f_subjs[1]) for p in range(P - b["duration"] + 1) if (b["id"], d, p) in xs]
-                        if vars_s1 and vars_s2:
-                            exc_2d = model_soft.NewIntVar(0, len(vars_s1) + len(vars_s2), f"exc2d_{cn}_{d}")
-                            model_soft.Add(exc_2d >= sum(vars_s1) + sum(vars_s2) - 1)
-                            obj_soft.append(exc_2d * 50000)
+            elif "aynı güne gelmesin" in r_type or "İki ders aynı güne" in r_type:
+                target_subjs = f_subjs if f_subjs else []
+                if len(target_subjs) >= 2:
+                    for cn in classes_to_schedule:
+                        if not _match_relation_class(cn, f_classes): continue
+                        for i1 in range(len(target_subjs)):
+                            for i2 in range(i1 + 1, len(target_subjs)):
+                                s1, s2 = target_subjs[i1], target_subjs[i2]
+                                for d in range(D):
+                                    vars_s1 = [xs[b["id"], d, p] for b in raw_blocks if cn in b["classes"] and _match_relation_subject(b["subject"], [s1]) for p in range(P - b["duration"] + 1) if (b["id"], d, p) in xs]
+                                    vars_s2 = [xs[b["id"], d, p] for b in raw_blocks if cn in b["classes"] and _match_relation_subject(b["subject"], [s2]) for p in range(P - b["duration"] + 1) if (b["id"], d, p) in xs]
+                                    if vars_s1 and vars_s2:
+                                        exc_2d = model_soft.NewIntVar(0, len(vars_s1) + len(vars_s2), f"exc2d_{cn}_{d}_{i1}_{i2}")
+                                        model_soft.Add(exc_2d >= sum(vars_s1) + sum(vars_s2) - 1)
+                                        obj_soft.append(exc_2d * 100000)
 
         # Avoid preferences
         for b in raw_blocks:
@@ -1473,16 +1518,21 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                             model2.Add(exc_m2 >= sum(day_terms) - max_h)
                             obj2.append(exc_m2 * (-50000))
 
-        elif "aynı güne gelmesin" in r_type and len(f_subjs) >= 2:
-            for cn in classes_to_schedule:
-                if not _match_relation_class(cn, f_classes): continue
-                for d in range(D):
-                    vars_s1 = [x2[b["id"], d, p] for b in raw_blocks if cn in b["classes"] and _norm_s(b["subject"]) == _norm_s(f_subjs[0]) for p in range(P - b["duration"] + 1) if (b["id"], d, p) in x2]
-                    vars_s2 = [x2[b["id"], d, p] for b in raw_blocks if cn in b["classes"] and _norm_s(b["subject"]) == _norm_s(f_subjs[1]) for p in range(P - b["duration"] + 1) if (b["id"], d, p) in x2]
-                    if vars_s1 and vars_s2:
-                        exc_2d2 = model2.NewIntVar(0, len(vars_s1) + len(vars_s2), f"exc2d2_{cn}_{d}")
-                        model2.Add(exc_2d2 >= sum(vars_s1) + sum(vars_s2) - 1)
-                        obj2.append(exc_2d2 * (-50000))
+        elif "aynı güne gelmesin" in r_type or "İki ders aynı güne" in r_type:
+            target_subjs = f_subjs if f_subjs else []
+            if len(target_subjs) >= 2:
+                for cn in classes_to_schedule:
+                    if not _match_relation_class(cn, f_classes): continue
+                    for i1 in range(len(target_subjs)):
+                        for i2 in range(i1 + 1, len(target_subjs)):
+                            s1, s2 = target_subjs[i1], target_subjs[i2]
+                            for d in range(D):
+                                vars_s1 = [x2[b["id"], d, p] for b in raw_blocks if cn in b["classes"] and _match_relation_subject(b["subject"], [s1]) for p in range(P - b["duration"] + 1) if (b["id"], d, p) in x2]
+                                vars_s2 = [x2[b["id"], d, p] for b in raw_blocks if cn in b["classes"] and _match_relation_subject(b["subject"], [s2]) for p in range(P - b["duration"] + 1) if (b["id"], d, p) in x2]
+                                if vars_s1 and vars_s2:
+                                    exc_2d2 = model2.NewIntVar(0, len(vars_s1) + len(vars_s2), f"exc2d2_{cn}_{d}_{i1}_{i2}")
+                                    model2.Add(exc_2d2 >= sum(vars_s1) + sum(vars_s2) - 1)
+                                    obj2.append(exc_2d2 * (-100000))
                         
     model2.Maximize(sum(obj2))
     solver2 = cp_model.CpSolver()

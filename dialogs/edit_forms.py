@@ -168,12 +168,16 @@ def parse_distribution_parts(type_str: str, total_duration: int = 0) -> list:
             
     return parts or ([total_duration] if total_duration > 0 else [2])
 
-def get_subject_color(subject_name: str) -> str:
-    """Returns a deterministic, vibrant, distinct color for any subject name."""
+def get_subject_color(subject_name: str, data_store: dict = None) -> str:
+    """Returns the persistent, distinct color for any subject name."""
     if not subject_name:
         return "#1E88E5"
-    hash_val = sum(ord(c) * (i + 1) for i, c in enumerate(subject_name.strip()))
-    return PASTEL_DISTINCT_COLORS[hash_val % len(PASTEL_DISTINCT_COLORS)]
+    try:
+        from dialogs.color_picker_dialog import resolve_subject_color
+        return resolve_subject_color(subject_name, data_store)
+    except Exception:
+        hash_val = sum(ord(c) * (i + 1) for i, c in enumerate(subject_name.strip()))
+        return PASTEL_DISTINCT_COLORS[hash_val % len(PASTEL_DISTINCT_COLORS)]
 
 
 class BaseEditForm(QDialog):

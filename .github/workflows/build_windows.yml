@@ -3,31 +3,55 @@ name: Build Windows EXE
 on:
   push:
     branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
-  build:
+  build-windows:
+    name: Build Windows Application
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-    - name: Set up Python
+    - name: Set up Python 3.10
       uses: actions/setup-python@v5
       with:
         python-version: '3.10'
+        cache: 'pip'
 
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
+        python -m pip install --upgrade pip setuptools wheel
         pip install -r requirements.txt
 
     - name: Build with PyInstaller
       run: |
         python -m PyInstaller --clean -y Chenki_Akademi.spec
 
-    - name: Upload Artifact
+    - name: Verify build output
+      shell: bash
+      run: |
+        ls -la dist/
+        ls -la dist/Chenki_Akademi/
+
+    - name: Compress Build Artifact
+      shell: pwsh
+      run: |
+        Compress-Archive -Path "dist\Chenki_Akademi\*" -DestinationPath "dist\Chenki_Akademi_Windows.zip" -Force
+
+    - name: Upload Windows EXE Directory
       uses: actions/upload-artifact@v4
       with:
-        name: Chenki_Akademi_Windows
+        name: Chenki_Akademi_Windows_Folder
         path: dist/Chenki_Akademi/
+        if-no-files-found: error
+
+    - name: Upload Windows EXE Zip
+      uses: actions/upload-artifact@v4
+      with:
+        name: Chenki_Akademi_Windows_ZIP
+        path: dist/Chenki_Akademi_Windows.zip
+        if-no-files-found: error
