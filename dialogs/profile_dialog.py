@@ -15,10 +15,9 @@ from PySide6.QtGui import QFont, QPixmap, QPainter, QPainterPath, QColor, QBrush
 
 FONT_FAMILY = ".AppleSystemUIFont, SF Pro Text, Helvetica Neue, Segoe UI, sans-serif"
 
-# ── Cloudinary Configuration (IAL Projesi Entegrasyonu) ───────────────
 CLOUDINARY_CLOUD_NAME = "dbfhcj6px"
 CLOUDINARY_UPLOAD_PRESET = "ml_default"
-CLOUDINARY_FOLDER = "profiles"
+CLOUDINARY_FOLDER = "ial-mobil"
 CLOUDINARY_UPLOAD_URL = f"https://api.cloudinary.com/v1_1/{CLOUDINARY_CLOUD_NAME}/image/upload"
 
 
@@ -236,7 +235,7 @@ class AppleProfileDialog(QDialog):
         t_lbl.setStyleSheet("color: #0F172A; border: none; background: transparent;")
         c_lay.addWidget(t_lbl)
         
-        sub_lbl = QLabel("Adınız, unvanınız ve Cloudinary destekli profil fotoğrafınız.")
+        sub_lbl = QLabel("Kişisel profil bilgilerinizi ve profil fotoğrafınızı güncelleyin.")
         sub_lbl.setFont(QFont(FONT_FAMILY, 9))
         sub_lbl.setStyleSheet("color: #64748B; border: none; background: transparent;")
         c_lay.addWidget(sub_lbl)
@@ -273,7 +272,7 @@ class AppleProfileDialog(QDialog):
         self.btn_change_photo.clicked.connect(self._select_photo)
         av_btns_layout.addWidget(self.btn_change_photo)
         
-        self.upload_status_lbl = QLabel("Cloudinary CDN ile senkronize edilir")
+        self.upload_status_lbl = QLabel("JPG veya PNG formatında profil fotoğrafı")
         self.upload_status_lbl.setFont(QFont(FONT_FAMILY, 8))
         self.upload_status_lbl.setStyleSheet("color: #94A3B8; border: none;")
         av_btns_layout.addWidget(self.upload_status_lbl)
@@ -314,6 +313,24 @@ class AppleProfileDialog(QDialog):
             QLineEdit:focus { border: 1.5px solid #0071E3; background: #FFFFFF; }
         """)
         c_lay.addWidget(self.title_edit)
+        
+        # Security / Password Section
+        sec_box = QHBoxLayout()
+        self.btn_change_pwd = QPushButton("Şifre Sıfırla / Değiştir")
+        self.btn_change_pwd.setFont(QFont(FONT_FAMILY, 9, QFont.DemiBold))
+        self.btn_change_pwd.setFixedHeight(34)
+        self.btn_change_pwd.setCursor(Qt.PointingHandCursor)
+        self.btn_change_pwd.setStyleSheet("""
+            QPushButton {
+                background: #EFF6FF; color: #0071E3; border: 1px solid #BFDBFE;
+                border-radius: 8px; padding: 0 16px; font-weight: 600;
+            }
+            QPushButton:hover { background: #DBEAFE; }
+        """)
+        self.btn_change_pwd.clicked.connect(self._open_change_password)
+        sec_box.addWidget(self.btn_change_pwd)
+        sec_box.addStretch(1)
+        c_lay.addLayout(sec_box)
         
         # Bottom Buttons
         btn_box = QHBoxLayout()
@@ -372,7 +389,7 @@ class AppleProfileDialog(QDialog):
         # Start Cloudinary upload
         self.btn_change_photo.setEnabled(False)
         self.btn_save.setEnabled(False)
-        self.upload_status_lbl.setText("Cloudinary'e yükleniyor...")
+        self.upload_status_lbl.setText("Fotoğraf yükleniyor...")
         self.upload_status_lbl.setStyleSheet("color: #0071E3; font-weight: bold; border: none;")
         
         self.worker = CloudinaryUploadWorker(file_path, self)
@@ -384,7 +401,7 @@ class AppleProfileDialog(QDialog):
         self.current_avatar_url = secure_url
         self.selected_local_file = ""
         self._update_avatar_preview()
-        self.upload_status_lbl.setText("Görsel Cloudinary CDN'e yüklendi")
+        self.upload_status_lbl.setText("Fotoğraf başarıyla yüklendi")
         self.upload_status_lbl.setStyleSheet("color: #059669; font-weight: bold; border: none;")
         self.btn_change_photo.setEnabled(True)
         self.btn_save.setEnabled(True)
@@ -395,6 +412,10 @@ class AppleProfileDialog(QDialog):
         self.btn_change_photo.setEnabled(True)
         self.btn_save.setEnabled(True)
         
+    def _open_change_password(self):
+        dlg = AppleChangePasswordDialog(user_email=self.email, parent=self)
+        dlg.exec()
+
     def _save_profile(self):
         name = self.name_edit.text().strip() or "Kullanıcı"
         title = self.title_edit.text().strip() or "Program Yöneticisi"
@@ -407,3 +428,182 @@ class AppleProfileDialog(QDialog):
         )
         self.profile_updated.emit(name, self.current_avatar_url)
         self.accept()
+
+
+# ── Password Reset / Security Dialog ─────────────────────────────────
+
+class AppleChangePasswordDialog(QDialog):
+    def __init__(self, user_email: str = None, parent=None):
+        super().__init__(parent)
+        self.user_email = user_email or ""
+        self.setWindowTitle("Şifre Sıfırla & Güvenlik")
+        self.setFixedWidth(400)
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: #FFFFFF;
+                font-family: {FONT_FAMILY};
+            }}
+        """)
+        self._build_ui()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(10)
+
+        # Header
+        hdr = QVBoxLayout()
+        hdr.setSpacing(2)
+        t_lbl = QLabel("Hesap Şifresini Sıfırla")
+        t_lbl.setFont(QFont(FONT_FAMILY, 12, QFont.Bold))
+        t_lbl.setStyleSheet("color: #0F172A;")
+        hdr.addWidget(t_lbl)
+
+        sub_lbl = QLabel("Şifre güncellendiğinde diğer tüm cihazların oturumu anında kapatılır.")
+        sub_lbl.setFont(QFont(FONT_FAMILY, 8.5))
+        sub_lbl.setStyleSheet("color: #64748B;")
+        sub_lbl.setWordWrap(True)
+        hdr.addWidget(sub_lbl)
+        layout.addLayout(hdr)
+
+        # Divider
+        div = QFrame()
+        div.setFixedHeight(1)
+        div.setStyleSheet("background: #E2E8F0;")
+        layout.addWidget(div)
+
+        # Field 1: Current Password
+        lbl_cur = QLabel("Mevcut Şifre *")
+        lbl_cur.setFont(QFont(FONT_FAMILY, 8, QFont.Bold))
+        lbl_cur.setStyleSheet("color: #475569;")
+        layout.addWidget(lbl_cur)
+
+        self.cur_pwd_edit = QLineEdit()
+        self.cur_pwd_edit.setEchoMode(QLineEdit.Password)
+        self.cur_pwd_edit.setPlaceholderText("Mevcut şifrenizi girin")
+        self.cur_pwd_edit.setFixedHeight(30)
+        self.cur_pwd_edit.setStyleSheet(self._input_style())
+        layout.addWidget(self.cur_pwd_edit)
+
+        # Field 2: New Password
+        lbl_new = QLabel("Yeni Şifre (En az 6 karakter) *")
+        lbl_new.setFont(QFont(FONT_FAMILY, 8, QFont.Bold))
+        lbl_new.setStyleSheet("color: #475569;")
+        layout.addWidget(lbl_new)
+
+        self.new_pwd_edit = QLineEdit()
+        self.new_pwd_edit.setEchoMode(QLineEdit.Password)
+        self.new_pwd_edit.setPlaceholderText("Yeni güçlü şifrenizi girin")
+        self.new_pwd_edit.setFixedHeight(30)
+        self.new_pwd_edit.setStyleSheet(self._input_style())
+        layout.addWidget(self.new_pwd_edit)
+
+        # Field 3: Confirm New Password
+        lbl_conf = QLabel("Yeni Şifre Tekrar *")
+        lbl_conf.setFont(QFont(FONT_FAMILY, 8, QFont.Bold))
+        lbl_conf.setStyleSheet("color: #475569;")
+        layout.addWidget(lbl_conf)
+
+        self.conf_pwd_edit = QLineEdit()
+        self.conf_pwd_edit.setEchoMode(QLineEdit.Password)
+        self.conf_pwd_edit.setPlaceholderText("Yeni şifrenizi tekrar girin")
+        self.conf_pwd_edit.setFixedHeight(30)
+        self.conf_pwd_edit.setStyleSheet(self._input_style())
+        layout.addWidget(self.conf_pwd_edit)
+
+        # Status / Error Label
+        self.status_lbl = QLabel("")
+        self.status_lbl.setFont(QFont(FONT_FAMILY, 8))
+        self.status_lbl.setStyleSheet("color: #EF4444;")
+        self.status_lbl.setWordWrap(True)
+        self.status_lbl.hide()
+        layout.addWidget(self.status_lbl)
+
+        # Buttons
+        btn_box = QHBoxLayout()
+        btn_box.setSpacing(8)
+
+        btn_cancel = QPushButton("Vazgeç")
+        btn_cancel.setFixedHeight(32)
+        btn_cancel.setFont(QFont(FONT_FAMILY, 8.5))
+        btn_cancel.setCursor(Qt.PointingHandCursor)
+        btn_cancel.setStyleSheet("""
+            QPushButton {
+                background: #F1F5F9; color: #334155; border: 1px solid #CBD5E1;
+                border-radius: 6px; padding: 0 14px;
+            }
+            QPushButton:hover { background: #E2E8F0; }
+        """)
+        btn_cancel.clicked.connect(self.reject)
+        btn_box.addWidget(btn_cancel)
+
+        self.btn_submit = QPushButton("Şifreyi Sıfırla ve Oturumları Kapat")
+        self.btn_submit.setFixedHeight(32)
+        self.btn_submit.setFont(QFont(FONT_FAMILY, 8.5, QFont.Bold))
+        self.btn_submit.setCursor(Qt.PointingHandCursor)
+        self.btn_submit.setStyleSheet("""
+            QPushButton {
+                background: #0071E3; color: #FFFFFF; border: none;
+                border-radius: 6px; padding: 0 16px; font-weight: 600;
+            }
+            QPushButton:hover { background: #0062C4; }
+        """)
+        self.btn_submit.clicked.connect(self._do_change_password)
+        btn_box.addWidget(self.btn_submit, 1)
+
+        layout.addLayout(btn_box)
+
+    def _input_style(self):
+        return """
+            QLineEdit {
+                background: #F8FAFC; border: 1px solid #CBD5E1;
+                border-radius: 6px; padding: 2px 8px; font-size: 12px; color: #0F172A;
+            }
+            QLineEdit:focus { border: 1.5px solid #0071E3; background: #FFFFFF; }
+        """
+
+    def _do_change_password(self):
+        cur_p = self.cur_pwd_edit.text()
+        new_p = self.new_pwd_edit.text()
+        conf_p = self.conf_pwd_edit.text()
+
+        if not cur_p:
+            self._show_error("Lütfen mevcut şifrenizi girin.")
+            return
+        if not new_p:
+            self._show_error("Lütfen yeni şifrenizi girin.")
+            return
+        if len(new_p) < 6:
+            self._show_error("Yeni şifre en az 6 karakter olmalıdır.")
+            return
+        if new_p != conf_p:
+            self._show_error("Yeni şifreler birbiriyle eşleşmiyor.")
+            return
+        if cur_p == new_p:
+            self._show_error("Yeni şifreniz mevcut şifrenizle aynı olamaz.")
+            return
+
+        from api_client import api_client
+        email = self.user_email
+        if not email:
+            stored = api_client.get_stored_auth_data() or {}
+            email = stored.get("email", "")
+
+        ok, msg = api_client.change_password(email, cur_p, new_p)
+        if not ok:
+            self._show_error(msg)
+            return
+
+        self.status_lbl.setText("✓ " + msg)
+        self.status_lbl.setStyleSheet("color: #059669; font-weight: bold; border: none; background: transparent;")
+        self.status_lbl.show()
+        self.btn_submit.setEnabled(False)
+        self.password_changed.emit()
+
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(1200, self.accept)
+
+    def _show_error(self, text: str):
+        self.status_lbl.setText("⚠ " + text)
+        self.status_lbl.setStyleSheet("color: #EF4444; font-weight: 500; border: none; background: transparent;")
+        self.status_lbl.show()

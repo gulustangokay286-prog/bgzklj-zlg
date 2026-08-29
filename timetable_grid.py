@@ -473,6 +473,17 @@ def get_subject_abbr(subject_name: str, max_len: int = 6) -> str:
 
 from PySide6.QtCore import QRect
 
+# Başlık şeridi renkleri: yerleşim durumunun görsel karşılığı (bkz.
+# placement_engine). Tek eşleme noktası burasıdır, bileşenlere dağılmaz.
+_HEADER_STATE_COLORS = {
+    "GREEN": QColor(34, 197, 94),
+    "BLUE": QColor(59, 130, 246),
+    "RED": QColor(239, 68, 68),
+    "GREY": QColor(148, 163, 184),
+    "SELECTED": QColor(250, 204, 21),
+}
+
+
 class AsCTimetableHeader(QHeaderView):
     """aSc Timetables style two-level header: Days on top spanning periods, Period numbers below (Scaled down 25%)."""
     def __init__(self, periods: int = 8, days_list: list = None, parent=None):
@@ -488,6 +499,15 @@ class AsCTimetableHeader(QHeaderView):
     def set_config(self, periods: int, days_list: list):
         self.periods = max(1, int(periods))
         self.days_list = days_list
+        self.viewport().update()
+
+    def set_placement_states(self, states: dict):
+        """Sürükleme sırasında sütun başlıklarının durumu: {sütun: görsel}.
+
+        Başlık "bu saat dolu mu"yu değil, "SÜRÜKLENEN ders buradan başlayabilir
+        mi"yi gösterir; renk yalnızca elde kart varken görünür.
+        """
+        self._placement_states = states or {}
         self.viewport().update()
 
     def paintSection(self, painter, rect, logicalIndex):
@@ -520,7 +540,8 @@ class AsCTimetableHeader(QHeaderView):
                 if x + w <= 0 or x >= vw:
                     continue
                 rect = QRect(x, 0, w, vh)
-                painter.fillRect(rect, QColor("#E2E8F0"))
+                state = (getattr(self, "_placement_states", None) or {}).get(col_idx)
+                painter.fillRect(rect, _HEADER_STATE_COLORS.get(state, QColor("#E2E8F0")))
                 painter.setPen(QPen(QColor("#CBD5E1"), 1))
                 painter.drawLine(x, vh - 1, x + w, vh - 1)
                 painter.drawLine(x + w - 1, 0, x + w - 1, vh)
@@ -579,7 +600,8 @@ class AsCTimetableHeader(QHeaderView):
             period_num = (col_idx % periods) + 1
             
             period_rect = QRect(x, 19, w, 19)
-            painter.fillRect(period_rect, QColor("#F8FAFC"))
+            state = (getattr(self, "_placement_states", None) or {}).get(col_idx)
+            painter.fillRect(period_rect, _HEADER_STATE_COLORS.get(state, QColor("#F8FAFC")))
             painter.setPen(QPen(QColor("#CBD5E1"), 1))
             painter.drawLine(x, 37, x + w, 37)
             painter.drawLine(x + w - 1, 19, x + w - 1, 37)
@@ -729,6 +751,13 @@ class DraggableLessonCard(QWidget):
         blk_str = f"\n⚠️ Kısıtlama: {self.blocked_reason}" if self.blocked_reason else ""
         self.setToolTip(f"<b>{self.subject_name}</b> ({dur_str}){cnt_str}{cls_str}{tch_str}{comb_str}{blk_str}")
 
+    def set_color(self, new_hex: str):
+        if new_hex:
+            self.color = str(new_hex).upper()
+            self.update()
+            if hasattr(self, "repaint"):
+                self.repaint()
+
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
@@ -736,6 +765,19 @@ class DraggableLessonCard(QWidget):
         p.setRenderHint(QPainter.SmoothPixmapTransform)
         
         base_color = QColor(self.color)
+        if not base_color.isValid() or str(self.color).upper() in ("#FFFFFF", "#000000", "#94A3B8", ""):
+            try:
+                from dialogs.color_picker_dialog import resolve_subject_color
+                win = self.window()
+                ds = getattr(win, "data_store", None)
+                if not ds and hasattr(win, "parent") and callable(win.parent):
+                    ds = getattr(win.parent(), "data_store", None)
+                cur = resolve_subject_color(self.subject_name, ds)
+                if cur:
+                    self.color = cur
+                    base_color = QColor(cur)
+            except Exception:
+                pass
         if not base_color.isValid():
             base_color = QColor("#64748B")
             
@@ -939,17 +981,12 @@ class DraggableLessonCard(QWidget):
         data = self._get_card_data()
 
         pix = self.render_single_card_pixmap()
-        hotspot = QPoint(pix.width() // 2, pix.height() // 2)
-
-        # Tell the drop side where inside the card the cursor is sitting.
-        #
-        # Without this the grid read the target cell from the CURSOR while the card
-        # was drawn CENTRED on it, so the two disagreed by half a card. For a 2-hour
-        # lesson that is a full period: the user lined the card up over periods 1-2,
-        # but the cursor was over period 2 and the lesson landed at 2-3. Lessons
-        # dragged within the grid already carried this offset; dock cards did not.
-        data["grab_dx"] = int(hotspot.x())
-        data["grab_dy"] = int(hotspot.y())
+        # Tutma noktasi kartin ILK saatinin ortasi: imlecin altindaki hucre dersin
+        # birinci saati olur, kart imlecin sagina dogru uzar.
+        dur = max(1, int(data.get("duration", 1) or 1))
+        hotspot = QPoint(max(1, pix.width() // (2 * dur)), pix.height() // 2)
+        data["grab_dx"] = 0
+        data["grab_dy"] = 0
 
         mime.setData("application/x-lesson", QByteArray(json.dumps(data).encode()))
         drag.setMimeData(mime)
@@ -960,10 +997,10 @@ class DraggableLessonCard(QWidget):
     def _start_sticky_drag(self):
         data = self._get_card_data()
         pix = self.render_single_card_pixmap()
-        grab = QPoint(pix.width() // 2, pix.height() // 2)
-        # Same offset the standard drag carries, for the same reason.
-        data["grab_dx"] = int(grab.x())
-        data["grab_dy"] = int(grab.y())
+        dur = max(1, int(data.get("duration", 1) or 1))
+        grab = QPoint(max(1, pix.width() // (2 * dur)), pix.height() // 2)
+        data["grab_dx"] = 0
+        data["grab_dy"] = 0
         win = self.window()
         StickyGhostWidget(pix, data, win, grab_offset=grab)
 
@@ -1190,6 +1227,21 @@ class DraggableLessonCard(QWidget):
 
                     tail = [a for idx, a in enumerate(old_rows) if idx >= insert_pos and idx not in matching_set]
                     data_store["atamalar"] = old_rows[:insert_pos] + new_rows + tail
+
+                    # Clean any loose/manual unplaced cards matching this subject+class so they regenerate cleanly with new distribution
+                    from auto_scheduler import format_tr_name as _fmt
+                    s_clean = _fmt(self.subject_name)
+                    c_clean = _fmt(self.class_name)
+                    if "loose_unplaced_cards" in data_store:
+                        data_store["loose_unplaced_cards"] = [
+                            lc for lc in data_store["loose_unplaced_cards"]
+                            if not (_fmt(lc.get("subject_name", "")) == s_clean and (not c_clean or _fmt(lc.get("class_name", "")) == c_clean))
+                        ]
+                    if "manual_unplaced_cards" in data_store:
+                        data_store["manual_unplaced_cards"] = [
+                            mc for mc in data_store["manual_unplaced_cards"]
+                            if not (_fmt(mc.get("subject_name", "")) == s_clean and (not c_clean or _fmt(mc.get("class_name", "")) == c_clean))
+                        ]
 
             if win:
                 if hasattr(win, "save_db"): win.save_db()
@@ -1505,13 +1557,23 @@ class UnplacedLessonsDock(QWidget):
 
             self.container_layout.setAlignment(Qt.AlignLeft)
             
+            from dialogs.color_picker_dialog import resolve_subject_color
+            ds_context = getattr(self, "data_store", None)
+            if not ds_context:
+                win = self.window()
+                ds_context = getattr(win, "data_store", None)
+                if not ds_context and hasattr(win, "parent") and callable(win.parent):
+                    ds_context = getattr(win.parent(), "data_store", None)
+
             for l in lessons_data:
                 dur = l.get("duration", 1)
                 count = l.get("count", 1)
                 teacher = l.get("teacher", "")
                 cls_name = l.get("class_name", "")
+                s_name = l.get("subject_name", "")
+                card_col = resolve_subject_color(s_name, ds_context) or l.get("color") or "#94A3B8"
                 card = DraggableLessonCard(
-                    l["id"], l["subject_name"], l["color"],
+                    l["id"], s_name, card_col,
                     duration=dur, count=count, teacher=teacher,
                     class_name=cls_name, display_mode=display_mode,
                     blocked_reason=l.get("blocked_reason", "")
@@ -1629,6 +1691,10 @@ class UnplacedLessonsDock(QWidget):
 
 _CELL_COLOR_CACHE = {}
 
+def clear_cell_color_cache():
+    global _CELL_COLOR_CACHE
+    _CELL_COLOR_CACHE.clear()
+
 class TimetableCellDelegate(QStyledItemDelegate):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1662,7 +1728,7 @@ class TimetableCellDelegate(QStyledItemDelegate):
             subject_name = info.get("subject_name") or info.get("subject") or ""
             teacher_name = info.get("teacher_name") or info.get("teacher") or ""
             
-        # 1. Determine cell background color with instant memory cache
+        # 1. Determine cell background color directly from data_store
         win = table.window() if table and hasattr(table, "window") else None
         data_store = getattr(win, "data_store", None)
         
@@ -1675,12 +1741,8 @@ class TimetableCellDelegate(QStyledItemDelegate):
                 from dialogs.color_picker_dialog import resolve_subject_color
                 resolved_hex = resolve_subject_color(color_key, data_store)
                 c = QColor(resolved_hex)
-                if c.isValid():
-                    h, s, l, a = c.getHsl()
-                    if s > 85:
-                        new_s = max(65, int(s * 0.65))
-                        new_l = min(220, max(120, int(l * 1.05))) if l < 180 else l
-                        c.setHsl(h, new_s, new_l, a)
+                if not c.isValid():
+                    c = QColor("#2563EB")
                 _CELL_COLOR_CACHE[color_key] = c
                 cell_color = c
         elif info and info.get("color"):
@@ -1696,7 +1758,7 @@ class TimetableCellDelegate(QStyledItemDelegate):
         if not cell_color or not cell_color.isValid():
             cell_color = QColor("#F1F5F9") if not is_filled else QColor("#FFFFFF")
                 
-        # 2. Fill background (Flat clean)
+        # 2. Fill background (Exact crisp color)
         painter.fillRect(rect, cell_color)
         
         # 3. Flat hairline grid borders (right and bottom lines only for flat 1px grid)
@@ -1716,9 +1778,10 @@ class TimetableCellDelegate(QStyledItemDelegate):
             painter.setBrush(Qt.NoBrush)
             painter.drawRect(rect.adjusted(1, 1, -2, -2))
             
-        # 5. Draw text - Clean single centered text (Class in teacher view, Subject in class view) - ALWAYS BLACK TEXT
+        # 5. Draw text - High-contrast readable centered text
         if clean_str or (info and info.get("subject_name")):
-            text_color = QColor("#000000")  # Always black for readability
+            lum = (0.299 * cell_color.red() + 0.587 * cell_color.green() + 0.114 * cell_color.blue())
+            text_color = QColor("#FFFFFF") if lum < 140 else QColor("#0F172A")
             painter.setPen(text_color)
             
             s_name = info.get("subject_name", "") if info else ""
@@ -1790,6 +1853,15 @@ class TimetableCellDelegate(QStyledItemDelegate):
 
 
 
+# Başlık şeridinde bir sütuna birden çok satırın durumu düşerse, EN GÜÇLÜ olan
+# gösterilir: bir yerde kapalıysa "kapalı", çakışıyorsa "çakışma" görünür.
+_PLACEMENT_RANK = {"NONE": 0, "SELECTED": 1, "GREEN": 2, "BLUE": 3, "RED": 4, "GREY": 5}
+
+
+def _placement_rank(visual):
+    return _PLACEMENT_RANK.get(visual, 0)
+
+
 class DropTableWidget(QTableWidget):
     lesson_dropped = Signal(int, int, dict) # row, col, lesson_info
     cell_right_clicked = Signal(int, int)  # row, col for context menu
@@ -1805,6 +1877,151 @@ class DropTableWidget(QTableWidget):
         self.horizontalScrollBar().valueChanged.connect(lambda: self.asc_header.viewport().update())
         self.setItemDelegate(TimetableCellDelegate(self))
         self._drag_preview_info = None
+        # Sürükleme sırasındaki yerleşim analizi (bkz. begin_placement_analysis)
+        self._placement_map = {}        # (satır, sütun) -> PlacementAnalysisResult
+        self._placement_session = 0     # eski analizin yeniyi ezmemesi için
+        self._placement_lesson = None
+
+    # ── Sürükleme sırasında canlı yerleşim analizi ─────────────────────────
+    #
+    # Kart havadayken her hedef hücre için "bu ders buraya konabilir mi?" sorusu
+    # placement_engine'e sorulur ve cevap renge çevrilir:
+    #     yeşil  konabilir      mavi  konur ama tercih edilmez
+    #     kırmızı çakışma var   gri   kapalı, asla konamaz
+    # Analiz saftır: çizelgeye dokunmaz, kayıt yapmaz, senkron tetiklemez.
+    PLACEMENT_COLORS = {
+        "GREEN": (QColor(34, 197, 94, 90), QColor(21, 128, 61)),
+        "BLUE": (QColor(59, 130, 246, 85), QColor(29, 78, 216)),
+        "RED": (QColor(239, 68, 68, 95), QColor(185, 28, 28)),
+        "GREY": (QColor(100, 116, 139, 70), QColor(71, 85, 105)),
+        "SELECTED": (QColor(250, 204, 21, 80), QColor(161, 98, 7)),
+    }
+
+    def _analysis_host(self):
+        """data_store'u taşıyan en yakın nesne (pencere ya da üst widget).
+
+        Gerçek uygulamada bu MainWindow'dur; ızgara tek başına (test/önizleme)
+        kullanıldığında pencere olmayabilir, o yüzden ebeveyn zinciri de taranır.
+        """
+        candidates = [self.window()]
+        node = self.parent()
+        while node is not None and len(candidates) < 8:
+            candidates.append(node)
+            node = node.parent() if hasattr(node, "parent") else None
+        for obj in candidates:
+            if obj is not None and getattr(obj, "data_store", None) is not None:
+                return obj
+        return None
+
+    def begin_placement_analysis(self, lesson_info: dict):
+        """Kart kaldırıldı: bütün aday konumları BİR KEZ değerlendir.
+
+        İndeksler burada kurulur; fare hareket ettikçe yeniden hesap yapılmaz,
+        hazır sonuç okunur. Bu yüzden sürükleme büyük çizelgede de akıcı kalır.
+        """
+        self._placement_session += 1
+        session = self._placement_session
+        self._placement_map = {}
+        self._placement_lesson = lesson_info or {}
+        grid = self.parent()
+        if not grid or not lesson_info:
+            return
+
+        win = self._analysis_host()
+        data_store = getattr(win, "data_store", None)
+        if data_store is None:
+            return
+        try:
+            import placement_engine as pe
+            snapshot = pe.TimetableSnapshot(
+                data_store,
+                institution_slug=getattr(win, "institution_slug", None),
+                exclude_block_id=lesson_info.get("block_id"))
+        except Exception as exc:
+            print(f"[Grid] yerleşim analizi kurulamadı: {exc}")
+            return
+
+        duration = max(1, int(lesson_info.get("duration", 1) or 1))
+        rows = grid.rows_for_lesson(lesson_info)
+        cache = {}
+        result_map = {}
+        for row in rows:
+            for col in range(self.columnCount()):
+                pos = grid.resolve_cell(row, col)
+                if pos["day"] < 0 or pos["period"] < 0:
+                    continue
+                lesson = dict(lesson_info)
+                # Satır hangi sınıfa aitse aday o sınıfa kurulur: aynı ders
+                # farklı satırda farklı sonuç verebilir (renk hücrenin değil,
+                # ders+konum çiftinin özelliğidir).
+                if pos["class_name"]:
+                    lesson.setdefault("class_name", pos["class_name"])
+                cand = pe.CandidatePlacement(lesson, pos["day"], pos["period"], duration)
+                key = cand.key()
+                res = cache.get(key)
+                if res is None:
+                    res = pe.analyze(snapshot, lesson, cand)
+                    cache[key] = res
+                result_map[(row, col)] = res
+
+        # Fare bu arada başka bir karta geçtiyse eski sonucu yazma.
+        if session != self._placement_session:
+            return
+        self._placement_map = result_map
+        self.viewport().update()
+        if hasattr(self, "asc_header"):
+            self.asc_header.set_placement_states(self.header_placement_states())
+            self.asc_header.viewport().update()
+
+    def header_placement_states(self) -> dict:
+        """Sütun başlığı şeridi için: {sütun: görsel durum}.
+
+        Başlık "hücre dolu mu"yu değil, "SÜRÜKLENEN ders buradan başlayabilir mi"yi
+        gösterir — aSc'deki davranış budur. Çok saatlik derslerde (ör. 2 saat)
+        yerleşebilen bloğun kapsadığı tüm saatler yeşil gösterilir.
+        """
+        by_col = {}
+        dur = max(1, int(self._placement_lesson.get("duration", 1) or 1)) if self._placement_lesson else 1
+        grid = self.parent()
+        periods = grid._periods if (grid and hasattr(grid, "_periods")) else 8
+        if periods <= 0: periods = 8
+
+        for (row, col), res in self._placement_map.items():
+            if res.outside_class_hours:
+                continue
+            cur = by_col.get(col)
+            if cur is None or _placement_rank(res.visual) > _placement_rank(cur):
+                by_col[col] = res.visual
+
+        # Çok saatlik kart sürüklendiğinde / üzerine gelindiğinde kapsanan tüm saatleri başlıkta yeşil yap
+        if self._drag_preview_info:
+            p_row = self._drag_preview_info.get("row", -1)
+            p_col = self._drag_preview_info.get("col", -1)
+            p_dur = max(1, int(self._drag_preview_info.get("duration", dur) or dur))
+            if p_row >= 0 and p_col >= 0:
+                res = self._placement_map.get((p_row, p_col))
+                state = res.visual if res else "GREEN"
+                day_start = (p_col // periods) * periods
+                day_end = day_start + periods - 1
+                for off in range(p_dur):
+                    tgt_c = p_col + off
+                    if tgt_c <= day_end and tgt_c < self.columnCount():
+                        by_col[tgt_c] = state
+
+        return by_col
+
+    def end_placement_analysis(self):
+        self._placement_session += 1
+        if self._placement_map:
+            self._placement_map = {}
+            self._placement_lesson = None
+            self.viewport().update()
+            if hasattr(self, "asc_header"):
+                self.asc_header.set_placement_states({})
+                self.asc_header.viewport().update()
+
+    def placement_at(self, row: int, col: int):
+        return self._placement_map.get((row, col))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1937,41 +2154,53 @@ class DropTableWidget(QTableWidget):
         else:
             self.viewport().update()
 
+        if hasattr(self, "asc_header"):
+            self.asc_header.set_placement_states(self.header_placement_states())
+
     def clear_drag_preview(self):
         self._clear_preview_targeted()
+        if hasattr(self, "asc_header"):
+            self.asc_header.set_placement_states(self.header_placement_states())
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasFormat("application/x-lesson"):
+            # Kart ızgaraya girdi: bütün aday konumlar BİR KEZ değerlendirilir,
+            # fare hareket ettikçe yeniden hesap yapılmaz.
+            try:
+                payload = event.mimeData().data("application/x-lesson").data().decode()
+                self.begin_placement_analysis(json.loads(payload))
+            except Exception as exc:
+                print(f"[Grid] yerleşim analizi başlatılamadı: {exc}")
             event.acceptProposedAction()
         else:
             event.ignore()
 
     def dragLeaveEvent(self, event):
         self.clear_drag_preview()
+        self.end_placement_analysis()
         event.accept()
 
-    def _drop_anchor(self, pos, lesson_info):
-        """Viewport point identifying the block's FIRST cell for a drop at `pos`.
+    def _drop_anchor(self, pos, lesson_info=None):
+        """İmlecin üzerinde durduğu hücre, dersin BİRİNCİ saatidir.
 
-        The drag pixmap's top-left sits at cursor - grab offset, so that corner (nudged
-        slightly inward, off the grid line) is the cell the user sees the block covering.
+        Kural tek cümle: fareyi hangi saatin üzerine getirdiyseniz ders ORADAN
+        başlar. 2 saatlik bir dersi 1. saatin üzerine getirirseniz 1-2. saatleri,
+        2. saatin üzerine getirirseniz 2-3. saatleri kapsar. Önizleme de bırakma da
+        aynı hücreyi kullanır.
 
-        The result is CLAMPED into the viewport. Subtracting the grab offset can push
-        the anchor off the top or left edge — grabbing a card anywhere below its middle
-        is enough, since a row is only ~30px tall — and rowAt()/columnAt() answer -1 for
-        a point outside the widget. dragMoveEvent read that as "no cell here" and
-        ignored the event, which is what put the forbidden cursor on the pointer and
-        made dropping onto another lesson impossible.
+        Eskiden kartın neresinden tutulduğu (grab_dx/dy) imleçten çıkarılıyordu:
+        kartı ortasından tutmak 2 saatlik bir derste tam bir saatlik kayma demekti
+        ve kullanıcı 2. saatin üzerindeyken ders 1. saate yapışıyordu. Tutma noktası
+        artık kartın İLK hücresinin ortasına ayarlandığı için hayalet görüntü de
+        imlecin sağına doğru uzuyor; görünen ile olan aynı.
+
+        Sonuç viewport içine KIRPILIR: dışarı taşan bir noktada rowAt()/columnAt()
+        -1 döner, dragMoveEvent bunu "burada hücre yok" diye okur ve imleçte yasak
+        işareti çıkardı.
         """
-        dx = int((lesson_info or {}).get("grab_dx", 0) or 0)
-        dy = int((lesson_info or {}).get("grab_dy", 0) or 0)
-        if not dx and not dy:
-            return pos
-
-        anchor = pos - QPoint(dx, dy) + QPoint(4, 4)
         bounds = self.viewport().rect()
-        x = min(max(anchor.x(), bounds.left() + 2), bounds.right() - 2)
-        y = min(max(anchor.y(), bounds.top() + 2), bounds.bottom() - 2)
+        x = min(max(pos.x(), bounds.left() + 2), bounds.right() - 2)
+        y = min(max(pos.y(), bounds.top() + 2), bounds.bottom() - 2)
         return QPoint(x, y)
 
     def _cell_at(self, point):
@@ -2013,6 +2242,7 @@ class DropTableWidget(QTableWidget):
 
     def dropEvent(self, event):
         self.clear_drag_preview()
+        self.end_placement_analysis()
         if event.mimeData().hasFormat("application/x-lesson"):
             try:
                 data = event.mimeData().data("application/x-lesson").data().decode()
@@ -2053,9 +2283,74 @@ class DropTableWidget(QTableWidget):
         else:
             event.ignore()
 
+    def _paint_placement_states(self):
+        """Aday konumları boya: yeşil / mavi / kırmızı / gri.
+
+        Renk burada HESAPLANMAZ; placement_engine'in verdiği duruma karşılık gelen
+        görsel jetona bakılır. Arayüzde iş kuralı yoktur.
+        """
+        if not self._placement_map:
+            return
+        painter = QPainter(self.viewport())
+        painter.setRenderHint(QPainter.Antialiasing, False)
+        view = self.viewport().rect()
+        drawn = 0
+        for (row, col), res in self._placement_map.items():
+            # Sınıfın ders saati dışındaki hücreler boyanmaz: zaten okul günü
+            # değiller ve boyandıklarında ekranın yarısı griye dönüp asıl bilgiyi
+            # bastırıyorlardı.
+            if res.outside_class_hours:
+                continue
+            visual = res.visual
+            colors = self.PLACEMENT_COLORS.get(visual)
+            if not colors:
+                continue
+            rect = self.visualRect(self.model().index(row, col))
+            if not rect.isValid() or not view.intersects(rect):
+                continue
+            fill, edge = colors
+            painter.fillRect(rect.adjusted(1, 1, -1, -1), fill)
+            painter.setPen(QPen(edge, 1))
+            painter.drawRect(rect.adjusted(0, 0, -1, -1))
+            drawn += 1
+            if drawn > 4000:      # emniyet: aşırı büyük ızgarada boyamayı sınırla
+                break
+
+        # Aktif önizleme bloğunun (ör. 2 saat) tüm hücrelerini aynı durumla boya
+        preview = self._drag_preview_info
+        if preview and isinstance(preview, dict):
+            p_r = preview.get("row", -1)
+            p_c = preview.get("col", -1)
+            p_d = max(1, int(preview.get("duration", 1)))
+            if p_r >= 0 and p_c >= 0:
+                res = self._placement_map.get((p_r, p_c))
+                if res and not res.outside_class_hours:
+                    colors = self.PLACEMENT_COLORS.get(res.visual)
+                    if colors:
+                        fill, edge = colors
+                        grid = self.parent()
+                        periods = grid._periods if (grid and hasattr(grid, "_periods")) else 8
+                        if periods <= 0: periods = 8
+                        day_end = (p_c // periods) * periods + periods - 1
+                        for off in range(p_d):
+                            cur_c = p_c + off
+                            if cur_c <= day_end and cur_c < self.columnCount():
+                                r_cell = self.visualRect(self.model().index(p_r, cur_c))
+                                if r_cell.isValid() and view.intersects(r_cell):
+                                    painter.fillRect(r_cell.adjusted(1, 1, -1, -1), fill)
+                                    painter.setPen(QPen(edge, 1.5))
+                                    painter.drawRect(r_cell.adjusted(0, 0, -1, -1))
+        painter.end()
+
     def paintEvent(self, event):
         super().paintEvent(event)
-        
+
+        # Sürükleme sırasında yerleşim analizi katmanı (hayaletin ALTINDA durur)
+        try:
+            self._paint_placement_states()
+        except Exception as exc:
+            print(f"[Grid] yerleşim boyama notu: {exc}")
+
         # Draw drag preview ghost overlay if active
         preview = self._drag_preview_info
         if preview and isinstance(preview, dict):
@@ -2304,14 +2599,16 @@ class DropTableWidget(QTableWidget):
                             rect = self.visualRect(self.model().index(orig_r, orig_c))
                         pixmap = self.viewport().grab(rect)
 
-                        hotspot = event.pos() - rect.topLeft()
-                        # Travel with the payload so the drop side can work out where the
-                        # block's FIRST cell is. Without it the drop reads the cell under
-                        # the cursor, which for a 2-hour block grabbed by its right half
-                        # is the block's second cell — the lesson then lands a period
-                        # further right than the ghost shows.
-                        data["grab_dx"] = int(hotspot.x())
-                        data["grab_dy"] = int(hotspot.y())
+                        # Tutma noktasi, blogun ILK hucresinin ortasi. Boylece hayalet
+                        # goruntu imlecin sagina dogru uzar ve "imlecin altindaki hucre
+                        # dersin 1. saatidir" kurali gorunusle birebir ortusur. Kartin
+                        # neresinden tuttugunuz artik bir sey degistirmiyor: eskiden
+                        # kartin sag yarisindan tutmak 2 saatlik dersi bir saat ileri
+                        # kaydiriyordu.
+                        cell_w = max(1, rect.width() // max(1, int(orig_dur or 1)))
+                        hotspot = QPoint(cell_w // 2, rect.height() // 2)
+                        data["grab_dx"] = 0
+                        data["grab_dy"] = 0
 
                         mime.setData("application/x-lesson", QByteArray(json.dumps(data).encode()))
                         drag.setMimeData(mime)
@@ -3446,6 +3743,62 @@ class TimetableGrid(QWidget):
         super().resizeEvent(event)
         self.adjust_columns_to_fit()
         
+    # ── YERLEŞİM ANALİZİ: ızgara koordinatı -> takvim koordinatı ────────────
+    #
+    # Piksel eşiği ve "col // periods" hesabı arayüzün içine dağılmış olmasın diye
+    # tek yer: hangi hücre hangi güne, saate ve hangi sınıf/öğretmen satırına
+    # denk geliyor? Sürükleme analizi de bırakma da buradan okur.
+    def resolve_cell(self, row: int, col: int) -> dict:
+        periods = max(1, int(getattr(self, "_periods", 8) or 8))
+        mode = getattr(self, "current_view_mode", "classes")
+        out = {"row": row, "col": col, "day": -1, "period": -1,
+               "class_name": "", "teacher_name": "", "mode": mode}
+        if row < 0 or col < 0:
+            return out
+
+        if mode == "classes":
+            out["day"], out["period"] = col // periods, col % periods
+            names = getattr(self, "class_list", []) or []
+            if row < len(names):
+                out["class_name"] = names[row]
+        elif mode == "teachers":
+            out["day"], out["period"] = col // periods, col % periods
+            names = getattr(self, "teacher_list", []) or []
+            if row < len(names):
+                out["teacher_name"] = names[row]
+        else:
+            # Tek birim görünümü: satır = ders saati, sütun = gün.
+            out["day"], out["period"] = col, row
+            kind, name = getattr(self, "_single_entity", ("class", ""))
+            if kind == "teacher":
+                out["teacher_name"] = name
+            else:
+                out["class_name"] = name
+        return out
+
+    def set_single_entity(self, kind: str, name: str):
+        """Tek birim görünümünde ekranda kimin çizelgesi var (analiz için)."""
+        self._single_entity = (kind or "class", name or "")
+
+    def rows_for_lesson(self, lesson: dict) -> list:
+        """Bu ders hangi satırlara konabilir? (analiz yalnız o satırlarda döner)
+
+        Bir ders yalnız KENDİ sınıfının satırına konabilir; öğretmen görünümünde
+        de kendi öğretmeninin satırına. Bütün ızgarayı taramak hem yanlış (başka
+        sınıfın satırı bu ders için bir aday değildir) hem de gereksiz.
+        """
+        import placement_engine as pe
+        mode = getattr(self, "current_view_mode", "classes")
+        if mode == "classes":
+            wanted = {pe.class_key(c) for c in pe.lesson_classes(lesson)}
+            return [i for i, name in enumerate(getattr(self, "class_list", []) or [])
+                    if pe.class_key(name) in wanted]
+        if mode == "teachers":
+            wanted = {pe.teacher_key(t) for t in pe.lesson_teachers(lesson)}
+            return [i for i, name in enumerate(getattr(self, "teacher_list", []) or [])
+                    if pe.teacher_key(name) in wanted]
+        return list(range(self.table.rowCount()))
+
     def set_mode_single_entity(self, periods: int, days_list: list):
         """Standard view: 1 entity (class/teacher), Rows=Periods, Cols=Days"""
         self._periods = periods

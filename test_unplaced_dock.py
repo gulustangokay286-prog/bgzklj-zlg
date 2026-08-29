@@ -6,7 +6,7 @@ test_unplaced_dock.py — yerleşemeyen dersler dock'a düşmeli ve elle yerleş
 Eskiden planlayıcının yerleştiremediği saatler hiçbir yerde görünmüyordu: grid delik
 geliyordu, o dersler yalnızca konsol satırında kalıyordu, kullanıcının elle koyacağı
 bir kart yoktu. Artık hepsi dock'a düşüyor, her kart neden yerleşemediğini taşıyor,
-ve kısıtlı bir saate bırakınca "yoksay ve yerleştir" seçeneği çıkıyor.
+ve kapalı bir saate bırakılırsa KESİN reddediliyor (öğretmenlerin kuralı).
 """
 import os
 import shutil
@@ -117,7 +117,7 @@ def run():
     check("kartlar sürüklenebilir kimliğe sahip",
           all(c["id"].startswith("loose_") for c in cards))
 
-    print("\n[kısıtlı saate bırakınca: uyarır, yoksay-yerleştir sunar]")
+    print("\n[kapalı saate bırakınca: KESİN RET  |  açık saate: yerleşir]")
     from main_window import MainWindow
 
     asked = []
@@ -154,24 +154,37 @@ def run():
         "class_name": "9A", "duration": 1, "lesson_id": card["id"],
     })
 
-    check("kısıtlama uyarısı gösterildi", bool(asked), "hiç uyarı çıkmadı")
-    if asked:
-        titles = " | ".join(t for t, _ in asked)
-        check("uyarı kısıtlamadan bahsediyor",
-              any("Kısıtlama" in t for t, _ in asked), titles)
-        joined = " ".join(txt for _, txt in asked)
-        check("uyarı 'yok sayıp yerleştir' seçeneği sunuyor",
-              "yok say" in joined.lower(), joined[:120])
-        check("uyarı dersin neden listede olduğunu açıklıyor",
-              "neden listede" in joined.lower() or "müsait" in joined.lower(),
-              joined[:160])
+    # Öğretmenlerin elle yazdığı kural: "Öğretmen kapalıysa o gün sürükleme
+    # manuel yapılsa bile o kısma yerleşim yapılamaz." Eskiden burada "yok sayıp
+    # yerleştir" seçeneği vardı ve kapalı saate ders konabiliyordu; bu testler o
+    # davranışı doğruluyordu. Kural tersine döndü: kapalı saat KESİN RET.
+    check("kapalı saat uyarısı gösterildi", bool(asked), "hiç uyarı çıkmadı")
+    titles = " | ".join(t for t, _ in asked)
+    joined = " ".join(txt for _, txt in asked)
+    check("uyarı 'yerleştirilemez' diyor",
+          any("Yerleştirilemez" in t for t, _ in asked), titles)
+    check("'yok sayıp yerleştir' seçeneği SUNULMUYOR",
+          "yok say" not in joined.lower(), joined[:140])
+    check("gerekçe yazıyor (kim, hangi saat)", "kapalı" in joined.lower(),
+          joined[:140])
 
     after_grid = len(store.get("grid_placements", []))
-    check("onaylanınca gerçekten yerleşti", after_grid > before_grid,
+    check("KAPALI saate ders KONMADI", after_grid == before_grid,
           f"{before_grid} -> {after_grid}")
-    check("yerleşen kart dock'tan düştü",
-          len(store.get("loose_unplaced_cards", [])) < before_cards,
+    check("kart dock'ta kaldı",
+          len(store.get("loose_unplaced_cards", [])) == before_cards,
           f"{before_cards} -> {len(store.get('loose_unplaced_cards', []))}")
+
+    # Aynı kart, sınıfın AÇIK olduğu bir saate bırakılırsa yerleşmeli: kural
+    # "hiçbir şey yerleşmesin" değil, "kapalı saate yerleşmesin".
+    asked.clear()
+    win._on_lesson_dropped(0, 0 * P + 0, {
+        "subject_name": card["subject_name"], "teacher_name": card["teacher_name"],
+        "class_name": "9A", "duration": 1, "lesson_id": card["id"],
+    })
+    check("açık saate ders YERLEŞTİ",
+          len(store.get("grid_placements", [])) > before_grid,
+          f"{before_grid} -> {len(store.get('grid_placements', []))}")
 
     win.close()
 

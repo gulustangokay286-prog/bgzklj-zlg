@@ -505,6 +505,65 @@ def has_institution_password(slug: str) -> bool:
     meta = get_institution_meta(slug)
     return bool(meta.get("has_password", False) and meta.get("password_hash"))
 
+
+# ── Account-level institution trust ──────────────────────────────────
+#
+# The institution password is a barrier for OTHER accounts, not for the
+# person who owns/knows it — so "trust" is recorded against the logged-in
+# USER (their email), stored in meta.json (which syncs across devices via
+# push_institution_to_rtdb), NOT against the machine. That's the fix for
+# "I set this institution's password, why am I asked for it again on my
+# other PC": once an account has proven it knows the password (or set it),
+# that account is trusted on every device it signs into. The per-device
+# cache above still exists as a fallback for offline/unsynced cases.
+
+def _norm_email(email: str) -> str:
+    return (email or "").strip().lower()
+
+
+def add_trusted_user(slug: str, email: str):
+    """Records that this account is trusted for this institution and syncs
+    it. Called both when someone SETS the password (they own it) and when
+    someone successfully ENTERS it (they've proven they know it)."""
+    email = _norm_email(email)
+    if not slug or not email:
+        return
+    meta_path = os.path.join(_base_dir(), slug, "meta.json")
+    if not os.path.exists(meta_path):
+        return
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception:
+        return
+    trusted = meta.get("trusted_users") or []
+    if email in trusted:
+        return
+    trusted.append(email)
+    meta["trusted_users"] = trusted
+    try:
+        _atomic_write_json(meta_path, meta)
+        _invalidate_meta_cache(slug)
+    except Exception:
+        try:
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, ensure_ascii=False, indent=2)
+        except Exception:
+            return
+    try:
+        import cloud_sync
+        cloud_sync.push_institution_to_rtdb(slug)
+    except Exception as e:
+        print(f"Cloud sync error on trusted-user add: {e}")
+
+
+def is_trusted_user(slug: str, email: str) -> bool:
+    email = _norm_email(email)
+    if not email:
+        return False
+    meta = get_institution_meta(slug)
+    return email in (meta.get("trusted_users") or [])
+
 # ── Institution CRUD ─────────────────────────────────────────────────
 
 INSTITUTION_COLORS = [
@@ -556,6 +615,8 @@ def list_institutions():
     base = _ensure_base()
     result = []
     for entry in sorted(os.listdir(base)):
+        if entry.startswith("_system_") or entry.startswith("_auth_") or entry in ("backups", "temp", "cache"):
+            continue
         inst_dir = os.path.join(base, entry)
         meta_path = os.path.join(inst_dir, "meta.json")
         if os.path.isdir(inst_dir) and os.path.exists(meta_path):
@@ -857,8 +918,9 @@ def get_institution_meta(slug: str) -> dict:
 # inside that version's own _version_meta["folder_id"] (None = no folder / "Genel").
 
 def list_folders(slug: str) -> list:
-    """Returns this institution's folders: [{id, name, created}, ...]."""
-    return get_institution_meta(slug).get("folders", [])
+    """Returns this institution's folders, newest created first: [{id, name, created}, ...]."""
+    raw = get_institution_meta(slug).get("folders", [])
+    return list(reversed(raw))
 
 def create_folder(slug: str, name: str) -> tuple:
     """Creates a new named folder for organizing versions.
@@ -1146,10 +1208,111 @@ def save_version(slug: str, data_store: dict, source: str = "manual", note: str 
         import database
         threading.Thread(target=push_version_to_rtdb, args=(slug, filename, save_data), daemon=True).start()
         threading.Thread(target=database.create_database_backup, args=(slug, "auto_save"), daemon=True).start()
+        threading.Thread(target=propagate_primary_timeoff_to_secondary, args=(slug, save_data), daemon=True).start()
     except Exception:
         pass
 
     return filename
+
+def propagate_primary_timeoff_to_secondary(primary_slug: str, primary_data: dict):
+    """
+    Boğaziçi'nde (ana kurumda) kısıtlamalar veya dersler değiştiğinde diğer bağlı kurumlara (Birey vb.)
+    tam tersi olarak otomatik yansır.
+    İkincil kurumlardaki (Birey) değişimler asla ana kuruma (Boğaziçi) yansımaz.
+    """
+    if not primary_slug or not primary_data:
+        return
+    if primary_slug != "bogazici_egitim_kurumlari":
+        meta = get_institution_meta(primary_slug)
+        if not meta.get("is_primary"):
+            return  # Yalnızca ana kurum dışa doğru yayılım yapar
+
+    bgz_teachers = {normalize_teacher_name(t.get("ad", "")): t for t in primary_data.get("ogretmenler", []) if t.get("ad")}
+    bgz_kisit = primary_data.get("kisitlamalar", {})
+
+    bgz_busy = {}
+    for p in primary_data.get("grid_placements", []):
+        t_name = p.get("teacher_name") or p.get("teacher") or ""
+        if t_name:
+            tk = normalize_teacher_name(t_name)
+            try:
+                d = int(p.get("day", p.get("col", 0)))
+                per = int(p.get("period", p.get("row", 0)))
+                dur = int(p.get("duration", 1))
+                for off in range(dur):
+                    bgz_busy.setdefault(tk, set()).add((d, per + off))
+            except Exception:
+                pass
+
+    for inst in list_institutions():
+        sec_slug = inst.get("slug")
+        if not sec_slug or sec_slug == primary_slug:
+            continue
+
+        sec_active = get_active_version(sec_slug)
+        if not sec_active:
+            continue
+        sec_data = load_version(sec_slug, sec_active)
+        if not sec_data:
+            continue
+
+        changed = False
+        sec_kisit = sec_data.setdefault("kisitlamalar", {})
+
+        for t in sec_data.get("ogretmenler", []):
+            t_name = t.get("ad", "").strip()
+            if not t_name:
+                continue
+            tk = normalize_teacher_name(t_name)
+            if tk not in bgz_teachers and t_name not in bgz_kisit:
+                continue
+
+            bgz_t = bgz_teachers.get(tk)
+            bgz_mat = None
+            if bgz_t and bgz_t.get("timeoff"):
+                bgz_mat = bgz_t.get("timeoff")
+            elif t_name in bgz_kisit:
+                bgz_mat = [[bgz_kisit[t_name].get(f"{d},{p}", 2) for p in range(4)] for d in range(5)]
+            else:
+                bgz_mat = [[2, 2, 2, 2] for _ in range(5)]
+
+            inv_mat = []
+            inv_dict = {}
+            for d in range(5):
+                row = []
+                for p in range(4):
+                    k = f"{d},{p}"
+                    v = bgz_mat[d][p] if d < len(bgz_mat) and p < len(bgz_mat[d]) else 2
+                    if (d, p) in bgz_busy.get(tk, set()):
+                        inv_v = 0
+                    elif v == 2:
+                        inv_v = 0
+                    elif v == 0:
+                        inv_v = 2
+                    else:
+                        inv_v = 1
+                    row.append(inv_v)
+                    inv_dict[k] = inv_v
+                inv_mat.append(row)
+
+            # Tamamen kapalı olanları tam açık bırak
+            if all(c == 0 for r in inv_mat for c in r):
+                inv_mat = [[2, 2, 2, 2] for _ in range(5)]
+                inv_dict = {f"{d},{p}": 2 for d in range(5) for p in range(4)}
+
+            if t.get("timeoff") != inv_mat or sec_kisit.get(t_name) != inv_dict:
+                t["timeoff"] = inv_mat
+                sec_kisit[t_name] = inv_dict
+                changed = True
+
+        if changed:
+            update_version_in_place(sec_slug, sec_active, sec_data)
+            try:
+                import cloud_sync
+                cloud_sync.push_version_to_rtdb(sec_slug, sec_active, sec_data)
+            except Exception:
+                pass
+
 
 def update_version_in_place(slug: str, filename: str, data_store: dict) -> bool:
     """Overwrites an existing version file with updated data and pushes to cloud with conflict backup.
@@ -1166,18 +1329,6 @@ def update_version_in_place(slug: str, filename: str, data_store: dict) -> bool:
 
     new_hash = compute_data_hash(save_data)
 
-    # Change detection.
-    #
-    # This runs on the GUI thread on every grid edit, and the previous version
-    # answered "did anything change?" by reading the whole .roz back off disk and
-    # re-hashing it — a full json.load plus a full json.dumps of the entire
-    # schedule, on top of the json.dumps already done for new_hash. Three full
-    # passes over the data per lesson drop is a large part of why releasing a lesson
-    # stuttered.
-    #
-    # We wrote that file ourselves, so remembering the hash we last wrote answers
-    # the same question for free. The on-disk read stays as the fallback for the
-    # first save after launch, when we have nothing remembered yet.
     cache_key = (slug, filename)
     if new_hash:
         remembered = _last_written_hash.get(cache_key)
@@ -1216,8 +1367,6 @@ def update_version_in_place(slug: str, filename: str, data_store: dict) -> bool:
         _last_written_hash.pop(cache_key, None)
         return False
 
-    # Order matters: invalidate_version_summary also clears the remembered hash, so
-    # record what we just wrote AFTER it, not before.
     invalidate_version_summary(slug, filename)
     _last_written_hash[cache_key] = new_hash
     invalidate_cross_busy_cache()
@@ -1229,6 +1378,7 @@ def update_version_in_place(slug: str, filename: str, data_store: dict) -> bool:
         import database
         threading.Thread(target=push_version_to_rtdb, args=(slug, filename, save_data), daemon=True).start()
         threading.Thread(target=database.create_database_backup, args=(slug, "in_place_update"), daemon=True).start()
+        threading.Thread(target=propagate_primary_timeoff_to_secondary, args=(slug, save_data), daemon=True).start()
     except Exception:
         pass
     return True
@@ -1797,6 +1947,7 @@ def set_active_version(slug: str, version_filename: str):
     except Exception:
         pass
 
+
 def ensure_institution_has_version(slug: str) -> str:
     """Ensures that the institution has at least one active version. Returns version filename."""
     active = get_active_version(slug)
@@ -1817,16 +1968,17 @@ def ensure_institution_has_version(slug: str) -> str:
     }
     return save_version(slug, empty_data, source="manual", note="Başlangıç çizelgesi")
 
-# ── Master Data Clone / Import ───────────────────────────────────────
 
 def import_master_data_from_institution(target_slug: str, source_slug: str,
                                         include_subjects: bool = True,
                                         include_classes: bool = True,
                                         include_rooms: bool = True,
                                         include_teachers: bool = True,
-                                        include_assignments: bool = True) -> tuple:
+                                        include_assignments: bool = True,
+                                        invert_timeoff: bool = True) -> tuple:
     """
-    Imports master definitions from source institution into target institution's active version.
+    Belirtilen kurumdan seçilen temel tanımları hedef kuruma aktarır.
+    Zaman tablosu / kısıtlamalar seçeneğe göre tersine çevrilerek çakışmalar önlenir.
     Returns: (bool success, str message, dict updated_data)
     """
     if target_slug == source_slug:
@@ -1884,7 +2036,7 @@ def import_master_data_from_institution(target_slug: str, source_slug: str,
                 added_r += 1
         counts.append(f"{added_r} derslik")
         
-    # 4. Öğretmenler
+    # 4. Öğretmenler ve Kısıtlamalar
     if include_teachers:
         existing_t = {t.get("ad", "").strip().upper() for t in tgt_data.get("ogretmenler", []) if t.get("ad")}
         added_t = 0

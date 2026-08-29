@@ -42,31 +42,119 @@ class ColorSwatchButton(QPushButton):
         """)
 
 
-def normalize_subject_name(s: str) -> str:
+def normalize_tr(s: str) -> str:
     if not s:
         return ""
-    s_str = str(s).strip().upper().replace("🔒", "").strip()
+    s_str = str(s).strip().replace("🔒", "").strip()
     if " - " in s_str:
-        parts = s_str.split(" - ")
-        s_str = parts[-1].strip()
+        s_str = s_str.split(" - ")[-1].strip()
     tr_map = str.maketrans({
-        'i': 'İ', 'ı': 'I', 'ş': 'Ş', 'ğ': 'Ğ', 'ü': 'Ü', 'ö': 'Ö', 'ç': 'Ç'
+        'i': 'İ', 'ı': 'I', 'ç': 'Ç', 'ğ': 'Ğ', 'ö': 'Ö', 'ş': 'Ş', 'ü': 'Ü'
     })
-    cleaned = s_str.translate(tr_map)
-    return "".join(c for c in cleaned if c.isalnum())
+    return s_str.translate(tr_map).upper()
 
 
-def normalize_subject_match(s1, s2):
+def extract_stem_and_digits(s: str):
+    import re
+    s_norm = normalize_tr(s)
+    alphanumeric = "".join(c for c in s_norm if c.isalnum())
+    m = re.search(r'(\d+)$', alphanumeric)
+    if m:
+        digits = m.group(1)
+        stem = alphanumeric[:m.start()]
+    else:
+        digits = ""
+        stem = alphanumeric
+    return stem, digits
+
+
+def normalize_subject_name(s: str) -> str:
+    stem, digits = extract_stem_and_digits(s)
+    return stem + digits
+
+
+ACRONYM_MAP = {
+    "TÜRK DİLİ VE EDEBİYATI": "TDE",
+    "TURK DILI VE EDEBIYATI": "TDE",
+    "TÜRKÇE": "TÜR",
+    "TURKCE": "TÜR",
+    "EDEBİYAT": "EDEB",
+    "EDEBIYAT": "EDEB",
+    "GÖRSEL SANATLAR": "GÖRSEL",
+    "GORSEL SANATLAR": "GÖRSEL",
+    "DİN KÜLTÜRÜ VE AHLAK BİLGİSİ": "DİN",
+    "DIN KULTURU VE AHLAK BILGISI": "DİN",
+    "DİN KÜLTÜRÜ": "DİN",
+    "DIN KULTURU": "DİN",
+    "BEDEN EĞİTİMİ VE SPOR": "BEDEN",
+    "BEDEN EGITIMI VE SPOR": "BEDEN",
+    "BEDEN EĞİTİMİ": "BEDEN",
+    "BEDEN EGITIMI": "BEDEN",
+    "REHBERLİK VE YÖNLENDİRME": "REHBER",
+    "REHBERLIK VE YONLENDIRME": "REHBER",
+    "REHBERLİK": "REHBER",
+    "REHBERLIK": "REHBER",
+    "FELSEFE": "FELS",
+    "MATEMATİK": "MAT",
+    "MATEMATIK": "MAT",
+    "GEOMETRİ": "GEOM",
+    "GEOMETRI": "GEOM",
+    "COĞRAFYA": "COĞRAF",
+    "COGRAFYA": "COĞRAF",
+    "BİYOLOJİ": "BİYO",
+    "BIYOLOJI": "BİYO",
+    "KİMYA": "KİM",
+    "KIMYA": "KİM",
+    "FİZİK": "FİZ",
+    "FIZIK": "FİZ",
+    "İNGİLİZCE": "İNG",
+    "INGILIZCE": "İNG",
+    "ALMANCA": "ALM",
+    "FRANSIZCA": "FRAN",
+    "TARİH": "TAR",
+    "TARIH": "TAR",
+}
+
+
+def normalize_subject_match(s1, s2) -> bool:
     if not s1 or not s2:
         return False
-    n1 = normalize_subject_name(s1)
-    n2 = normalize_subject_name(s2)
-    if not n1 or not n2:
-        return False
-    if n1 == n2:
+    str1 = str(s1).strip().replace("🔒", "").strip()
+    str2 = str(s2).strip().replace("🔒", "").strip()
+    if str1.upper() == str2.upper():
         return True
-    if len(n1) >= 2 and len(n2) >= 2 and (n1.startswith(n2) or n2.startswith(n1)):
+
+    from auto_scheduler import normalize_clean
+    n1 = normalize_clean(str1)
+    n2 = normalize_clean(str2)
+    if n1 == n2 and n1:
         return True
+
+    # Check known acronyms & reverse lookup
+    for full_name, abbr in ACRONYM_MAP.items():
+        fn_norm = normalize_clean(full_name)
+        ab_norm = normalize_clean(abbr)
+        if (n1 == fn_norm or fn_norm in n1 or n1.startswith(fn_norm)) and (n2 == ab_norm or ab_norm in n2 or n2.startswith(ab_norm)):
+            return True
+        if (n2 == fn_norm or fn_norm in n2 or n2.startswith(fn_norm)) and (n1 == ab_norm or ab_norm in n1 or n1.startswith(ab_norm)):
+            return True
+
+    # Substring containment (e.g. "biyoloji" in "biyoloji9", "mat" in "matematik")
+    if n1 in n2 or n2 in n1:
+        return True
+
+    # Exact stem / letter-only match
+    s1_letters = "".join(c for c in n1 if c.isalpha())
+    s2_letters = "".join(c for c in n2 if c.isalpha())
+    if s1_letters and s2_letters:
+        if s1_letters == s2_letters:
+            return True
+        if len(s1_letters) >= 3 and len(s2_letters) >= 3:
+            if s1_letters[:3] == s2_letters[:3]:
+                return True
+            if s1_letters.startswith(s2_letters) or s2_letters.startswith(s1_letters):
+                return True
+
     return False
 
 
@@ -74,28 +162,42 @@ def resolve_subject_color(subject_name: str, data_store: dict = None) -> str:
     """Returns the persistent color for a subject by inspecting data_store."""
     if not subject_name:
         return "#2563EB"
+        
+    s_clean = str(subject_name).replace("🔒", "").strip()
     if data_store and isinstance(data_store, dict):
-        # 1. Check dersler
+        # 1. Check dersler (highest priority for user configured subject colors)
         for d in data_store.get("dersler", []):
-            if normalize_subject_match(d.get("ad"), subject_name) or normalize_subject_match(d.get("kisa"), subject_name):
+            if normalize_subject_match(d.get("ad"), s_clean) or normalize_subject_match(d.get("kisa"), s_clean):
                 c = d.get("color") or d.get("renk")
-                if c and QColor(c).isValid() and str(c).upper() not in ("#FFFFFF", "#000000", "#C0C0C0", "#B4B4B8", "#D0D0D0"):
-                    return c
+                if c and QColor(c).isValid() and str(c).upper() not in ("#FFFFFF", "#000000", "#C0C0C0", "#B4B4B8", "#D0D0D0", ""):
+                    return str(c).upper()
+                    
         # 2. Check atamalar
         for a in data_store.get("atamalar", []):
-            if normalize_subject_match(a.get("subject"), subject_name):
-                c = a.get("color")
-                if c and QColor(c).isValid() and str(c).upper() not in ("#FFFFFF", "#000000", "#C0C0C0", "#B4B4B8", "#D0D0D0"):
-                    return c
+            if normalize_subject_match(a.get("subject"), s_clean) or normalize_subject_match(a.get("ders"), s_clean):
+                c = a.get("color") or a.get("renk")
+                if c and QColor(c).isValid() and str(c).upper() not in ("#FFFFFF", "#000000", "#C0C0C0", "#B4B4B8", "#D0D0D0", ""):
+                    return str(c).upper()
+                    
         # 3. Check grid_placements
         for p in data_store.get("grid_placements", []):
-            if normalize_subject_match(p.get("subject_name") or p.get("subject"), subject_name):
+            if normalize_subject_match(p.get("subject_name") or p.get("subject"), s_clean):
                 c = p.get("color")
-                if c and QColor(c).isValid() and str(c).upper() not in ("#FFFFFF", "#000000", "#C0C0C0", "#B4B4B8", "#D0D0D0"):
-                    return c
-                    
-    # Fallback to deterministic curated color
-    hash_val = sum(ord(ch) * (i + 1) for i, ch in enumerate(subject_name.strip()))
+                if c and QColor(c).isValid() and str(c).upper() not in ("#FFFFFF", "#000000", "#C0C0C0", "#B4B4B8", "#D0D0D0", ""):
+                    return str(c).upper()
+
+        # 4. Check yerlesim
+        if isinstance(data_store.get("yerlesim"), dict):
+            for k, v in data_store["yerlesim"].items():
+                if isinstance(v, dict) and normalize_subject_match(v.get("subject_name") or v.get("subject"), s_clean):
+                    c = v.get("color")
+                    if c and QColor(c).isValid() and str(c).upper() not in ("#FFFFFF", "#000000", "#C0C0C0", "#B4B4B8", "#D0D0D0", ""):
+                        return str(c).upper()
+
+    # Deterministic curated fallback based on root stem
+    from auto_scheduler import normalize_clean
+    key = normalize_clean(s_clean) or s_clean
+    hash_val = sum(ord(ch) * (i + 1) for i, ch in enumerate(key))
     return CURATED_PALETTE[hash_val % len(CURATED_PALETTE)]
 
 
@@ -106,6 +208,15 @@ def update_subject_color_globally(widget_or_parent, data_store: dict, subject_na
     if not subject_name or not new_hex:
         return
         
+    new_hex = str(new_hex).upper().strip()
+    
+    # Invalidate cell color caches
+    try:
+        from timetable_grid import clear_cell_color_cache
+        clear_cell_color_cache()
+    except Exception:
+        pass
+
     win = None
     if hasattr(widget_or_parent, "window") and callable(widget_or_parent.window):
         candidate = widget_or_parent.window()
@@ -122,6 +233,18 @@ def update_subject_color_globally(widget_or_parent, data_store: dict, subject_na
                 cur = cur.parent()
             else:
                 break
+
+    if not win:
+        try:
+            from PySide6.QtWidgets import QApplication
+            app = QApplication.instance()
+            if app:
+                for top in app.topLevelWidgets():
+                    if hasattr(top, "data_store") and top.data_store:
+                        win = top
+                        break
+        except Exception:
+            pass
 
     if win and hasattr(win, "data_store") and win.data_store:
         data_store = win.data_store
@@ -157,8 +280,9 @@ def update_subject_color_globally(widget_or_parent, data_store: dict, subject_na
                 
         # 2. Update atamalar
         for a in data_store.get("atamalar", []):
-            if normalize_subject_match(a.get("subject"), subject_name):
+            if normalize_subject_match(a.get("subject"), subject_name) or normalize_subject_match(a.get("ders"), subject_name):
                 a["color"] = new_hex
+                a["renk"] = new_hex
                 
         # 3. Update grid_placements
         for gp in data_store.get("grid_placements", []):
@@ -171,19 +295,42 @@ def update_subject_color_globally(widget_or_parent, data_store: dict, subject_na
                 if isinstance(v, dict) and normalize_subject_match(v.get("subject_name") or v.get("subject"), subject_name):
                     v["color"] = new_hex
 
-    # 5. Live UI update on main window grid
+        # 5. Update manual_unplaced_cards
+        for mc in data_store.get("manual_unplaced_cards", []):
+            if normalize_subject_match(mc.get("subject_name"), subject_name):
+                mc["color"] = new_hex
+
+        # 6. Update loose_unplaced_cards
+        for lc in data_store.get("loose_unplaced_cards", []):
+            if normalize_subject_match(lc.get("subject_name"), subject_name):
+                lc["color"] = new_hex
+
+    # 6. Locate grid widget
+    grid = None
     if win and hasattr(win, "_grid"):
         grid = win._grid
+    elif hasattr(widget_or_parent, "_grid"):
+        grid = widget_or_parent._grid
+    elif hasattr(widget_or_parent, "table") and hasattr(widget_or_parent, "_placed_lessons"):
+        grid = widget_or_parent
+    else:
+        cur = widget_or_parent
+        while cur is not None:
+            if hasattr(cur, "table") and hasattr(cur, "_placed_lessons"):
+                grid = cur
+                break
+            if hasattr(cur, "parent") and callable(cur.parent):
+                cur = cur.parent()
+            else:
+                break
+
+    # 7. Real-time UI update on grid
+    if grid:
         if hasattr(grid, "_placed_lessons"):
             for (r, c), info in list(grid._placed_lessons.items()):
                 if normalize_subject_match(info.get("subject_name"), subject_name):
                     info["color"] = new_hex
-                    item = grid.table.item(r, c)
-                    if item:
-                        item.setBackground(QBrush(QColor(new_hex)))
-                        lum = (0.299 * QColor(new_hex).red() + 0.587 * QColor(new_hex).green() + 0.114 * QColor(new_hex).blue())
-                        item.setForeground(QBrush(Qt.white if lum < 160 else Qt.black))
-                        
+                    
         if hasattr(grid, "table"):
             for r in range(grid.table.rowCount()):
                 for c in range(grid.table.columnCount()):
@@ -192,21 +339,44 @@ def update_subject_color_globally(widget_or_parent, data_store: dict, subject_na
                         clean_text = it.text().replace("🔒", "").strip()
                         if normalize_subject_match(clean_text, subject_name):
                             it.setBackground(QBrush(QColor(new_hex)))
+                            lum = (0.299 * QColor(new_hex).red() + 0.587 * QColor(new_hex).green() + 0.114 * QColor(new_hex).blue())
+                            it.setForeground(QBrush(Qt.white if lum < 140 else Qt.black))
+                            
             grid.table.viewport().update()
             grid.table.update()
             
         if hasattr(grid, "info_color_box"):
-            grid.info_color_box.setStyleSheet(f"background: {new_hex}; border: 2px solid #334155; border-radius: 4px;")
+            grid.info_color_box.setStyleSheet(f"background: {new_hex}; border: 1px solid rgba(0,0,0,0.15); border-radius: 5px;")
             
-        if hasattr(grid, "unplaced_dock") and hasattr(grid.unplaced_dock, "update_list"):
-            grid.unplaced_dock.update_list(data_store)
-            
+    # 8. Instantly update all DraggableLessonCard instances across ALL open widgets/docks in memory
+    try:
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app:
+            for w in app.allWidgets():
+                cls_name = w.__class__.__name__
+                if cls_name == "DraggableLessonCard" or (hasattr(w, "subject_name") and hasattr(w, "color")):
+                    s_card = getattr(w, "subject_name", "")
+                    if s_card and normalize_subject_match(s_card, subject_name):
+                        w.color = new_hex
+                        if hasattr(w, "set_color"):
+                            w.set_color(new_hex)
+                        else:
+                            w.update()
+                            if hasattr(w, "repaint"):
+                                w.repaint()
+    except Exception:
+        pass
+
+    if win:
         if hasattr(win, "save_db"):
             win.save_db(sync_from_grid=False)
         if hasattr(win, "_refresh_tree"):
             win._refresh_tree()
         if hasattr(win, "_refresh_grid"):
             win._refresh_grid()
+        if hasattr(win, "_refresh_unplaced_lessons"):
+            win._refresh_unplaced_lessons()
     else:
         from database import trigger_save_db
         trigger_save_db(widget_or_parent, data_store or {})

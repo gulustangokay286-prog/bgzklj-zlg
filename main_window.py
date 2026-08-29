@@ -285,6 +285,11 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+Y"), self, self._act_redo)
         QShortcut(QKeySequence("Ctrl+Shift+Z"), self, self._act_redo)
 
+        # If timetable is completely empty (new institution / no data transfer), auto-prompt master data wizard
+        if not self.data_store.get("siniflar") and not self.data_store.get("dersler") and not self.data_store.get("ogretmenler"):
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(250, self._open_wizard)
+
     def _open_download_page(self):
         import webbrowser
         download_url = self.data_store.get("settings", {}).get("download_url", "https://chenki.net/indir")
@@ -1216,11 +1221,26 @@ class MainWindow(QMainWindow):
         self.data_store["grid_placements"] = new_global
 
     def _restore_grid_placements(self, view_type=None, entity_name=None):
+        # Tek birim görünümünde ekranda kimin çizelgesi olduğunu ızgaraya bildir:
+        # sürükleme analizi aday konumu bu bilgiyle kurar.
+        if entity_name and hasattr(self._grid, "set_single_entity"):
+            try:
+                self._grid.set_single_entity(
+                    "teacher" if str(view_type).startswith("teacher") else "class",
+                    entity_name)
+            except Exception:
+                pass
         self._refresh_grid()
 
     def _refresh_grid(self, skip_unplaced=False):
         if not hasattr(self, "_grid"):
             return
+            
+        try:
+            from timetable_grid import clear_cell_color_cache
+            clear_cell_color_cache()
+        except Exception:
+            pass
             
         settings = self.data_store.get("settings", {})
         try:
@@ -2006,10 +2026,11 @@ class MainWindow(QMainWindow):
             c_name = lc.get("class_name", "")
             t_name = lc.get("teacher", "")
             dur = int(lc.get("duration", 1) or 1)
+            card_col = resolve_subject_color(s_name, self.data_store) or lc.get("color", "#94A3B8")
             unplaced.append({
                 "id": lc.get("id", f"{s_name}_{c_name}_{dur}"),
                 "subject_name": s_name,
-                "color": lc.get("color", "#94A3B8"),
+                "color": card_col,
                 "teacher": t_name,
                 "class_name": c_name,
                 "duration": dur,
@@ -2029,7 +2050,7 @@ class MainWindow(QMainWindow):
             cnt = int(item.get("count", 1) or 1)
             is_c = bool(item.get("is_combined", False))
             comb_cls = list(item.get("combined_classes", []))
-            color = item.get("color", "#94A3B8")
+            color = resolve_subject_color(s_name, self.data_store) or item.get("color", "#94A3B8")
             
             s_key = format_tr_name(s_name)
             c_key = format_tr_name(c_name)
@@ -2048,6 +2069,8 @@ class MainWindow(QMainWindow):
                     "combined_classes": comb_cls,
                     "blocked_reason": item.get("blocked_reason", "")
                 }
+            else:
+                deck_agg[deck_key]["color"] = color
             deck_agg[deck_key]["count"] += cnt
             if t_name and not deck_agg[deck_key]["teacher"]:
                 deck_agg[deck_key]["teacher"] = t_name
@@ -2101,6 +2124,7 @@ class MainWindow(QMainWindow):
             return True, ""
             
         from timetable_grid import DAYS
+        from auto_scheduler import norm_teacher, matches_class, normalize_clean
         day_name = DAYS[day] if 0 <= day < len(DAYS) else f"{day+1}. Gün"
         
         placed = self._grid.get_placed_lessons()
@@ -2124,16 +2148,16 @@ class MainWindow(QMainWindow):
         for rel in relations:
             r_type = rel.get("kural", "")
             val = rel.get("parametre", 2)
-            f_subjs = [s.strip().upper() for s in rel.get("dersler", []) if s.strip()]
-            f_teach = [t.strip().upper() for t in rel.get("ogretmenler", []) if t.strip()]
-            f_classes = [c.strip().upper() for c in rel.get("siniflar", []) if c.strip()]
+            f_subjs = rel.get("dersler", [])
+            f_teach = rel.get("ogretmenler", [])
+            f_classes = rel.get("siniflar", [])
             
-            # Sınıf veya öğretmen filtresi varsa tam eşleşmeli
-            if f_classes and class_name and (class_name.strip().upper() not in f_classes):
+            # Sınıf, öğretmen veya ders filtresi varsa eşleşmeli
+            if f_classes and class_name and not any(matches_class(class_name, fc) or matches_class(fc, class_name) for fc in f_classes):
                 continue
-            if f_teach and teacher and (teacher.strip().upper() not in f_teach):
+            if f_teach and teacher and not any(norm_teacher(teacher) == norm_teacher(ft) for ft in f_teach):
                 continue
-            if f_subjs and (subject.strip().upper() not in f_subjs):
+            if f_subjs and not any(normalize_clean(subject) == normalize_clean(fs) or normalize_clean(fs) in normalize_clean(subject) for fs in f_subjs):
                 continue
                 
             # Rule 1: Günde maksimum ders sayısı
@@ -2192,10 +2216,61 @@ class MainWindow(QMainWindow):
 
         return True, ""
 
+    def _final_placement_check(self, row, col, lesson_info):
+        """Bırakma anında SON doğrulama — sürüklerken görünen renkle aynı kaynak.
+
+        Fare bırakıldığında son hover hesabına güvenilmez, analiz bir kez daha
+        yapılır (bu arada başka bir cihazdan veri gelmiş olabilir). Sonuç yalnızca
+        BİLGİLENDİRİR: program hiçbir zaman kullanıcıyı durdurmaz, ne olacağını
+        söyler — kapalı bir saate bırakıyorsa gerekçesiyle sorar.
+        """
+        try:
+            import placement_engine as pe
+            pos = self._grid.resolve_cell(row, col)
+            if pos["day"] < 0 or pos["period"] < 0:
+                return None
+            lesson = dict(lesson_info or {})
+            if pos["class_name"]:
+                lesson.setdefault("class_name", pos["class_name"])
+            snapshot = pe.TimetableSnapshot(
+                self.data_store,
+                institution_slug=getattr(self, "institution_slug", None),
+                exclude_block_id=lesson.get("block_id"))
+            cand = pe.CandidatePlacement(lesson, pos["day"], pos["period"],
+                                         lesson.get("duration"))
+            return pe.analyze(snapshot, lesson, cand)
+        except Exception as exc:
+            print(f"[Drop] son yerleşim kontrolü atlandı: {exc}")
+            return None
+
     def _on_lesson_dropped(self, row, col, lesson_info):
         from timetable_grid import DAYS
         from auto_scheduler import matches_class, format_tr_name, normalize_clean
-        
+        import placement_engine
+
+        # Kapalı/imkânsız hücreye bırakma: motorun gerekçesiyle sor. Aşağıdaki
+        # ayrıntılı kontroller (takas, dock'a alma) olduğu gibi devam eder.
+        # KAPALI SAAT: elle bile yerleştirilemez.
+        #
+        # Öğretmenlerin kuralı net: "öğretmen kapalıysa, sürükleme manuel yapılsa
+        # bile o kısma yerleşim yapılamaz." Kapalı saat bir tercih değil, fiziksel
+        # bir gerçek — öğretmen o saatte okulda yok, başka kurumda ya da o saati
+        # başka kurum tutmuş. Bu yüzden burada "yine de yerleştir" seçeneği YOK.
+        #
+        # "Yine de yerleştir" yalnızca DOLU hücrede sunulur (aşağıdaki takas /
+        # dock akışı): oradaki engel bir çakışmadır, kullanıcı bilerek çözebilir.
+        verdict = self._final_placement_check(row, col, lesson_info)
+        if verdict is not None and verdict.status in (
+                placement_engine.FORBIDDEN, placement_engine.INVALID_GEOMETRY):
+            reasons = "<br>".join(f"• {c.message}" for c in verdict.hard_violations[:5])
+            QMessageBox.warning(
+                self, "Bu Saate Yerleştirilemez",
+                f"{reasons or verdict.explanation}<br><br>"
+                f"<b>Bu saate ders konulamaz.</b> Kapalı saat elle de aşılamaz — "
+                f"gerekiyorsa önce Zaman Tablosu ekranından o saati açın.")
+            self.statusBar().showMessage(verdict.explanation, 6000)
+            return
+
         display_mode = getattr(self._grid, "current_view_mode", "classes")
         subject_name = lesson_info.get("subject_name", "Ders")
         color = get_subject_color(subject_name, self.data_store)
@@ -2444,21 +2519,41 @@ class MainWindow(QMainWindow):
                         return
                     pending_swap = class_occupied
                 else:
-                    if len(unique_occupied) == 1:
-                        detail = f"zaten <b>{occ_s}</b> ({occ_t}) dersi var"
+                    # Neden takas edilemediğini AÇIKÇA söyle.
+                    #
+                    # 2 saatlik bir dersle 1 saatlik bir dersi takas etmek mümkün
+                    # değildir: yer değiştirdiklerinde 2 saatlik ders, 1 saatliğin
+                    # yanındaki BAŞKA bir dersin üstüne taşar ve onu da yutar. Bu
+                    # yüzden yerinden olan ders silinmez, aşağıdaki listeye alınır ve
+                    # oradan istenen saate sürüklenebilir. Kullanıcı ne olacağını
+                    # bırakmadan önce görür.
+                    names = ", ".join(
+                        f"{(o.get('subject_name') or o.get('subject') or 'Ders')}"
+                        f" ({int(o.get('duration', 1) or 1)} saat)"
+                        for o in unique_occupied[:4]
+                    )
+                    if len(unique_occupied) > 4:
+                        names += f" ve {len(unique_occupied) - 4} ders daha"
+
+                    if len(unique_occupied) == 1 and occ_dur != duration:
+                        why = (f"<b>{duration} saatlik</b> ders ile <b>{occ_dur} saatlik</b> "
+                               f"ders yer değiştiremez: takas edilseydi uzun olan, "
+                               f"yanındaki başka bir dersin üstüne taşardı.")
+                    elif len(unique_occupied) > 1:
+                        why = (f"Bu aralıkta <b>{len(unique_occupied)}</b> ders var; "
+                               f"takasın tek bir karşılığı yok.")
                     else:
-                        listed = ", ".join(
-                            (o.get("subject_name") or o.get("subject") or "Ders")
-                            for o in unique_occupied[:4]
-                        )
-                        detail = (f"<b>{len(unique_occupied)}</b> ders var "
-                                  f"({listed}{'...' if len(unique_occupied) > 4 else ''})")
+                        why = "Bu ders gridden sürüklenmediği için takas edilemiyor."
+
                     ret = QMessageBox.question(
-                        self, "Bu Saat Dolu",
+                        self, "Takas Edilemiyor — Ders Aşağı Alınacak",
                         f"<b>{occ_c}</b> sınıfının <b>{day_name}</b> günü "
-                        f"<b>{period_idx+1}. saatinden</b> itibaren {detail}.<br><br>"
-                        f"Yeni ders buraya yerleştirilsin mi?<br>"
-                        f"<i>Hiçbiri silinmez; hepsi yerleştirilmeyenler listesine geri döner.</i>",
+                        f"<b>{period_idx+1}. saatinde</b> {names} var.<br><br>"
+                        f"{why}<br><br>"
+                        f"Devam ederseniz <b>{names}</b> aşağıdaki "
+                        f"<b>“Yerleştirilmeyenler”</b> alanına alınır — silinmez, "
+                        f"oradan istediğiniz saate sürükleyebilirsiniz.<br><br>"
+                        f"Devam edilsin mi?",
                         QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
                     )
                     if ret != QMessageBox.Yes:
@@ -2483,16 +2578,16 @@ class MainWindow(QMainWindow):
                             # deliberately, and usually because they are fixing exactly
                             # this problem. Making them fight the dialog every time was
                             # the wrong default.
-                            ret = QMessageBox.warning(
-                                self, "Sınıf Kısıtlama Uyarısı",
-                                f"⚠️ <b>'{chk_c}'</b> sınıfının <b>{day_name}</b> günü <b>{check_p+1}. ders saati</b> 'KAPALI' olarak kısıtlanmıştır.<br><br>"
-                                "Yine de kısıtlamayı yok sayıp bu dersi yerleştirmek istiyor musunuz?"
-                                + _blocked_note,
-                                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
-                            )
-                            if ret != QMessageBox.Yes:
-                                self.statusBar().showMessage(f"İptal edildi: {chk_c} - {day_name} {check_p+1}. saat kapalı!")
-                                return
+                            # Kapalı saat elle de aşılamaz (öğretmen kuralı).
+                            QMessageBox.warning(
+                                self, "Bu Saate Yerleştirilemez",
+                                f"⚠️ <b>'{chk_c}'</b> sınıfının <b>{day_name}</b> günü "
+                                f"<b>{check_p+1}. ders saati</b> KAPALI.<br><br>"
+                                f"<b>Bu saate ders konulamaz.</b> Gerekiyorsa önce "
+                                f"Zaman Tablosu ekranından o saati açın."
+                                + _blocked_note)
+                            self.statusBar().showMessage(f"Yerleştirilemedi: {chk_c} - {day_name} {check_p+1}. saat kapalı!")
+                            return
 
         # Öğretmen Timeoff Kontrolü (Global Kisitlamalar ve Yerel Timeoff)
         if teacher:
@@ -2506,30 +2601,25 @@ class MainWindow(QMainWindow):
                 # Global çapraz kısıtlama
                 is_available = kisitlamalar.get(teacher, {}).get(cell_key, True)
                 if not is_available:
-                    ret = QMessageBox.warning(
-                        self, "Kısıtlama Uyarısı",
-                        f"⚠️ <b>'{teacher}'</b> öğretmeninin <b>{day_name}</b> günü <b>{check_p+1}. ders saatinde</b> 'ÇALIŞAMAZ / KAPALI' kısıtlaması bulunmaktadır.<br><br>"
-                        "Yine de kısıtlamayı yok sayıp bu dersi yerleştirmek istiyor musunuz?"
-                        + _blocked_note,
-                        QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
-                    )
-                    if ret != QMessageBox.Yes:
-                        self.statusBar().showMessage(f"İptal edildi: {teacher} - {day_name} {check_p+1}. saat kapalı!")
-                        return
+                    QMessageBox.warning(
+                        self, "Bu Saate Yerleştirilemez",
+                        f"⚠️ <b>'{teacher}'</b> öğretmeninin <b>{day_name}</b> günü "
+                        f"<b>{check_p+1}. ders saatinde</b> ÇALIŞAMAZ kısıtlaması var."
+                        f"<br><br><b>Bu saate ders konulamaz.</b>" + _blocked_note)
+                    self.statusBar().showMessage(f"Yerleştirilemedi: {teacher} - {day_name} {check_p+1}. saat kapalı!")
+                    return
                     
                 # Yerel timeoff (Grid üzerinden ayarlanan)
                 if t_timeoff and day_idx < len(t_timeoff) and check_p < len(t_timeoff[day_idx]):
                     if t_timeoff[day_idx][check_p] == 0:
-                        ret = QMessageBox.warning(
-                            self, "Öğretmen Kısıtlama Uyarısı",
-                            f"⚠️ <b>'{teacher}'</b> öğretmeninin <b>{day_name}</b> günü <b>{check_p+1}. ders saati</b> 'KAPALI' olarak kısıtlanmıştır.<br><br>"
-                            "Yine de kısıtlamayı yok sayıp bu dersi yerleştirmek istiyor musunuz?"
-                            + _blocked_note,
-                            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
-                        )
-                        if ret != QMessageBox.Yes:
-                            self.statusBar().showMessage(f"İptal edildi: {teacher} - {day_name} {check_p+1}. saat kapalı!")
-                            return
+                        QMessageBox.warning(
+                            self, "Bu Saate Yerleştirilemez",
+                            f"⚠️ <b>'{teacher}'</b> öğretmeninin <b>{day_name}</b> günü "
+                            f"<b>{check_p+1}. ders saati</b> KAPALI.<br><br>"
+                            f"<b>Bu saate ders konulamaz.</b> Gerekiyorsa önce "
+                            f"Zaman Tablosu ekranından o saati açın." + _blocked_note)
+                        self.statusBar().showMessage(f"Yerleştirilemedi: {teacher} - {day_name} {check_p+1}. saat kapalı!")
+                        return
 
         # ── 3. KONTROL: Öğretmen Çakışması Kontrolü
         teacher_info = next((t for t in self.data_store.get("ogretmenler", []) if format_tr_name(t.get("ad", "")) == teacher), {})

@@ -439,10 +439,22 @@ class CrossConflictResolutionDialog(QDialog):
         
         seen = set()
         for c in conflicts:
-            k = (c["teacher"], c["day"], c["period"], c["other_institution"])
+            t_name = c.get("teacher", "")
+            d_idx = c.get("day", 0)
+            p_idx = c.get("period", 0)
+            other_inst = c.get("other_institution") or c.get("institution", "Diğer Kurum")
+            other_cls = c.get("other_class") or c.get("class", "")
+            other_sub = c.get("other_subject") or c.get("subject", "")
+            this_cls = c.get("this_class", "")
+            this_sub = c.get("this_subject", "")
+            
+            k = (t_name, d_idx, p_idx, other_inst)
             if k in seen:
                 continue
             seen.add(k)
+            
+            from timetable_grid import DAYS
+            d_name = DAYS[d_idx] if 0 <= d_idx < len(DAYS) else f"{d_idx+1}. Gün"
             
             c_row = QFrame()
             c_row.setStyleSheet("background: #FFFFFF; border: 1px solid #E5E5EA; border-radius: 6px;")
@@ -450,10 +462,15 @@ class CrossConflictResolutionDialog(QDialog):
             r_lay.setContentsMargins(10, 6, 10, 6)
             r_lay.setSpacing(2)
             
-            lbl_t = QLabel(f"<b>{c['teacher']}</b> — {c['day']} {c['period']}. Ders Saati")
+            lbl_t = QLabel(f"<b>{t_name}</b> — {d_name} {p_idx+1}. Ders Saati")
             lbl_t.setStyleSheet("font-size: 11px; color: #1D1D1F; background: transparent; border: none;")
             
-            lbl_d = QLabel(f"• Diğer Kurum: <b>{c['other_institution']}</b> ({c['other_class']} - {c['other_subject']})\n• Bu Kurumdaki Hedef: <b>{c['this_class']} - {c['this_subject']}</b>")
+            det_text = f"• Diğer Kurum: <b>{other_inst}</b>"
+            if other_cls or other_sub:
+                det_text += f" ({other_cls} - {other_sub})"
+            if this_cls or this_sub:
+                det_text += f"\n• Bu Kurumdaki Hedef: <b>{this_cls} - {this_sub}</b>"
+            lbl_d = QLabel(det_text)
             lbl_d.setStyleSheet("font-size: 10px; color: #D97706; background: transparent; border: none;")
             
             r_lay.addWidget(lbl_t)
@@ -995,12 +1012,14 @@ class AutoScheduleDialog(QDialog):
         target_hrs = result.get("total_hours", total_hrs)
         cross_conflicts = result.get("cross_conflicts", [])
         
-        # If cross-institution conflicts detected, ask the user interactively
         if cross_conflicts:
             c_dlg = CrossConflictResolutionDialog(cross_conflicts, parent=self)
             ignore_and_place = (c_dlg.exec() == QDialog.Accepted)
             if not ignore_and_place:
-                conflicting_keys = {(c["day_idx"], c["period_idx"], c["teacher"]) for c in cross_conflicts}
+                conflicting_keys = {
+                    (c.get("day_idx", c.get("day", 0)), c.get("period_idx", c.get("period", 0)), c.get("teacher", ""))
+                    for c in cross_conflicts
+                }
                 filtered_schedule = []
                 for item in schedule:
                     t = item.get("teacher_name") or item.get("teacher") or ""

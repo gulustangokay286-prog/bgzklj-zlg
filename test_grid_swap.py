@@ -214,13 +214,35 @@ def run():
           len(set(dock_subjects) | set(grid_subjects)) >= 3,
           f"dock={dock_subjects} grid={grid_subjects}")
 
-    print("\n[dock kartı sürüklerken tutma noktası taşınıyor]")
+    print("\n[sürüklerken imlecin altındaki hücre dersin 1. saatidir]")
+    from PySide6.QtCore import QPoint
+    table = win._grid.table
+
+    # Kart nereden tutulursa tutulsun, bırakma hücresi imlecin altındaki hücredir.
+    table.resize(900, 300)
+    target = table.visualRect(table.model().index(0, 2)).center()
+    for payload in ({}, {"grab_dx": 999, "grab_dy": 999}, {"grab_dx": 40, "grab_dy": 12}):
+        anchor = table._drop_anchor(target, payload)
+        check(f"tutma noktası hücreyi kaydırmıyor ({payload or 'ofset yok'})",
+              table._cell_at(anchor) == (0, 2),
+              f"{table._cell_at(anchor)} != (0, 2)")
+
+    # 2 saatlik ders: önizleme her zaman gelinen saatten BAŞLAR (1. saatteysen 1-2,
+    # 2. saatteysen 2-3). Eskiden 2. saatin üzerindeyken 1. saati kapsıyordu.
+    info2 = {"subject_name": "Matematik", "teacher_name": "Ahmet Yılmaz",
+             "class_name": "9A", "duration": 2}
+    for col in (0, 1, 2):
+        table.set_drag_preview(0, col, info2)
+        prev = table._drag_preview_info or {}
+        check(f"{col + 1}. saate gelince önizleme {col + 1}-{col + 2}. saatler",
+              prev.get("col") == col and prev.get("duration") == 2,
+              f"col={prev.get('col')} dur={prev.get('duration')}")
+    table.clear_drag_preview()
+
     from timetable_grid import DraggableLessonCard
     import inspect
     src = inspect.getsource(DraggableLessonCard._start_standard_drag)
-    check("standart sürüklemede grab_dx gönderiliyor", "grab_dx" in src, src[:100])
-    src2 = inspect.getsource(DraggableLessonCard._start_sticky_drag)
-    check("yapışkan sürüklemede grab_dx gönderiliyor", "grab_dx" in src2, src2[:100])
+    check("dock kartı ilk hücresinden tutuluyor", "2 * dur" in src, src[:140])
 
     win.close()
 

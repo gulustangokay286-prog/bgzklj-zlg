@@ -1156,6 +1156,7 @@ class MasterDataDialog(QDialog):
         trigger_save_db(self, self.data_store)
         p = self.parent()
         if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
+        if p and hasattr(p, "_refresh_unplaced_lessons"): p._refresh_unplaced_lessons()
         if p and hasattr(p, "_load_unplaced_lessons"): p._load_unplaced_lessons()
 
     def _act_update(self):
@@ -1224,14 +1225,12 @@ class MasterDataDialog(QDialog):
                                     p["class_name"] = new_name
                                     p["class"] = new_name
 
-                if idx == 0 and new_color and new_color != old_color:
+                if idx == 0:
                     target_subj = new_name or old_name
-                    for a in self.data_store.get("atamalar", []):
-                        if a.get("subject") == target_subj:
-                            a["color"] = new_color
-                    for p in self.data_store.get("grid_placements", []):
-                        if p.get("subject_name") == target_subj or p.get("subject") == target_subj:
-                            p["color"] = new_color
+                    target_col = new_color or old_color
+                    if target_subj and target_col:
+                        from dialogs.color_picker_dialog import update_subject_color_globally
+                        update_subject_color_globally(self, self.data_store, target_subj, target_col)
 
                 # Specific Two-Way Sync for Classes
                 if idx == 1:

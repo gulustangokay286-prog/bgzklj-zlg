@@ -18,6 +18,9 @@ from PySide6.QtGui import (
 )
 
 import version_store
+import bk_branding
+from version import APP_VERSION
+import update_notifications
 from dialogs.faq_dialog import FAQDialog
 from dialogs.notifications_dialog import AppleNotificationsDialog
 from dialogs.profile_dialog import (
@@ -1136,6 +1139,12 @@ class CrossImportDialog(QDialog):
         self.cb_assignments = QCheckBox("Ders - Öğretmen Atamaları (Haftalık Dağıtımlar)")
         self.cb_assignments.setChecked(True)
         cb_box.addWidget(self.cb_assignments)
+
+        self.cb_invert_timeoff = QCheckBox("Zaman Kısıtlamalarını / Diğer Kurum Saatlerini Tam Tersi Olarak Aktar")
+        self.cb_invert_timeoff.setToolTip("Kaynak kurumda öğretmenin derste olduğu saatler bu kurum için kapalı saat yapılır; çakışmalar otomatik engellenir.")
+        self.cb_invert_timeoff.setChecked(True)
+        self.cb_invert_timeoff.setStyleSheet(f"color: {APPLE_BLUE}; font-weight: 600;")
+        cb_box.addWidget(self.cb_invert_timeoff)
         
         layout.addLayout(cb_box)
         layout.addStretch(1)
@@ -1183,6 +1192,7 @@ class CrossImportDialog(QDialog):
             "rooms": self.cb_rooms.isChecked(),
             "teachers": self.cb_teachers.isChecked(),
             "assignments": self.cb_assignments.isChecked(),
+            "invert_timeoff": self.cb_invert_timeoff.isChecked(),
         }
 
 
@@ -1384,6 +1394,15 @@ class AppleInstitutionCard(QFrame):
             if dlg.exec() == QDialog.Accepted:
                 pwd = dlg.get_password()
                 version_store.set_institution_password(self.slug, pwd)
+                
+                # Trust the user who just set the password
+                p = self.parent()
+                while p:
+                    if hasattr(p, "user_email") and p.user_email:
+                        version_store.add_trusted_user(self.slug, p.user_email)
+                        break
+                    p = p.parent()
+                    
                 show_apple_info(self, "Bilgi", "Kurum şifresi başarıyla güncellendi.", is_success=True)
                 self._notify_parent_refresh()
         elif act_rm_pwd and action == act_rm_pwd:
@@ -1622,6 +1641,31 @@ def make_dashboard_icon(name: str, color_hex: str = "#0071E3", size: int = 18) -
         path.lineTo(size * 0.42, size * 0.72)
         path.lineTo(size * 0.78, size * 0.28)
         p.drawPath(path)
+    elif name == "refresh":
+        # Dairesel yenileme oku
+        p.setPen(QPen(c, 1.7, Qt.SolidLine, Qt.RoundCap))
+        p.setBrush(Qt.NoBrush)
+        rect = QRectF(size * 0.18, size * 0.18, size * 0.64, size * 0.64)
+        p.drawArc(rect, 45 * 16, 280 * 16)
+        head = QPainterPath()
+        head.moveTo(size * 0.80, size * 0.16)
+        head.lineTo(size * 0.82, size * 0.42)
+        head.lineTo(size * 0.56, size * 0.34)
+        head.closeSubpath()
+        p.setBrush(QBrush(c))
+        p.setPen(Qt.NoPen)
+        p.drawPath(head)
+    elif name == "import":
+        # Kutuya inen ok: veri aktarımı
+        p.setPen(QPen(c, 1.7, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.setBrush(Qt.NoBrush)
+        p.drawLine(QPointF(size * 0.5, size * 0.16), QPointF(size * 0.5, size * 0.58))
+        arrow = QPainterPath()
+        arrow.moveTo(size * 0.32, size * 0.44)
+        arrow.lineTo(size * 0.5, size * 0.63)
+        arrow.lineTo(size * 0.68, size * 0.44)
+        p.drawPath(arrow)
+        p.drawLine(QPointF(size * 0.2, size * 0.78), QPointF(size * 0.8, size * 0.78))
     elif name == "info":
         p.setPen(QPen(c, max(1.3, size * 0.08)))
         p.setBrush(Qt.NoBrush)
@@ -1965,6 +2009,7 @@ class AppleVersionRow(QFrame):
         self._is_last = is_last
         self.setCursor(Qt.PointingHandCursor)
         self.setFixedHeight(46)
+        self.setAcceptDrops(True)
         
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 5, 16, 5)
@@ -2289,6 +2334,37 @@ class AppleVersionRow(QFrame):
         drag.setHotSpot(QPoint(_DRAG_PIXMAP_W // 2, _DRAG_PIXMAP_H // 2))
         drag.exec(Qt.MoveAction, Qt.MoveAction)
 
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasFormat(VERSION_DRAG_MIME):
+            event.setDropAction(Qt.MoveAction)
+            event.accept()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasFormat(VERSION_DRAG_MIME):
+            event.setDropAction(Qt.MoveAction)
+            event.accept()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        if event.mimeData().hasFormat(VERSION_DRAG_MIME):
+            raw = bytes(event.mimeData().data(VERSION_DRAG_MIME)).decode("utf-8")
+            slug, _, filename = raw.partition("\n")
+            if slug and filename:
+                event.setDropAction(Qt.MoveAction)
+                event.accept()
+                p = self.parent()
+                while p:
+                    if hasattr(p, "folder_id"):
+                        version_store.assign_version_folder(slug, filename, p.folder_id)
+                        self._notify_parent_refresh_versions()
+                        return
+                    p = p.parent() if hasattr(p, "parent") and callable(p.parent) else None
+                return
+        event.ignore()
+
 
 # ── Main Home Dashboard ──────────────────────────────────────────────
 
@@ -2364,6 +2440,67 @@ class HomeDashboard(QWidget):
         except Exception as rte:
             print(f"[HomeDashboard] Realtime sync init note: {rte}")
 
+    def _start_version_check(self):
+        """Fire-and-forget: asks the release server whether a newer version
+        than the one currently running exists, and updates the small status
+        label next to the version number once it answers. Never blocks
+        startup and never raises — see update_notifications.VersionStatusChecker."""
+        self._version_checker = update_notifications.VersionStatusChecker()
+        self._version_checker.result_ready.connect(self._on_version_check_result)
+        self._version_checker.start()
+
+    def _on_version_check_result(self, status: str, detail: str):
+        if status == "latest":
+            self.version_status_lbl.setText("Güncel")
+            self.version_status_lbl.setStyleSheet("color: #16A34A; margin-left: 6px;")
+        elif status == "update_available":
+            self.version_status_lbl.setText(f"Güncelleme mevcut (v{detail})")
+            self.version_status_lbl.setStyleSheet("color: #D97706; margin-left: 6px;")
+        else:
+            self.version_status_lbl.setText("")
+
+    def _on_manual_refresh(self):
+        """Yenile düğmesi: buluttan çek, panelleri yeniden kur.
+
+        Açılışta zaten otomatik çekiliyor; bu, "başka bilgisayarda bir klasör ya da
+        çizelge oluşturuldu mu?" sorusunu beklemeden sormanın yolu. Ağ işi ayrı bir
+        iş parçacığında döner, pencere donmaz; düğme iş bitene kadar kapalı kalır.
+        """
+        if getattr(self, "_sync_in_flight", False):
+            return
+        self._sync_in_flight = True
+        self.btn_refresh.setEnabled(False)
+        self.btn_refresh.setToolTip("Yenileniyor...")
+
+        import threading
+        from PySide6.QtCore import QTimer
+
+        def _done(ok, msg):
+            self._sync_in_flight = False
+            self.btn_refresh.setEnabled(True)
+            self.btn_refresh.setToolTip("Yenile — buluttaki değişiklikleri getir")
+            self._refresh_institutions()
+            if self._selected_slug:
+                self._refresh_versions()
+            if not ok and msg:
+                print(f"[HomeDashboard] yenileme notu: {msg}")
+
+        def _worker():
+            ok, msg = True, ""
+            try:
+                from cloud_sync import pull_all_from_rtdb
+                ok, msg, _ = pull_all_from_rtdb(self.auth_data)
+            except Exception as exc:
+                ok, msg = False, str(exc)
+            # Alici olarak self veriliyor: geri cagri GUI is parcaciginda,
+            # pencere hala yasiyorsa calisir.
+            QTimer.singleShot(0, self, lambda: _done(ok, msg))
+
+        if self.auth_data and not self.auth_data.get("is_offline"):
+            threading.Thread(target=_worker, daemon=True).start()
+        else:
+            _done(True, "")
+
     def _on_realtime_nudge(self, slug):
         worker = getattr(self, "cloud_worker", None)
         if worker is not None:
@@ -2435,33 +2572,43 @@ class HomeDashboard(QWidget):
         
         # ── 1. Top Bar ───────────────────────────────────────────────
         top_bar = QFrame()
-        top_bar.setFixedHeight(50)
+        top_bar.setFixedHeight(54)
         top_bar.setStyleSheet("background: #FFFFFF; border-bottom: 1px solid #EFEFEF;")
-        
+
         top_layout = QHBoxLayout(top_bar)
         top_layout.setContentsMargins(18, 0, 18, 0)
         top_layout.setSpacing(10)
-        
-        # Brand Logo (11.png)
+
+        # Brand lockup (real institution mark, not a generic icon)
         brand_icon = QLabel()
-        logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "11.png")
-        if not os.path.exists(logo_path):
-            logo_path = "/Users/fookay/ders program/11.png"
-            
-        if os.path.exists(logo_path):
-            logo_pix = QPixmap(logo_path).scaled(26, 26, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            brand_icon.setPixmap(logo_pix)
+        brand_pix = QPixmap(bk_branding.DASHBOARD_BRAND_PNG)
+        if not brand_pix.isNull():
+            brand_icon.setPixmap(brand_pix.scaledToHeight(34, Qt.SmoothTransformation))
         else:
-            brand_icon.setPixmap(make_3d_institution_icon("", "#0071E3", 22))
-        brand_icon.setFixedSize(26, 26)
+            brand_icon.setPixmap(make_3d_institution_icon("", bk_branding.BRAND_BLUE, 22))
         brand_icon.setStyleSheet("border: none; background: transparent;")
         top_layout.addWidget(brand_icon)
-        
+
         brand_lbl = QLabel("Anasayfa")
         brand_lbl.setFont(QFont(FONT_FAMILY, 11.5, QFont.Bold))
         brand_lbl.setStyleSheet("color: #111111;")
         top_layout.addWidget(brand_lbl)
-        
+
+        # Sürüm numarası + güncellik durumu. Durum metni başta "Kontrol
+        # ediliyor..." olarak başlar, arka planda sunucuya sorulur (bkz.
+        # _start_version_check) ve sonuç gelince güncellenir — hiçbir zaman
+        # uygulama açılışını bekletmez.
+        self.version_lbl = QLabel(f"v{APP_VERSION}")
+        self.version_lbl.setFont(QFont(FONT_FAMILY, 9))
+        self.version_lbl.setStyleSheet(f"color: {TEXT_MUTED}; margin-left: 10px;")
+        top_layout.addWidget(self.version_lbl)
+
+        self.version_status_lbl = QLabel("Kontrol ediliyor...")
+        self.version_status_lbl.setFont(QFont(FONT_FAMILY, 9))
+        self.version_status_lbl.setStyleSheet(f"color: {TEXT_MUTED}; margin-left: 6px;")
+        top_layout.addWidget(self.version_status_lbl)
+        self._start_version_check()
+
         top_layout.addSpacing(16)
         
         # Search Box with ⌘K hint
@@ -2505,9 +2652,9 @@ class HomeDashboard(QWidget):
         self.user_lbl.setFont(QFont(FONT_FAMILY, 9.5))
         self.user_lbl.setStyleSheet("color: #111111;")
         top_layout.addWidget(self.user_lbl)
-        
+
         top_layout.addSpacing(6)
-        
+
         # Utility icons (?, 🔔, Avatar)
         def _make_icon_btn(icon_name, tooltip, color="#555555", sz=16):
             btn = QPushButton()
@@ -2522,6 +2669,19 @@ class HomeDashboard(QWidget):
             """)
             return btn
         
+        # Yenile: başka bir cihazda açılan klasör/çizelge buraya gelsin diye
+        # buluttan çekip panelleri yeniden kurar. Açılışta da otomatik çalışır,
+        # bu düğme "şimdi bak" demenin yolu.
+        self.btn_refresh = _make_icon_btn("refresh", "Yenile — buluttaki değişiklikleri getir")
+        self.btn_refresh.clicked.connect(self._on_manual_refresh)
+        top_layout.addWidget(self.btn_refresh)
+
+        # Veri Aktar her kullanıcıda görünür: kurum tanımlarını (ders, sınıf,
+        # öğretmen, atama) başka bir kurumdan kopyalamak yönetici işi değil.
+        self.btn_import = _make_icon_btn("import", "Veri Aktar — başka kurumdan tanımları kopyala")
+        self.btn_import.clicked.connect(self._on_cross_import_clicked)
+        top_layout.addWidget(self.btn_import)
+
         btn_help = _make_icon_btn("help", "Yardım & SSS")
         btn_help.clicked.connect(self._on_help_clicked)
         top_layout.addWidget(btn_help)
@@ -2529,6 +2689,29 @@ class HomeDashboard(QWidget):
         btn_bell = _make_icon_btn("bell", "Bildirimler")
         btn_bell.clicked.connect(self._on_notifications_clicked)
         top_layout.addWidget(btn_bell)
+        
+        # Kurum Anahtarı / Hesap Oluştur (Exclusive for Master SuperAdmin: sehersanli@gmail.com / sehersanli@chenki.net)
+        u_email = (self.auth_data.get("email", "") if self.auth_data else "").lower()
+        if u_email in ("sehersanli@gmail.com", "sehersanli@chenki.net", "admin@chenki.net") or (self.auth_data and self.auth_data.get("is_master")):
+            self.btn_create_account = QPushButton("Kurum Anahtarı Oluştur")
+            self.btn_create_account.setFont(QFont(FONT_FAMILY, 8.5, QFont.Bold))
+            self.btn_create_account.setFixedHeight(28)
+            self.btn_create_account.setCursor(Qt.PointingHandCursor)
+            self.btn_create_account.setStyleSheet("""
+                QPushButton {
+                    background: #0071E3;
+                    color: #FFFFFF;
+                    border: none;
+                    border-radius: 14px;
+                    padding: 0 14px;
+                    font-weight: 600;
+                }
+                QPushButton:hover {
+                    background: #0062C4;
+                }
+            """)
+            self.btn_create_account.clicked.connect(self._on_create_customer_account_clicked)
+            top_layout.addWidget(self.btn_create_account)
         
         top_layout.addSpacing(2)
         
@@ -2880,6 +3063,13 @@ class HomeDashboard(QWidget):
         menu.addSeparator()
         
         act_profile = menu.addAction("Profili Düzenle")
+        act_change_pwd = menu.addAction("Şifre Sıfırla / Değiştir")
+        
+        act_create_acc = None
+        u_email = (self.auth_data.get("email", "") if self.auth_data else "").lower()
+        if u_email in ("sehersanli@gmail.com", "sehersanli@chenki.net", "admin@chenki.net") or (self.auth_data and self.auth_data.get("is_master")):
+            act_create_acc = menu.addAction("Kurum Anahtarı / Hesap Oluştur")
+            
         act_cloud = menu.addAction("Bulut Eşitle")
         act_import = menu.addAction("Veri Aktar")
         menu.addSeparator()
@@ -2889,6 +3079,10 @@ class HomeDashboard(QWidget):
         action = menu.exec_(pos)
         if action == act_profile:
             self._on_edit_profile_clicked()
+        elif action == act_change_pwd:
+            self._on_change_password_clicked()
+        elif act_create_acc and action == act_create_acc:
+            self._on_create_customer_account_clicked()
         elif action == act_cloud:
             self._manual_cloud_sync()
         elif action == act_import:
@@ -2908,6 +3102,17 @@ class HomeDashboard(QWidget):
         dlg = AppleProfileDialog(current_email=self.user_email, parent=self)
         dlg.profile_updated.connect(self._on_profile_updated)
         dlg.exec()
+
+    def _on_change_password_clicked(self):
+        from dialogs.profile_dialog import AppleChangePasswordDialog
+        dlg = AppleChangePasswordDialog(user_email=self.user_email, parent=self)
+        dlg.exec()
+
+    def _on_create_customer_account_clicked(self):
+        from dialogs.customer_account_dialog import AppleCreateCustomerAccountDialog
+        dlg = AppleCreateCustomerAccountDialog(parent=self)
+        dlg.account_created.connect(lambda acc: self._refresh_institutions())
+        dlg.exec()
         
     def _on_profile_updated(self, new_name: str, new_avatar_url: str):
         self.display_name = new_name
@@ -2925,6 +3130,11 @@ class HomeDashboard(QWidget):
             return
         if version_store.verify_institution_password(self._selected_slug, pwd):
             self._unlocked_slugs.add(self._selected_slug)
+            
+            # Record account-level trust across devices
+            if hasattr(self, "user_email") and self.user_email:
+                version_store.add_trusted_user(self._selected_slug, self.user_email)
+                
             # Cache password for this device so it won't be asked again
             version_store.save_device_password_cache(self._selected_slug, pwd)
             self.pwd_err_lbl.hide()
@@ -2980,8 +3190,17 @@ class HomeDashboard(QWidget):
                 
         institutions = version_store.list_institutions()
         
+        tenant_type = (self.auth_data.get("tenant_type") if self.auth_data else None) or "internal"
+        allowed_slugs = set((self.auth_data.get("allowed_institutions") if self.auth_data else None) or [])
+
         filtered = []
         for inst in institutions:
+            slug = inst.get("slug", "")
+            if slug.startswith("_system_") or slug.startswith("_auth_"):
+                continue
+            if tenant_type == "isolated" and slug not in allowed_slugs:
+                # Isolated external customer account: DO NOT display internal group institutions
+                continue
             if self._search_query and self._search_query not in inst["name"].lower():
                 continue
             filtered.append(inst)
@@ -2994,6 +3213,14 @@ class HomeDashboard(QWidget):
             
         if not self._selected_slug and filtered:
             self._on_institution_selected(filtered[0]["slug"])
+        elif filtered and self._selected_slug not in [i["slug"] for i in filtered]:
+            self._on_institution_selected(filtered[0]["slug"])
+        elif not filtered:
+            self._selected_slug = None
+            self.right_title.setText("Kurum Bulunmuyor")
+            self.ver_count_lbl.setText("0 versiyon")
+            self.last_update_badge.hide()
+            self._refresh_versions()
         elif self._selected_slug:
             self._refresh_versions()
             
@@ -3001,8 +3228,13 @@ class HomeDashboard(QWidget):
         self._selected_slug = slug
         version_store.set_last_active_institution_slug(slug)
         self._selected_version = None
-        # Auto-unlock if this device has previously authenticated for this institution
-        if version_store.check_device_password_cache(slug):
+        
+        # Auto-unlock if this user or device is trusted / has authenticated
+        if (
+            getattr(self, "is_master_admin", False)
+            or (hasattr(self, "user_email") and self.user_email and version_store.is_trusted_user(slug, self.user_email))
+            or version_store.check_device_password_cache(slug)
+        ):
             self._unlocked_slugs.add(slug)
         
         for i in range(self.inst_list_layout.count() - 1):
@@ -3432,12 +3664,36 @@ class HomeDashboard(QWidget):
             inst = version_store.create_institution(name, color=color, password=pwd)
             self._selected_slug = inst["slug"]
             
+            # If current user is isolated, add this newly created slug to allowed_institutions
+            if self.auth_data and self.auth_data.get("tenant_type") == "isolated":
+                allowed = self.auth_data.setdefault("allowed_institutions", [])
+                if inst["slug"] not in allowed:
+                    allowed.append(inst["slug"])
+                from api_client import api_client
+                stored = api_client.get_stored_auth_data() or {}
+                stored["allowed_institutions"] = allowed
+                api_client.save_token(stored)
+                
+                # Update registered accounts map
+                em = self.auth_data.get("email", "").lower()
+                if em:
+                    accs = api_client.load_registered_accounts()
+                    if em in accs:
+                        accs[em]["allowed_institutions"] = allowed
+                        api_client.save_registered_accounts_locally(accs)
+            
             if self.auth_data and not self.auth_data.get("is_offline"):
                 from cloud_sync import push_institution_to_rtdb
                 push_institution_to_rtdb(inst["slug"], self.auth_data)
                 
             self._refresh_institutions()
             
+    def _on_version_dropped_on_folder(self, slug, filename, folder_id):
+        if not slug or not filename:
+            return
+        version_store.assign_version_folder(slug, filename, folder_id)
+        self._refresh_versions()
+
     def _on_new_empty_clicked(self):
         if not self._selected_slug:
             return
@@ -3446,10 +3702,26 @@ class HomeDashboard(QWidget):
         self.new_empty_timetable.emit(self._selected_slug)
         
     def _on_cross_import_clicked(self):
-        if not self._selected_slug:
-            QMessageBox.warning(self, "Uyarı", "Lütfen önce hedef bir kurum seçin.")
+        # Hedef kurum seçili değilse, kullanıcıyı boş bir uyarıyla geri çevirmek
+        # yerine makul olanı seç: tek kurum varsa o, yoksa son açılan kurum.
+        target = self._selected_slug
+        if not target:
+            try:
+                insts = version_store.list_institutions() or []
+            except Exception:
+                insts = []
+            if len(insts) == 1:
+                target = insts[0].get("slug")
+            else:
+                target = version_store.get_last_active_institution_slug()
+        if not target:
+            QMessageBox.warning(
+                self, "Kurum Seçilmedi",
+                "Verilerin aktarılacağı kurumu soldaki listeden seçin, "
+                "sonra tekrar deneyin.")
             return
-            
+        self._selected_slug = target
+
         dlg = CrossImportDialog(self._selected_slug, parent=self)
         if dlg.exec() == QDialog.Accepted:
             sel = dlg.get_selection()
@@ -3467,7 +3739,8 @@ class HomeDashboard(QWidget):
                 include_classes=sel["classes"],
                 include_rooms=sel["rooms"],
                 include_teachers=sel["teachers"],
-                include_assignments=sel["assignments"]
+                include_assignments=sel["assignments"],
+                invert_timeoff=sel.get("invert_timeoff", True)
             )
             
             if ok:

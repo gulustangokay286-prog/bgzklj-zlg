@@ -39,8 +39,13 @@ class SubjectsDialog(BaseDialog):
     def _add(self):
         d = _SubjectEditDialog(self)
         if d.exec():
-            self._subjects.append(d.get_data())
+            data = d.get_data()
+            self._subjects.append(data)
             self._refresh()
+            from dialogs.color_picker_dialog import update_subject_color_globally
+            win = self.window() or self.parent()
+            ds = getattr(win, "data_store", None)
+            update_subject_color_globally(self, ds, data.get("ad"), data.get("renk"))
 
     def _delete(self):
         row = self.table.currentRow()
@@ -53,8 +58,13 @@ class SubjectsDialog(BaseDialog):
         if row >= 0:
             d = _SubjectEditDialog(self, self._subjects[row])
             if d.exec():
-                self._subjects[row] = d.get_data()
+                data = d.get_data()
+                self._subjects[row] = data
                 self._refresh()
+                from dialogs.color_picker_dialog import update_subject_color_globally
+                win = self.window() or self.parent()
+                ds = getattr(win, "data_store", None)
+                update_subject_color_globally(self, ds, data.get("ad"), data.get("renk"))
 
     def _refresh(self):
         from dialogs.edit_forms import get_subject_color

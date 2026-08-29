@@ -1,21 +1,15 @@
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_all
 
+ortools_datas, ortools_binaries, ortools_hiddenimports = collect_all('ortools')
 
-# Bu liste dialogs/ klasoruyle birebir tutulur: birkac ekran (Danisman,
-# Aktar, Dersliklere Atama ...) yalnizca calisirken import edildigi icin
-# listede olmayan bir modul derlemede disarida kalip dugmeyi olduruyordu.
 hidden_modules = [
-    'ortools',
-    'ortools.sat',
-    'ortools.sat.python',
-    'ortools.sat.python.cp_model',
-    'ortools.init',
-    'ortools.init.python',
     'perfect_scheduler',
     'kempe_scheduler',
     'tabu_repair',
     'chain_scheduler',
     'placement_engine',
+    'dialogs',
     'dialogs.preflight_dialog',
     'dialogs.advanced_wizard',
     'dialogs.advisor_dialog',
@@ -64,8 +58,6 @@ hidden_modules = [
     'lesson_hours',
     'login_dialog',
     'main_window',
-    'release_telemetry',
-    'update_notifications',
     'ribbon_widget',
     'save_dialog',
     'splash_screen',
@@ -75,32 +67,28 @@ hidden_modules = [
     'version',
     'version_store',
     'core.timetable_data',
-]
+] + ortools_hiddenimports
 
-import sys
-import os
-
-icon_file = 'app_icon.icns' if sys.platform == 'darwin' and os.path.exists('app_icon.icns') else 'app_icon.ico'
-
-app_datas = [
+datas = [
+    ('resources', 'resources'),
+    ('data', 'data'),
     ('dialogs', 'dialogs'),
+    ('bgz_database.json', '.'),
+    ('app_icon.png', '.'),
+    ('app_icon.ico', '.'),
     ('11.png', '.'),
     ('ChatGPT Image 16 Ağu 2026 10_31_17.png', '.'),
-    ('app_icon.ico', '.'),
-    ('app_icon.png', '.'),
-    ('app_icon.icns', '.'),
-]
-if os.path.exists('release_system_ca.pem'):
-    # Only present when pinning against a self-signed release-system cert
-    # for local/dev testing — see release_telemetry.py's docstring. Not
-    # needed against updates.chenki.net's real Let's Encrypt cert.
-    app_datas.append(('release_system_ca.pem', '.'))
+    ('C:/Users/gokay/Desktop/aSc/IMG_4327 (1).PNG', '.'),
+    ('C:/Users/gokay/Desktop/aSc/ChatGPT Image 5 Tem 2026 01_04_30.png', '.')
+] + ortools_datas
+
+binaries = ortools_binaries
 
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[],
-    datas=app_datas,
+    binaries=binaries,
+    datas=datas,
     hiddenimports=hidden_modules,
     hookspath=[],
     hooksconfig={},
@@ -114,33 +102,21 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
+    a.binaries,
+    a.datas,
     [],
-    exclude_binaries=True,
-    name='Chenki_Akademi',
+    name='BGZ_Ders_Planlama_Final_v60',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=False,
+    upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=icon_file,
-)
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=False,
-    upx_exclude=[],
-    name='Chenki_Akademi',
-)
-app = BUNDLE(
-    coll,
-    name='Chenki_Akademi.app',
-    icon=icon_file,
-    bundle_identifier='com.chenki.akademi',
+    icon=['app_icon.ico'],
 )

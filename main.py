@@ -1,5 +1,5 @@
 """
-main.py — Chenki Akademi v2 Entry Point
+main.py — BK Planner Entry Point
 Login → Home Dashboard → Timetable Editor akışı
 """
 import sys
@@ -26,6 +26,9 @@ from main_window import MainWindow
 import traceback
 import database
 import version_store
+import bk_branding
+import bk_update
+import update_notifications
 
 def global_exception_handler(exc_type, exc_value, exc_traceback):
     if issubclass(exc_type, (KeyboardInterrupt, SystemExit)):
@@ -320,17 +323,14 @@ def main():
     palette.setColor(QPalette.Button, QColor(240, 240, 240))
     palette.setColor(QPalette.ButtonText, Qt.black)
     palette.setColor(QPalette.BrightText, Qt.red)
-    palette.setColor(QPalette.Highlight, QColor(42, 130, 218))
+    palette.setColor(QPalette.Highlight, QColor(bk_branding.BRAND_BLUE))
     palette.setColor(QPalette.HighlightedText, Qt.white)
     app.setPalette(palette)
-    
-    app.setApplicationName("Chenki Planlama")
-    app.setOrganizationName("Chenki")
 
-    icon_path = get_asset_path("app_icon.png")
-    if not os.path.exists(icon_path):
-        icon_path = get_asset_path("app_icon.ico")
-        
+    app.setApplicationName(bk_branding.PRODUCT_NAME)
+    app.setOrganizationName(bk_branding.COMPANY_NAME)
+
+    icon_path = bk_branding.ICON_ICO if os.path.exists(bk_branding.ICON_ICO) else bk_branding.ICON_PNG
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))
 
@@ -367,19 +367,13 @@ def main():
         }
     """)
 
-    logo_candidate = get_asset_path("11.png")
-    if not os.path.exists(logo_candidate):
-        logo_candidate = os.path.join(os.path.dirname(os.path.abspath(__file__)), "11.png")
-    logo_path = logo_candidate if os.path.exists(logo_candidate) else icon_path
+    logo_path = bk_branding.INNER_LOGO_PNG if os.path.exists(bk_branding.INNER_LOGO_PNG) else icon_path
 
-    auth_data = None
-    try:
-        from api_client import api_client as _api
-        ok, auto_auth = _api.auto_authenticate()
-        if ok and auto_auth:
-            auth_data = auto_auth
-    except Exception as exc:
-        print(f"[main] auto authenticate note: {exc}")
+    from splash_screen import BKSplashScreen
+    splash = BKSplashScreen(bk_update.install_root())
+    splash.exec()
+    auth_data = splash.auth_data if splash.is_valid_token else None
+    del splash
 
     if not auth_data:
         login = LoginDialog(logo_path if os.path.exists(logo_path) else None)
@@ -395,7 +389,31 @@ def main():
     shell.resize(1200, 800)
     shell.show()
 
-    sys.exit(app.exec())
+    # "What's new" toast reads State/pending_notes.json, written once by the
+    # splash-time update engine right after activating a new version — see
+    # update_notifications.py's docstring. The in-session checker (polling,
+    # no standalone background process — see bk_update.py's module
+    # docstring) replaces the old silent restart-watcher toast with a real
+    # "update now / later" sheet.
+    try:
+        QTimer.singleShot(500, lambda: update_notifications.check_and_show_whats_new(shell))
+        bk_update.start_in_session_checker(shell)
+    except Exception:
+        pass  # must never block app startup
+
+    exit_code = app.exec()
+
+    # Safety net for "uygulamadan çıkınca kapatmıyor": if some background
+    # resource (a non-daemon thread, an open socket) survives the window
+    # closing, sys.exit() below can leave the OS process alive indefinitely
+    # since Python only fully exits once every non-daemon thread has ended.
+    # This guarantees the process is gone within 3 seconds of the last
+    # window closing, no matter what's still running.
+    import threading as _threading
+    import time as _time
+
+    _threading.Thread(target=lambda: (_time.sleep(3), os._exit(exit_code)), daemon=True).start()
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":

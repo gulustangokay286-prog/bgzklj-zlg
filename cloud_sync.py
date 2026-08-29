@@ -62,6 +62,8 @@ def push_all_to_rtdb(auth_data: dict = None) -> tuple:
     pushed = 0
     pushed_versions = 0
     for slug in sorted(os.listdir(base_dir)):
+        if slug.startswith("_system_") or slug.startswith("_auth_") or slug in ("backups", "temp", "cache"):
+            continue
         inst_dir = os.path.join(base_dir, slug)
         if not (os.path.isdir(inst_dir) and os.path.exists(os.path.join(inst_dir, "meta.json"))):
             continue
@@ -204,6 +206,9 @@ class CloudSyncWorker(QObject):
                             print(f"[CloudSync] {confirmed} bekleyen silme işlemi tamamlandı")
                     except Exception as exc:
                         print(f"[CloudSync] pending delete flush note: {exc}")
+
+                    # Session revocation check disabled per user setting
+
 
                     try:
                         pull_ok, msg, new_count = api_client.pull_all_from_rtdb(self.auth_data)

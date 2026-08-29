@@ -1181,7 +1181,9 @@ class LessonAssignmentDialog(QDialog):
         row_layout.setSpacing(8)
         
         top_h = QHBoxLayout()
+        top_h.setContentsMargins(0, 0, 0, 0)
         top_h.setSpacing(8)
+        top_h.setAlignment(Qt.AlignVCenter)
         
         # Subject Combo (Searchable with Turkish-aware real-time search)
         cb_subject = SearchableComboBox()
@@ -1200,7 +1202,7 @@ class LessonAssignmentDialog(QDialog):
                 cb_subject.lineEdit().clear()
                 cb_subject.lineEdit().setPlaceholderText("Ders Ara veya Seç...")
             
-        top_h.addWidget(cb_subject, 2)
+        top_h.addWidget(cb_subject, 2, Qt.AlignVCenter)
         
         # Hours / Tip Combo
         cb_tip = NoScrollComboBox()
@@ -1211,10 +1213,11 @@ class LessonAssignmentDialog(QDialog):
             idx_t = cb_tip.findText(distribution)
             if idx_t >= 0: cb_tip.setCurrentIndex(idx_t)
             else: cb_tip.setCurrentText(distribution)
-        top_h.addWidget(cb_tip, 1)
+        top_h.addWidget(cb_tip, 1, Qt.AlignVCenter)
         
         # Sınıfları Seç Butonu
         btn_classes = QPushButton("Sınıf(lar) Ata...")
+        btn_classes.setCursor(Qt.PointingHandCursor)
         btn_classes.setStyleSheet("""
             QPushButton {
                 background: #ECFDF5;
@@ -1228,10 +1231,11 @@ class LessonAssignmentDialog(QDialog):
             }
             QPushButton:hover { background: #D1FAE5; }
         """)
-        top_h.addWidget(btn_classes, 1)
+        top_h.addWidget(btn_classes, 1, Qt.AlignVCenter)
         
         # Birleşik Sınıf Butonu
         btn_comb = QPushButton("Birleşik Sınıf...")
+        btn_comb.setCursor(Qt.PointingHandCursor)
         btn_comb.setStyleSheet("""
             QPushButton {
                 background: #FFFBEB;
@@ -1245,11 +1249,12 @@ class LessonAssignmentDialog(QDialog):
             }
             QPushButton:hover { background: #FEF3C7; }
         """)
-        top_h.addWidget(btn_comb, 1)
+        top_h.addWidget(btn_comb, 1, Qt.AlignVCenter)
         
         # Sil Butonu (Circular Capsule)
         btn_del = QPushButton("✕")
         btn_del.setFixedSize(34, 34)
+        btn_del.setCursor(Qt.PointingHandCursor)
         btn_del.setStyleSheet("""
             QPushButton {
                 background: #FFF1F2;
@@ -1258,10 +1263,12 @@ class LessonAssignmentDialog(QDialog):
                 border-radius: 17px;
                 font-weight: 700;
                 font-size: 14px;
+                padding: 0;
+                margin: 0;
             }
             QPushButton:hover { background: #FFE4E6; }
         """)
-        top_h.addWidget(btn_del)
+        top_h.addWidget(btn_del, 0, Qt.AlignVCenter)
         
         row_layout.addLayout(top_h)
         
@@ -2094,7 +2101,7 @@ class DersEditDialog(QDialog):
             self.existing_data["ozel_alanlar"] = dlg.get_data()
 
     def _pick_color(self):
-        from dialogs.color_picker_dialog import ModernColorPickerDialog
+        from dialogs.color_picker_dialog import ModernColorPickerDialog, update_subject_color_globally
         s_name = self.txt_ad.text().strip() or "Ders"
         data_store = self._get_data_store()
         c = ModernColorPickerDialog.pick_color(
@@ -2107,6 +2114,7 @@ class DersEditDialog(QDialog):
         if c and c.isValid():
             self.current_color = c.name()
             self.color_lbl.setStyleSheet(f"background-color: {self.current_color}; border: 1px solid #AAA; border-radius: 4px;")
+            update_subject_color_globally(self, data_store, s_name, self.current_color)
 
     def get_data(self):
         raw_ad = self.txt_ad.text().strip()
