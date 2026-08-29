@@ -19,6 +19,84 @@ SUBJECT_COLORS = [
     "#3F51B5", "#009688", "#E67E22", "#D32F2F", "#16A085"
 ]
 
+def get_bell_times(data_store: dict, periods: int = 8, separator: str = "-") -> list:
+    """
+    Returns a list of formatted time strings (e.g. ['08:50-09:30', '09:40-10:20', ...])
+    for periods 0..periods-1 by inspecting bell_schedule and all time configurations in data_store.
+    """
+    if not data_store or not isinstance(data_store, dict):
+        data_store = {}
+    settings = data_store.get("settings", {}) if isinstance(data_store.get("settings"), dict) else {}
+
+    # 1. Check bell_schedule list
+    schedule = (
+        settings.get("bell_schedule")
+        or data_store.get("bell_schedule")
+        or data_store.get("bell_times")
+        or settings.get("bell_times")
+        or settings.get("zil_saatleri")
+        or data_store.get("zil_saatleri")
+    )
+    
+    out = [None] * periods
+    if schedule and isinstance(schedule, list):
+        for p_idx in range(min(periods, len(schedule))):
+            item = schedule[p_idx]
+            if isinstance(item, dict):
+                s = str(item.get("start") or item.get("baslangic") or "").strip()
+                e = str(item.get("end") or item.get("bitis") or "").strip()
+                if s and e:
+                    out[p_idx] = f"{s}{separator}{e}"
+            elif isinstance(item, str) and "-" in item:
+                out[p_idx] = item.replace(" - ", separator).replace(" ", "")
+
+    # 2. Check dict representations (e.g. zil_programi)
+    if any(x is None for x in out):
+        bells = data_store.get("zil_programi") or settings.get("zil_saatleri")
+        if isinstance(bells, dict):
+            for p_idx in range(periods):
+                if out[p_idx] is not None:
+                    continue
+                entry = bells.get(str(p_idx)) or bells.get(p_idx) or bells.get(str(p_idx + 1)) or bells.get(p_idx + 1)
+                if isinstance(entry, dict):
+                    s = str(entry.get("start") or entry.get("baslangic") or "").strip()
+                    e = str(entry.get("end") or entry.get("bitis") or "").strip()
+                    if s and e:
+                        out[p_idx] = f"{s}{separator}{e}"
+
+    # 3. Fill missing slots sequentially
+    curr_h, curr_m = 8, 30
+    first_valid = next((x for x in out if x is not None), None)
+    if first_valid:
+        try:
+            start_part = first_valid.split(separator)[0].strip()
+            if ":" in start_part:
+                curr_h, curr_m = map(int, start_part.split(":")[:2])
+        except Exception:
+            curr_h, curr_m = 8, 30
+
+    result = []
+    for p_idx in range(periods):
+        if out[p_idx]:
+            result.append(out[p_idx])
+            try:
+                end_part = out[p_idx].split(separator)[1].strip()
+                eh, em = map(int, end_part.split(":")[:2])
+                tot_m = eh * 60 + em + 10  # 10 min break
+                curr_h, curr_m = (tot_m // 60) % 24, tot_m % 60
+            except Exception:
+                pass
+        else:
+            s_str = f"{curr_h:02d}:{curr_m:02d}"
+            tot_end = curr_h * 60 + curr_m + 40
+            e_str = f"{(tot_end // 60) % 24:02d}:{tot_end % 60:02d}"
+            result.append(f"{s_str}{separator}{e_str}")
+            tot_next = tot_end + 10
+            curr_h, curr_m = (tot_next // 60) % 24, tot_next % 60
+
+    return result
+
+
 def get_subject_color(subject_name: str, custom_color: str = None) -> str:
     if custom_color and custom_color not in ["#FFFFFF", "#C4C4F0", ""]:
         return custom_color
@@ -714,23 +792,19 @@ class TimetablePrintPreview(QDialog):
         # Top-Left Corner Box
         painter.drawRect(QRectF(grid_x, grid_y, hour_col_w, col_header_h))
         
-        times = [
-            "9:00-9:40", "9:50-10:30", "10:40-11:20", "11:30-12:10",
-            "12:20-13:00", "14:20-15:00", "15:10-15:50", "16:00-16:40",
-            "16:50-17:30", "17:40-18:20", "18:30-19:10", "19:20-20:00"
-        ]
+        times = get_bell_times(self.data_store, periods, separator="-")
         
         # Top Period Column Headers (1..periods with times underneath)
         for p_idx in range(periods):
             cx = grid_x + hour_col_w + p_idx * col_w
             painter.drawRect(QRectF(cx, grid_y, col_w, col_header_h))
             
-            painter.setFont(make_font(20 if is_single_page else 10, True))
-            painter.drawText(QRectF(cx, grid_y + 1, col_w, col_header_h * 0.55), Qt.AlignCenter | Qt.AlignBottom, str(p_idx + 1))
+            painter.setFont(make_font(18 if is_single_page else 10, True))
+            painter.drawText(QRectF(cx, grid_y + 1, col_w, col_header_h * 0.52), Qt.AlignCenter | Qt.AlignBottom, str(p_idx + 1))
             
-            t_str = times[p_idx] if p_idx < len(times) else f"{8+p_idx}:00-{8+p_idx}:40"
-            painter.setFont(make_font(12 if is_single_page else 6, False))
-            painter.drawText(QRectF(cx, grid_y + col_header_h * 0.56, col_w, col_header_h * 0.42), Qt.AlignCenter | Qt.AlignTop, t_str)
+            t_str = times[p_idx]
+            painter.setFont(make_font(11 if is_single_page else 6.5, False))
+            painter.drawText(QRectF(cx, grid_y + col_header_h * 0.54, col_w, col_header_h * 0.44), Qt.AlignCenter | Qt.AlignTop, t_str)
             
         # Left Day Column Headers & Content Cells
         for d_idx, day_name in enumerate(days):
@@ -1794,10 +1868,7 @@ class TimetablePrintPreview(QDialog):
         saved_days = settings.get("days") or settings.get("days_list") or all_days[:cnt]
         days = [short_days[all_days.index(d)] if d in all_days else d[:3] for d in saved_days]
         periods = int(settings.get("periods", 8))
-        times = [
-            "8:00 - 8:45", "9:00 - 9:45", "10:00 - 10:45", "11:00 - 11:45",
-            "12:00 - 12:45", "13:00 - 13:45", "14:00 - 14:45", "15:00 - 15:45"
-        ]
+        times = get_bell_times(self.data_store, periods, separator=" - ")
         
         day_col_w = 80
         grid_w = w - day_col_w
@@ -1840,8 +1911,8 @@ class TimetablePrintPreview(QDialog):
                 painter.setFont(make_font(16, False))
                 painter.drawText(QRectF(px, table_y + 5, period_w, header_h / 2), Qt.AlignCenter | Qt.AlignBottom, str(p + 1))
                 
-                painter.setFont(make_font(8, False))
-                t_str = times[p] if p < len(times) else f"{8+p}:00 - {8+p}:45"
+                painter.setFont(make_font(8.5, False))
+                t_str = times[p]
                 painter.drawText(QRectF(px, table_y + header_h / 2, period_w, header_h / 2), Qt.AlignCenter | Qt.AlignTop, t_str)
                 
             cur_y = table_y + header_h

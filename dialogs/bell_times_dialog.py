@@ -590,13 +590,21 @@ class BellAndBreakTimesDialog(QDialog):
         self._auto_calculate_times()
 
     def _load_data(self):
-        saved = self.data_store.get("settings", {}).get("bell_schedule", [])
+        settings = self.data_store.get("settings", {}) if isinstance(self.data_store.get("settings"), dict) else {}
+        saved = (
+            settings.get("bell_schedule")
+            or self.data_store.get("bell_schedule")
+            or self.data_store.get("bell_times")
+            or settings.get("bell_times")
+            or settings.get("zil_saatleri")
+            or self.data_store.get("zil_saatleri")
+        )
         if saved and len(saved) >= self.periods:
             for i in range(self.periods):
                 item = saved[i]
-                s_t = QTime.fromString(item.get("start", "08:30"), "HH:mm")
-                e_t = QTime.fromString(item.get("end", "09:10"), "HH:mm")
-                b_val = item.get("break_duration", 10)
+                s_t = QTime.fromString(item.get("start", "08:30"), "HH:mm") if isinstance(item, dict) else QTime(8, 30)
+                e_t = QTime.fromString(item.get("end", "09:10"), "HH:mm") if isinstance(item, dict) else QTime(9, 10)
+                b_val = item.get("break_duration", 10) if isinstance(item, dict) else 10
                 
                 self.rows_data[i]["start"].setTime(s_t)
                 self.rows_data[i]["end"].setTime(e_t)
@@ -631,6 +639,12 @@ class BellAndBreakTimesDialog(QDialog):
             
         settings = self.data_store.setdefault("settings", {})
         settings["bell_schedule"] = schedule
+        settings["bell_times"] = schedule
+        settings["zil_saatleri"] = schedule
+        self.data_store["bell_schedule"] = schedule
+        self.data_store["bell_times"] = schedule
+        self.data_store["zil_saatleri"] = schedule
+        self.data_store["zil_programi"] = {str(item["period"] - 1): item for item in schedule}
         
         # Direct and Reliable Real-Time Persistence (SQLite + JSON Version + VDS Cloud + UI Grid)
         win = self.window()

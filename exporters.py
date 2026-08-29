@@ -52,22 +52,36 @@ def grid_dimensions(data_store: dict):
 
 def period_labels(data_store: dict, periods: int):
     """Column headers, using the bell schedule when the school has defined one."""
-    bells = data_store.get("zil_programi") or data_store.get("bell_times") or {}
-    labels = []
-    for p in range(periods):
-        entry = None
-        if isinstance(bells, dict):
-            entry = bells.get(str(p)) or bells.get(p)
-        elif isinstance(bells, list) and p < len(bells):
-            entry = bells[p]
-        if isinstance(entry, dict):
-            start = entry.get("start") or entry.get("baslangic") or ""
-            end = entry.get("end") or entry.get("bitis") or ""
-            if start and end:
-                labels.append(f"{p + 1}. Ders\n{start}-{end}")
-                continue
-        labels.append(f"{p + 1}. Ders")
-    return labels
+    if not isinstance(data_store, dict):
+        data_store = {}
+    try:
+        from dialogs.print_preview import get_bell_times
+        times = get_bell_times(data_store, periods, separator="-")
+        return [f"{p + 1}. Ders\n{times[p]}" for p in range(periods)]
+    except Exception:
+        settings = data_store.get("settings", {}) if isinstance(data_store.get("settings"), dict) else {}
+        bells = (
+            settings.get("bell_schedule")
+            or data_store.get("bell_schedule")
+            or data_store.get("zil_programi")
+            or data_store.get("bell_times")
+            or {}
+        )
+        labels = []
+        for p in range(periods):
+            entry = None
+            if isinstance(bells, dict):
+                entry = bells.get(str(p)) or bells.get(p) or bells.get(str(p + 1))
+            elif isinstance(bells, list) and p < len(bells):
+                entry = bells[p]
+            if isinstance(entry, dict):
+                start = entry.get("start") or entry.get("baslangic") or ""
+                end = entry.get("end") or entry.get("bitis") or ""
+                if start and end:
+                    labels.append(f"{p + 1}. Ders\n{start}-{end}")
+                    continue
+            labels.append(f"{p + 1}. Ders")
+        return labels
 
 
 def _placement_index(data_store: dict):
