@@ -126,13 +126,145 @@ class _FolderRow(QFrame):
             """)
 
 
+class FolderTransferChoiceDialog(QDialog):
+    """Apple-styled modal dialog asking whether to copy as a new version or move to the selected new folder."""
+
+    def __init__(self, src_folder_name: str, dst_folder_name: str, parent=None):
+        super().__init__(parent)
+        self.choice = "cancel"  # "copy", "move", "cancel"
+
+        self.setWindowTitle("Klasör Değişikliği")
+        self.setFixedSize(520, 270)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool | Qt.NoDropShadowWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(12, 12, 12, 12)
+
+        container = QWidget(self)
+        container.setObjectName("transferCard")
+        container.setStyleSheet("""
+            #transferCard {
+                background: #FFFFFF;
+                border: 1px solid #CBD5E1;
+                border-radius: 16px;
+            }
+        """)
+
+        c_lay = QVBoxLayout(container)
+        c_lay.setContentsMargins(24, 22, 24, 20)
+        c_lay.setSpacing(12)
+
+        t_lbl = QLabel("Klasör Değişikliği / Çizelge Aktarımı")
+        t_lbl.setFont(QFont(FONT_FAMILY, 13, QFont.Bold))
+        t_lbl.setStyleSheet("color: #0F172A; background: transparent; border: none;")
+        c_lay.addWidget(t_lbl)
+
+        sub_lbl = QLabel(
+            f"Bu çizelge şu an <b>{src_folder_name}</b> klasöründe bulunuyor.<br>"
+            f"Seçilen <b>{dst_folder_name}</b> klasörüne nasıl aktarılsın?"
+        )
+        sub_lbl.setFont(QFont(FONT_FAMILY, 10))
+        sub_lbl.setStyleSheet("color: #475569; background: transparent; border: none;")
+        sub_lbl.setWordWrap(True)
+        c_lay.addWidget(sub_lbl)
+
+        div = QFrame()
+        div.setFixedHeight(1)
+        div.setStyleSheet("background: #E2E8F0; border: none;")
+        c_lay.addWidget(div)
+
+        c_lay.addStretch(1)
+
+        # Action Buttons Layout (Pill style)
+        btn_box = QHBoxLayout()
+        btn_box.setSpacing(10)
+
+        btn_cancel = QPushButton("Vazgeç")
+        btn_cancel.setFixedHeight(36)
+        btn_cancel.setCursor(Qt.PointingHandCursor)
+        btn_cancel.setStyleSheet(f"""
+            QPushButton {{
+                background: #FFFFFF;
+                color: #64748B;
+                border: 1px solid #CBD5E1;
+                border-radius: 18px;
+                padding: 0 18px;
+                font-weight: 600;
+                font-size: 12px;
+                font-family: {FONT_FAMILY};
+            }}
+            QPushButton:hover {{ background: #F8FAFC; color: #0F172A; }}
+        """)
+        btn_cancel.clicked.connect(self._on_cancel)
+        btn_box.addWidget(btn_cancel)
+
+        btn_box.addStretch(1)
+
+        btn_move = QPushButton("📁  Bu Klasöre Taşı")
+        btn_move.setFixedHeight(36)
+        btn_move.setCursor(Qt.PointingHandCursor)
+        btn_move.setToolTip("Çizelgeyi doğrudan bu klasöre taşır (eski klasörde kopya bırakmaz).")
+        btn_move.setStyleSheet(f"""
+            QPushButton {{
+                background: #F1F5F9;
+                color: #0F172A;
+                border: 1px solid #CBD5E1;
+                border-radius: 18px;
+                padding: 0 18px;
+                font-weight: 600;
+                font-size: 12px;
+                font-family: {FONT_FAMILY};
+            }}
+            QPushButton:hover {{ background: #E2E8F0; }}
+        """)
+        btn_move.clicked.connect(self._on_move)
+        btn_box.addWidget(btn_move)
+
+        btn_copy = QPushButton("📋  Kopya Olarak Kaydet (+1 Versiyon)")
+        btn_copy.setFixedHeight(36)
+        btn_copy.setCursor(Qt.PointingHandCursor)
+        btn_copy.setToolTip("Mevcut çizelgeyi önceki klasörde korur, bu klasöre yeni bir versiyon olarak kopyalar.")
+        btn_copy.setStyleSheet(f"""
+            QPushButton {{
+                background: #0071E3;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 18px;
+                padding: 0 20px;
+                font-weight: 700;
+                font-size: 12px;
+                font-family: {FONT_FAMILY};
+            }}
+            QPushButton:hover {{ background: #0062C4; }}
+        """)
+        btn_copy.clicked.connect(self._on_copy)
+        btn_box.addWidget(btn_copy)
+
+        c_lay.addLayout(btn_box)
+        outer.addWidget(container)
+
+    def _on_cancel(self):
+        self.choice = "cancel"
+        self.reject()
+
+    def _on_move(self):
+        self.choice = "move"
+        self.accept()
+
+    def _on_copy(self):
+        self.choice = "copy"
+        self.accept()
+
+
 class SaveLocationDialog(QDialog):
     """Modal: pick an existing folder, create a new one, or leave it unfoldered ("Genel")."""
 
-    def __init__(self, slug: str, parent=None):
+    def __init__(self, slug: str, current_folder_id=None, parent=None):
         super().__init__(parent)
         self.slug = slug
-        self.selected_folder_id = None
+        self.current_folder_id = current_folder_id
+        self.selected_folder_id = current_folder_id
         self._rows = []
 
         self.setWindowTitle("Nereye Kaydedilsin?")
@@ -346,10 +478,30 @@ class SaveLocationDialog(QDialog):
         self._pick_folder(folder.get("id"))
 
     @classmethod
-    def choose(cls, parent, slug: str):
-        """Shows the dialog. Returns (folder_id, cancelled: bool)."""
-        dlg = cls(slug, parent=parent)
+    def choose(cls, parent, slug: str, current_folder_id=None, has_existing_version=False):
+        """Shows the dialog. Returns (target_folder_id, action, cancelled: bool).
+        action can be:
+          - 'save': standard save in current/same folder
+          - 'copy': copy to target folder as new version (+1 version number), keep previous version
+          - 'move': move existing version to target folder
+        """
+        dlg = cls(slug, current_folder_id=current_folder_id, parent=parent)
         result = dlg.exec()
         if result != QDialog.Accepted:
-            return None, True
-        return dlg.selected_folder_id, False
+            return None, None, True
+
+        target_folder_id = dlg.selected_folder_id
+
+        # If user selected a DIFFERENT folder and there is an existing version in the old folder:
+        if has_existing_version and target_folder_id != current_folder_id:
+            src_name = version_store.get_folder_name(slug, current_folder_id)
+            dst_name = version_store.get_folder_name(slug, target_folder_id)
+
+            transfer_dlg = FolderTransferChoiceDialog(src_name, dst_name, parent=parent)
+            transfer_res = transfer_dlg.exec()
+            if transfer_res != QDialog.Accepted or transfer_dlg.choice == "cancel":
+                return None, None, True
+
+            return target_folder_id, transfer_dlg.choice, False
+
+        return target_folder_id, "save", False

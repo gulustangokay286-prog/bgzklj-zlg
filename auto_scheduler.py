@@ -896,12 +896,13 @@ def _solve_one_day(day_layouts, base_busy_day, rng, budget=200000):
 
 def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, avoid_by_class,
                 teacher_timeoff, teacher_avoid, cross_inst_map, global_teacher_busy,
-                D, P, time_limit=5.0, independent_classes=False, planning_relations=None, progress_callback=None):
+                D, P, time_limit=5.0, independent_classes=False, planning_relations=None,
+                locked_placements=None, progress_callback=None):
     """
     Google OR-Tools CP-SAT Timetable Solver.
     Guarantees 100% mathematical optimum and conflict-free placement in < 1 second.
     Enforces class constraints, teacher timeoff, cross-institution reserved hours,
-    and all user-defined Planning Relations (planlama_iliskileri).
+    all user-defined Planning Relations, and preserves existing locked/pinned placements.
     Returns (placements_list, total_placed_hours, elapsed_time_seconds, status_str)
     """
     import time
@@ -913,9 +914,35 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
     
     try:
         from ortools.sat.python import cp_model
-    except ImportError:
-        print("[AutoScheduler] ortools bulunamadı, klasik motor deneniyor.")
+    except Exception as e:
+        print(f"[AutoScheduler] ortools yuklenirken hata olustu: {e}")
         return None, 0, 0.0, "ORTOOLS_MISSING"
+
+    class _CpsatProgressBridge(cp_model.CpSolverSolutionCallback):
+        def __init__(self, r_blocks, x_vars, d_cnt, p_cnt, tot_target, cb):
+            super().__init__()
+            self._r_blocks = r_blocks
+            self._x_vars = x_vars
+            self._d_cnt = d_cnt
+            self._p_cnt = p_cnt
+            self._tot_target = tot_target
+            self._cb = cb
+
+        def on_solution_callback(self):
+            if not callable(self._cb):
+                return
+            try:
+                cur_placed = 0
+                for b in self._r_blocks:
+                    bid, dur = b["id"], b["duration"]
+                    for d in range(self._d_cnt):
+                        for p in range(self._p_cnt - dur + 1):
+                            if (bid, d, p) in self._x_vars and self.Value(self._x_vars[bid, d, p]) == 1:
+                                cur_placed += dur * len(b["classes"])
+                                break
+                self._cb(cur_placed, self._tot_target)
+            except Exception:
+                pass
 
     raw_blocks = []
     
@@ -999,6 +1026,55 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
     cross_inst_map = cross_inst_map or {}
     global_teacher_busy = global_teacher_busy or {}
 
+    # Bind locked/pinned placements with contiguous block merging
+    locked_block_bindings = {}  # block_id -> (day, period)
+    if locked_placements:
+        # First merge contiguous slices of same lesson
+        lk_groups = defaultdict(list)
+        for p in locked_placements:
+            lp_cn = (p.get("class_name") or p.get("class") or "").strip()
+            lp_s = (p.get("subject_name") or p.get("subject") or "").strip().lower()
+            lp_t = norm_teacher(p.get("teacher_name") or p.get("teacher") or "")
+            lp_d = int(p.get("day", p.get("col", 0)))
+            lp_p = int(p.get("period", p.get("row", 0)))
+            lp_dur = int(p.get("duration", 1))
+            lk_groups[(lp_cn, lp_s, lp_t, lp_d)].append((lp_p, lp_dur, p))
+
+        merged_locked = []
+        for (lp_cn, lp_s, lp_t, lp_d), items in lk_groups.items():
+            items.sort(key=lambda x: x[0])
+            i = 0
+            while i < len(items):
+                cur_p, cur_dur, orig = items[i]
+                span = cur_dur
+                j = i + 1
+                while j < len(items) and items[j][0] == cur_p + span:
+                    span += items[j][1]
+                    j += 1
+                new_item = dict(orig)
+                new_item["day"] = lp_d
+                new_item["period"] = cur_p
+                new_item["duration"] = span
+                merged_locked.append(new_item)
+                i = j
+
+        for lp in merged_locked:
+            lp_cn = (lp.get("class_name") or lp.get("class") or "").strip()
+            lp_s = (lp.get("subject_name") or lp.get("subject") or "").strip().lower()
+            lp_t = norm_teacher(lp.get("teacher_name") or lp.get("teacher") or "")
+            lp_d = int(lp.get("day", lp.get("col", 0)))
+            lp_p = int(lp.get("period", lp.get("row", 0)))
+            lp_dur = int(lp.get("duration", 1))
+
+            for b in raw_blocks:
+                bid = b["id"]
+                if bid in locked_block_bindings:
+                    continue
+                if b["duration"] == lp_dur and any(matches_class(cn, lp_cn) for cn in b["classes"]):
+                    if b["subject"].strip().lower() == lp_s and (not lp_t or b["tk"] == lp_t):
+                        locked_block_bindings[bid] = (lp_d, lp_p)
+                        break
+
     def _norm_s(s: str) -> str:
         return normalize_clean(s or "").strip().lower()
 
@@ -1040,6 +1116,10 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
         bid, dur, tk = b["id"], b["duration"], b["tk"]
         for d in range(D):
             for p in range(P - dur + 1):
+                if bid in locked_block_bindings:
+                    lk_d, lk_p = locked_block_bindings[bid]
+                    if d != lk_d or p != lk_p:
+                        continue
                 # Sınıf kapalı saat kontrolü
                 if any((d, p + off) in blocked_by_class.get(cn, set()) for cn in b["classes"] for off in range(dur)):
                     continue
@@ -1238,7 +1318,8 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
         solver1 = cp_model.CpSolver()
         solver1.parameters.num_workers = 8
         solver1.parameters.max_time_in_seconds = min(3.0, max(1.0, float(time_limit)))
-        status1 = solver1.Solve(model1)
+        cb1 = _CpsatProgressBridge(raw_blocks, x1, D, P, total_assigned_hours, progress_callback) if progress_callback else None
+        status1 = solver1.Solve(model1, cb1) if cb1 else solver1.Solve(model1)
         
         if status1 in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             placements = []
@@ -1248,6 +1329,7 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                     for p in range(P - dur + 1):
                         if (bid, d, p) in x1 and solver1.Value(x1[bid, d, p]) == 1:
                             for cn in b["classes"]:
+                                is_lk = (bid in locked_block_bindings)
                                 placements.append({
                                     "class_name": cn, "class": cn,
                                     "subject_name": b["subject"], "subject": b["subject"],
@@ -1257,6 +1339,8 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                                     "duration": dur,
                                     "is_combined": b["is_combined"],
                                     "block_id": b["block_id"],
+                                    "locked": is_lk,
+                                    "is_manual": is_lk,
                                     "is_filler": False,
                                     "needs_review": bool(independent_classes)
                                 })
@@ -1273,6 +1357,10 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
         bid, dur, tk = b["id"], b["duration"], b["tk"]
         for d in range(D):
             for p in range(P - dur + 1):
+                if bid in locked_block_bindings:
+                    lk_d, lk_p = locked_block_bindings[bid]
+                    if d != lk_d or p != lk_p:
+                        continue
                 if any((d, p + off) in blocked_by_class.get(cn, set()) for cn in b["classes"] for off in range(dur)):
                     continue
                 if tk and not independent_classes:
@@ -1387,7 +1475,8 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
         solver_s = cp_model.CpSolver()
         solver_s.parameters.num_workers = 8
         solver_s.parameters.max_time_in_seconds = min(3.0, max(1.0, float(time_limit)))
-        sts = solver_s.Solve(model_soft)
+        cbs = _CpsatProgressBridge(raw_blocks, xs, D, P, total_assigned_hours, progress_callback) if progress_callback else None
+        sts = solver_s.Solve(model_soft, cbs) if cbs else solver_s.Solve(model_soft)
         if sts in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             placements = []
             for b in raw_blocks:
@@ -1396,6 +1485,7 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                     for p in range(P - dur + 1):
                         if (bid, d, p) in xs and solver_s.Value(xs[bid, d, p]) == 1:
                             for cn in b["classes"]:
+                                is_lk = (bid in locked_block_bindings)
                                 placements.append({
                                     "class_name": cn, "class": cn,
                                     "subject_name": b["subject"], "subject": b["subject"],
@@ -1405,6 +1495,8 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                                     "duration": dur,
                                     "is_combined": b["is_combined"],
                                     "block_id": b["block_id"],
+                                    "locked": is_lk,
+                                    "is_manual": is_lk,
                                     "is_filler": False,
                                     "needs_review": bool(independent_classes)
                                 })
@@ -1423,6 +1515,10 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
         is_placed2[bid] = model2.NewBoolVar(f"p_{bid}")
         for d in range(D):
             for p in range(P - dur + 1):
+                if bid in locked_block_bindings:
+                    lk_d, lk_p = locked_block_bindings[bid]
+                    if d != lk_d or p != lk_p:
+                        continue
                 if any((d, p + off) in blocked_by_class.get(cn, set()) for cn in b["classes"] for off in range(dur)):
                     continue
                 if tk and not independent_classes:
@@ -1538,7 +1634,8 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
     solver2 = cp_model.CpSolver()
     solver2.parameters.num_workers = 8
     solver2.parameters.max_time_in_seconds = float(time_limit)
-    status2 = solver2.Solve(model2)
+    cb2 = _CpsatProgressBridge(raw_blocks, x2, D, P, total_assigned_hours, progress_callback) if progress_callback else None
+    status2 = solver2.Solve(model2, cb2) if cb2 else solver2.Solve(model2)
     
     placements = []
     for b in raw_blocks:
@@ -1548,6 +1645,7 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                 for p in range(P - dur + 1):
                     if (bid, d, p) in x2 and solver2.Value(x2[bid, d, p]) == 1:
                         for cn in b["classes"]:
+                            is_lk = (bid in locked_block_bindings)
                             placements.append({
                                 "class_name": cn, "class": cn,
                                 "subject_name": b["subject"], "subject": b["subject"],
@@ -1557,6 +1655,8 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                                 "duration": dur,
                                 "is_combined": b["is_combined"],
                                 "block_id": b["block_id"],
+                                "locked": is_lk,
+                                "is_manual": is_lk,
                                 "is_filler": False,
                                 "needs_review": bool(independent_classes)
                             })
@@ -1863,8 +1963,20 @@ class AutoSchedulerWorker(QThread):
         best_violations = []
         best_leftovers = {}
 
+        def _on_cpsat_progress(placed_hrs, tot_hrs):
+            self.iteration_updated.emit(1, 0, placed_hrs)
+            self.progress_updated.emit(placed_hrs, max(total_target, tot_hrs))
+
         self.iteration_updated.emit(1, 0, 0)
         self.progress_updated.emit(0, max(total_target, total_assigned_hours))
+
+        # Collect locked/pinned placements that must be preserved
+        locked_placements = []
+        for p in self.data_store.get("grid_placements", []):
+            if p.get("locked") or p.get("is_manual"):
+                c_name = (p.get("class_name") or p.get("class") or "").strip()
+                if any(matches_class(c_name, tgt) for tgt in classes_to_schedule):
+                    locked_placements.append(p)
 
         # Extract active planning relations
         planning_relations = [r for r in self.data_store.get("planlama_iliskileri", []) if r.get("aktif", True)]
@@ -1882,7 +1994,9 @@ class AutoSchedulerWorker(QThread):
             D=D, P=P,
             time_limit=5.0,
             independent_classes=self.independent_classes,
-            planning_relations=planning_relations
+            planning_relations=planning_relations,
+            locked_placements=locked_placements,
+            progress_callback=_on_cpsat_progress
         )
 
         # Fallback to perfect_fill if CP-SAT was missing or failed

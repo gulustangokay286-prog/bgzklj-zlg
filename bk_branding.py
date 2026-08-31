@@ -7,6 +7,7 @@ place this is defined.
 import os
 
 PRODUCT_NAME = "Chenkron"
+PRODUCT_FULL_NAME = "Chenkron Ders Dağıtım ve Yönetim Sistemi"
 PRODUCT_SLUG = "chenkron"  # release-system product id — lowercase, no spaces
 COMPANY_NAME = "Chenkron"
 COPYRIGHT = "© Chenkron"

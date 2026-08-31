@@ -989,6 +989,7 @@ class AutoScheduleDialog(QDialog):
         pct = int((placed / max(1, total)) * 100) if total > 0 else 100
         self.progress.setValue(pct)
         self.lbl_pct.setText(f"{pct}%")
+        self.lbl_val_placed.setText(f"{placed} Saat")
         ratio = (placed / float(max(1, total))) if total > 0 else 1.0
         self.skeleton.set_placed_ratio(ratio)
 
@@ -1010,6 +1011,9 @@ class AutoScheduleDialog(QDialog):
         schedule = result.get("schedule", [])
         total_hrs = result.get("placed_hours") or sum(item.get("duration", 1) for item in schedule)
         target_hrs = result.get("total_hours", total_hrs)
+        self.lbl_val_placed.setText(f"{total_hrs} Saat")
+        self.lbl_info.setText(f"Otomatik planlama tamamlandı ({total_hrs} ders saati yerleştirildi).")
+        self.lbl_info.setStyleSheet("color: #34C759; font-weight: 600;")
         cross_conflicts = result.get("cross_conflicts", [])
         
         if cross_conflicts:

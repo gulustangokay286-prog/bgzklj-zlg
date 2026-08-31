@@ -221,7 +221,7 @@ class UpdateAvailableSheet(QWidget):
         title.setObjectName("sheetTitle")
         layout.addWidget(title)
 
-        msg = QLabel(f"BK Planner {new_version} indirildi ve doğrulandı. Şimdi güncellensin mi?")
+        msg = QLabel(f"{bk_branding.PRODUCT_NAME} {new_version} indirildi ve doğrulandı. Şimdi güncellensin mi?")
         msg.setObjectName("sheetMessage")
         msg.setWordWrap(True)
         msg.setMinimumWidth(380)

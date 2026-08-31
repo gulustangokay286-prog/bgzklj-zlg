@@ -1053,6 +1053,30 @@ def delete_folder(slug: str, folder_id: str) -> int:
         pass
     return deleted
 
+def get_version_folder_id(slug: str, filename: str) -> str | None:
+    """Returns the folder_id for a given version filename, or None."""
+    if not slug or not filename:
+        return None
+    try:
+        ver_dir = _versions_dir(slug)
+        filepath = os.path.join(ver_dir, filename)
+        if os.path.exists(filepath):
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("_version_meta", {}).get("folder_id")
+    except Exception:
+        pass
+    return None
+
+def get_folder_name(slug: str, folder_id: str | None) -> str:
+    """Returns the human-readable name of a folder (or 'Genel (Klasörsüz)')."""
+    if folder_id is None:
+        return "Genel (Klasörsüz)"
+    for f in list_folders(slug):
+        if f.get("id") == folder_id:
+            return f.get("name", "Klasör")
+    return "Klasör"
+
 def assign_version_folder(slug: str, filename: str, folder_id: str):
     """Moves an already-saved version into a folder (folder_id=None takes it out)."""
     if not slug or not filename:

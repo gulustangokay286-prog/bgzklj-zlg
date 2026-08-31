@@ -1121,29 +1121,36 @@ class MainWindow(QMainWindow):
                 for t in self.data_store.get("ogretmenler", []):
                     if t.get("ad"): t["ad"] = format_tr_name(t["ad"])
 
-                # Load global kisitlamalar and override local
-                from version_store import load_global_kisitlamalar
-                global_k = load_global_kisitlamalar()
-                if global_k:
-                    if "kisitlamalar" not in self.data_store:
-                        self.data_store["kisitlamalar"] = {}
-                    # Update local with global
-                    for k, v in global_k.items():
-                        self.data_store["kisitlamalar"][k] = v
-
-                if "kisitlamalar" not in self.data_store:
-                    self.data_store["kisitlamalar"] = {}
-
-                # Which institution this schedule actually belongs to. This used to
-                # fall back to a hardcoded "bogazici_egitim_kurumlari" whenever
-                # settings.institution_slug was missing — and it is missing on every
-                # existing schedule, since settings is empty — so opening ANY other
-                # institution pulled Boğaziçi's constraints in on top of its own.
+                # Which institution this schedule actually belongs to
                 import constraint_sync
                 inst_slug = (self.data_store.get("settings", {}) or {}).get("institution_slug") \
                     or getattr(self, "institution_slug", None)
                 if inst_slug:
                     self.data_store.setdefault("settings", {})["institution_slug"] = inst_slug
+
+                # Load global kisitlamalar cleanly (only teacher/class matrices for this institution)
+                from version_store import load_global_kisitlamalar
+                global_k = load_global_kisitlamalar()
+                if global_k:
+                    if "kisitlamalar" not in self.data_store or not isinstance(self.data_store["kisitlamalar"], dict):
+                        self.data_store["kisitlamalar"] = {}
+                    inst_k = global_k.get(inst_slug) if inst_slug and isinstance(global_k.get(inst_slug), dict) else global_k
+                    for k, v in inst_k.items():
+                        if isinstance(v, list):
+                            self.data_store["kisitlamalar"][k] = v
+                        elif isinstance(v, dict):
+                            for tk, tv in v.items():
+                                if isinstance(tv, list):
+                                    self.data_store["kisitlamalar"][tk] = tv
+
+                # Clean any accidental institution slugs in kisitlamalar
+                if isinstance(self.data_store.get("kisitlamalar"), dict):
+                    for bad_key in list(self.data_store["kisitlamalar"].keys()):
+                        if bad_key in ("bogazici_egitim_kurumlari", "birey_egitim_kurumlari", "bogazici_anadolu_lisesi") or isinstance(self.data_store["kisitlamalar"][bad_key], dict):
+                            self.data_store["kisitlamalar"].pop(bad_key, None)
+
+                if "kisitlamalar" not in self.data_store:
+                    self.data_store["kisitlamalar"] = {}
 
                 # Bring the two stored representations of every availability matrix
                 # back into agreement (repairs schedules written by older versions).
@@ -3081,6 +3088,8 @@ class MainWindow(QMainWindow):
 
         import version_store
         ver_fn = getattr(self, "version_filename", None)
+        current_folder_id = version_store.get_version_folder_id(slug, ver_fn) if ver_fn else None
+        has_existing_version = bool(ver_fn)
 
         if not force and not getattr(self, "_is_dirty", False):
             try:
@@ -3092,7 +3101,9 @@ class MainWindow(QMainWindow):
             return True
 
         from dialogs.save_location_dialog import SaveLocationDialog
-        folder_id, cancelled = SaveLocationDialog.choose(self, slug)
+        folder_id, action, cancelled = SaveLocationDialog.choose(
+            self, slug, current_folder_id=current_folder_id, has_existing_version=has_existing_version
+        )
         if cancelled:
             return False
 
@@ -3123,13 +3134,54 @@ class MainWindow(QMainWindow):
                     return False
 
         try:
-            new_vf = version_store.save_version(slug, self.data_store, source="manual", note=note, folder_id=folder_id)
-            self.version_filename = new_vf
-            self.current_roz_path = os.path.join(version_store._base_dir(), slug, "versions", new_vf)
-            self.db_path = self.current_roz_path
-            version_store.set_active_version(slug, new_vf)
-            version_store.touch_institution_timestamp(slug)
-            self._is_dirty = False
+            if action == "copy":
+                # KOPYA OLARAK KAYDET:
+                # 1) Versiyon numarasını +1 artırır (allow_duplicate=True)
+                # 2) Önceki klasördeki çizelgeye asla dokunmaz, olduğu gibi korur
+                # 3) Yeni klasöre yeni versiyonu kaydeder
+                new_vf = version_store.save_version(
+                    slug, self.data_store, source="manual", note=note, folder_id=folder_id, allow_duplicate=True
+                )
+                self.version_filename = new_vf
+                self.current_roz_path = os.path.join(version_store._base_dir(), slug, "versions", new_vf)
+                self.db_path = self.current_roz_path
+                version_store.set_active_version(slug, new_vf)
+                version_store.touch_institution_timestamp(slug)
+                self._is_dirty = False
+                dst_name = version_store.get_folder_name(slug, folder_id)
+                self.statusBar().showMessage(f"📋 Çizelge '{dst_name}' klasörüne yeni bir versiyon olarak kopyalandı.", 4000)
+
+            elif action == "move":
+                # BU KLASÖRE TAŞI:
+                # 1) Varsa son değişiklikleri geçerli versiyona yazar
+                # 2) Çizelgeyi seçilen yeni klasöre taşır
+                if ver_fn:
+                    version_store.update_version_in_place(slug, ver_fn, self.data_store)
+                    version_store.assign_version_folder(slug, ver_fn, folder_id)
+                    version_store.set_active_version(slug, ver_fn)
+                else:
+                    new_vf = version_store.save_version(
+                        slug, self.data_store, source="manual", note=note, folder_id=folder_id
+                    )
+                    self.version_filename = new_vf
+                    self.current_roz_path = os.path.join(version_store._base_dir(), slug, "versions", new_vf)
+                    self.db_path = self.current_roz_path
+                    version_store.set_active_version(slug, new_vf)
+                version_store.touch_institution_timestamp(slug)
+                self._is_dirty = False
+                dst_name = version_store.get_folder_name(slug, folder_id)
+                self.statusBar().showMessage(f"📁 Çizelge '{dst_name}' klasörüne taşındı.", 4000)
+
+            else:  # "save" (aynı klasöre standart kayıt)
+                new_vf = version_store.save_version(
+                    slug, self.data_store, source="manual", note=note, folder_id=folder_id, allow_duplicate=force
+                )
+                self.version_filename = new_vf
+                self.current_roz_path = os.path.join(version_store._base_dir(), slug, "versions", new_vf)
+                self.db_path = self.current_roz_path
+                version_store.set_active_version(slug, new_vf)
+                version_store.touch_institution_timestamp(slug)
+                self._is_dirty = False
         except Exception as e:
             print(f"[SAVE] New version save error: {e}")
         return True

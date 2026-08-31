@@ -20,13 +20,13 @@ VSVersionInfo(
         StringTable(
           u'040904B0',
           [
-            StringStruct(u'CompanyName', u'Boğaziçi Koleji'),
-            StringStruct(u'FileDescription', u'BK Planner'),
+            StringStruct(u'CompanyName', u'Chenkron'),
+            StringStruct(u'FileDescription', u'Chenkron Ders Da\u011f\u0131t\u0131m ve Y\u00f6netim Sistemi'),
             StringStruct(u'FileVersion', u'4.0.0.0'),
-            StringStruct(u'InternalName', u'BKPlanner'),
-            StringStruct(u'LegalCopyright', u'© Boğaziçi Koleji'),
-            StringStruct(u'OriginalFilename', u'BKPlanner.exe'),
-            StringStruct(u'ProductName', u'BK Planner'),
+            StringStruct(u'InternalName', u'Chenkron'),
+            StringStruct(u'LegalCopyright', u'\u00a9 Chenkron'),
+            StringStruct(u'OriginalFilename', u'Chenkron.exe'),
+            StringStruct(u'ProductName', u'Chenkron'),
             StringStruct(u'ProductVersion', u'4.0.0.0'),
           ],
         )
