@@ -183,7 +183,7 @@ class _WordmarkCanvas(QWidget):
             p.drawText(
                 0, int(cy + logo_size/2 + 24 + rise), self.width(), 22,
                 Qt.AlignHCenter | Qt.AlignTop,
-                "Chenkron Ders Dağıtım Motoru",
+                "Chenkron Ders Dağıtım ve Yönetim Sistemi",
             )
             
         status_local = sub_local - 400
