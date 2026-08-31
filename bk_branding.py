@@ -6,10 +6,10 @@ place this is defined.
 """
 import os
 
-PRODUCT_NAME = "BK Planner"
-PRODUCT_SLUG = "bkplanner"  # release-system product id — lowercase, no spaces
-COMPANY_NAME = "Boğaziçi Koleji"
-COPYRIGHT = "© Boğaziçi Koleji"
+PRODUCT_NAME = "Chenkron"
+PRODUCT_SLUG = "chenkron"  # release-system product id — lowercase, no spaces
+COMPANY_NAME = "Chenkron"
+COPYRIGHT = "© Chenkron"
 
 # Sampled directly from the supplied brand mark (App Logo.png /
 # Inner Logo.PNG), not invented — this IS the institution's real color.
@@ -43,4 +43,14 @@ def asset_path(filename: str) -> str:
 ICON_ICO = asset_path("bk_icon.ico")
 ICON_PNG = asset_path("bk_icon.png")
 INNER_LOGO_PNG = asset_path("bk_inner_logo.png")
+
+# The shield alone, on transparency — used as the sign-in mark and, very
+# faint, as a watermark. Prefers the clean filename so a PyInstaller spec
+# does not have to carry "ChatGPT Image ....png".
+SHIELD_PNG = (asset_path("bk_shield_clean.png")
+              if os.path.exists(asset_path("bk_shield_clean.png"))
+              else INNER_LOGO_PNG)
+LOCKUP_PNG = (asset_path("bk_lockup.png")
+              if os.path.exists(asset_path("bk_lockup.png"))
+              else SHIELD_PNG)
 DASHBOARD_BRAND_PNG = asset_path("bk_dashboard_brand.png")

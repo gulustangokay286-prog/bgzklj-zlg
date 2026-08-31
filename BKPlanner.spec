@@ -61,6 +61,9 @@ app_datas = [
     ('bk_icon.ico', '.'),
     ('bk_icon.png', '.'),
     ('bk_inner_logo.png', '.'),
+    ('bk_shield_clean.png', '.'),
+    ('ChatGPT Image 9 Tem 2026 19_56_13-3.png', '.'),
+    ('bk_lockup.png', '.'),
     ('bk_dashboard_brand.png', '.'),
     # Ed25519 public key the in-process update engine verifies manifests
     # against — must land at client/keys/ so signature.py's module-relative

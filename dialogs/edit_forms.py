@@ -4092,6 +4092,9 @@ class OgretmenEditDialog(BaseEditForm):
             if hasattr(p, "_refresh_unplaced_lessons"): p._refresh_unplaced_lessons()
             if hasattr(p, "_restore_grid_placements"): p._restore_grid_placements()
             if hasattr(p, "_refresh_grid"): p._refresh_grid()
+            if hasattr(p, "_refresh_unplaced_lessons"): p._refresh_unplaced_lessons()
+            if hasattr(p, "_restore_grid_placements"): p._restore_grid_placements()
+            if hasattr(p, "_refresh_grid"): p._refresh_grid()
             
             # Update local UI list
             self._update_assignments_list(data_store)

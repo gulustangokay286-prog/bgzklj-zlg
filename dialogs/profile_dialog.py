@@ -8,10 +8,11 @@ import urllib.request
 import requests
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QFileDialog, QWidget, QFrame, QApplication
+    QFileDialog, QWidget, QFrame, QApplication, QGraphicsDropShadowEffect,
+    QGraphicsOpacityEffect
 )
-from PySide6.QtCore import Qt, Signal, QThread
-from PySide6.QtGui import QFont, QPixmap, QPainter, QPainterPath, QColor, QBrush, QPen
+from PySide6.QtCore import Qt, Signal, QThread, QPropertyAnimation, QEasingCurve, QSize
+from PySide6.QtGui import QFont, QPixmap, QPainter, QPainterPath, QColor, QBrush, QPen, QIcon
 
 FONT_FAMILY = ".AppleSystemUIFont, SF Pro Text, Helvetica Neue, Segoe UI, sans-serif"
 
@@ -175,6 +176,24 @@ def make_circular_avatar_pixmap(image_path_or_url: str, initials: str, size: int
     return pix
 
 
+STATIC_TITLES = [
+    "Program Yöneticisi",
+    "Okul Müdürü",
+    "Müdür Başyardımcısı",
+    "Müdür Yardımcısı",
+    "Bölüm / Zümre Başkanı",
+    "Ders Öğretmeni",
+    "Bilişim & Sistem Sorumlusu",
+    "Rehberlik & Psikolojik Danışman",
+    "Eğitim Danışmanı",
+    "Genel Koordinatör",
+    "Diğer",
+]
+
+
+import bk_ui
+
+
 class CloudinaryUploadWorker(QThread):
     finished = Signal(str)
     failed = Signal(str)
@@ -194,186 +213,197 @@ class CloudinaryUploadWorker(QThread):
             self.failed.emit(str(e))
 
 
-class AppleProfileDialog(QDialog):
-    profile_updated = Signal(str, str)  # name, avatar_url
-    
-    def __init__(self, current_email: str = "admin@bgz.local", parent=None):
+# ── Modern Apple Role Picker (Popover Menu Selection) ─────────────────
+
+class AppleRolePickerButton(QPushButton):
+    """Modern Apple-style Role / Title selector button that opens a HeroPopoverMenu."""
+    role_changed = Signal(str)
+
+    def __init__(self, current_role: str = "Program Yöneticisi", parent=None):
         super().__init__(parent)
+        self.setFixedHeight(40)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.NoFocus)
+        self._role = current_role or "Program Yöneticisi"
+
+        self.setStyleSheet(f"""
+            QPushButton {{
+                background: {bk_ui.SURFACE};
+                border: 1.5px solid {bk_ui.HAIRLINE_STRONG};
+                border-radius: {bk_ui.R_CONTROL}px;
+                padding: 0px;
+                text-align: left;
+                color: {bk_ui.INK};
+                font-size: 13px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                border-color: {bk_ui.BRAND};
+                background: #FFFFFF;
+            }}
+            QPushButton:pressed {{
+                background: {bk_ui.SURFACE_SUNK};
+            }}
+            QLabel {{
+                background: transparent;
+                border: none;
+            }}
+        """)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 2, 12, 2)
+        layout.setSpacing(10)
+
+        self.icon_lbl = QLabel()
+        self.icon_lbl.setFixedSize(18, 18)
+        self.icon_lbl.setStyleSheet("background: transparent; border: none;")
+        self.icon_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        layout.addWidget(self.icon_lbl, 0, Qt.AlignVCenter)
+
+        self.label = QLabel(self._role)
+        self.label.setFont(bk_ui.font(9.6, QFont.Medium))
+        self.label.setStyleSheet(f"color: {bk_ui.INK}; background: transparent; border: none;")
+        self.label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        layout.addWidget(self.label, 1)
+
+        self.chevron = QLabel()
+        self.chevron.setFixedSize(14, 14)
+        self.chevron.setStyleSheet("background: transparent; border: none;")
+        self.chevron.setPixmap(bk_ui.chevron_glyph(bk_ui.INK_FAINT, 13, "down"))
+        self.chevron.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        layout.addWidget(self.chevron, 0, Qt.AlignVCenter)
+
+        self.clicked.connect(self._open_menu)
+        self._update_icon()
+
+    def currentText(self):
+        return self._role
+
+    def setRole(self, role: str):
+        self._role = role
+        self.label.setText(role)
+        self._update_icon()
+        self.role_changed.emit(role)
+
+    def _update_icon(self):
+        if "Müdür" in self._role:
+            glyph = bk_ui.building_glyph(bk_ui.BRAND, 16)
+        elif "Öğretmen" in self._role or "Zümre" in self._role:
+            glyph = bk_ui.person_glyph(bk_ui.BRAND, 16)
+        elif "Bilişim" in self._role or "Sistem" in self._role:
+            glyph = bk_ui.settings_glyph(bk_ui.BRAND, 16)
+        else:
+            glyph = bk_ui.star_glyph(bk_ui.BRAND, 16)
+        self.icon_lbl.setPixmap(glyph)
+
+    def _open_menu(self):
+        menu = bk_ui.HeroPopoverMenu(self)
+        menu.card.setFixedWidth(280)
+
+        for title in STATIC_TITLES:
+            if title == "Diğer":
+                menu.add_separator()
+                menu.add_action("Diğer (Özel Unvan)...", bk_ui.pencil_glyph(bk_ui.BRAND, 16),
+                                on_click=self._on_custom_role)
+            else:
+                is_selected = (title == self._role)
+                if "Müdür" in title:
+                    glyph = bk_ui.building_glyph(bk_ui.BRAND if is_selected else bk_ui.INK_SOFT, 16)
+                elif "Öğretmen" in title or "Zümre" in title:
+                    glyph = bk_ui.person_glyph(bk_ui.BRAND if is_selected else bk_ui.INK_SOFT, 16)
+                elif "Bilişim" in title or "Sistem" in title:
+                    glyph = bk_ui.settings_glyph(bk_ui.BRAND if is_selected else bk_ui.INK_SOFT, 16)
+                else:
+                    glyph = bk_ui.star_glyph(bk_ui.BRAND if is_selected else bk_ui.INK_SOFT, 16)
+
+                menu.add_action(title, glyph, on_click=lambda t=title: self.setRole(t),
+                                checkable=True, checked=is_selected)
+
+        menu.popup_below(self, align="left", offset_y=4)
+
+    def _on_custom_role(self):
+        from dialogs.institution_dialogs import AppleInputDialog
+        dlg = AppleInputDialog("Özel Unvan", "Görevinizi veya unvanınızı yazın:", default_text=self._role, parent=self.window())
+        if dlg.exec() == QDialog.Accepted and dlg.text_value().strip():
+            self.setRole(dlg.text_value().strip())
+
+
+class AppleProfileDialog(bk_ui.HeroSheetDialog):
+    """Profile, on the program's one sheet."""
+
+    profile_updated = Signal(str, str, str)  # name, avatar_url, title
+
+    def __init__(self, current_email: str = "admin@bgz.local", parent=None):
         self.email = current_email
         self.profile_data = get_user_profile(current_email)
         self.current_avatar_url = self.profile_data.get("avatar_url", "")
         self.selected_local_file = ""
-        
+
+        super().__init__(parent, width=470, height=452,
+                         title="Profili Düzenle",
+                         subtitle="Adınız ve unvanınız her ekranda görünür.")
         self.setWindowTitle("Profili Düzenle")
-        self.setFixedSize(460, 480)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool | Qt.NoDropShadowWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        
         self._build_ui()
-        
+
     def _build_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(15, 15, 15, 15)
-        
-        container = QWidget(self)
-        container.setObjectName("profileCard")
-        container.setStyleSheet("""
-            #profileCard {
-                background: #FFFFFF;
-                border: 1px solid #CBD5E1;
-                border-radius: 20px;
-            }
-        """)
-        
-        c_lay = QVBoxLayout(container)
-        c_lay.setContentsMargins(28, 24, 28, 24)
-        c_lay.setSpacing(14)
-        
-        # Header
-        t_lbl = QLabel("Kullanıcı Profilini Düzenle")
-        t_lbl.setFont(QFont(FONT_FAMILY, 13, QFont.Bold))
-        t_lbl.setStyleSheet("color: #0F172A; border: none; background: transparent;")
-        c_lay.addWidget(t_lbl)
-        
-        sub_lbl = QLabel("Kişisel profil bilgilerinizi ve profil fotoğrafınızı güncelleyin.")
-        sub_lbl.setFont(QFont(FONT_FAMILY, 9))
-        sub_lbl.setStyleSheet("color: #64748B; border: none; background: transparent;")
-        c_lay.addWidget(sub_lbl)
-        
-        # Divider
-        div = QFrame()
-        div.setFixedHeight(1)
-        div.setStyleSheet("background: #E2E8F0; border: none;")
-        c_lay.addWidget(div)
-        
-        # Avatar Row
+        lay = self.card_layout
+
+        # -- avatar ----------------------------------------------------
         avatar_box = QHBoxLayout()
         avatar_box.setSpacing(16)
-        
+
         self.avatar_preview = QLabel()
-        self.avatar_preview.setFixedSize(68, 68)
+        self.avatar_preview.setFixedSize(64, 64)
         self._update_avatar_preview()
         avatar_box.addWidget(self.avatar_preview)
-        
-        av_btns_layout = QVBoxLayout()
-        av_btns_layout.setSpacing(4)
-        
-        self.btn_change_photo = QPushButton("Fotoğraf Seç & Yükle")
-        self.btn_change_photo.setFont(QFont(FONT_FAMILY, 9, QFont.DemiBold))
-        self.btn_change_photo.setFixedHeight(32)
-        self.btn_change_photo.setCursor(Qt.PointingHandCursor)
-        self.btn_change_photo.setStyleSheet("""
-            QPushButton {
-                background: #EFF6FF; color: #0071E3; border: 1px solid #BFDBFE;
-                border-radius: 16px; padding: 0 16px; font-weight: 600;
-            }
-            QPushButton:hover { background: #DBEAFE; }
-        """)
+
+        av_col = QVBoxLayout()
+        av_col.setSpacing(5)
+        av_col.addStretch(1)
+
+        self.btn_change_photo = bk_ui.secondary_button("Fotoğraf Seç", height=34)
+        self.btn_change_photo.setFont(bk_ui.font(9.2, QFont.DemiBold))
         self.btn_change_photo.clicked.connect(self._select_photo)
-        av_btns_layout.addWidget(self.btn_change_photo)
-        
-        self.upload_status_lbl = QLabel("JPG veya PNG formatında profil fotoğrafı")
-        self.upload_status_lbl.setFont(QFont(FONT_FAMILY, 8))
-        self.upload_status_lbl.setStyleSheet("color: #94A3B8; border: none;")
-        av_btns_layout.addWidget(self.upload_status_lbl)
-        
-        avatar_box.addLayout(av_btns_layout, 1)
-        c_lay.addLayout(avatar_box)
-        
-        # Field 1: Full Name
-        name_title = QLabel("AD SOYAD *")
-        name_title.setFont(QFont(FONT_FAMILY, 8, QFont.Bold))
-        name_title.setStyleSheet("color: #64748B; letter-spacing: 0.5px; border: none;")
-        c_lay.addWidget(name_title)
-        
-        self.name_edit = QLineEdit(self.profile_data.get("name", "Seher Şanlı"))
-        self.name_edit.setFixedHeight(36)
-        self.name_edit.setStyleSheet("""
-            QLineEdit {
-                background: #F8FAFC; border: 1.5px solid #CBD5E1;
-                border-radius: 8px; padding: 4px 12px; font-size: 13px; color: #0F172A;
-            }
-            QLineEdit:focus { border: 1.5px solid #0071E3; background: #FFFFFF; }
-        """)
-        c_lay.addWidget(self.name_edit)
-        
-        # Field 2: Role / Title
-        title_title = QLabel("UNVAN / BRANŞ")
-        title_title.setFont(QFont(FONT_FAMILY, 8, QFont.Bold))
-        title_title.setStyleSheet("color: #64748B; letter-spacing: 0.5px; border: none;")
-        c_lay.addWidget(title_title)
-        
-        self.title_edit = QLineEdit(self.profile_data.get("title", "Program Yöneticisi"))
-        self.title_edit.setFixedHeight(36)
-        self.title_edit.setStyleSheet("""
-            QLineEdit {
-                background: #F8FAFC; border: 1.5px solid #CBD5E1;
-                border-radius: 8px; padding: 4px 12px; font-size: 13px; color: #0F172A;
-            }
-            QLineEdit:focus { border: 1.5px solid #0071E3; background: #FFFFFF; }
-        """)
-        c_lay.addWidget(self.title_edit)
-        
-        # Security / Password Section
-        sec_box = QHBoxLayout()
-        self.btn_change_pwd = QPushButton("Şifre Sıfırla / Değiştir")
-        self.btn_change_pwd.setFont(QFont(FONT_FAMILY, 9, QFont.DemiBold))
-        self.btn_change_pwd.setFixedHeight(34)
-        self.btn_change_pwd.setCursor(Qt.PointingHandCursor)
-        self.btn_change_pwd.setStyleSheet("""
-            QPushButton {
-                background: #EFF6FF; color: #0071E3; border: 1px solid #BFDBFE;
-                border-radius: 8px; padding: 0 16px; font-weight: 600;
-            }
-            QPushButton:hover { background: #DBEAFE; }
-        """)
-        self.btn_change_pwd.clicked.connect(self._open_change_password)
-        sec_box.addWidget(self.btn_change_pwd)
-        sec_box.addStretch(1)
-        c_lay.addLayout(sec_box)
-        
-        # Bottom Buttons
-        btn_box = QHBoxLayout()
-        btn_box.setSpacing(12)
-        
-        btn_cancel = QPushButton("Vazgeç")
-        btn_cancel.setFixedHeight(36)
-        btn_cancel.setFont(QFont(FONT_FAMILY, 9, QFont.DemiBold))
-        btn_cancel.setCursor(Qt.PointingHandCursor)
-        btn_cancel.setStyleSheet("""
-            QPushButton {
-                background: #F1F5F9; color: #1E293B; border: 1px solid #CBD5E1;
-                border-radius: 18px; padding: 0 20px; font-weight: 500;
-            }
-            QPushButton:hover { background: #E2E8F0; }
-        """)
-        btn_cancel.clicked.connect(self.reject)
-        btn_box.addWidget(btn_cancel)
-        
-        self.btn_save = QPushButton("Profili Kaydet")
-        self.btn_save.setFixedHeight(36)
-        self.btn_save.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
-        self.btn_save.setCursor(Qt.PointingHandCursor)
-        self.btn_save.setStyleSheet("""
-            QPushButton {
-                background: #0071E3; color: #FFFFFF; border: none;
-                border-radius: 18px; padding: 0 24px; font-weight: 600;
-            }
-            QPushButton:hover { background: #0062C4; }
-        """)
-        self.btn_save.clicked.connect(self._save_profile)
-        btn_box.addWidget(self.btn_save)
-        
-        c_lay.addLayout(btn_box)
-        layout.addWidget(container)
-        
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(self.btn_change_photo)
+        row.addStretch(1)
+        av_col.addLayout(row)
+
+        self.upload_status_lbl = QLabel("JPG veya PNG, en az 128×128 piksel")
+        self.upload_status_lbl.setFont(bk_ui.font(8.6))
+        self.upload_status_lbl.setStyleSheet(
+            f"color: {bk_ui.INK_FAINT}; border: none; background: transparent;")
+        av_col.addWidget(self.upload_status_lbl)
+        av_col.addStretch(1)
+
+        avatar_box.addLayout(av_col, 1)
+        lay.addLayout(avatar_box)
+        lay.addSpacing(4)
+
+        # -- name ------------------------------------------------------
+        lay.addWidget(bk_ui.field_label("Ad Soyad"))
+        self.name_edit = bk_ui.Field(height=40, font_px=13)
+        self.name_edit.setText(self.profile_data.get("name", ""))
+        self.name_edit.textChanged.connect(lambda *_: self._update_avatar_preview())
+        lay.addWidget(self.name_edit)
+
+        # -- title (Modern Role Picker) --------------------------------
+        lay.addWidget(bk_ui.field_label("Unvan / Görev"))
+        cur_title = self.profile_data.get("title", "Program Yöneticisi")
+        self.title_combo = AppleRolePickerButton(current_role=cur_title, parent=self)
+        lay.addWidget(self.title_combo)
+
+        self.add_footer("Profili Kaydet", "Vazgeç", on_confirm=self._save_profile)
+        self.btn_save = self.btn_confirm     # old name, same button
+
     def _update_avatar_preview(self):
         name = self.name_edit.text() if hasattr(self, "name_edit") else self.profile_data.get("name", "U")
         parts = [p for p in name.strip().split() if p]
         initials = (parts[0][0] + parts[1][0]) if len(parts) >= 2 else (parts[0][:2] if parts else "U")
         
         img_src = self.selected_local_file or self.current_avatar_url
-        pix = make_circular_avatar_pixmap(img_src, initials, size=68)
+        pix = make_circular_avatar_pixmap(img_src, initials, size=64)
         self.avatar_preview.setPixmap(pix)
         
     def _select_photo(self):
@@ -411,14 +441,10 @@ class AppleProfileDialog(QDialog):
         self.upload_status_lbl.setStyleSheet("color: #EF4444; border: none;")
         self.btn_change_photo.setEnabled(True)
         self.btn_save.setEnabled(True)
-        
-    def _open_change_password(self):
-        dlg = AppleChangePasswordDialog(user_email=self.email, parent=self)
-        dlg.exec()
 
     def _save_profile(self):
         name = self.name_edit.text().strip() or "Kullanıcı"
-        title = self.title_edit.text().strip() or "Program Yöneticisi"
+        title = self.title_combo.currentText().strip() or "Program Yöneticisi"
         
         save_user_profile(
             email=self.email,
@@ -426,150 +452,162 @@ class AppleProfileDialog(QDialog):
             avatar_url=self.current_avatar_url,
             title=title
         )
-        self.profile_updated.emit(name, self.current_avatar_url)
+        self.profile_updated.emit(name, self.current_avatar_url, title)
         self.accept()
 
 
 # ── Password Reset / Security Dialog ─────────────────────────────────
 
-class AppleChangePasswordDialog(QDialog):
+class AppleChangePasswordDialog(bk_ui.HeroSheetDialog):
+    """Change password with Apple HIG styling, live criteria checklist, and eye icon toggle."""
+
+    password_changed = Signal()
+
     def __init__(self, user_email: str = None, parent=None):
-        super().__init__(parent)
         self.user_email = user_email or ""
+        super().__init__(parent, width=460, height=450,
+                         title="Hesap Şifresini Belirle",
+                         subtitle="Yeni şifrenizi belirleyin; diğer cihazlardaki "
+                                  "oturumlar güvenliğiniz için sonlandırılır.")
         self.setWindowTitle("Şifre Sıfırla & Güvenlik")
-        self.setFixedWidth(400)
-        self.setStyleSheet(f"""
-            QDialog {{
-                background-color: #FFFFFF;
-                font-family: {FONT_FAMILY};
-            }}
-        """)
         self._build_ui()
 
+    def _pwd_field(self, placeholder):
+        f = bk_ui.Field(placeholder, height=40, font_px=13)
+        f.setEchoMode(QLineEdit.Password)
+        f._pad_right = 44
+        f._restyle()
+
+        btn = QPushButton(f)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setFocusPolicy(Qt.NoFocus)
+        btn.setFixedSize(30, 30)
+        btn.setIcon(QIcon(bk_ui.eye_glyph(bk_ui.INK_SOFT, 16)))
+        btn.setIconSize(QSize(16, 16))
+        btn.setToolTip("Şifreyi Göster / Gizle")
+        btn.setStyleSheet("""
+            QPushButton {
+                border: none; background: transparent; padding: 0px; border-radius: 6px;
+            }
+            QPushButton:hover { background: rgba(0, 0, 0, 0.05); }
+        """)
+
+        def _flip():
+            show = f.echoMode() == QLineEdit.Password
+            f.setEchoMode(QLineEdit.Normal if show else QLineEdit.Password)
+            if show:
+                btn.setIcon(QIcon(bk_ui.eye_slash_glyph(bk_ui.BRAND, 16)))
+            else:
+                btn.setIcon(QIcon(bk_ui.eye_glyph(bk_ui.INK_SOFT, 16)))
+
+        btn.clicked.connect(_flip)
+
+        def _place(_event=None):
+            btn.move(f.width() - btn.width() - 6, (f.height() - btn.height()) // 2)
+
+        f.resizeEvent = lambda e: (bk_ui.Field.resizeEvent(f, e), _place())
+        _place()
+        return f
+
     def _build_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 16, 18, 16)
-        layout.setSpacing(10)
+        lay = self.card_layout
 
-        # Header
-        hdr = QVBoxLayout()
-        hdr.setSpacing(2)
-        t_lbl = QLabel("Hesap Şifresini Sıfırla")
-        t_lbl.setFont(QFont(FONT_FAMILY, 12, QFont.Bold))
-        t_lbl.setStyleSheet("color: #0F172A;")
-        hdr.addWidget(t_lbl)
+        lay.addWidget(bk_ui.field_label("Yeni Şifre"))
+        self.new_pwd_edit = self._pwd_field("Yeni şifrenizi girin")
+        self.new_pwd_edit.textChanged.connect(self._update_criteria)
+        lay.addWidget(self.new_pwd_edit)
 
-        sub_lbl = QLabel("Şifre güncellendiğinde diğer tüm cihazların oturumu anında kapatılır.")
-        sub_lbl.setFont(QFont(FONT_FAMILY, 8.5))
-        sub_lbl.setStyleSheet("color: #64748B;")
-        sub_lbl.setWordWrap(True)
-        hdr.addWidget(sub_lbl)
-        layout.addLayout(hdr)
+        lay.addWidget(bk_ui.field_label("Yeni Şifre (Tekrar)"))
+        self.conf_pwd_edit = self._pwd_field("Yeni şifreyi tekrar girin")
+        self.conf_pwd_edit.textChanged.connect(self._update_criteria)
+        lay.addWidget(self.conf_pwd_edit)
 
-        # Divider
-        div = QFrame()
-        div.setFixedHeight(1)
-        div.setStyleSheet("background: #E2E8F0;")
-        layout.addWidget(div)
+        # ── Live Password Criteria Checklist ─────────────────────────
+        crit_box = QFrame()
+        crit_box.setStyleSheet(f"""
+            QFrame {{
+                background: {bk_ui.SURFACE_SUNK};
+                border: 1px solid {bk_ui.HAIRLINE};
+                border-radius: 10px;
+            }}
+        """)
+        crit_lay = QVBoxLayout(crit_box)
+        crit_lay.setContentsMargins(12, 10, 12, 10)
+        crit_lay.setSpacing(6)
 
-        # Field 1: Current Password
-        lbl_cur = QLabel("Mevcut Şifre *")
-        lbl_cur.setFont(QFont(FONT_FAMILY, 8, QFont.Bold))
-        lbl_cur.setStyleSheet("color: #475569;")
-        layout.addWidget(lbl_cur)
+        def _crit_row(label_text):
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(8)
 
-        self.cur_pwd_edit = QLineEdit()
-        self.cur_pwd_edit.setEchoMode(QLineEdit.Password)
-        self.cur_pwd_edit.setPlaceholderText("Mevcut şifrenizi girin")
-        self.cur_pwd_edit.setFixedHeight(30)
-        self.cur_pwd_edit.setStyleSheet(self._input_style())
-        layout.addWidget(self.cur_pwd_edit)
+            dot = QLabel("○")
+            dot.setFont(bk_ui.font(8.8, QFont.Bold))
+            dot.setFixedWidth(16)
+            dot.setAlignment(Qt.AlignCenter)
+            dot.setStyleSheet(f"color: {bk_ui.INK_FAINT}; background: transparent; border: none;")
+            row.addWidget(dot)
 
-        # Field 2: New Password
-        lbl_new = QLabel("Yeni Şifre (En az 6 karakter) *")
-        lbl_new.setFont(QFont(FONT_FAMILY, 8, QFont.Bold))
-        lbl_new.setStyleSheet("color: #475569;")
-        layout.addWidget(lbl_new)
+            lbl = QLabel(label_text)
+            lbl.setFont(bk_ui.font(8.6))
+            lbl.setStyleSheet(f"color: {bk_ui.INK_SOFT}; background: transparent; border: none;")
+            row.addWidget(lbl, 1)
+            crit_lay.addLayout(row)
+            return dot, lbl
 
-        self.new_pwd_edit = QLineEdit()
-        self.new_pwd_edit.setEchoMode(QLineEdit.Password)
-        self.new_pwd_edit.setPlaceholderText("Yeni güçlü şifrenizi girin")
-        self.new_pwd_edit.setFixedHeight(30)
-        self.new_pwd_edit.setStyleSheet(self._input_style())
-        layout.addWidget(self.new_pwd_edit)
+        self.crit_len_dot, self.crit_len_lbl = _crit_row("En az 6 karakter")
+        self.crit_mix_dot, self.crit_mix_lbl = _crit_row("En az bir harf ve bir rakam")
+        self.crit_match_dot, self.crit_match_lbl = _crit_row("Şifreler birbiriyle eşleşiyor")
 
-        # Field 3: Confirm New Password
-        lbl_conf = QLabel("Yeni Şifre Tekrar *")
-        lbl_conf.setFont(QFont(FONT_FAMILY, 8, QFont.Bold))
-        lbl_conf.setStyleSheet("color: #475569;")
-        layout.addWidget(lbl_conf)
+        lay.addWidget(crit_box)
 
-        self.conf_pwd_edit = QLineEdit()
-        self.conf_pwd_edit.setEchoMode(QLineEdit.Password)
-        self.conf_pwd_edit.setPlaceholderText("Yeni şifrenizi tekrar girin")
-        self.conf_pwd_edit.setFixedHeight(30)
-        self.conf_pwd_edit.setStyleSheet(self._input_style())
-        layout.addWidget(self.conf_pwd_edit)
-
-        # Status / Error Label
+        # Status Line
         self.status_lbl = QLabel("")
-        self.status_lbl.setFont(QFont(FONT_FAMILY, 8))
-        self.status_lbl.setStyleSheet("color: #EF4444;")
-        self.status_lbl.setWordWrap(True)
+        self.status_lbl.setFont(bk_ui.font(9.0))
+        self.status_lbl.setFixedHeight(18)
+        self.status_lbl.setStyleSheet(
+            f"color: {bk_ui.DANGER}; font-weight: 600; border: none; background: transparent;")
         self.status_lbl.hide()
-        layout.addWidget(self.status_lbl)
+        lay.addWidget(self.status_lbl)
 
-        # Buttons
-        btn_box = QHBoxLayout()
-        btn_box.setSpacing(8)
+        self.add_footer("Şifreyi Güncelle", "Vazgeç",
+                        on_confirm=self._do_change_password)
+        self.btn_submit = self.btn_confirm
 
-        btn_cancel = QPushButton("Vazgeç")
-        btn_cancel.setFixedHeight(32)
-        btn_cancel.setFont(QFont(FONT_FAMILY, 8.5))
-        btn_cancel.setCursor(Qt.PointingHandCursor)
-        btn_cancel.setStyleSheet("""
-            QPushButton {
-                background: #F1F5F9; color: #334155; border: 1px solid #CBD5E1;
-                border-radius: 6px; padding: 0 14px;
-            }
-            QPushButton:hover { background: #E2E8F0; }
-        """)
-        btn_cancel.clicked.connect(self.reject)
-        btn_box.addWidget(btn_cancel)
-
-        self.btn_submit = QPushButton("Şifreyi Sıfırla ve Oturumları Kapat")
-        self.btn_submit.setFixedHeight(32)
-        self.btn_submit.setFont(QFont(FONT_FAMILY, 8.5, QFont.Bold))
-        self.btn_submit.setCursor(Qt.PointingHandCursor)
-        self.btn_submit.setStyleSheet("""
-            QPushButton {
-                background: #0071E3; color: #FFFFFF; border: none;
-                border-radius: 6px; padding: 0 16px; font-weight: 600;
-            }
-            QPushButton:hover { background: #0062C4; }
-        """)
-        self.btn_submit.clicked.connect(self._do_change_password)
-        btn_box.addWidget(self.btn_submit, 1)
-
-        layout.addLayout(btn_box)
-
-    def _input_style(self):
-        return """
-            QLineEdit {
-                background: #F8FAFC; border: 1px solid #CBD5E1;
-                border-radius: 6px; padding: 2px 8px; font-size: 12px; color: #0F172A;
-            }
-            QLineEdit:focus { border: 1.5px solid #0071E3; background: #FFFFFF; }
-        """
-
-    def _do_change_password(self):
-        cur_p = self.cur_pwd_edit.text()
+    def _update_criteria(self):
         new_p = self.new_pwd_edit.text()
         conf_p = self.conf_pwd_edit.text()
 
-        if not cur_p:
-            self._show_error("Lütfen mevcut şifrenizi girin.")
-            return
+        # 1. Length
+        c_len = len(new_p) >= 6
+        self._set_crit_state(self.crit_len_dot, self.crit_len_lbl, c_len)
+
+        # 2. Letter and digit
+        has_letter = any(c.isalpha() for c in new_p)
+        has_digit = any(c.isdigit() for c in new_p)
+        c_mix = has_letter and has_digit
+        self._set_crit_state(self.crit_mix_dot, self.crit_mix_lbl, c_mix)
+
+        # 3. Match
+        c_match = bool(new_p and conf_p and new_p == conf_p)
+        self._set_crit_state(self.crit_match_dot, self.crit_match_lbl, c_match)
+
+        if self.status_lbl.isVisible():
+            self.status_lbl.hide()
+
+    def _set_crit_state(self, dot_lbl, text_lbl, satisfied: bool):
+        if satisfied:
+            dot_lbl.setText("✓")
+            dot_lbl.setStyleSheet("color: #059669; font-weight: bold; background: transparent; border: none;")
+            text_lbl.setStyleSheet("color: #059669; font-weight: 500; background: transparent; border: none;")
+        else:
+            dot_lbl.setText("○")
+            dot_lbl.setStyleSheet(f"color: {bk_ui.INK_FAINT}; font-weight: normal; background: transparent; border: none;")
+            text_lbl.setStyleSheet(f"color: {bk_ui.INK_SOFT}; font-weight: normal; background: transparent; border: none;")
+
+    def _do_change_password(self):
+        new_p = self.new_pwd_edit.text().strip()
+        conf_p = self.conf_pwd_edit.text().strip()
+
         if not new_p:
             self._show_error("Lütfen yeni şifrenizi girin.")
             return
@@ -579,9 +617,6 @@ class AppleChangePasswordDialog(QDialog):
         if new_p != conf_p:
             self._show_error("Yeni şifreler birbiriyle eşleşmiyor.")
             return
-        if cur_p == new_p:
-            self._show_error("Yeni şifreniz mevcut şifrenizle aynı olamaz.")
-            return
 
         from api_client import api_client
         email = self.user_email
@@ -589,21 +624,27 @@ class AppleChangePasswordDialog(QDialog):
             stored = api_client.get_stored_auth_data() or {}
             email = stored.get("email", "")
 
-        ok, msg = api_client.change_password(email, cur_p, new_p)
+        self.btn_submit.setEnabled(False)
+        self.status_lbl.setText("Şifre güncelleniyor...")
+        self.status_lbl.setStyleSheet("color: #0071E3; font-weight: 500; border: none;")
+        self.status_lbl.show()
+        QApplication.processEvents()
+
+        ok, msg = api_client.change_password(email, "", new_p)
         if not ok:
             self._show_error(msg)
+            self.btn_submit.setEnabled(True)
             return
 
         self.status_lbl.setText("✓ " + msg)
-        self.status_lbl.setStyleSheet("color: #059669; font-weight: bold; border: none; background: transparent;")
+        self.status_lbl.setStyleSheet("color: #059669; font-weight: bold; border: none;")
         self.status_lbl.show()
-        self.btn_submit.setEnabled(False)
         self.password_changed.emit()
 
         from PySide6.QtCore import QTimer
-        QTimer.singleShot(1200, self.accept)
+        QTimer.singleShot(1000, self.accept)
 
     def _show_error(self, text: str):
         self.status_lbl.setText("⚠ " + text)
-        self.status_lbl.setStyleSheet("color: #EF4444; font-weight: 500; border: none; background: transparent;")
+        self.status_lbl.setStyleSheet("color: #EF4444; font-weight: 500; border: none;")
         self.status_lbl.show()

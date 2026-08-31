@@ -91,6 +91,7 @@ app_datas = [
     ('bk_icon.ico', '.'),
     ('bk_inner_logo.png', '.'),
     ('bk_dashboard_brand.png', '.'),
+    ('ChatGPT Image 9 Tem 2026 19_56_13-3.png', '.'),
 ] + ortools_datas
 
 if os.path.exists('release_system_ca.pem'):

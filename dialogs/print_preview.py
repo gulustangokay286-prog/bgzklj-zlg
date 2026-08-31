@@ -97,6 +97,84 @@ def get_bell_times(data_store: dict, periods: int = 8, separator: str = "-") -> 
     return result
 
 
+def get_bell_times(data_store: dict, periods: int = 8, separator: str = "-") -> list:
+    """
+    Returns a list of formatted time strings (e.g. ['08:50-09:30', '09:40-10:20', ...])
+    for periods 0..periods-1 by inspecting bell_schedule and all time configurations in data_store.
+    """
+    if not data_store or not isinstance(data_store, dict):
+        data_store = {}
+    settings = data_store.get("settings", {}) if isinstance(data_store.get("settings"), dict) else {}
+
+    # 1. Check bell_schedule list
+    schedule = (
+        settings.get("bell_schedule")
+        or data_store.get("bell_schedule")
+        or data_store.get("bell_times")
+        or settings.get("bell_times")
+        or settings.get("zil_saatleri")
+        or data_store.get("zil_saatleri")
+    )
+    
+    out = [None] * periods
+    if schedule and isinstance(schedule, list):
+        for p_idx in range(min(periods, len(schedule))):
+            item = schedule[p_idx]
+            if isinstance(item, dict):
+                s = str(item.get("start") or item.get("baslangic") or "").strip()
+                e = str(item.get("end") or item.get("bitis") or "").strip()
+                if s and e:
+                    out[p_idx] = f"{s}{separator}{e}"
+            elif isinstance(item, str) and "-" in item:
+                out[p_idx] = item.replace(" - ", separator).replace(" ", "")
+
+    # 2. Check dict representations (e.g. zil_programi)
+    if any(x is None for x in out):
+        bells = data_store.get("zil_programi") or settings.get("zil_saatleri")
+        if isinstance(bells, dict):
+            for p_idx in range(periods):
+                if out[p_idx] is not None:
+                    continue
+                entry = bells.get(str(p_idx)) or bells.get(p_idx) or bells.get(str(p_idx + 1)) or bells.get(p_idx + 1)
+                if isinstance(entry, dict):
+                    s = str(entry.get("start") or entry.get("baslangic") or "").strip()
+                    e = str(entry.get("end") or entry.get("bitis") or "").strip()
+                    if s and e:
+                        out[p_idx] = f"{s}{separator}{e}"
+
+    # 3. Fill missing slots sequentially
+    curr_h, curr_m = 8, 30
+    first_valid = next((x for x in out if x is not None), None)
+    if first_valid:
+        try:
+            start_part = first_valid.split(separator)[0].strip()
+            if ":" in start_part:
+                curr_h, curr_m = map(int, start_part.split(":")[:2])
+        except Exception:
+            curr_h, curr_m = 8, 30
+
+    result = []
+    for p_idx in range(periods):
+        if out[p_idx]:
+            result.append(out[p_idx])
+            try:
+                end_part = out[p_idx].split(separator)[1].strip()
+                eh, em = map(int, end_part.split(":")[:2])
+                tot_m = eh * 60 + em + 10  # 10 min break
+                curr_h, curr_m = (tot_m // 60) % 24, tot_m % 60
+            except Exception:
+                pass
+        else:
+            s_str = f"{curr_h:02d}:{curr_m:02d}"
+            tot_end = curr_h * 60 + curr_m + 40
+            e_str = f"{(tot_end // 60) % 24:02d}:{tot_end % 60:02d}"
+            result.append(f"{s_str}{separator}{e_str}")
+            tot_next = tot_end + 10
+            curr_h, curr_m = (tot_next // 60) % 24, tot_next % 60
+
+    return result
+
+
 def get_subject_color(subject_name: str, custom_color: str = None) -> str:
     if custom_color and custom_color not in ["#FFFFFF", "#C4C4F0", ""]:
         return custom_color
@@ -475,7 +553,7 @@ class TimetablePrintPreview(QDialog):
             mode = self.mode_combo.currentText()
             target = self.target_combo.currentText()
             html = f"<html><head><meta charset='utf-8'><title>{target} - Program</title></head><body>"
-            html += f"<h1>{target} - {mode}</h1><p>BGZ Ders Planlama 2026 - 2027</p></body></html>"
+            html += f"<h1>{target} - {mode}</h1><p>Chenkron Ders Planlama 2026 - 2027</p></body></html>"
             with open(path, "w", encoding="utf-8") as f:
                 f.write(html)
             QMessageBox.information(self, "Başarılı", "HTML çıktısı kaydedildi.")
@@ -957,7 +1035,7 @@ class TimetablePrintPreview(QDialog):
         def draw_page_footer():
             painter.setFont(make_font(8, False))
             painter.setPen(QPen(QColor("#94A3B8"), 1))
-            painter.drawText(QRectF(tbl_x, VH - 30, tbl_w / 2, 20), Qt.AlignLeft, "BGZ Ders Planlama Sistemi 2026 - 2027")
+            painter.drawText(QRectF(tbl_x, VH - 30, tbl_w / 2, 20), Qt.AlignLeft, "Chenkron Ders Planlama Sistemi 2026 - 2027")
             painter.drawText(QRectF(tbl_x + tbl_w / 2, VH - 30, tbl_w / 2, 20), Qt.AlignRight, f"Sayfa {page_num}")
 
         draw_page_header()
@@ -1378,7 +1456,7 @@ class TimetablePrintPreview(QDialog):
         painter.setFont(make_font(8.5, False))
         painter.setPen(QPen(QColor("#64748B"), 1))
         painter.drawText(QRectF(tbl_x, VH - 35, 450, 20), Qt.AlignLeft, f"Toplam Atanan Ders Sayısı: {len(atamalar)} | Toplam Ders Saati: {total_hours} Saat")
-        painter.drawText(QRectF(VW - tbl_x - 300, VH - 35, 300, 20), Qt.AlignRight, "BGZ Ders Planlama Sistemi 2026 - 2027")
+        painter.drawText(QRectF(VW - tbl_x - 300, VH - 35, 300, 20), Qt.AlignRight, "Chenkron Ders Planlama Sistemi 2026 - 2027")
 
     def _render_weekly_grid(self, painter, printer, VW, VH, is_teacher=False):
         """Single class or single teacher timetable on one page (Same exact layout as photo)"""
@@ -1844,7 +1922,7 @@ class TimetablePrintPreview(QDialog):
                 painter.setFont(make_font(8.5, False))
                 painter.setPen(QPen(QColor("#64748B"), 1))
                 painter.drawText(QRectF(margin_x, min(leg_bottom, VH - margin_y + 14), w / 2, 18), Qt.AlignLeft, f"Ders Planı Oluşturuldu: {date_str}")
-                painter.drawText(QRectF(margin_x + w / 2, min(leg_bottom, VH - margin_y + 14), w / 2, 18), Qt.AlignRight, "BGZ Ders Planlama")
+                painter.drawText(QRectF(margin_x + w / 2, min(leg_bottom, VH - margin_y + 14), w / 2, 18), Qt.AlignRight, "Chenkron Ders Planlama")
 
 
     def _render_tablo_dersler(self, painter, printer, VW, VH):
@@ -1977,4 +2055,4 @@ class TimetablePrintPreview(QDialog):
             # Footer
             painter.setFont(make_font(8, False))
             painter.drawText(QRectF(margin_x, cur_y + len(days) * row_h + 10, w / 2, 20), Qt.AlignLeft, f"Ders Planı Oluşturuldu:{date_str}")
-            painter.drawText(QRectF(margin_x + w / 2, cur_y + len(days) * row_h + 10, w / 2, 20), Qt.AlignRight, "BGZ Ders Planlama")
+            painter.drawText(QRectF(margin_x + w / 2, cur_y + len(days) * row_h + 10, w / 2, 20), Qt.AlignRight, "Chenkron Ders Planlama")

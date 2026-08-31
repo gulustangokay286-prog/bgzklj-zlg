@@ -8,10 +8,10 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QLabel,
     QSplitter, QTreeWidget, QTreeWidgetItem, QStatusBar,
     QMessageBox, QTabWidget, QFrame, QSizePolicy, QMenu, QToolButton, QFileDialog, QDialog,
-    QTableWidgetItem
+    QTableWidgetItem, QGraphicsBlurEffect, QGraphicsOpacityEffect, QGraphicsDropShadowEffect
 )
-from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QFont, QIcon, QPixmap, QPainter, QColor, QPen, QLinearGradient, QBrush, QAction, QPainterPath, QPainterPath
+from PySide6.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QEvent
+from PySide6.QtGui import QFont, QIcon, QPixmap, QPainter, QColor, QPen, QLinearGradient, QBrush, QAction, QPainterPath, QPalette
 
 from ribbon_widget import RibbonWidget, make_icon
 from timetable_grid import TimetableGrid
@@ -23,7 +23,7 @@ from core.timetable_data import TimetableData
 from dialogs.edit_forms import format_tr_name
 from dialogs.edit_forms import format_tr_name
 
-APP_TITLE = "BGZ Ders Planlama"
+APP_TITLE = "Chenkron"
 VERSION   = "2026 - 2027"
 FONT_FAMILY = ".AppleSystemUIFont, SF Pro Text, Helvetica Neue, Segoe UI, sans-serif"
 
@@ -173,7 +173,7 @@ class TitleBar(QWidget):
     def __init__(self, logo_path, parent=None):
         super().__init__(parent)
         self.setFixedHeight(44)
-        self.setStyleSheet("background: #F0F0F0; border-bottom: 1px solid #D0D0D0;")
+        self.setStyleSheet("background: #FFFFFF; border-bottom: 1px solid #E2E8F0;")
         layout = QHBoxLayout(self)
         layout.setContentsMargins(6, 8, 8, 0) # 8px down
 
@@ -212,7 +212,7 @@ class TitleBar(QWidget):
 
 class MainWindow(QMainWindow):
     def __init__(self, logo_path=None, auth_data=None, override_db_path=None,
-                 institution_slug=None, institution_name=None, version_filename=None):
+                 institution_slug=None, institution_name=None, version_filename=None, defer_load=False):
         super().__init__()
         self.auth_data = auth_data
         self.logo_path = logo_path
@@ -223,12 +223,17 @@ class MainWindow(QMainWindow):
         self._updater = None
         self._update_check_was_manual = False
 
-        title = "BGZ Ders Programı Yöneticisi"
+        title = "Chenkron Ders Programı Yöneticisi"
         if institution_name:
             title = f"{institution_name} — {title}"
         self.setWindowTitle(title)
         self.resize(1280, 780)
         self.setMinimumSize(900, 600)
+        self.setStyleSheet("QMainWindow { background: #FFFFFF; }")
+        pal = self.palette()
+        pal.setColor(QPalette.Window, QColor(255, 255, 255))
+        pal.setColor(QPalette.Base, QColor(255, 255, 255))
+        self.setPalette(pal)
 
         if logo_path and os.path.exists(logo_path):
             self.setWindowIcon(QIcon(logo_path))
@@ -267,15 +272,31 @@ class MainWindow(QMainWindow):
         #     self._download_cloud_data()
             
         self._build_ui()
-        self.load_db()
-        self._refresh_tree()
-        self._is_loading = False
-        
+        if not defer_load:
+            self.load_db()
+            self._refresh_tree()
+            self._is_loading = False
+        else:
+            self._is_loading = True
+            
         # Hide QStatusBar completely so bottom area is clear without wasted space
         self.statusBar().hide()
         self.cloud_worker = None
         self._realtime = None
         self._start_cloud_sync()
+        
+    def perform_deferred_load(self):
+        """Called asynchronously by AppShell to load heavy data without blocking UI construction."""
+        from PySide6.QtWidgets import QApplication
+        
+        QApplication.processEvents()
+        self.load_db()
+        
+        QApplication.processEvents()
+        self._refresh_tree()
+        
+        self._is_loading = False
+        QApplication.processEvents()
 
         # Global Rollback / Undo / Redo Shortcuts
         from PySide6.QtGui import QKeySequence, QShortcut
@@ -330,6 +351,9 @@ class MainWindow(QMainWindow):
                 self._realtime.watch(self.institution_slug)
         except Exception as e:
             print(f"[MainWindow] realtime sync init note: {e}")
+
+    def show_preparation_overlay(self, inst_name="", version_label="", duration_ms=2000):
+        pass
 
     def _on_realtime_notice(self, slug):
         """A push only says 'something changed'; the data still has to be fetched."""
@@ -636,7 +660,7 @@ class MainWindow(QMainWindow):
         fm.addSeparator()
         
         act_about = QAction(make_icon("okul", 16), "Hakkında", self)
-        act_about.triggered.connect(lambda: QMessageBox.about(self, "Hakkında", f"{APP_TITLE} {VERSION}\n\nBGZ Ders Planlama Yazılımı"))
+        act_about.triggered.connect(lambda: QMessageBox.about(self, "Hakkında", f"{APP_TITLE} {VERSION}\n\nChenkron Ders Planlama Yazılımı"))
         fm.addAction(act_about)
         
         fm.addSeparator()
@@ -708,7 +732,7 @@ class MainWindow(QMainWindow):
         # ── 1. Ana Menü ──────────────────────────────────────────────────────
         p1 = r.add_tab("Ana Menü")
         p1.add_button("Ana Sayfa",      "anasayfa", self._go_home)
-        p1.add_button("Yeni",           "yeni",     self._act_new)
+        self.btn_ribbon_new_main = p1.add_button("Yeni", "yeni", self._act_new)
         p1.add_button("Aç",             "ac",       self._act_open)
         p1.add_button("Kaydet",         "kaydet",   self._act_save)
         p1.add_button("Geri Al\nCtrl+Z","geri_al",  self._act_undo)
@@ -739,7 +763,7 @@ class MainWindow(QMainWindow):
         # ── 2. Dosya İşlemleri ───────────────────────────────────────────────
         p2 = r.add_tab("Dosya İşlemleri")
         p2.add_back(self._go_main_tab)
-        p2.add_button("Yeni",       "yeni",   self._act_new)
+        self.btn_ribbon_new_file = p2.add_button("Yeni", "yeni", self._act_new)
         p2.add_button("Aç",         "ac",     self._act_open)
         p2.add_button("Kapat",      "temizle",self._act_close)
         p2.add_button("Demo\nDosyaları","okul",self._act_demo_files)
@@ -757,7 +781,7 @@ class MainWindow(QMainWindow):
         # ── 3. Tanımlama İşlemleri ───────────────────────────────────────────
         p3 = r.add_tab("Tanımlama İşlemleri")
         p3.add_back(self._go_main_tab)
-        p3.add_button("Sihirbaz",   "sihirbaz",self._open_wizard)
+        self.btn_ribbon_wizard = p3.add_button("Sihirbaz", "sihirbaz", self._open_wizard)
         p3.add_button("Temel\nBilgiler","okul",self._open_school_info)
         p3.add_divider()
         p3.add_button("Toplu Atama\nListesi", "iliskiler", self._act_assignment_list)
@@ -828,6 +852,26 @@ class MainWindow(QMainWindow):
         p7.add_button("Online\nYardım","yardim",lambda: __import__('webbrowser').open("https://chenki.net/"))
         p7.add_button("Sorular?\nYorumlar?","yardim",lambda: __import__('dialogs.faq_dialog', fromlist=['FAQDialog']).FAQDialog(self).exec())
         p7.add_stretch()
+        self._update_ribbon_new_btn_state()
+
+    def _update_ribbon_new_btn_state(self):
+        """Disables 'Yeni' and 'Sihirbaz' ribbon buttons if 1 or more lessons, teachers, rooms, or classes are present."""
+        has_entities = False
+        if getattr(self, "data_store", None):
+            dersler = self.data_store.get("dersler", [])
+            ogretmenler = self.data_store.get("ogretmenler", [])
+            derslikler = self.data_store.get("derslikler", [])
+            siniflar = self.data_store.get("siniflar", [])
+            atamalar = self.data_store.get("atamalar", [])
+            has_entities = bool(len(dersler) > 0 or len(ogretmenler) > 0 or len(derslikler) > 0 or len(siniflar) > 0 or len(atamalar) > 0)
+
+        tooltip = "Kurumda mevcut veriler/dersler bulunduğu için yeni sihirbaz devre dışıdır." if has_entities else "Yeni Kurum Sihirbazı"
+        enabled = not has_entities
+
+        for btn in [getattr(self, "btn_ribbon_new_main", None), getattr(self, "btn_ribbon_new_file", None), getattr(self, "btn_ribbon_wizard", None)]:
+            if btn:
+                btn.setEnabled(enabled)
+                btn.setToolTip(tooltip)
 
     # ── Workspace ─────────────────────────────────────────────────────────────
     def _build_workspace(self, parent):
@@ -1008,7 +1052,7 @@ class MainWindow(QMainWindow):
         splitter.addWidget(right)
         splitter.setSizes([175, 1100])
 
-        self._grid.view_mode_changed.connect(lambda mode: self._refresh_grid())
+        self._grid.view_mode_changed.connect(lambda mode: self._refresh_grid(skip_unplaced=True))
 
         # Wire up grid toggle button
         def toggle_sidebar():
@@ -1076,6 +1120,16 @@ class MainWindow(QMainWindow):
                     if a.get("subject"): a["subject"] = format_tr_name(a["subject"])
                 for t in self.data_store.get("ogretmenler", []):
                     if t.get("ad"): t["ad"] = format_tr_name(t["ad"])
+
+                # Load global kisitlamalar and override local
+                from version_store import load_global_kisitlamalar
+                global_k = load_global_kisitlamalar()
+                if global_k:
+                    if "kisitlamalar" not in self.data_store:
+                        self.data_store["kisitlamalar"] = {}
+                    # Update local with global
+                    for k, v in global_k.items():
+                        self.data_store["kisitlamalar"][k] = v
 
                 if "kisitlamalar" not in self.data_store:
                     self.data_store["kisitlamalar"] = {}
@@ -1283,7 +1337,51 @@ class MainWindow(QMainWindow):
         # Batch UI updates for instantaneous rendering (0ms lag)
         if hasattr(self._grid, "table"):
             self._grid.table.setUpdatesEnabled(False)
+            self._grid.table.blockSignals(True)
             
+        # Pre-cache color maps for O(1) instantaneous access
+        teacher_color_cache = {}
+        for t in self.data_store.get("ogretmenler", []):
+            tn = t.get("ad", "").strip()
+            if tn:
+                c = t.get("color") or t.get("renk")
+                if c and QColor(c).isValid() and str(c).upper() not in ("#FFFFFF", "#000000"):
+                    teacher_color_cache[tn] = c
+                    teacher_color_cache[tn.lower()] = c
+
+        def fast_t_color(name):
+            if not name:
+                return "#2563EB"
+            if name in teacher_color_cache:
+                return teacher_color_cache[name]
+            low = name.lower()
+            if low in teacher_color_cache:
+                return teacher_color_cache[low]
+            c = get_teacher_color(name, self.data_store)
+            teacher_color_cache[name] = c
+            return c
+
+        subject_color_cache = {}
+        for s in self.data_store.get("dersler", []):
+            sn = s.get("ad", "").strip()
+            if sn:
+                c = s.get("color") or s.get("renk")
+                if c and QColor(c).isValid() and str(c).upper() not in ("#FFFFFF", "#000000"):
+                    subject_color_cache[sn] = c
+                    subject_color_cache[sn.lower()] = c
+
+        def fast_s_color(name):
+            if not name:
+                return "#2563EB"
+            if name in subject_color_cache:
+                return subject_color_cache[name]
+            low = name.lower()
+            if low in subject_color_cache:
+                return subject_color_cache[low]
+            c = get_subject_color(name, self.data_store)
+            subject_color_cache[name] = c
+            return c
+
         try:
             if mode == "teachers":
                 teachers = self.data_store.get("ogretmenler", [])
@@ -1321,7 +1419,7 @@ class MainWindow(QMainWindow):
                             teacher_match_cache[t_name] = matching_row
                                 
                     if 0 <= matching_row < len(teacher_names) and 0 <= col < len(days_list):
-                        color = get_teacher_color(t_name, self.data_store)
+                        color = fast_t_color(t_name)
                         for ext in range(dur):
                             p_idx = period + ext
                             if p_idx < periods:
@@ -1433,7 +1531,7 @@ class MainWindow(QMainWindow):
                             class_match_cache[tc] = matching_row
                                         
                         if 0 <= matching_row < len(class_names) and 0 <= col < len(days_list):
-                            color = get_subject_color(s_name, self.data_store)
+                            color = fast_s_color(s_name)
                             for ext in range(dur):
                                 p_idx = period + ext
                                 if p_idx < periods:
@@ -1489,6 +1587,7 @@ class MainWindow(QMainWindow):
                             p += span
         finally:
             if hasattr(self._grid, "table"):
+                self._grid.table.blockSignals(False)
                 self._grid.table.setUpdatesEnabled(True)
                 self._grid.table.viewport().update()
         
@@ -1676,6 +1775,7 @@ class MainWindow(QMainWindow):
         root_d.setExpanded(is_exp_d)
         root_r.setExpanded(is_exp_r)
         
+        self._update_ribbon_new_btn_state()
         self._refresh_unplaced_lessons(target_entity=target_entity)
 
     def _refresh_unplaced_lessons(self, target_entity=None):
@@ -3134,6 +3234,13 @@ class MainWindow(QMainWindow):
                 self._refresh_grid()
 
     def _act_new(self):
+        if self.data_store and (self.data_store.get("dersler") or self.data_store.get("ogretmenler") or self.data_store.get("derslikler") or self.data_store.get("siniflar")):
+            QMessageBox.information(
+                self, "Yeni Sihirbaz Devre Dışı",
+                "Bu kurumda halihazırda mevcut dersler, öğretmenler veya sınıflar bulunmaktadır.\n"
+                "Sıfırdan sihirbaz çalıştırmak yerine üst menüdeki Dersler, Sınıflar ve Öğretmenler sekmelerini kullanabilirsiniz."
+            )
+            return
         from dialogs.startup_wizard import StartupWizard
         wizard = StartupWizard(self)
         if wizard.exec():
@@ -3174,7 +3281,7 @@ class MainWindow(QMainWindow):
             m = re.match(r"v(\d+)_", new_vf)
             v_num = f"v{int(m.group(1))}" if m else ""
             inst_name = getattr(self, "institution_name", slug)
-            self.setWindowTitle(f"BGZ Ders Planlama — {inst_name} — {v_num}")
+            self.setWindowTitle(f"Chenkron — {inst_name} — {v_num}")
 
         fname = os.path.basename(self.current_roz_path or self.db_path or "program.roz")
         from save_dialog import run_apple_save_sequence
@@ -3397,7 +3504,7 @@ class MainWindow(QMainWindow):
                         m = re.match(r"v(\d+)_", ver_fn)
                         if m: v_num = f"v{int(m.group(1))}"
                     title_suffix = f" — {v_num}" if v_num else ""
-                    self.setWindowTitle(f"BGZ Ders Planlama — {kurum_adi}{title_suffix}")
+                    self.setWindowTitle(f"Chenkron — {kurum_adi}{title_suffix}")
                 except Exception as e:
                     print(f"Failed to update institution name in meta: {e}")
                     
@@ -3513,6 +3620,13 @@ class MainWindow(QMainWindow):
         self._refresh_unplaced_lessons()
 
     def _open_wizard(self):
+        if self.data_store and (self.data_store.get("dersler") or self.data_store.get("ogretmenler") or self.data_store.get("derslikler") or self.data_store.get("siniflar")):
+            QMessageBox.information(
+                self, "Sihirbaz Devre Dışı",
+                "Bu kurumda halihazırda mevcut dersler, öğretmenler veya sınıflar bulunmaktadır.\n"
+                "Sıfırdan sihirbaz çalıştırmak yerine üst menüdeki Dersler, Sınıflar ve Öğretmenler butonlarını kullanabilirsiniz."
+            )
+            return
         self._push_undo_state()
         d = MasterDataDialog(0, self)
         d.exec()

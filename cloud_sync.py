@@ -86,6 +86,23 @@ def push_all_to_rtdb(auth_data: dict = None) -> tuple:
 
     return True, f"{pushed} kurum ve {pushed_versions} versiyon buluta yüklendi.", pushed
 
+def push_all_to_rtdb(auth_data: dict = None) -> tuple:
+    """Pushes all local institutions and their versions to RTDB."""
+    import version_store
+    base_dir = version_store._ensure_base()
+    if not os.path.exists(base_dir):
+        return True, "Yüklenecek kurum bulunamadı.", 0
+        
+    pushed = 0
+    for slug in os.listdir(base_dir):
+        inst_dir = os.path.join(base_dir, slug)
+        if os.path.isdir(inst_dir) and os.path.exists(os.path.join(inst_dir, "meta.json")):
+            if push_institution_to_rtdb(slug, auth_data):
+                pushed += 1
+                
+    return True, f"{pushed} kurum buluta başarıyla yüklendi.", pushed
+
+
 def delete_version_from_rtdb(slug: str, filename: str, auth_data: dict = None) -> bool:
     return api_client.delete_version_from_rtdb(slug, filename, auth_data)
 
@@ -286,8 +303,18 @@ class RealtimeSyncClient(QObject):
             return
         if slug == self._slug and self._socket is not None:
             return  # already watching this one
-        self.stop()
         self._slug = slug
+        self._reconnect_timer.stop()
+        if not hasattr(self, "_watch_debounce"):
+            self._watch_debounce = QTimer(self)
+            self._watch_debounce.setSingleShot(True)
+            self._watch_debounce.timeout.connect(self._do_watch)
+        self._watch_debounce.start(150)
+
+    def _do_watch(self):
+        if not self._slug:
+            return
+        self._close_socket()
         self._open()
 
     def _open(self):

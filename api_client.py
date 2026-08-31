@@ -139,11 +139,8 @@ class APIClient:
     # reached; they never yield a cloud token and never grant server-side write
     # access, which is enforced by the backend rather than trusted from here.
     LOCAL_ACCOUNTS = {
-        "sehersanli@gmail.com": {"password": "seher2312", "role": "admin", "uid": "seher_admin_gmail", "full_name": "Seher Şanlı", "is_master": True, "tenant_type": "internal"},
-        "sehersanli@chenki.net": {"password": "seher2312", "role": "admin", "uid": "seher_admin", "full_name": "Seher Şanlı", "is_master": True, "tenant_type": "internal"},
-        "admin@chenki.net": {"password": "seher2312", "role": "admin", "uid": "admin_chenki", "full_name": "Seher Şanlı", "is_master": True, "tenant_type": "internal"},
+        "sehersanli@chenki.net": {"password": "seher2311", "role": "admin", "uid": "seher_admin", "full_name": "Seher Şanlı", "is_master": True, "tenant_type": "internal"},
         "bireykurum@chenki.net": {"password": "birey19", "role": "admin", "uid": "birey_admin", "full_name": "Birey Kurum", "is_master": False, "tenant_type": "internal"},
-        "birey@chenki.net": {"password": "birey19", "role": "admin", "uid": "birey_admin", "full_name": "Birey Kurum", "is_master": False, "tenant_type": "internal"},
     }
 
     def load_registered_accounts(self) -> dict:
@@ -258,6 +255,37 @@ class APIClient:
 
         return True, "Kurum anahtarı ve hesap başarıyla oluşturuldu.", acc_data
 
+    def delete_customer_account(self, email: str) -> tuple:
+        """
+        Deletes a customer account / institution key and pushes the change to VDS cloud in real-time.
+        """
+        clean_email = (email or "").strip().lower()
+        if not clean_email:
+            return False, "Geçersiz e-posta."
+            
+        if clean_email == "sehersanli@chenki.net":
+            return False, "Ana yönetici (Master Admin) hesabı silinemez."
+        
+        accounts = self.load_registered_accounts()
+        if clean_email in accounts:
+            del accounts[clean_email]
+            self.save_registered_accounts_locally(accounts)
+            
+            if clean_email in self.LOCAL_ACCOUNTS:
+                del self.LOCAL_ACCOUNTS[clean_email]
+                
+            try:
+                url = f"{self.base_url}/api/sync/_system_accounts/accounts_v1"
+                headers = self.get_headers()
+                self.session.put(
+                    url, headers=headers, json={"accounts": accounts}, timeout=8
+                )
+            except Exception as e:
+                print(f"[APIClient] delete accounts sync note: {e}")
+                
+            return True, "Kurum anahtarı ve hesabı başarıyla silindi."
+        return False, "Hesap bulunamadı."
+
     def login(self, email, password):
         import uuid as _uuid
         clean_email = (email or "").strip().lower()
@@ -267,34 +295,29 @@ class APIClient:
         registered = self.load_registered_accounts()
         reg_acc = registered.get(clean_email)
 
-        # Candidate passwords to ensure genuine VDS JWT token acquisition
-        candidate_passwords = [password]
-        if clean_email in ("sehersanli@gmail.com", "sehersanli@chenki.net", "admin@chenki.net"):
-            if password in ("seher2312", "seher2311"):
-                candidate_passwords = [password, "seher2311", "seher2312"]
+        # 1. Attempt VDS Cloud login with real credentials
+        try:
+            resp = self.session.post(
+                url, data={"username": clean_email, "password": password}, timeout=6
+            )
+            if resp.status_code == 200:
+                token_data = resp.json()
+                token_data["email"] = clean_email
+                token_data.setdefault("role", "admin" if reg_acc else "viewer")
+                if not token_data.get("full_name"):
+                    token_data["full_name"] = reg_acc.get("full_name") if reg_acc else clean_email.split("@")[0].capitalize()
+                token_data["name"] = token_data["full_name"]
+                token_data["_refresh"] = password
+                token_data["session_id"] = token_data.get("session_id") or _uuid.uuid4().hex
+                token_data["is_master"] = (clean_email == "sehersanli@chenki.net")
+                token_data["tenant_type"] = reg_acc.get("tenant_type", "internal") if reg_acc else ("internal" if token_data["is_master"] else "isolated")
+                token_data["allowed_institutions"] = reg_acc.get("allowed_institutions", []) if reg_acc else []
+                self.save_token(token_data)
+                return True, token_data
+        except Exception:
+            pass
 
-        for cand_pwd in candidate_passwords:
-            try:
-                resp = self.session.post(
-                    url, data={"username": clean_email, "password": cand_pwd}, timeout=6
-                )
-                if resp.status_code == 200:
-                    token_data = resp.json()
-                    token_data["email"] = clean_email
-                    token_data.setdefault("role", "admin" if reg_acc else "viewer")
-                    if not token_data.get("full_name"):
-                        token_data["full_name"] = reg_acc.get("full_name") if reg_acc else clean_email.split("@")[0].capitalize()
-                    token_data["name"] = token_data["full_name"]
-                    token_data["_refresh"] = password
-                    token_data["session_id"] = token_data.get("session_id") or _uuid.uuid4().hex
-                    token_data["is_master"] = clean_email in ("sehersanli@gmail.com", "sehersanli@chenki.net", "admin@chenki.net")
-                    token_data["tenant_type"] = reg_acc.get("tenant_type", "internal") if reg_acc else ("internal" if token_data["is_master"] else "isolated")
-                    token_data["allowed_institutions"] = reg_acc.get("allowed_institutions", []) if reg_acc else []
-                    self.save_token(token_data)
-                    return True, token_data
-            except Exception:
-                pass
-
+        # 2. Check registered accounts store
         if reg_acc and reg_acc.get("password") == password:
             token_data = {
                 "access_token": f"local_{clean_email.replace('@', '_')}",
@@ -306,7 +329,7 @@ class APIClient:
                 "tenant_type": reg_acc.get("tenant_type", "isolated"),
                 "allowed_institutions": reg_acc.get("allowed_institutions", []),
                 "session_id": _uuid.uuid4().hex,
-                "is_master": clean_email in ("sehersanli@gmail.com", "sehersanli@chenki.net", "admin@chenki.net"),
+                "is_master": (clean_email == "sehersanli@chenki.net"),
                 "is_local": True,
                 "is_offline": True,
                 "_refresh": password
@@ -314,32 +337,96 @@ class APIClient:
             self.save_token(token_data)
             return True, token_data
 
+        # 3. Check fallback in-memory accounts
         account = self.LOCAL_ACCOUNTS.get(clean_email)
-        if account:
-            valid_pwd = (account["password"] == password) or (clean_email in ("sehersanli@gmail.com", "sehersanli@chenki.net", "admin@chenki.net") and password in ("seher2312", "seher2311"))
-            if valid_pwd:
-                token_data = {
-                    "access_token": f"local_{account['uid']}",
-                    "email": clean_email,
-                    "uid": account["uid"],
-                    "role": account["role"],
-                    "full_name": account["full_name"],
-                    "name": account["full_name"],
-                    "session_id": _uuid.uuid4().hex,
-                    "is_master": account.get("is_master", clean_email in ("sehersanli@gmail.com", "sehersanli@chenki.net", "admin@chenki.net")),
-                    "tenant_type": account.get("tenant_type", "internal"),
-                    "allowed_institutions": account.get("allowed_institutions", []),
-                    "is_local": True,
-                    "is_offline": True,
-                    "_refresh": password
-                }
-                self.save_token(token_data)
-                return True, token_data
+        if account and account.get("password") == password:
+            token_data = {
+                "access_token": f"local_{account['uid']}",
+                "email": clean_email,
+                "uid": account["uid"],
+                "role": account["role"],
+                "full_name": account["full_name"],
+                "name": account["full_name"],
+                "session_id": _uuid.uuid4().hex,
+                "is_master": (clean_email == "sehersanli@chenki.net"),
+                "tenant_type": account.get("tenant_type", "internal"),
+                "allowed_institutions": account.get("allowed_institutions", []),
+                "is_local": True,
+                "is_offline": True,
+                "_refresh": password
+            }
+            self.save_token(token_data)
+            return True, token_data
 
         return False, "E-posta veya şifre hatalı."
 
+    # ── Password reset ────────────────────────────────────────────────
+    # The server does the work: it issues the code, mails it, checks it and
+    # writes the new hash into the user table that /auth/login reads. The
+    # client never sees the code and never touches the password store, so a
+    # locked-out user needs no token for any of this — which is the whole
+    # point, since the one thing they cannot produce is a session.
+
+    def _reset_call(self, path: str, payload: dict, timeout: int = 45) -> tuple:
+        url = f"{self.base_url}{path}"
+        try:
+            resp = self.session.post(url, json=payload, timeout=timeout)
+        except Exception:
+            return False, "Sunucuya ulaşılamıyor. İnternet bağlantınızı kontrol edin."
+        if resp.status_code == 200:
+            try:
+                return True, resp.json()
+            except Exception:
+                return True, {}
+        if resp.status_code == 404:
+            # An older server that predates these endpoints answers 404 for
+            # the path itself; say so rather than showing "işlem başarısız".
+            return False, "Sunucu şifre sıfırlamayı desteklemiyor (güncelleme gerekli)."
+        try:
+            detail = resp.json().get("detail")
+        except Exception:
+            detail = None
+        return False, detail or f"İşlem başarısız (HTTP {resp.status_code})."
+
+    def request_password_reset(self, email: str) -> tuple:
+        """(ok, message). An address with no account comes back as a failure
+        naming it — "Bu e-posta adresi sistemde kayıtlı değil" — rather than
+        as a silent success, so a mistyped address is caught on the screen
+        instead of being waited on."""
+        ok, res = self._reset_call("/auth/forgot", {"email": (email or "").strip().lower()})
+        if not ok:
+            return False, res
+        return True, res.get("msg", "Doğrulama kodu gönderildi.")
+
+    def verify_reset_code(self, email: str, code: str) -> tuple:
+        """(ok, ticket_or_message). The ticket is single-use and short-lived;
+        it is what lets the next screen set a password without handling the
+        code again."""
+        ok, res = self._reset_call(
+            "/auth/verify-reset-code",
+            {"email": (email or "").strip().lower(), "code": (code or "").strip()},
+            timeout=20,
+        )
+        if not ok:
+            return False, res
+        ticket = res.get("ticket")
+        if not ticket:
+            return False, "Doğrulama başarısız. Lütfen tekrar deneyin."
+        return True, ticket
+
+    def submit_new_password(self, email: str, ticket: str, new_password: str) -> tuple:
+        ok, res = self._reset_call(
+            "/auth/reset",
+            {"email": (email or "").strip().lower(),
+             "ticket": ticket, "new_password": new_password},
+            timeout=25,
+        )
+        if not ok:
+            return False, res
+        return True, res.get("msg", "Şifreniz güncellendi.")
+
     def verify_current_password(self, email: str, current_password: str) -> bool:
-        """Verifies if the current password is valid against stored credentials or VDS."""
+        """Verifies if the current password is valid against stored credentials, registered accounts or VDS."""
         if not email or not current_password:
             return False
         clean_email = email.strip().lower()
@@ -350,44 +437,43 @@ class APIClient:
             if stored.get("_refresh") == current_password:
                 return True
 
+        # Check registered accounts
+        registered = self.load_registered_accounts()
+        if clean_email in registered and registered[clean_email].get("password") == current_password:
+            return True
+
+        # Check local accounts
         account = self.LOCAL_ACCOUNTS.get(clean_email)
-        if account:
-            if account.get("password") == current_password:
-                return True
-            if clean_email in ("sehersanli@gmail.com", "sehersanli@chenki.net", "admin@chenki.net") and current_password in ("seher2312", "seher2311"):
-                return True
+        if account and account.get("password") == current_password:
+            return True
 
-        candidate_passwords = [current_password]
-        if clean_email in ("sehersanli@gmail.com", "sehersanli@chenki.net", "admin@chenki.net") and current_password in ("seher2312", "seher2311"):
-            candidate_passwords = [current_password, "seher2311", "seher2312"]
-
+        # Check VDS login
         url = f"{self.base_url}/auth/login"
-        for cand_pwd in candidate_passwords:
-            try:
-                resp = self.session.post(
-                    url, data={"username": clean_email, "password": cand_pwd}, timeout=5
-                )
-                if resp.status_code == 200:
-                    return True
-            except Exception:
-                pass
+        try:
+            resp = self.session.post(
+                url, data={"username": clean_email, "password": current_password}, timeout=5
+            )
+            if resp.status_code == 200:
+                return True
+        except Exception:
+            pass
 
         return False
 
-    def change_password(self, email: str, current_password: str, new_password: str) -> tuple:
+    def change_password(self, email: str, current_password: str = "", new_password: str = "") -> tuple:
         """
-        Changes user password after validating current password.
+        Changes user password. If current_password is provided, validates it.
         Generates a new session_id, marks it on the VDS, invalidating all other devices.
         Returns: (bool success, str message)
         """
         clean_email = (email or "").strip().lower()
         if not clean_email:
             return False, "Geçerli bir kullanıcı e-postası bulunamadı."
-        if not self.verify_current_password(clean_email, current_password):
+        if current_password and not self.verify_current_password(clean_email, current_password):
             return False, "Mevcut şifreniz hatalı."
         if len(new_password) < 6:
             return False, "Yeni şifre en az 6 karakter olmalıdır."
-        if current_password == new_password:
+        if current_password and current_password == new_password:
             return False, "Yeni şifreniz mevcut şifrenizle aynı olamaz."
 
         import uuid as _uuid
@@ -407,6 +493,18 @@ class APIClient:
         # Update in-memory local accounts
         if clean_email in self.LOCAL_ACCOUNTS:
             self.LOCAL_ACCOUNTS[clean_email]["password"] = new_password
+
+        # Update registered accounts if present and sync to cloud
+        try:
+            accounts = self.load_registered_accounts()
+            if clean_email in accounts:
+                accounts[clean_email]["password"] = new_password
+                self.save_registered_accounts_locally(accounts)
+                url = f"{self.base_url}/api/sync/_system_accounts/accounts_v1"
+                headers = self.get_headers()
+                self.session.put(url, headers=headers, json={"accounts": accounts}, timeout=6)
+        except Exception:
+            pass
 
         # Push new session & security state to VDS backend
         self.push_security_session(clean_email, new_session_id, new_password, now_ts)

@@ -7,10 +7,10 @@ import json
 from datetime import datetime
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QScrollArea, QWidget, QLabel, 
-    QPushButton, QFrame
+    QPushButton, QFrame, QStackedWidget, QGraphicsDropShadowEffect, QGraphicsOpacityEffect
 )
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve
+from PySide6.QtGui import QFont, QColor
 
 FONT_FAMILY = ".AppleSystemUIFont, SF Pro Text, Helvetica Neue, Segoe UI, sans-serif"
 
@@ -54,148 +54,150 @@ def add_system_notification(title: str, message: str, tag: str = "Sistem", tag_c
     save_notifications(items)
 
 
-class AppleNotificationsDialog(QDialog):
+import bk_ui
+
+
+class AppleNotificationsDialog(bk_ui.HeroSheetDialog):
+    """The notification centre, on the program's one sheet."""
+
     def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Bildirimler")
-        self.resize(520, 480)
-        self.setStyleSheet(f"""
-            QDialog {{
-                background-color: #F8FAFC;
-                font-family: {FONT_FAMILY};
-            }}
-        """)
         self.notifications = load_notifications()
+        super().__init__(parent, width=520, height=480,
+                         title="Bildirimler",
+                         subtitle="Güncellemeler, güvenlik olayları ve eşitleme sonuçları.")
+        self.setWindowTitle("Bildirimler")
         self._build_ui()
-        
+        self._render_state()
+
     def _build_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 22, 24, 22)
-        layout.setSpacing(14)
-        
-        # Header Row
-        hdr_box = QHBoxLayout()
-        title_lbl = QLabel("Bildirim Merkezi")
-        title_lbl.setFont(QFont(FONT_FAMILY, 15, QFont.Bold))
-        title_lbl.setStyleSheet("color: #0F172A;")
-        hdr_box.addWidget(title_lbl)
-        hdr_box.addStretch(1)
-        
-        count = len(self.notifications)
-        if count > 0:
-            count_lbl = QLabel(f"{count} Yeni")
-            count_lbl.setFont(QFont(FONT_FAMILY, 8.5, QFont.Bold))
-            count_lbl.setStyleSheet("background: #E0E7FF; color: #4338CA; padding: 3px 10px; border-radius: 10px;")
-            hdr_box.addWidget(count_lbl)
-        layout.addLayout(hdr_box)
-        
-        # Scroll Area
+        lay = self.card_layout
+        lay.setContentsMargins(24, 20, 24, 18)
+        lay.setSpacing(12)
+
+        self.stack = QStackedWidget()
+        self.stack.setStyleSheet("background: transparent;")
+
+        # ── Page 0: Empty State (Dead-Centered, Unclipped) ────────────
+        self.empty_page = bk_ui.EmptyState(
+            title="Bildirim Yok",
+            message="Güncellemeler, güvenlik olayları ve eşitleme sonuçları burada toplanır.",
+            glyph=bk_ui.check_glyph(bk_ui.INK_FAINT, 44)
+        )
+        self.stack.addWidget(self.empty_page)
+
+        # ── Page 1: List View ─────────────────────────────────────────
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setStyleSheet("""
             QScrollArea { border: none; background: transparent; }
-            QScrollBar:vertical {
-                background: transparent; width: 6px; margin: 0;
-            }
-            QScrollBar::handle:vertical {
-                background: #CBD5E1; border-radius: 3px; min-height: 30px;
-            }
-            QScrollBar::handle:vertical:hover { background: #94A3B8; }
+            QScrollBar:vertical { background: transparent; width: 6px; margin: 0; }
+            QScrollBar::handle:vertical { background: #D5D5DB; border-radius: 3px; min-height: 30px; }
+            QScrollBar::handle:vertical:hover { background: #A0A0AA; }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
         """)
-        
+
         self.container = QWidget()
         self.container.setStyleSheet("background: transparent;")
         self.cards_layout = QVBoxLayout(self.container)
         self.cards_layout.setContentsMargins(0, 0, 4, 0)
-        self.cards_layout.setSpacing(10)
-        
-        if not self.notifications:
-            empty_frame = QFrame()
-            empty_frame.setStyleSheet("background: #FFFFFF; border: 1px dashed #CBD5E1; border-radius: 12px; padding: 36px;")
-            e_lay = QVBoxLayout(empty_frame)
-            e_lay.setAlignment(Qt.AlignCenter)
-            
-            e_txt = QLabel("Henüz okunmamış bildirim bulunmuyor.")
-            e_txt.setFont(QFont(FONT_FAMILY, 11))
-            e_txt.setStyleSheet("color: #64748B; font-weight: 500;")
-            e_txt.setAlignment(Qt.AlignCenter)
-            e_lay.addWidget(e_txt)
-            
-            self.cards_layout.addWidget(empty_frame)
-        else:
-            for item in self.notifications:
-                card = QFrame()
-                card.setStyleSheet("QFrame { background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; padding: 14px; }")
-                c_lay = QVBoxLayout(card)
-                c_lay.setSpacing(6)
-                
-                top_row = QHBoxLayout()
-                t_lbl = QLabel(item.get("title", "Bildirim"))
-                t_lbl.setFont(QFont(FONT_FAMILY, 10.5, QFont.Bold))
-                t_lbl.setStyleSheet("color: #0F172A; border: none;")
-                top_row.addWidget(t_lbl)
-                top_row.addStretch(1)
-                
-                tag_txt = item.get("tag", "Bilgi")
-                tag_color = item.get("tag_color", "#0071E3")
-                tag_bg = item.get("tag_bg", "#EFF6FF")
-                tag = QLabel(tag_txt)
-                tag.setFont(QFont(FONT_FAMILY, 8, QFont.Bold))
-                tag.setStyleSheet(f"background: {tag_bg}; color: {tag_color}; padding: 2px 8px; border-radius: 6px; border: none;")
-                top_row.addWidget(tag)
-                c_lay.addLayout(top_row)
-                
-                m_lbl = QLabel(item.get("message", ""))
-                m_lbl.setFont(QFont(FONT_FAMILY, 9))
-                m_lbl.setStyleSheet("color: #64748B; border: none; line-height: 1.3;")
-                m_lbl.setWordWrap(True)
-                c_lay.addWidget(m_lbl)
-                
-                time_lbl = QLabel(item.get("time", ""))
-                time_lbl.setFont(QFont(FONT_FAMILY, 8))
-                time_lbl.setStyleSheet("color: #94A3B8; border: none;")
-                c_lay.addWidget(time_lbl)
-                
-                self.cards_layout.addWidget(card)
-            
-        self.cards_layout.addStretch(1)
+        self.cards_layout.setSpacing(0)
+
         scroll.setWidget(self.container)
-        layout.addWidget(scroll, 1)
-        
-        # Bottom Buttons
-        b_lay = QHBoxLayout()
-        
-        if self.notifications:
-            btn_clear = QPushButton("Tümünü Temizle")
-            btn_clear.setFont(QFont(FONT_FAMILY, 9, QFont.DemiBold))
-            btn_clear.setFixedHeight(34)
-            btn_clear.setCursor(Qt.PointingHandCursor)
-            btn_clear.setStyleSheet("""
-                QPushButton {
-                    background: #F1F5F9; color: #64748B; border: 1px solid #CBD5E1;
-                    border-radius: 17px; padding: 0 18px; font-weight: 500;
-                }
-                QPushButton:hover { background: #E2E8F0; color: #0F172A; }
-            """)
-            btn_clear.clicked.connect(self._clear_notifications)
-            b_lay.addWidget(btn_clear)
-        
-        b_lay.addStretch(1)
-        
-        btn_close = QPushButton("Kapat")
-        btn_close.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
-        btn_close.setFixedHeight(34)
-        btn_close.setCursor(Qt.PointingHandCursor)
-        btn_close.setStyleSheet("""
-            QPushButton {
-                background: #0071E3; color: #FFFFFF; border: none;
-                border-radius: 17px; padding: 0 24px; font-weight: 600;
-            }
-            QPushButton:hover { background: #0062C4; }
-        """)
-        btn_close.clicked.connect(self.accept)
-        b_lay.addWidget(btn_close)
-        
-        layout.addLayout(b_lay)
+        self.stack.addWidget(scroll)
+
+        lay.addWidget(self.stack, 1)
+
+        # ── Footer Separator & Row ───────────────────────────────────
+        lay.addWidget(bk_ui.hairline())
+
+        footer_row = QHBoxLayout()
+        footer_row.setContentsMargins(0, 2, 0, 0)
+        footer_row.setSpacing(10)
+
+        self.footer_count_lbl = QLabel("")
+        self.footer_count_lbl.setFont(bk_ui.font(8.6))
+        self.footer_count_lbl.setStyleSheet(f"color: {bk_ui.INK_SOFT}; background: transparent; border: none;")
+        footer_row.addWidget(self.footer_count_lbl, 0, Qt.AlignVCenter)
+        footer_row.addStretch(1)
+
+        self.btn_cancel = bk_ui.secondary_button("Tümünü Temizle", height=32)
+        self.btn_cancel.setFont(bk_ui.font(8.8, QFont.Medium))
+        self.btn_cancel.clicked.connect(self._clear_notifications)
+        footer_row.addWidget(self.btn_cancel)
+
+        self.btn_confirm = bk_ui.primary_button("Kapat", height=32)
+        self.btn_confirm.setFont(bk_ui.font(8.8, QFont.DemiBold))
+        self.btn_confirm.clicked.connect(self.accept)
+        footer_row.addWidget(self.btn_confirm)
+
+        lay.addLayout(footer_row)
+
+    def _render_state(self):
+        while self.cards_layout.count():
+            item = self.cards_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        if not self.notifications:
+            self.stack.setCurrentIndex(0)
+            self.btn_cancel.hide()
+            self.footer_count_lbl.setText("● Bildirim bulunmuyor")
+        else:
+            self.stack.setCurrentIndex(1)
+            for i, item in enumerate(self.notifications):
+                self.cards_layout.addWidget(
+                    self._row(item, last=(i == len(self.notifications) - 1)))
+            self.cards_layout.addStretch(1)
+            self.btn_cancel.show()
+            self.footer_count_lbl.setText(f"● {len(self.notifications)} Bildirim")
+
+    def _clear_notifications(self):
+        save_notifications([])
+        self.notifications = []
+        self._render_state()
+
+    def _row(self, item, last=False):
+        w = QFrame()
+        w.setStyleSheet(
+            "QFrame { background: transparent; border: none; "
+            + ("" if last else f"border-bottom: 1px solid {bk_ui.HAIRLINE};") + " }")
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(2, 10, 2, 10)
+        lay.setSpacing(12)
+
+        dot = QLabel()
+        dot.setFixedSize(10, 10)
+        colour = item.get("tag_color") or bk_ui.BRAND
+        dot.setStyleSheet(f"background: {colour}; border: none; border-radius: 5px;")
+        dot.setToolTip(item.get("tag", "Bilgi"))
+        lay.addWidget(dot, 0, Qt.AlignTop)
+
+        col = QVBoxLayout()
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(3)
+
+        head = QHBoxLayout()
+        head.setSpacing(8)
+        t = QLabel(item.get("title", "Bildirim"))
+        t.setFont(bk_ui.font(9.6, QFont.DemiBold))
+        t.setStyleSheet(f"color: {bk_ui.INK}; border: none; background: transparent;")
+        head.addWidget(t)
+        head.addStretch(1)
+        when = QLabel(item.get("time", ""))
+        when.setFont(bk_ui.font(8.4))
+        when.setStyleSheet(f"color: {bk_ui.INK_FAINT}; border: none; background: transparent;")
+        head.addWidget(when)
+        col.addLayout(head)
+
+        m = QLabel(item.get("message", ""))
+        m.setFont(bk_ui.font(9.0))
+        m.setWordWrap(True)
+        m.setStyleSheet(f"color: {bk_ui.INK_SOFT}; border: none; background: transparent;")
+        col.addWidget(m)
+
+        lay.addLayout(col, 1)
+        return w
 

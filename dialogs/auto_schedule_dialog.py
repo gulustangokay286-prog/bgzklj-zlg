@@ -647,7 +647,7 @@ class AutoScheduleDialog(QDialog):
         lbl_title = QLabel("Otomatik Ders Programı")
         lbl_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1D1D1F; letter-spacing: -0.3px;")
         
-        lbl_sub = QLabel("BGZ Yapay Zeka Optimizasyon Motoru")
+        lbl_sub = QLabel("Chenkron Yapay Zeka Optimizasyon Motoru")
         lbl_sub.setStyleSheet("color: #86868B; font-size: 11.5px;")
         
         title_col.addWidget(lbl_title)
@@ -709,7 +709,7 @@ class AutoScheduleDialog(QDialog):
         self.cb_complexity = AppleComboBox()
         self.cb_complexity.setFixedHeight(34)
         self.cb_complexity.addItems([
-            "BGZ Optimizasyon Motoru (Yüksek Performans & Akıllı Çözücü — Önerilen)",
+            "Chenkron Optimizasyon Motoru (Yüksek Performans & Akıllı Çözücü — Önerilen)",
             "Hızlı Sezgisel Arama (Fast Heuristic)",
             "Katı Kural Kısıt Çözücü (Strict CSP)"
         ])
@@ -918,7 +918,7 @@ class AutoScheduleDialog(QDialog):
         self.lbl_pct.setText("0%")
         self.btn_start.setEnabled(False)
         self.btn_cancel.setText("Durdur ve Kaydet")
-        self.lbl_info.setText("BGZ Yapay Zeka Motoru çalışıyor (Canlı kısıt optimizasyonu)...")
+        self.lbl_info.setText("Chenkron Yapay Zeka Motoru çalışıyor (Canlı kısıt optimizasyonu)...")
         self.lbl_info.setStyleSheet("color: #0071E3; font-weight: 500;")
         
         self.icon_3d.start_pulse()

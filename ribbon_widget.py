@@ -925,6 +925,11 @@ class RibbonButton(QToolButton):
             QToolButton:pressed {
                 background: #B8D4F0;
             }
+            QToolButton:disabled {
+                background: transparent;
+                border: 1px solid transparent;
+                color: #A0AEC0;
+            }
         """)
         if callback:
             self.clicked.connect(callback)
@@ -1065,7 +1070,7 @@ class RibbonWidget(QWidget):
         # ── Tab bar ──
         self._tab_bar = QWidget(self)
         self._tab_bar.setFixedHeight(34)
-        self._tab_bar.setStyleSheet(f"background: #F8FAFC; border-bottom: 1px solid {RIBBON_BORDER};")
+        self._tab_bar.setStyleSheet(f"background: #FFFFFF; border-bottom: 1px solid {RIBBON_BORDER};")
         self._tab_layout = QHBoxLayout(self._tab_bar)
         self._tab_layout.setContentsMargins(8, 3, 8, 0)
         self._tab_layout.setSpacing(4)

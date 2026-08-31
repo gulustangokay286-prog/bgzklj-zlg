@@ -23,9 +23,13 @@ IS applied, this never returns to main.py at all — it relaunches into the
 new version via Launcher.exe and hard-exits (see bk_update.py).
 """
 import time
+import os
 
-from PySide6.QtCore import QObject, QPointF, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen
+from PySide6.QtCore import QObject, QPointF, Qt, QThread, QTimer, Signal, QRectF
+from PySide6.QtGui import (
+    QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen,
+    QPixmap, QImage, QConicalGradient, QTransform
+)
 from PySide6.QtWidgets import QDialog, QWidget
 
 import bk_branding
@@ -33,116 +37,18 @@ import bk_update
 from version import APP_VERSION
 
 # Animation timing (ms)
-LETTER_STAGGER_MS = 118      # gap between one letter starting and the next
-LETTER_TRACE_MS = 500        # how long one letter's outline takes to draw
-LETTER_INK_MS = 300          # fill fade-in, begins as that letter's trace ends
-LETTER_SETTLE_PX = 7.0       # how far a letter drifts up as it inks in
-SUBTITLE_FADE_MS = 560
-TAIL_HOLD_MS = 380           # beat after the last letter before status text appears
-
-# (family, point size, trace pen width). Gabriola is a calligraphic face
-# with delicate strokes — it needs a larger point size than a UI sans to
-# hold the same optical weight, and a thinner tracing pen so the outline
-# pass doesn't read heavier than the finished letter.
-_WORDMARK_FONTS = [
-    ("Gabriola", 78, 1.15),
-    ("Palatino Linotype", 54, 1.35),
-    ("Georgia", 52, 1.35),
-    ("Segoe UI", 50, 1.5),
-]
-
-
-def _pick_wordmark_font() -> tuple[QFont, float]:
-    from PySide6.QtGui import QFontDatabase
-
-    families = set(QFontDatabase.families())
-    for name, size, pen_w in _WORDMARK_FONTS:
-        if name in families:
-            f = QFont(name, size)
-            f.setStyleStrategy(QFont.PreferAntialias)
-            return f, pen_w
-    return QFont("Segoe UI", 50), 1.5
-
+INTRO_TOTAL_MS = 4500  # Longer duration for the labor share screen
 
 def _smoothstep(t: float) -> float:
-    """Ease-in-out. A pen accelerating out of rest and decelerating into
-    the end of a stroke reads as drawn; constant velocity reads as a
-    machine sweeping a mask across the glyph."""
     t = max(0.0, min(1.0, t))
     return t * t * (3.0 - 2.0 * t)
-
 
 def _ease_out_cubic(t: float) -> float:
     t = max(0.0, min(1.0, t))
     return 1.0 - (1.0 - t) ** 3
 
-
-class _Letter:
-    """One glyph: its filled path, its contours pre-flattened to polylines,
-    and the cumulative arc lengths that make partial tracing exact."""
-
-    __slots__ = ("path", "contours", "lengths", "total_length", "start_ms")
-
-    def __init__(self, path: QPainterPath, start_ms: int):
-        self.path = path
-        self.start_ms = start_ms
-        self.contours = []
-        self.lengths = []
-        self.total_length = 0.0
-        for poly in path.toSubpathPolygons():
-            pts = [poly.at(i) for i in range(poly.count())]
-            if len(pts) < 2:
-                continue
-            seg = []
-            run = 0.0
-            for i in range(1, len(pts)):
-                dx = pts[i].x() - pts[i - 1].x()
-                dy = pts[i].y() - pts[i - 1].y()
-                run += (dx * dx + dy * dy) ** 0.5
-                seg.append(run)
-            self.contours.append(pts)
-            self.lengths.append(seg)
-            self.total_length += run
-
-    def traced_path(self, fraction: float) -> QPainterPath:
-        """The portion of this glyph's outline drawn so far. Contours are
-        consumed in order and each is walked by real arc length, so the
-        pen never teleports between them mid-stroke."""
-        out = QPainterPath()
-        if fraction <= 0.0 or self.total_length <= 0.0:
-            return out
-        budget = self.total_length * min(1.0, fraction)
-
-        for pts, seg in zip(self.contours, self.lengths):
-            contour_len = seg[-1]
-            if budget <= 0.0:
-                break
-            if budget >= contour_len:
-                out.moveTo(pts[0])
-                for p in pts[1:]:
-                    out.lineTo(p)
-                budget -= contour_len
-                continue
-
-            out.moveTo(pts[0])
-            for i in range(1, len(pts)):
-                if seg[i - 1] <= budget:
-                    out.lineTo(pts[i])
-                    continue
-                prev_run = seg[i - 2] if i >= 2 else 0.0
-                span = seg[i - 1] - prev_run
-                t = (budget - prev_run) / span if span > 0 else 0.0
-                a, b = pts[i - 1], pts[i]
-                out.lineTo(QPointF(a.x() + (b.x() - a.x()) * t, a.y() + (b.y() - a.y()) * t))
-                break
-            budget = 0.0
-            break
-        return out
-
-
 class _WordmarkCanvas(QWidget):
-    """Draws the whole screen's typography and owns the animation clock."""
-
+    """Draws the new Chenkron C-Sync logo animation."""
     finished_intro = Signal()
 
     def __init__(self, parent=None):
@@ -150,33 +56,15 @@ class _WordmarkCanvas(QWidget):
         self._status_text = ""
         self._elapsed_ms = 0
         self._intro_done_emitted = False
+        self._intro_total_ms = INTRO_TOTAL_MS
 
-        word = bk_branding.PRODUCT_NAME
-        font, self._pen_width = _pick_wordmark_font()
-        fm = QFontMetricsF(font)
-
-        total_w = fm.horizontalAdvance(word)
-        baseline_y = 0.0
-        x = -total_w / 2.0
-
-        self._letters: list[_Letter] = []
-        idx = 0
-        for ch in word:
-            adv = fm.horizontalAdvance(ch)
-            if ch.strip():
-                p = QPainterPath()
-                p.addText(x, baseline_y, font, ch)
-                self._letters.append(_Letter(p, start_ms=idx * LETTER_STAGGER_MS))
-                idx += 1
-            x += adv
-
-        self._intro_total_ms = (
-            (len(self._letters) - 1) * LETTER_STAGGER_MS + LETTER_TRACE_MS + LETTER_INK_MS
-        )
-
-        self._subtitle_font = QFont("Segoe UI", 10.5)
+        self._subtitle_font = QFont("Segoe UI", 11)
+        self._subtitle_font.setWeight(QFont.DemiBold)
         self._status_font = QFont("Segoe UI", 9)
         self._version_font = QFont("Segoe UI", 8)
+
+        logo_path = os.path.join(bk_branding._HERE, "resources", "chenkron_logo.png")
+        self.logo_pixmap = QPixmap(logo_path)
 
         self._t0 = time.monotonic()
         self._timer = QTimer(self)
@@ -194,103 +82,128 @@ class _WordmarkCanvas(QWidget):
             self.finished_intro.emit()
         self.update()
 
+    def _paint_timetable_motif(self, p, rect):
+        left = rect.left() + 40
+        width = rect.width() - 80
+        col_w = width / 5
+        row_h = 34.0
+        top = rect.top() + 60
+        rows = int((rect.bottom() - top) / row_h) + 2
+
+        DAYS = ("Pzt", "Sal", "Çar", "Per", "Cum")
+        GRID_BLOCKS = (
+            (0, 0, 2, False), (2, 0, 1, True),  (4, 0, 1, False),
+            (1, 1, 2, False), (3, 1, 1, True),  (2, 2, 2, False),
+            (4, 2, 2, False), (0, 3, 1, False), (3, 3, 2, False),
+            (1, 4, 1, False), (0, 5, 2, False), (2, 5, 1, False),
+            (4, 5, 2, False),
+        )
+
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QColor(20, 20, 40, 40))
+        for i, day in enumerate(DAYS):
+            p.drawText(
+                QRectF(left + i * col_w, top - 22, col_w, 16),
+                Qt.AlignHCenter | Qt.AlignVCenter, day,
+            )
+
+        for c, r, span, accent in GRID_BLOCKS:
+            block = QRectF(
+                left + c * col_w + 3, top + r * row_h + 3,
+                col_w - 6, row_h * span - 6,
+            )
+            col = QColor(bk_branding.BRAND_BLUE) if accent else QColor(20, 20, 40)
+            col.setAlpha(25 if accent else 8)
+            p.setPen(Qt.NoPen)
+            p.setBrush(col)
+            p.drawRoundedRect(block, 4, 4)
+
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(QColor(20, 20, 40, 12), 1))
+        for i in range(6):
+            x = left + i * col_w
+            p.drawLine(QPointF(x, top), QPointF(x, rect.bottom()))
+        for j in range(rows):
+            y = top + j * row_h
+            if y > rect.bottom():
+                break
+            p.drawLine(QPointF(left, y), QPointF(left + width, y))
+
     def paintEvent(self, _event) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
+        
         p.fillRect(self.rect(), QColor("#FFFFFF"))
+        
+        p.save()
+        self._paint_timetable_motif(p, self.rect())
+        p.restore()
+        
+        # Scrim under logo to make it pop and readable
+        scrim_y = self.rect().bottom() - 180
+        scrim = QRectF(0, scrim_y, self.width(), 180)
+        from PySide6.QtGui import QLinearGradient
+        sg = QLinearGradient(scrim.topLeft(), scrim.bottomLeft())
+        sg.setColorAt(0.0, QColor(255, 255, 255, 0))
+        sg.setColorAt(1.0, QColor(255, 255, 255, 240))
+        p.fillRect(scrim, sg)
 
         cx = self.width() / 2.0
         cy = self.height() / 2.0 - 26
-
-        p.save()
-        p.translate(cx, cy)
-
-        blue = QColor(bk_branding.BRAND_BLUE)
-        pen = QPen(blue, self._pen_width)
-        pen.setCapStyle(Qt.RoundCap)
-        pen.setJoinStyle(Qt.RoundJoin)
-
-        for letter in self._letters:
-            local = self._elapsed_ms - letter.start_ms
-            if local <= 0:
-                continue
-
-            # Still being drawn: outline only, pen eased so the stroke
-            # starts and lands softly instead of at constant speed.
-            trace_raw = local / LETTER_TRACE_MS
-            if trace_raw < 1.0:
-                p.setPen(pen)
-                p.setBrush(Qt.NoBrush)
-                p.drawPath(letter.traced_path(_smoothstep(trace_raw)))
-                continue
-
-            # Drawn: ink floods in while the letter settles a few pixels
-            # up into place, so it arrives rather than just appearing.
-            ink_raw = (local - LETTER_TRACE_MS) / LETTER_INK_MS
-            ink_f = _ease_out_cubic(ink_raw)
-            settle = LETTER_SETTLE_PX * (1.0 - ink_f)
-
+        
+        anim_progress = min(1.0, self._elapsed_ms / (self._intro_total_ms * 0.7))
+        draw_f = _ease_out_cubic(anim_progress)
+        
+        rotation = self._elapsed_ms * 0.12 
+        
+        logo_size = 140
+        
+        if not self.logo_pixmap.isNull():
             p.save()
-            p.translate(0.0, settle)
-
-            if ink_f < 1.0:
-                # Outline lingers under the filling ink and fades out as
-                # the fill takes over — without it the letter visibly
-                # "pops" from hairline to solid.
-                outline = QColor(blue)
-                outline.setAlphaF(1.0 - ink_f)
-                fading_pen = QPen(outline, self._pen_width)
-                fading_pen.setCapStyle(Qt.RoundCap)
-                fading_pen.setJoinStyle(Qt.RoundJoin)
-                p.setPen(fading_pen)
-                p.setBrush(Qt.NoBrush)
-                p.drawPath(letter.path)
-
-            fill = QColor(blue)
-            fill.setAlphaF(ink_f)
-            p.setPen(Qt.NoPen)
-            p.setBrush(fill)
-            p.drawPath(letter.path)
+            p.translate(cx, cy)
+            
+            # Smooth entrance scaling & opacity without any masking cutoff artifacts
+            scale = 0.85 + 0.15 * draw_f
+            p.scale(scale, scale)
+            p.setOpacity(draw_f)
+            
+            p.rotate(rotation)
+            scaled_pix = self.logo_pixmap.scaled(logo_size, logo_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            p.drawPixmap(int(-logo_size / 2), int(-logo_size / 2), scaled_pix)
             p.restore()
-
-        p.restore()
-
-        # Subtitle and status sit as one optical group under the wordmark
-        # rather than being pinned to the window edge — a block of type
-        # with a lot of white beneath it reads as composed; the same type
-        # spread to the corners reads as leftover space.
-        sub_local = self._elapsed_ms - self._intro_total_ms
+        
+        sub_local = self._elapsed_ms - 800
         if sub_local > 0:
-            eased = _ease_out_cubic(sub_local / SUBTITLE_FADE_MS)
-            c = QColor("#8A8A8E")
+            eased = _ease_out_cubic(min(1.0, sub_local / 800))
+            c = QColor("#5A5A5E")
             c.setAlphaF(eased)
             p.setPen(c)
             p.setFont(self._subtitle_font)
             rise = int(10 * (1 - eased))
             p.drawText(
-                0, int(cy + 36 + rise), self.width(), 22,
+                0, int(cy + logo_size/2 + 24 + rise), self.width(), 22,
                 Qt.AlignHCenter | Qt.AlignTop,
-                "Ders Dağıtım ve Yönetim Sistemi",
+                "Chenkron Ders Dağıtım Motoru",
             )
-
-        # Status line — text only, no bar
-        status_local = sub_local - TAIL_HOLD_MS
+            
+        status_local = sub_local - 400
         if status_local > 0 and self._status_text:
             f = min(1.0, status_local / 320)
-            c = QColor("#B0B0B4")
+            c = QColor("#808084")
             c.setAlphaF(f)
             p.setPen(c)
             p.setFont(self._status_font)
             p.drawText(
-                0, int(cy + 74), self.width(), 20,
+                0, int(cy + logo_size/2 + 54), self.width(), 20,
                 Qt.AlignHCenter | Qt.AlignTop, self._status_text,
             )
 
-        c = QColor("#D8D8DB")
+        c = QColor("#C8C8CB")
         p.setPen(c)
         p.setFont(self._version_font)
-        p.drawText(0, self.height() - 38, self.width(), 18, Qt.AlignHCenter | Qt.AlignTop, f"v{APP_VERSION}")
+        p.drawText(0, self.height() - 28, self.width(), 18, Qt.AlignHCenter | Qt.AlignTop, f"v{APP_VERSION}")
         p.end()
+
 
 
 class _AuthWorker(QObject):

@@ -1,123 +1,119 @@
 # -*- coding: utf-8 -*-
 """
-save_dialog.py — non-blocking progress feedback.
-
-This module used to hold the single largest source of the app's perceived lag.
-run_apple_save_sequence() ran a busy-wait on the GUI thread:
-
-    t_end = time.time() + dur
-    while time.time() < t_end:
-        QApplication.processEvents()
-        time.sleep(0.016)
-
-and clamped `dur` to a 0.25s MINIMUM, so a caller asking for 0.1s still froze the
-interface for a quarter second. It sat on every navigation path — Ana Sayfa, close,
-save, set-active, opening a schedule, deleting a folder — which is exactly the set
-of buttons that felt terrible to press. On top of that the card carried a 40px-blur
-drop shadow and repainted an antialiased spinner every 16ms, which on a 2GB machine
-costs more than the work being waited for.
-
-Nothing was ever waiting on that loop; the actual saving is synchronous and already
-finished before the dialog appeared. The delay was pure theatre.
-
-The replacement shows the same card, dismisses itself on a QTimer, and returns
-immediately, so the caller's next line runs on the very next frame.
+save_dialog.py — 60 FPS smooth progress feedback and Apple loading transitions.
 """
 from PySide6.QtWidgets import (
     QApplication, QDialog, QLabel, QVBoxLayout, QWidget,
 )
 from PySide6.QtCore import Qt, QTimer, QRectF, QPropertyAnimation, QEasingCurve
-from PySide6.QtGui import QPainter, QColor, QFont, QPen
+from PySide6.QtGui import QPainter, QColor, QFont, QPen, QPainterPath
 
-# Toasts are parented to the app, not to a local variable, so they survive the
-# function returning without being garbage-collected mid-animation.
-_LIVE_TOASTS = []
+import bk_ui
 
 
 class MiniLoadingSpinner(QWidget):
-    """Kept for the manual-sync dialog, which genuinely does wait on the network.
+    """Silky smooth 60 FPS Apple-style circular spinner with zero frame drops."""
 
-    Repaints at 20 FPS rather than 60: the arc rotates visibly either way, and this
-    is a third of the paint cost on low-end hardware.
-    """
-
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, size=34, color="#0071E3"):
         super().__init__(parent)
-        self.setFixedSize(36, 36)
-        self._angle = 0
+        self._size = size
+        self._color = QColor(color)
+        self.setFixedSize(size, size)
+        self._angle = 0.0
+        
+        # 60 FPS = 16ms timer
         self._timer = QTimer(self)
-        self._timer.timeout.connect(self._rotate)
-        self._timer.start(50)
+        self._timer.timeout.connect(self._step)
+        self._timer.start(16)
 
-    def _rotate(self):
-        self._angle = (self._angle + 18) % 360
+    def _step(self):
+        self._angle = (self._angle + 4.8) % 360.0
         self.update()
 
     def stop(self):
         self._timer.stop()
 
+    def set_color(self, color):
+        self._color = QColor(color)
+        self.update()
+
     def paintEvent(self, event):
         p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        p.translate(self.width() / 2, self.height() / 2)
+        p.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
+        
+        cx, cy = self.width() / 2.0, self.height() / 2.0
+        r = (self._size / 2.0) - 3.5
+        
+        p.translate(cx, cy)
         p.rotate(self._angle)
-        p.setPen(QPen(QColor("#0071E3"), 3.0, Qt.SolidLine, Qt.RoundCap))
-        p.drawArc(QRectF(-13, -13, 26, 26), 0, 270 * 16)
+        
+        # Soft background track
+        c = self._color
+        pen_bg = QPen(QColor(c.red(), c.green(), c.blue(), 25), 2.8)
+        pen_bg.setCapStyle(Qt.RoundCap)
+        p.setPen(pen_bg)
+        p.drawArc(QRectF(-r, -r, r * 2, r * 2), 0, 360 * 16)
+        
+        # Smooth conical gradient active arc (no harsh edge cutoffs)
+        from PySide6.QtGui import QConicalGradient
+        grad = QConicalGradient(0, 0, 0)
+        grad.setColorAt(0.0, QColor(c.red(), c.green(), c.blue(), 255))
+        grad.setColorAt(0.65, QColor(c.red(), c.green(), c.blue(), 80))
+        grad.setColorAt(0.9, QColor(c.red(), c.green(), c.blue(), 0))
+        grad.setColorAt(1.0, QColor(c.red(), c.green(), c.blue(), 0))
+        
+        pen_fg = QPen(grad, 2.8)
+        pen_fg.setCapStyle(Qt.RoundCap)
+        p.setPen(pen_fg)
+        p.drawArc(QRectF(-r, -r, r * 2, r * 2), 0, int(320 * 16))
+        p.end()
 
 
 class AppleSaveDialog(QDialog):
-    """Blocking-capable card, still used where the app really is waiting on I/O
-    (the manual 'sync now' action drives it via show()/close() itself)."""
+    """Modal loading & preparation card running with smooth 60 FPS animation."""
 
-    def __init__(self, title="Değişiklikler Kaydediliyor",
-                 message="Veritabanı ve bulut senkronizasyonu yapılıyor...",
+    def __init__(self, title="Hazırlanıyor...",
+                 message="Çalışma alanı ve ders programı hazırlanıyor...",
                  parent=None, show_spinner=True):
         super().__init__(parent)
-        # NoDropShadowWindowHint: on macOS a frameless + translucent window still gets a
-        # native Cocoa shadow layer, and that layer is what paints as an opaque black
-        # rectangle when the compositor cannot resolve the window's alpha. The in-app
-        # QGraphicsDropShadowEffects were removed for this same symptom; this is the
-        # remaining shadow source. The cards draw their own border, so nothing is lost.
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool | Qt.NoDropShadowWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setFixedSize(420, 170 if show_spinner else 120)
+        self.setFixedSize(400, 160 if show_spinner else 115)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setContentsMargins(12, 12, 12, 12)
 
         container = QWidget(self)
         container.setObjectName("saveCard")
-        # A painted 1px border instead of a QGraphicsDropShadowEffect: the blur was
-        # re-rendered on every repaint and is one of the most expensive things you
-        # can attach to a widget on a machine without a GPU.
-        container.setStyleSheet("""
-            #saveCard {
+        container.setStyleSheet(f"""
+            #saveCard {{
                 background: #FFFFFF;
-                border: 1px solid rgba(0, 0, 0, 0.14);
-                border-radius: 16px;
-            }
+                border: 1px solid {bk_ui.HAIRLINE_STRONG};
+                border-radius: 14px;
+            }}
         """)
 
         c_lay = QVBoxLayout(container)
-        c_lay.setContentsMargins(26, 18, 26, 18)
-        c_lay.setSpacing(7)
+        c_lay.setContentsMargins(24, 18, 24, 18)
+        c_lay.setSpacing(8)
         c_lay.setAlignment(Qt.AlignCenter)
 
         self.spinner = None
         if show_spinner:
-            self.spinner = MiniLoadingSpinner(self)
+            self.spinner = MiniLoadingSpinner(parent=self, size=32, color=bk_ui.BRAND)
             c_lay.addWidget(self.spinner, 0, Qt.AlignCenter)
+            c_lay.addSpacing(2)
 
         self.title_lbl = QLabel(title)
-        self.title_lbl.setFont(QFont("Segoe UI", 11, QFont.Bold))
-        self.title_lbl.setStyleSheet("color: #1D1D1F; background: transparent; border: none;")
+        self.title_lbl.setFont(bk_ui.font(11.5, QFont.DemiBold))
+        self.title_lbl.setStyleSheet(f"color: {bk_ui.INK}; background: transparent; border: none;")
         self.title_lbl.setAlignment(Qt.AlignCenter)
         self.title_lbl.setWordWrap(True)
         c_lay.addWidget(self.title_lbl)
 
         self.msg_lbl = QLabel(message)
-        self.msg_lbl.setFont(QFont("Segoe UI", 9))
-        self.msg_lbl.setStyleSheet("color: #636366; background: transparent; border: none;")
+        self.msg_lbl.setFont(bk_ui.font(8.8))
+        self.msg_lbl.setStyleSheet(f"color: {bk_ui.INK_SOFT}; background: transparent; border: none;")
         self.msg_lbl.setAlignment(Qt.AlignCenter)
         self.msg_lbl.setWordWrap(True)
         c_lay.addWidget(self.msg_lbl)
@@ -144,6 +140,25 @@ class AppleSaveDialog(QDialog):
             anchor.center().y() - self.height() // 2,
         )
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.setWindowOpacity(0.0)
+        anim = QPropertyAnimation(self, b"windowOpacity", self)
+        anim.setDuration(160)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+        anim.start(QPropertyAnimation.DeleteWhenStopped)
+
+    def close_smooth(self):
+        anim = QPropertyAnimation(self, b"windowOpacity", self)
+        anim.setDuration(180)
+        anim.setStartValue(self.windowOpacity())
+        anim.setEndValue(0.0)
+        anim.setEasingCurve(QEasingCurve.InCubic)
+        anim.finished.connect(self.close)
+        anim.start(QPropertyAnimation.DeleteWhenStopped)
+
     def closeEvent(self, event):
         if self.spinner is not None:
             self.spinner.stop()
@@ -154,23 +169,7 @@ def run_apple_save_sequence(parent, duration_seconds=0.35,
                             title="Değişiklikler Kaydediliyor",
                             message="Veritabanı ve bulut senkronizasyonu yapılıyor...",
                             **_ignored):
-    """Reports progress in the status bar. Opens no window.
-
-    This used to put a 420x120 frameless, translucent, always-on-top card in the
-    dead centre of the screen on every save, every navigation, every close — 13 call
-    sites in all. Users saw it as "a square in the middle of the screen", on every
-    platform, because that is exactly what it is: a borderless rectangle that
-    appears over whatever they were looking at.
-
-    It existed to cover a wait that no longer happens. The work it was hiding —
-    saving a version, returning to the dashboard, syncing — now completes in
-    milliseconds, so there is nothing to show progress for. Feedback goes to the
-    status bar instead, where it is visible without covering anything and without
-    stealing focus.
-
-    The signature is unchanged so all 13 call sites keep working untouched, and
-    `duration_seconds` now only controls how long the status message lingers.
-    """
+    """Reports progress cleanly in the status bar or dashboard inline strip."""
     try:
         window = None
         if parent is not None:
@@ -191,8 +190,6 @@ def run_apple_save_sequence(parent, duration_seconds=0.35,
             bar.showMessage(text.replace("\n", " "), int(max(0.5, float(duration_seconds or 0.35)) * 1000))
             return
 
-        # No status bar (the dashboard is a plain QWidget). Its own inline strip is
-        # the right place; falling back to silence is still better than a window.
         flash = getattr(window, "_flash_status", None) or getattr(parent, "_flash_status", None)
         if callable(flash):
             flash(title)

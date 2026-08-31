@@ -16,6 +16,27 @@ from auto_scheduler import matches_class, format_tr_name
 
 FONT_FAMILY = ".AppleSystemUIFont, SF Pro Text, Helvetica Neue, Segoe UI, sans-serif"
 
+_CELL_FONT = QFont("Segoe UI", 8, QFont.Bold)
+_CELL_BRUSH_CACHE = {}
+_CELL_TEXT_BRUSH_CACHE = {}
+_CLASS_FMT_CACHE = {}
+
+def _fast_cell_brush(color_str: str) -> QBrush:
+    b = _CELL_BRUSH_CACHE.get(color_str)
+    if b is None:
+        b = QBrush(QColor(color_str))
+        _CELL_BRUSH_CACHE[color_str] = b
+    return b
+
+def _fast_text_brush(color_str: str) -> QBrush:
+    tb = _CELL_TEXT_BRUSH_CACHE.get(color_str)
+    if tb is None:
+        c = QColor(color_str)
+        luminance = (0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue())
+        tb = QBrush(Qt.white if luminance < 160 else Qt.black)
+        _CELL_TEXT_BRUSH_CACHE[color_str] = tb
+    return tb
+
 class StickyGhostWidget(QLabel):
     _active_instance = None
     _hovered_table = None
@@ -3466,14 +3487,13 @@ class TimetableGrid(QWidget):
         self.btn_view_teachers.setStyleSheet(active_style if self.current_view_mode == "teachers" else inactive_style)
 
     def _set_view_mode(self, mode: str):
+        if getattr(self, "current_view_mode", None) == mode:
+            return
         self.current_view_mode = mode
         self.btn_view_classes.setChecked(mode == "classes")
         self.btn_view_teachers.setChecked(mode == "teachers")
         self._update_view_btn_styles()
         self.view_mode_changed.emit(mode)
-        win = self.window()
-        if hasattr(win, "_refresh_grid"):
-            win._refresh_grid()
 
     def _unlock_all_lessons(self):
         for (r, c), p_info in self._placed_lessons.items():
@@ -3648,40 +3668,32 @@ class TimetableGrid(QWidget):
             self.table.setVerticalHeaderLabels([f"{i+1}" for i in range(self._periods)])
 
     def set_cell(self, row, col, subject_name, color, teacher_name="", duration=1, class_name="", display_mode="classes", locked=False, is_manual=False, is_combined=False, combined_classes=None):
-        class_name = str(class_name).replace("(ea)", "(EA)").replace("(say)", "(SAY)").replace("(soz)", "(SÖZ)").replace("(dil)", "(DİL)")
-        is_comb_bool = bool(is_combined or ("+" in class_name) or ("," in class_name) or ("&" in class_name) or (combined_classes and len(combined_classes) > 1))
         if display_mode == "teachers":
-            if "," in class_name or "&" in class_name or "+" in class_name:
-                display_text = "+".join([c.strip().split("(")[0].strip() for c in class_name.replace("&", ",").replace("+", ",").split(",") if c.strip()])
-            else:
-                display_text = class_name.strip().split("(")[0].strip()
+            fmt_c = _CLASS_FMT_CACHE.get(class_name)
+            if fmt_c is None:
+                c_clean = str(class_name).replace("(ea)", "(EA)").replace("(say)", "(SAY)").replace("(soz)", "(SÖZ)").replace("(dil)", "(DİL)")
+                if "," in c_clean or "&" in c_clean or "+" in c_clean:
+                    fmt_c = "+".join([c.strip().split("(")[0].strip() for c in c_clean.replace("&", ",").replace("+", ",").split(",") if c.strip()])
+                else:
+                    fmt_c = c_clean.strip().split("(")[0].strip()
+                _CLASS_FMT_CACHE[class_name] = fmt_c
+            display_text = fmt_c
         else:
             display_text = get_subject_abbr(subject_name)
             
-        # Lock emoji is drawn by the delegate paint method, not in text
-            
         item = QTableWidgetItem(display_text)
-            
         item.setTextAlignment(Qt.AlignCenter)
-        item.setBackground(QBrush(QColor(color)))
-        
-        c = QColor(color)
-        luminance = (0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue())
-        text_color = Qt.white if luminance < 160 else Qt.black
-        item.setForeground(QBrush(text_color))
-        
-        font = QFont("Segoe UI", 8, QFont.Bold)
-        item.setFont(font)
+        item.setBackground(_fast_cell_brush(color))
+        item.setForeground(_fast_text_brush(color))
+        item.setFont(_CELL_FONT)
         
         self.table.setItem(row, col, item)
         
-        # Merge columns if duration > 1 (Whole school view spans horizontally)
         if duration > 1:
             self.table.setSpan(row, col, 1, duration)
         elif self.table.rowSpan(row, col) > 1 or self.table.columnSpan(row, col) > 1:
             self.table.setSpan(row, col, 1, 1)
         
-        # Track placed lesson with day/period for lock matching
         periods = self._periods
         day_idx = col // periods if periods > 0 else 0
         period_idx = col % periods if periods > 0 else 0
@@ -3693,7 +3705,7 @@ class TimetableGrid(QWidget):
             "color": color,
             "locked": bool(locked),
             "is_manual": bool(is_manual),
-            "is_combined": is_comb_bool,
+            "is_combined": bool(is_combined),
             "combined_classes": combined_classes or [],
             "day_idx": day_idx, "period": period_idx,
             "origin_row": row, "origin_col": col

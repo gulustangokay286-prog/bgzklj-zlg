@@ -74,15 +74,22 @@ class AppShell(QMainWindow):
         super().__init__()
         self.logo_path = logo_path
         self.auth_data = auth_data
-        self.setWindowTitle("BGZ Ders Planlama — Kurum & Çizelge Yönetimi")
+        self.setWindowTitle("Chenkron — Ders Dağıtım ve Yönetim Sistemi")
         self.setMinimumSize(1100, 700)
         
         if logo_path and os.path.exists(logo_path):
             from PySide6.QtGui import QIcon
             self.setWindowIcon(QIcon(logo_path))
         
+        self.setStyleSheet("QMainWindow { background: #FFFFFF; }")
+        pal = self.palette()
+        pal.setColor(QPalette.Window, QColor(255, 255, 255))
+        pal.setColor(QPalette.Base, QColor(255, 255, 255))
+        self.setPalette(pal)
+        
         # Stacked widget: 0=Dashboard, 1=Editor
         self._stack = QStackedWidget()
+        self._stack.setStyleSheet("background: #FFFFFF;")
         self.setCentralWidget(self._stack)
         
         # Page 0: Home Dashboard
@@ -119,16 +126,19 @@ class AppShell(QMainWindow):
         m = re.match(r"v(\d+)_", version_filename)
         v_label = f"Versiyon {int(m.group(1))}" if m else "Çizelge"
         
-        from save_dialog import run_apple_save_sequence
-        run_apple_save_sequence(
-            self,
-            duration_seconds=0.2,
-            title=f"{v_label} Açılıyor",
-            message=f"{inst_name}\nÇalışma alanı ve ders yerleşimleri yükleniyor..."
+        from save_dialog import AppleSaveDialog
+        dlg = AppleSaveDialog(
+            title="Hazırlanıyor...",
+            message=f"{inst_name} · {v_label}\nÇalışma alanı ve ders programı hazırlanıyor...",
+            parent=self,
+            show_spinner=True
         )
+        dlg.show()
+        QApplication.processEvents()
         
         data = version_store.load_version(slug, version_filename)
         if not data:
+            dlg.close()
             from PySide6.QtWidgets import QMessageBox
             QMessageBox.warning(self, "Hata", f"Versiyon dosyası yüklenemedi:\n{version_filename}")
             return
@@ -160,10 +170,14 @@ class AppShell(QMainWindow):
         
         self._stack.addWidget(self._editor)
         self._stack.setCurrentWidget(self._editor)
+        QApplication.processEvents()
         
         # Auto-set opened version as active and update timestamp
         version_store.set_active_version(slug, version_filename)
         version_store.touch_institution_timestamp(slug)
+        
+        # Smoothly dismiss preparation sheet
+        QTimer.singleShot(800, dlg.close_smooth)
         
         # Update title
         v_num = ""
@@ -171,7 +185,7 @@ class AppShell(QMainWindow):
         m = re.match(r"v(\d+)_", version_filename)
         if m:
             v_num = f"v{int(m.group(1))}"
-        self.setWindowTitle(f"BGZ Ders Planlama — {inst_name} — {v_num}")
+        self.setWindowTitle(f"Chenkron — {inst_name} — {v_num}")
     
     def _open_empty_timetable(self, slug):
         """Create a new version that inherits master data from the current active version (fresh grid)."""
@@ -246,7 +260,7 @@ class AppShell(QMainWindow):
         run_apple_save_sequence(self, duration_seconds=0.1, title="Kaydedildi", message="Anasayfaya dönülüyor...")
         
         self._stack.setCurrentWidget(self._dashboard)
-        self.setWindowTitle("BGZ Ders Planlama — Kurum & Çizelge Yönetimi")
+        self.setWindowTitle("Chenkron — Ders Dağıtım ve Yönetim Sistemi")
         try:
             self._dashboard._refresh_institutions()
             if hasattr(self._dashboard, "_selected_slug") and self._dashboard._selected_slug:
@@ -313,15 +327,15 @@ def main():
     from PySide6.QtCore import Qt
     
     palette = QPalette()
-    palette.setColor(QPalette.Window, QColor(240, 240, 240))
-    palette.setColor(QPalette.WindowText, Qt.black)
-    palette.setColor(QPalette.Base, Qt.white)
-    palette.setColor(QPalette.AlternateBase, QColor(245, 245, 245))
-    palette.setColor(QPalette.ToolTipBase, Qt.white)
-    palette.setColor(QPalette.ToolTipText, Qt.black)
-    palette.setColor(QPalette.Text, Qt.black)
-    palette.setColor(QPalette.Button, QColor(240, 240, 240))
-    palette.setColor(QPalette.ButtonText, Qt.black)
+    palette.setColor(QPalette.Window, QColor(255, 255, 255))
+    palette.setColor(QPalette.WindowText, QColor(15, 23, 42))
+    palette.setColor(QPalette.Base, QColor(255, 255, 255))
+    palette.setColor(QPalette.AlternateBase, QColor(248, 250, 252))
+    palette.setColor(QPalette.ToolTipBase, QColor(255, 255, 255))
+    palette.setColor(QPalette.ToolTipText, QColor(15, 23, 42))
+    palette.setColor(QPalette.Text, QColor(15, 23, 42))
+    palette.setColor(QPalette.Button, QColor(255, 255, 255))
+    palette.setColor(QPalette.ButtonText, QColor(15, 23, 42))
     palette.setColor(QPalette.BrightText, Qt.red)
     palette.setColor(QPalette.Highlight, QColor(bk_branding.BRAND_BLUE))
     palette.setColor(QPalette.HighlightedText, Qt.white)
