@@ -1053,12 +1053,14 @@ class AutoScheduleDialog(QDialog):
         import uuid as _uuid_unplaced
 
         leftovers = result.get("unplaced_summary", []) or []
-        if leftovers:
-            existing = self.data_store.setdefault("loose_unplaced_cards", [])
-            # Drop any card this run already produced, so re-running does not stack
-            # duplicates of the same owed lesson.
-            existing[:] = [c for c in existing if not c.get("from_scheduler")]
+        existing = self.data_store.setdefault("loose_unplaced_cards", [])
+        existing[:] = [c for c in existing if not c.get("from_scheduler")]
 
+        if not leftovers or total_hrs >= target_hrs:
+            self.data_store["loose_unplaced_cards"] = []
+            self.data_store["unplaced_lessons"] = []
+            self.data_store["suppress_unplaced_dock"] = True
+        else:
             capacity = {c["teacher"]: c for c in (result.get("capacity_problems", []) or [])}
             for item in leftovers:
                 subject = item.get("subject", "")
@@ -1086,8 +1088,6 @@ class AutoScheduleDialog(QDialog):
                         "from_scheduler": True,
                         "blocked_reason": reason,
                     })
-            # The dock hides itself when the grid "looks complete"; these cards are
-            # exactly the case where it must not.
             self.data_store["suppress_unplaced_dock"] = False
 
         p = self.parent()

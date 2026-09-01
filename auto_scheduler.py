@@ -1639,10 +1639,7 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                         if (d, p) != locked_block_bindings[bid]: continue
                     if any((d, p) in blocked_by_class.get(cn, set()) for cn in target_cls): continue
                     if tk and not independent_classes:
-                        if (d, p) in teacher_timeoff.get(tk, set()): continue
                         if (d, p) in global_teacher_busy.get(tk, set()): continue
-                    elif tk and independent_classes:
-                        if (d, p) in teacher_timeoff.get(tk, set()): continue
                     if _is_slot_forbidden_by_relations(b, d, p, 1): continue
                     
                     v = model2.NewBoolVar(f"x2_{bid}_1h_{d}_{p}")
@@ -1650,7 +1647,8 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                     for cn in target_cls: occ_class2[cn, d, p].append(v)
                     if tk and not independent_classes: occ_teacher2[tk, d, p].append(v)
                     
-                    pen = 0
+                    pen = p * 2
+                    if tk and (d, p) in teacher_timeoff.get(tk, set()): pen += 25000
                     if any((d, p) in avoid_by_class.get(cn, set()) for cn in target_cls): pen += 5
                     if tk and (d, p) in teacher_avoid.get(tk, set()): pen += 5
                     if tk and (d, p) in cross_inst_map.get(tk, set()): pen += 3000
@@ -1667,10 +1665,7 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                         if (d, p) != locked_block_bindings[bid]: continue
                     if any((d, p + off) in blocked_by_class.get(cn, set()) for cn in target_cls for off in range(2)): continue
                     if tk and not independent_classes:
-                        if any((d, p + off) in teacher_timeoff.get(tk, set()) for off in range(2)): continue
                         if any((d, p + off) in global_teacher_busy.get(tk, set()) for off in range(2)): continue
-                    elif tk and independent_classes:
-                        if any((d, p + off) in teacher_timeoff.get(tk, set()) for off in range(2)): continue
                     if _is_slot_forbidden_by_relations(b, d, p, 2): continue
                     
                     v2 = model2.NewBoolVar(f"x2_{bid}_2h_{d}_{p}")
@@ -1682,7 +1677,8 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                         occ_teacher2[tk, d, p].append(v2)
                         occ_teacher2[tk, d, p + 1].append(v2)
                     
-                    pen = 0
+                    pen = p * 2
+                    if tk and any((d, p + off) in teacher_timeoff.get(tk, set()) for off in range(2)): pen += 25000
                     if any((d, p + off) in avoid_by_class.get(cn, set()) for cn in target_cls for off in range(2)): pen += 5
                     if tk and any((d, p + off) in teacher_avoid.get(tk, set()) for off in range(2)): pen += 5
                     if tk and any((d, p + off) in cross_inst_map.get(tk, set()) for off in range(2)): pen += 3000
@@ -1694,10 +1690,7 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                     for p in range(P):
                         if any((d, p) in blocked_by_class.get(cn, set()) for cn in target_cls): continue
                         if tk and not independent_classes:
-                            if (d, p) in teacher_timeoff.get(tk, set()): continue
                             if (d, p) in global_teacher_busy.get(tk, set()): continue
-                        elif tk and independent_classes:
-                            if (d, p) in teacher_timeoff.get(tk, set()): continue
                         if _is_slot_forbidden_by_relations(b, d, p, 1): continue
                         
                         vh1 = model2.NewBoolVar(f"x2_{bid}_s1_{d}_{p}")
@@ -1711,7 +1704,8 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                             occ_teacher2[tk, d, p].append(vh1)
                             occ_teacher2[tk, d, p].append(vh2)
                         
-                        pen = 0
+                        pen = p * 2
+                        if tk and (d, p) in teacher_timeoff.get(tk, set()): pen += 25000
                         if any((d, p) in avoid_by_class.get(cn, set()) for cn in target_cls): pen += 5
                         if tk and (d, p) in teacher_avoid.get(tk, set()): pen += 5
                         if tk and (d, p) in cross_inst_map.get(tk, set()): pen += 3000
@@ -1737,16 +1731,15 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                     for p in range(P):
                         if any((d, p) in blocked_by_class.get(cn, set()) for cn in target_cls): continue
                         if tk and not independent_classes:
-                            if (d, p) in teacher_timeoff.get(tk, set()): continue
                             if (d, p) in global_teacher_busy.get(tk, set()): continue
-                        elif tk and independent_classes:
-                            if (d, p) in teacher_timeoff.get(tk, set()): continue
                         if _is_slot_forbidden_by_relations(b, d, p, 1): continue
                         vu = model2.NewBoolVar(f"x2_{bid}_u{u_idx}_{d}_{p}")
                         u_list.append((vu, d, p))
                         for cn in target_cls: occ_class2[cn, d, p].append(vu)
                         if tk and not independent_classes: occ_teacher2[tk, d, p].append(vu)
-                        obj2.append(vu * 500000)
+                        pen = p * 2
+                        if tk and (d, p) in teacher_timeoff.get(tk, set()): pen += 25000
+                        obj2.append(vu * (500000 - pen))
                 u_splits.append(u_list)
                 model2.AddAtMostOne([v for v, _, _ in u_list])
             if u_splits:
