@@ -2,6 +2,8 @@
 version_store.py — Kurum, Versiyon, Şifreli Erişim ve Çapraz Çakışma Yönetim Modülü
 Her kurum bir klasör, her oto/manuel kayıt bir .roz versiyon dosyası.
 """
+from __future__ import annotations
+
 import copy
 import os
 import json
