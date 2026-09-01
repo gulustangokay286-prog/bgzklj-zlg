@@ -1282,6 +1282,17 @@ def propagate_primary_timeoff_to_secondary(primary_slug: str, primary_data: dict
 
         changed = False
         sec_kisit = sec_data.setdefault("kisitlamalar", {})
+        sec_settings = sec_data.get("settings", {}) or {}
+        sec_periods = int(sec_settings.get("periods") or sec_settings.get("ders_saati") or 5)
+        sec_days = len(sec_settings.get("days") or []) or 5
+
+        # Calculate assigned load per teacher in secondary institution
+        sec_teacher_load = {}
+        for a in sec_data.get("atamalar", []) or []:
+            if isinstance(a, dict):
+                t_k = normalize_teacher_name(a.get("teacher") or a.get("ogretmen") or "")
+                if t_k:
+                    sec_teacher_load[t_k] = sec_teacher_load.get(t_k, 0) + int(a.get("duration", 1) or 1)
 
         for t in sec_data.get("ogretmenler", []):
             t_name = t.get("ad", "").strip()
@@ -1296,33 +1307,47 @@ def propagate_primary_timeoff_to_secondary(primary_slug: str, primary_data: dict
             if bgz_t and bgz_t.get("timeoff"):
                 bgz_mat = bgz_t.get("timeoff")
             elif t_name in bgz_kisit:
-                bgz_mat = [[bgz_kisit[t_name].get(f"{d},{p}", 2) for p in range(4)] for d in range(5)]
+                bgz_mat = [[bgz_kisit[t_name].get(f"{d},{p}", 2) for p in range(sec_periods)] for d in range(sec_days)]
             else:
-                bgz_mat = [[2, 2, 2, 2] for _ in range(5)]
+                bgz_mat = [[2] * sec_periods for _ in range(sec_days)]
 
             inv_mat = []
             inv_dict = {}
-            for d in range(5):
+            for d in range(sec_days):
                 row = []
-                for p in range(4):
+                for p in range(sec_periods):
                     k = f"{d},{p}"
                     v = bgz_mat[d][p] if d < len(bgz_mat) and p < len(bgz_mat[d]) else 2
                     if (d, p) in bgz_busy.get(tk, set()):
                         inv_v = 0
-                    elif v == 2:
-                        inv_v = 0
                     elif v == 0:
                         inv_v = 2
                     else:
-                        inv_v = 1
+                        inv_v = 0
                     row.append(inv_v)
                     inv_dict[k] = inv_v
                 inv_mat.append(row)
 
-            # Tamamen kapalı olanları tam açık bırak
+            # Ensure teacher has enough open hours for their assigned load in secondary institution
+            req_hours = sec_teacher_load.get(tk, 0)
+            open_count = sum(sum(1 for val in row if val == 2) for row in inv_mat)
+            if open_count < req_hours:
+                # Open slots where teacher is not actively busy at primary institution
+                for d in range(sec_days):
+                    for p in range(sec_periods):
+                        if inv_mat[d][p] == 0 and (d, p) not in bgz_busy.get(tk, set()):
+                            inv_mat[d][p] = 2
+                            inv_dict[f"{d},{p}"] = 2
+                            open_count += 1
+                            if open_count >= req_hours:
+                                break
+                    if open_count >= req_hours:
+                        break
+
+            # If still all closed, default to fully open
             if all(c == 0 for r in inv_mat for c in r):
-                inv_mat = [[2, 2, 2, 2] for _ in range(5)]
-                inv_dict = {f"{d},{p}": 2 for d in range(5) for p in range(4)}
+                inv_mat = [[2] * sec_periods for _ in range(sec_days)]
+                inv_dict = {f"{d},{p}": 2 for d in range(sec_days) for p in range(sec_periods)}
 
             if t.get("timeoff") != inv_mat or sec_kisit.get(t_name) != inv_dict:
                 t["timeoff"] = inv_mat
