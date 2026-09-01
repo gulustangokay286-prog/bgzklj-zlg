@@ -181,7 +181,7 @@ def run():
     check("asıl veri değişmedi",
           json.dumps(a["kisitlamalar"], sort_keys=True) == before)
 
-    print("\n[8) 5 saniyelik sayaç]")
+    print("\n[8) anında devam butonu]")
     from PySide6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication(sys.argv)
     from dialogs.preflight_dialog import PreflightDialog, run_preflight
@@ -191,13 +191,8 @@ def run():
                                        "available": 12, "shortfall": 8}],
               "understaffed_slots": [], "idle_teachers": []}
     dlg = PreflightDialog(report, DAYS, mode="save")
-    check("devam düğmesi başta kilitli", not dlg.btn_go.isEnabled())
-    check("düğmede geri sayım var", "(5)" in dlg.btn_go.text(), dlg.btn_go.text())
-    for _ in range(4):
-        dlg._tick()
-    check("4 saniye sonra hâlâ kilitli", not dlg.btn_go.isEnabled(), dlg.btn_go.text())
-    dlg._tick()
-    check("5. saniyede açıldı", dlg.btn_go.isEnabled(), dlg.btn_go.text())
+    check("devam düğmesi hemen aktif (kullanıcıyı bekletmez)", dlg.btn_go.isEnabled())
+    check("düğmede onay metni var", "Yine de Kaydet" in dlg.btn_go.text() or "Yoksay" in dlg.btn_go.text(), dlg.btn_go.text())
     check("geri dön düğmesi hep açık", dlg.btn_fix.isEnabled())
     dlg.deleteLater()
 

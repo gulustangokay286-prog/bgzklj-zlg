@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 FONT_FAMILY = ".AppleSystemUIFont, SF Pro Text, -apple-system, Segoe UI, sans-serif"
-COUNTDOWN_SECONDS = 5
+COUNTDOWN_SECONDS = 0
 
 
 def _fmt_report(report, days):
@@ -156,10 +156,10 @@ class PreflightDialog(QDialog):
         self.btn_fix.clicked.connect(self.reject)
 
         self._go_text = "Yine de Kaydet" if not is_plan else "Yoksay ve Devam Et"
-        self.btn_go = QPushButton(f"{self._go_text} ({self._seconds})")
-        self.btn_go.setEnabled(False)
+        self.btn_go = QPushButton(self._go_text)
+        self.btn_go.setEnabled(True)
         self.btn_go.setStyleSheet(
-            "background: #E2E8F0; color: #94A3B8; border: 1px solid #CBD5E1;")
+            "background: #B91C1C; color: #FFFFFF; border: 1px solid #991B1B;")
         self.btn_go.clicked.connect(self.accept)
 
         row.addWidget(self.btn_fix)
@@ -167,17 +167,23 @@ class PreflightDialog(QDialog):
         row.addWidget(self.btn_go)
         root.addLayout(row)
 
-        self._timer = QTimer(self)
-        self._timer.setInterval(1000)
-        self._timer.timeout.connect(self._tick)
-        self._timer.start()
+        if self._seconds > 0:
+            self.btn_go.setEnabled(False)
+            self.btn_go.setText(f"{self._go_text} ({self._seconds})")
+            self.btn_go.setStyleSheet(
+                "background: #E2E8F0; color: #94A3B8; border: 1px solid #CBD5E1;")
+            self._timer = QTimer(self)
+            self._timer.setInterval(1000)
+            self._timer.timeout.connect(self._tick)
+            self._timer.start()
 
     def _tick(self):
         self._seconds -= 1
         if self._seconds > 0:
             self.btn_go.setText(f"{self._go_text} ({self._seconds})")
             return
-        self._timer.stop()
+        if hasattr(self, "_timer"):
+            self._timer.stop()
         self.btn_go.setText(self._go_text)
         self.btn_go.setEnabled(True)
         self.btn_go.setStyleSheet(

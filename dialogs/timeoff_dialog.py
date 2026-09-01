@@ -389,22 +389,13 @@ class TimeoffDialog(QDialog):
             base_text += " [Rezerve]"
             bg_color = "#EFF6FF"
             fg_color = "#2563EB"
-        elif is_cross_locked:
-            base_text += " [Kilitli]"
-            if state != 0:
-                bg_color = "#FFEDD5"
-                fg_color = "#C2410C"
 
         item.setText(base_text)
         item.setForeground(QBrush(QColor(fg_color)))
         item.setBackground(QBrush(QColor(bg_color)))
             
     def _on_context_menu(self, pos):
-        """Reserve/release this teacher's hour for the current institution.
-
-        Reserving is how an institution claims a shared teacher's time BEFORE any
-        lesson is placed there; every other institution then sees the hour as closed.
-        """
+        """Reserve/release this teacher's hour for the current institution."""
         from PySide6.QtWidgets import QMenu, QMessageBox
         index = self.table.indexAt(pos)
         if not index.isValid():
@@ -418,10 +409,9 @@ class TimeoffDialog(QDialog):
         owner_other = self.other_reserved.get(slot)
         menu = QMenu(self)
         if owner_other:
-            act = menu.addAction(f"🔒 '{owner_other}' kurumuna rezerve — değiştirilemez")
-            act.setEnabled(False)
-            menu.exec_(self.table.viewport().mapToGlobal(pos))
-            return
+            info_act = menu.addAction(f"ℹ️ '{owner_other}' kurumunda planlı")
+            info_act.setEnabled(False)
+            menu.addSeparator()
 
         if slot in self.my_reserved:
             act_toggle = menu.addAction("⚑ Rezervasyonu Kaldır")

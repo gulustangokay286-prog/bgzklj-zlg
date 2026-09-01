@@ -131,10 +131,20 @@ def run():
     QMessageBox.critical = staticmethod(lambda *a, **k: QMessageBox.Yes)
     QMessageBox.information = staticmethod(lambda *a, **k: QMessageBox.Ok)
 
-    # override_db_path ZORUNLU. Kurumsuz bir MainWindow, yapici icinde son
-    # kullanilan .roz yolunu okuyup ona baglaniyor — yani KULLANICININ aktif
-    # versiyonuna. Yolu yapicidan SONRA degistirmek gec kaliyor: kurulum sirasinda
-    # gercek dosyaya yaziliyor (iki kez oldu, v082 yedekten geri alindi).
+    def fake_box_exec(self):
+        buttons = self.buttons()
+        if buttons:
+            self._clicked = buttons[0]
+        return 0
+
+    QMessageBox.exec = fake_box_exec
+    QMessageBox.exec_ = fake_box_exec
+    QMessageBox.clickedButton = lambda self: getattr(self, "_clicked", self.buttons()[0] if self.buttons() else None)
+
+    import json
+    with open(SANDBOX_DB, "w", encoding="utf-8") as f:
+        json.dump(store, f)
+
     win = MainWindow(override_db_path=SANDBOX_DB)
     win._is_loading = False
     win.db_path = SANDBOX_DB
