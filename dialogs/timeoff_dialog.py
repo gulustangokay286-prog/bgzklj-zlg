@@ -44,11 +44,8 @@ class TimeoffDialog(QDialog):
                 or get_last_active_institution_slug()
             norm_name = normalize_teacher_name(name)
 
-            day_count, periods = constraint_sync.grid_dimensions(self.data_store)
-            shared = constraint_sync.shared_teacher_states(inst_slug, day_count, periods)
-            for slot, state in (shared.get(norm_name) or {}).items():
-                if state == constraint_sync.CLOSED:
-                    self.cross_institution_locks.add(slot)
+            # Only lock slots where the teacher is actually scheduled/reserved in another institution.
+            # Slots closed at another institution mean the teacher is FREE for this institution.
 
             cross_busy = get_cross_institution_teacher_busy_slots(exclude_slug=inst_slug)
             for (t_norm, d, p_slot), conflict_info in cross_busy.items():

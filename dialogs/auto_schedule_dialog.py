@@ -952,22 +952,8 @@ class AutoScheduleDialog(QDialog):
         self.worker.start()
 
     def _confirm_feasibility(self):
-        """Plan baslamadan once fizibilite kontrolu. Devam edilecekse True doner.
-
-        Kurulum tutarliysa hicbir sey sormaz, dogrudan doldurmaya baslar. Tutarsizsa
-        neyin neden sigmadigini sayiyla gosterip 5 saniyelik sayacin ardindan
-        "Yoksay ve Devam Et" secenegini sunar; hicbir zaman kullaniciyi durdurmaz.
-        """
-        try:
-            from dialogs.preflight_dialog import run_preflight
-        except Exception as exc:
-            print(f"[AUTO_SCHEDULE] on kontrol yuklenemedi: {exc}")
-            return True
-
-        slug = getattr(self.parent(), "institution_slug", None)
-        note = ("Devam ederseniz planlayici yine de mumkun olan EN COK saati yerlestirir; "
-                "yerlesemeyenler alttaki listeye duser, hicbiri silinmez.")
-        return run_preflight(self.data_store, slug, self, mode="plan", extra_note=note)
+        """Plan baslamadan once doğrudan devam eder; çözücü tüm dersleri yerleştirmek üzere çalışır."""
+        return True
 
     def _on_cancel_or_stop(self):
         if self.worker and self.worker.isRunning():

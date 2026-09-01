@@ -166,12 +166,8 @@ def _build_teacher_timeoff_map(data_store: dict, institution_slug: str = None, i
         try:
             shared = constraint_sync.shared_teacher_states(institution_slug, day_count, periods)
             # Split by state first so the name-alias merge can run over plain slot sets.
-            foreign_closed = {k: {s for s, st in v.items() if st == constraint_sync.CLOSED}
-                              for k, v in shared.items()}
             foreign_avoid = {k: {s for s, st in v.items() if st == constraint_sync.AVOID}
                              for k, v in shared.items()}
-            for key, slots in _merge_foreign_teacher_slots(data_store, foreign_closed).items():
-                blocked[key].update(slots)
             for key, slots in _merge_foreign_teacher_slots(data_store, foreign_avoid).items():
                 avoid[key].update(slots)
         except Exception as e:
@@ -1655,7 +1651,7 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                     if any((d, p) in avoid_by_class.get(cn, set()) for cn in target_cls): pen += 5
                     if tk and (d, p) in teacher_avoid.get(tk, set()): pen += 5
                     if tk and (d, p) in cross_inst_map.get(tk, set()): pen += 3000
-                    obj2.append(v * (10000 - pen))
+                    obj2.append(v * (500000 - pen))
             if u_vars:
                 model2.AddAtMostOne([v for v, _, _ in u_vars])
                 block_solvers2[bid]["vars_1h"] = u_vars
@@ -1687,7 +1683,7 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                     if any((d, p + off) in avoid_by_class.get(cn, set()) for cn in target_cls for off in range(2)): pen += 5
                     if tk and any((d, p + off) in teacher_avoid.get(tk, set()) for off in range(2)): pen += 5
                     if tk and any((d, p + off) in cross_inst_map.get(tk, set()) for off in range(2)): pen += 3000
-                    obj2.append(v2 * (20500 - pen))
+                    obj2.append(v2 * (1050000 - pen))
 
             v_s1, v_s2 = [], []
             if bid not in locked_block_bindings:
@@ -1716,8 +1712,8 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                         if any((d, p) in avoid_by_class.get(cn, set()) for cn in target_cls): pen += 5
                         if tk and (d, p) in teacher_avoid.get(tk, set()): pen += 5
                         if tk and (d, p) in cross_inst_map.get(tk, set()): pen += 3000
-                        obj2.append(vh1 * (10000 - pen))
-                        obj2.append(vh2 * (10000 - pen))
+                        obj2.append(vh1 * (500000 - pen))
+                        obj2.append(vh2 * (500000 - pen))
 
             if v_2h or v_s1:
                 s_2h = sum(v for v, _, _ in v_2h)
@@ -1747,7 +1743,7 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                         u_list.append((vu, d, p))
                         for cn in target_cls: occ_class2[cn, d, p].append(vu)
                         if tk and not independent_classes: occ_teacher2[tk, d, p].append(vu)
-                        obj2.append(vu * 10000)
+                        obj2.append(vu * 500000)
                 u_splits.append(u_list)
                 model2.AddAtMostOne([v for v, _, _ in u_list])
             if u_splits:
@@ -2181,7 +2177,7 @@ class AutoSchedulerWorker(QThread):
         # Collect locked/pinned placements that must be preserved
         locked_placements = []
         for p in self.data_store.get("grid_placements", []):
-            if p.get("locked") or (self.fill_empty and p.get("is_manual")):
+            if p.get("locked") or p.get("pinned"):
                 c_name = (p.get("class_name") or p.get("class") or "").strip()
                 t_name = norm_teacher(p.get("teacher_name") or p.get("teacher") or "")
                 d_p = int(p.get("day", p.get("col", 0)))
@@ -2209,7 +2205,7 @@ class AutoSchedulerWorker(QThread):
             cross_inst_map=cross_inst_map,
             global_teacher_busy=global_teacher_busy,
             D=D, P=P,
-            time_limit=max(12.0, len(classes_to_schedule) * 1.5),
+            time_limit=max(25.0, len(classes_to_schedule) * 3.0),
             independent_classes=self.independent_classes,
             planning_relations=planning_relations,
             locked_placements=locked_placements,
