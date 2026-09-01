@@ -27,21 +27,22 @@ hidden_modules = [
     'exporters', 'home_dashboard', 'lesson_hours', 'login_dialog', 'main_window',
     'bk_branding', 'bk_update', 'update_notifications', 'ribbon_widget', 'save_dialog',
     'splash_screen', 'state_manager', 'timetable_grid', 'version', 'version_store',
-    'core.timetable_data',
+    'core.timetable_data', 'openpyxl', 'openpyxl.styles', 'openpyxl.cell', 'openpyxl.utils',
 ]
-hidden_modules += [
-    'client', 'client.config',
-    'client.networking', 'client.networking.http_client',
-    'client.security', 'client.security.signature', 'client.security.device_identity',
-    'client.state', 'client.state.paths', 'client.state.atomic_json',
-    'client.updater', 'client.updater.engine', 'client.updater.downloader',
-    'client.updater.installer', 'client.updater.manifest', 'client.updater.chunk_store',
-    'client.updater.rollback', 'client.updater.state_machine', 'client.updater.verifier',
-]
+if os.path.isdir(RELEASE_SYSTEM):
+    hidden_modules += [
+        'client', 'client.config',
+        'client.networking', 'client.networking.http_client',
+        'client.security', 'client.security.signature', 'client.security.device_identity',
+        'client.state', 'client.state.paths', 'client.state.atomic_json',
+        'client.updater', 'client.updater.engine', 'client.updater.downloader',
+        'client.updater.installer', 'client.updater.manifest', 'client.updater.chunk_store',
+        'client.updater.rollback', 'client.updater.state_machine', 'client.updater.verifier',
+    ]
 
-icon_file = 'icon.ico' if os.path.exists(os.path.join(HERE, 'icon.ico')) else 'bk_icon.ico'
+icon_file = 'icon.ico' if os.path.exists(os.path.join(HERE, 'icon.ico')) else ('bk_icon.ico' if os.path.exists(os.path.join(HERE, 'bk_icon.ico')) else None)
 
-app_datas = [
+candidate_datas = [
     ('dialogs', 'dialogs'),
     ('resources', 'resources'),
     ('data', 'data'),
@@ -60,16 +61,29 @@ app_datas = [
     ('bk_shield_clean.png', '.'),
     ('bk_lockup.png', '.'),
     ('bk_dashboard_brand.png', '.'),
-    (os.path.join(RELEASE_SYSTEM, 'client', 'keys', 'release_public_key.pem'), os.path.join('client', 'keys')),
 ]
+
+app_datas = []
+for src, dst in candidate_datas:
+    full_src = os.path.join(HERE, src) if not os.path.isabs(src) else src
+    if os.path.exists(full_src):
+        app_datas.append((src, dst))
+
+rel_key = os.path.join(RELEASE_SYSTEM, 'client', 'keys', 'release_public_key.pem')
+if os.path.exists(rel_key):
+    app_datas.append((rel_key, os.path.join('client', 'keys')))
 
 from PyInstaller.utils.hooks import collect_all
 
 datas_ortools, binaries_ortools, hiddenimports_ortools = collect_all('ortools')
 
+pathex_list = [HERE]
+if os.path.isdir(RELEASE_SYSTEM):
+    pathex_list.append(RELEASE_SYSTEM)
+
 a = Analysis(
     ['main.py'],
-    pathex=[RELEASE_SYSTEM],
+    pathex=pathex_list,
     binaries=binaries_ortools,
     datas=app_datas + datas_ortools,
     hiddenimports=hidden_modules + hiddenimports_ortools,

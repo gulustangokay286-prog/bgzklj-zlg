@@ -969,7 +969,37 @@ class TimetablePrintPreview(QDialog):
                     
                     p_idx += dur
                 else:
+                    is_closed = False
+                    if is_teacher:
+                        for t in self.data_store.get("ogretmenler", []) or []:
+                            if (t.get("ad") or t.get("name") or "").strip() == target_name:
+                                toff = t.get("timeoff", [])
+                                if toff and d_idx < len(toff) and p_idx < len(toff[d_idx]):
+                                    is_closed = (toff[d_idx][p_idx] == 0)
+                                break
+                        if not is_closed:
+                            kisit = self.data_store.get("kisitlamalar", {}).get(target_name, {})
+                            if f"{d_idx},{p_idx}" in kisit:
+                                is_closed = (kisit[f"{d_idx},{p_idx}"] in (0, False))
+                    else:
+                        for c in self.data_store.get("siniflar", []) or []:
+                            if (c.get("ad") or c.get("name") or "").strip() == target_name:
+                                toff = c.get("timeoff", [])
+                                if toff and d_idx < len(toff) and p_idx < len(toff[d_idx]):
+                                    is_closed = (toff[d_idx][p_idx] == 0)
+                                break
+                        if not is_closed:
+                            kisit = self.data_store.get("kisitlamalar", {}).get(target_name, {})
+                            if f"{d_idx},{p_idx}" in kisit:
+                                is_closed = (kisit[f"{d_idx},{p_idx}"] in (0, False))
+
+                    painter.setBrush(QBrush(QColor("#E2E8F0" if is_closed else "#FFFFFF")))
+                    painter.setPen(QPen(QColor("#000000"), 1.4 if is_single_page else 1.0))
                     painter.drawRect(QRectF(cx, ry, col_w, row_h))
+                    if is_closed:
+                        painter.setFont(make_font(14 if is_single_page else 8, True))
+                        painter.setPen(QPen(QColor("#94A3B8"), 1))
+                        painter.drawText(QRectF(cx, ry, col_w, row_h), Qt.AlignCenter, "✕")
                     p_idx += 1
 
     def _render_class_lessons_list(self, painter, printer, VW, VH):
@@ -1768,11 +1798,38 @@ class TimetablePrintPreview(QDialog):
                         p = p_offset
                         px = dx + p_offset * period_w
                         lesson = placements.get((d_idx, p))
-                        
                         if not lesson or str(lesson.get("subject_name", "")).strip().lower() in ["boş", "bos", "-", "—", ""]:
-                            painter.setBrush(QBrush(QColor("#FFFFFF")))
+                            is_closed = False
+                            if is_teacher:
+                                for t in self.data_store.get("ogretmenler", []) or []:
+                                    if (t.get("ad") or t.get("name") or "").strip() == item_name:
+                                        toff = t.get("timeoff", [])
+                                        if toff and d_idx < len(toff) and p < len(toff[d_idx]):
+                                            is_closed = (toff[d_idx][p] == 0)
+                                        break
+                                if not is_closed:
+                                    kisit = self.data_store.get("kisitlamalar", {}).get(item_name, {})
+                                    if f"{d_idx},{p}" in kisit:
+                                        is_closed = (kisit[f"{d_idx},{p}"] in (0, False))
+                            else:
+                                for c in self.data_store.get("siniflar", []) or []:
+                                    if (c.get("ad") or c.get("name") or "").strip() == item_name:
+                                        toff = c.get("timeoff", [])
+                                        if toff and d_idx < len(toff) and p < len(toff[d_idx]):
+                                            is_closed = (toff[d_idx][p] == 0)
+                                        break
+                                if not is_closed:
+                                    kisit = self.data_store.get("kisitlamalar", {}).get(item_name, {})
+                                    if f"{d_idx},{p}" in kisit:
+                                        is_closed = (kisit[f"{d_idx},{p}"] in (0, False))
+
+                            painter.setBrush(QBrush(QColor("#E2E8F0" if is_closed else "#FFFFFF")))
                             painter.setPen(QPen(QColor("#0F172A"), 0.8))
                             painter.drawRect(QRectF(px, cur_y, period_w, row_h))
+                            if is_closed:
+                                painter.setFont(make_font(8.5, True))
+                                painter.setPen(QPen(QColor("#94A3B8"), 1))
+                                painter.drawText(QRectF(px, cur_y, period_w, row_h), Qt.AlignCenter, "✕")
                             p_offset += 1
                             continue
                             

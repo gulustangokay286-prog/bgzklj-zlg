@@ -1000,28 +1000,6 @@ class AutoScheduleDialog(QDialog):
         self.lbl_val_placed.setText(f"{total_hrs} Saat")
         self.lbl_info.setText(f"Otomatik planlama tamamlandı ({total_hrs} ders saati yerleştirildi).")
         self.lbl_info.setStyleSheet("color: #34C759; font-weight: 600;")
-        cross_conflicts = result.get("cross_conflicts", [])
-        
-        if cross_conflicts:
-            c_dlg = CrossConflictResolutionDialog(cross_conflicts, parent=self)
-            ignore_and_place = (c_dlg.exec() == QDialog.Accepted)
-            if not ignore_and_place:
-                conflicting_keys = {
-                    (c.get("day_idx", c.get("day", 0)), c.get("period_idx", c.get("period", 0)), c.get("teacher", ""))
-                    for c in cross_conflicts
-                }
-                filtered_schedule = []
-                for item in schedule:
-                    t = item.get("teacher_name") or item.get("teacher") or ""
-                    d = item.get("day_idx") if "day_idx" in item else item.get("day", 0)
-                    p = item.get("period", 0)
-                    dur = int(item.get("duration", 1))
-                    has_c = any((d, p + off, t) in conflicting_keys for off in range(dur))
-                    if not has_c:
-                        filtered_schedule.append(item)
-                schedule = filtered_schedule
-                total_hrs = sum(item.get("duration", 1) for item in schedule)
-            
         self.data_store["auto_schedule_results"] = schedule
         # Carried through so the window can explain, right after the run, exactly why
         # any cell was left empty instead of just announcing success.

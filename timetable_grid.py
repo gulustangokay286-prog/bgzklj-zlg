@@ -640,6 +640,133 @@ class AsCTimetableHeader(QHeaderView):
         painter.end()
 
 
+class AsCVerticalHeader(QHeaderView):
+    """Modern header for rows with support for unplaced hours badges."""
+    def __init__(self, parent=None):
+        super().__init__(Qt.Vertical, parent)
+        self.setSectionResizeMode(QHeaderView.Stretch)
+        self.setDefaultAlignment(Qt.AlignCenter)
+        self.setDefaultSectionSize(36)
+        self.setMinimumSectionSize(0)
+        self.setMinimumWidth(82)
+
+    def paintSection(self, painter, rect, logicalIndex):
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+
+        # 1. Fill background & borders
+        painter.fillRect(rect, QColor("#F8FAFC"))
+        painter.setPen(QPen(QColor("#E2E8F0"), 1))
+        painter.drawLine(rect.right(), rect.top(), rect.right(), rect.bottom())
+        painter.drawLine(rect.left(), rect.bottom(), rect.right(), rect.bottom())
+
+        # 2. Unplaced hours indicator badge (Artan dersler - sağ alt köşe)
+        table = self.parent()
+        grid = table.parent() if table else None
+        
+        # Robustly locate data_store
+        data_store = None
+        curr = self
+        while curr:
+            if hasattr(curr, "data_store") and isinstance(getattr(curr, "data_store"), dict):
+                data_store = curr.data_store
+                break
+            curr = curr.parent()
+        if not data_store:
+            app = QApplication.instance()
+            if app:
+                for w in app.topLevelWidgets():
+                    if hasattr(w, "data_store") and isinstance(getattr(w, "data_store"), dict):
+                        data_store = w.data_store
+                        break
+
+        unplaced_hrs = 0
+        if grid and data_store:
+            display_mode = getattr(grid, "current_view_mode", "classes")
+            target_name = ""
+            if display_mode == "classes":
+                class_list = getattr(grid, "class_list", []) or []
+                if 0 <= logicalIndex < len(class_list):
+                    target_name = class_list[logicalIndex]
+            elif display_mode == "teachers":
+                teacher_list = getattr(grid, "teacher_list", []) or []
+                if 0 <= logicalIndex < len(teacher_list):
+                    target_name = teacher_list[logicalIndex]
+
+            if target_name:
+                norm_tgt = target_name.replace(" ", "").upper()
+                # 1. Total assigned hours
+                total_assigned = 0
+                for a in data_store.get("atamalar", []) or []:
+                    if isinstance(a, dict):
+                        if display_mode == "classes":
+                            c_raw = str(a.get("class") or a.get("sinif") or a.get("class_name") or "")
+                            if norm_tgt == c_raw.replace(" ", "").upper() or target_name in c_raw or c_raw in target_name:
+                                total_assigned += int(a.get("duration", 1) or 1)
+                        else:
+                            t_raw = str(a.get("teacher") or a.get("ogretmen") or a.get("teacher_name") or "")
+                            if norm_tgt == t_raw.replace(" ", "").upper() or target_name in t_raw or t_raw in target_name:
+                                total_assigned += int(a.get("duration", 1) or 1)
+
+                # 2. Total placed hours on the active grid
+                total_placed = 0
+                if hasattr(grid, "_placed_lessons") and grid._placed_lessons:
+                    seen_blocks = set()
+                    for (r, c), info in grid._placed_lessons.items():
+                        if not isinstance(info, dict):
+                            continue
+                        orig_r = info.get("origin_row", r)
+                        orig_c = info.get("origin_col", c)
+                        block_key = (orig_r, orig_c, info.get("block_id") or id(info))
+                        if block_key in seen_blocks:
+                            continue
+                        seen_blocks.add(block_key)
+                        
+                        if display_mode == "classes":
+                            c_raw = str(info.get("class_name") or info.get("class") or "")
+                            if norm_tgt == c_raw.replace(" ", "").upper() or target_name in c_raw or c_raw in target_name:
+                                total_placed += int(info.get("duration", 1) or 1)
+                        else:
+                            t_raw = str(info.get("teacher_name") or info.get("teacher") or "")
+                            if norm_tgt == t_raw.replace(" ", "").upper() or target_name in t_raw or t_raw in target_name:
+                                total_placed += int(info.get("duration", 1) or 1)
+                else:
+                    for p in data_store.get("grid_placements", []) or []:
+                        if isinstance(p, dict):
+                            if display_mode == "classes":
+                                c_raw = str(p.get("class_name") or p.get("class") or "")
+                                if norm_tgt == c_raw.replace(" ", "").upper() or target_name in c_raw or c_raw in target_name:
+                                    total_placed += int(p.get("duration", 1) or 1)
+                            else:
+                                t_raw = str(p.get("teacher_name") or p.get("teacher") or "")
+                                if norm_tgt == t_raw.replace(" ", "").upper() or target_name in t_raw or t_raw in target_name:
+                                    total_placed += int(p.get("duration", 1) or 1)
+
+                unplaced_hrs = max(0, total_assigned - total_placed)
+
+        # Draw section text
+        model = self.model()
+        text = str(model.headerData(logicalIndex, Qt.Vertical, Qt.DisplayRole) or "")
+        painter.setFont(QFont(FONT_FAMILY, 8.5, QFont.Bold))
+        painter.setPen(QColor("#0F172A"))
+        if unplaced_hrs > 0:
+            painter.drawText(rect.adjusted(6, 0, -28, 0), Qt.AlignLeft | Qt.AlignVCenter, text)
+            badge_text = f"{unplaced_hrs}s"
+            badge_w = 26 if len(badge_text) <= 3 else 32
+            badge_h = 13
+            badge_rect = QRectF(rect.right() - badge_w - 2, rect.bottom() - badge_h - 2, badge_w, badge_h)
+            painter.setBrush(QBrush(QColor("#FEE2E2")))
+            painter.setPen(QPen(QColor("#EF4444"), 1))
+            painter.drawRoundedRect(badge_rect, 3, 3)
+            painter.setFont(QFont("Segoe UI", 7, QFont.Bold))
+            painter.setPen(QColor("#DC2626"))
+            painter.drawText(badge_rect, Qt.AlignCenter, badge_text)
+        else:
+            painter.drawText(rect.adjusted(2, 0, -2, 0), Qt.AlignCenter, text)
+
+        painter.restore()
+
+
 def _compute_free_slot_capacity(data_store, class_name, teacher_name, is_comb, combined_classes, exclude_subject_fmt):
     """Best-effort estimate of how many empty slots across the whole week are actually
     available for a lesson, so a distribution edit (e.g. picking "2+2+1" = 5 hours) can be
@@ -1776,8 +1903,40 @@ class TimetableCellDelegate(QStyledItemDelegate):
                 cell_color = c
                 
         is_filled = bool(clean_str or (info and info.get("subject_name")))
+        is_closed_slot = False
+        if not is_filled and grid:
+            pos = grid.resolve_cell(row, col)
+            day_idx = pos.get("day", -1)
+            period_idx = pos.get("period", -1)
+            c_name = pos.get("class_name", "")
+            t_name = pos.get("teacher_name", "")
+            display_mode = getattr(grid, "current_view_mode", "classes")
+            if day_idx >= 0 and period_idx >= 0 and data_store:
+                if display_mode == "teachers" and t_name:
+                    for t in data_store.get("ogretmenler", []) or []:
+                        if (t.get("ad") or t.get("name") or "").strip() == t_name:
+                            toff = t.get("timeoff", [])
+                            if toff and day_idx < len(toff) and period_idx < len(toff[day_idx]):
+                                is_closed_slot = (toff[day_idx][period_idx] == 0)
+                            break
+                    if not is_closed_slot:
+                        kisit = data_store.get("kisitlamalar", {}).get(t_name, {})
+                        if f"{day_idx},{period_idx}" in kisit:
+                            is_closed_slot = (kisit[f"{day_idx},{period_idx}"] in (0, False))
+                elif c_name:
+                    for c in data_store.get("siniflar", []) or []:
+                        if (c.get("ad") or c.get("name") or "").strip() == c_name:
+                            toff = c.get("timeoff", [])
+                            if toff and day_idx < len(toff) and period_idx < len(toff[day_idx]):
+                                is_closed_slot = (toff[day_idx][period_idx] == 0)
+                            break
+                    if not is_closed_slot:
+                        kisit = data_store.get("kisitlamalar", {}).get(c_name, {})
+                        if f"{day_idx},{period_idx}" in kisit:
+                            is_closed_slot = (kisit[f"{day_idx},{period_idx}"] in (0, False))
+
         if not cell_color or not cell_color.isValid():
-            cell_color = QColor("#F1F5F9") if not is_filled else QColor("#FFFFFF")
+            cell_color = QColor("#E2E8F0") if is_closed_slot else (QColor("#F8FAFC") if not is_filled else QColor("#FFFFFF"))
                 
         # 2. Fill background (Exact crisp color)
         painter.fillRect(rect, cell_color)
@@ -1792,6 +1951,12 @@ class TimetableCellDelegate(QStyledItemDelegate):
         if periods > 0 and (col + 1) % periods == 0:
             painter.setPen(QPen(QColor("#64748B"), 1.5))
             painter.drawLine(rect.right(), rect.top(), rect.right(), rect.bottom())
+
+        # 3.2 Closed slot X icon
+        if is_closed_slot and not is_filled:
+            painter.setFont(QFont("Segoe UI", 9, QFont.Bold))
+            painter.setPen(QColor("#94A3B8"))
+            painter.drawText(rect, Qt.AlignCenter, "✕")
         
         # 4. Selection border
         if option.state & QStyle.State_Selected:
@@ -2021,7 +2186,7 @@ class DropTableWidget(QTableWidget):
             p_dur = max(1, int(self._drag_preview_info.get("duration", dur) or dur))
             if p_row >= 0 and p_col >= 0:
                 res = self._placement_map.get((p_row, p_col))
-                state = res.visual if res else "GREEN"
+                state = res.visual if res else "RED"
                 day_start = (p_col // periods) * periods
                 day_end = day_start + periods - 1
                 for off in range(p_dur):
@@ -2384,14 +2549,20 @@ class DropTableWidget(QTableWidget):
                     painter = QPainter(self.viewport())
                     painter.setRenderHint(QPainter.Antialiasing, True)
                     
-                    is_swap = bool(preview.get("is_swap"))
-                    base_color = QColor(preview.get("color") or "#3B82F6")
-                    if is_swap:
-                        # Amber, solid outline: the target already holds a lesson and
-                        # letting go will exchange the two. Distinct from the ordinary
-                        # dashed preview of an empty landing spot.
+                    res = self._placement_map.get((preview.get("row", -1), preview.get("col", -1)))
+                    visual = res.visual if res else ("RED" if is_swap else "GREEN")
+                    if visual == "RED":
+                        fill_color = QColor(239, 68, 68, 150)
+                        pen = QPen(QColor(185, 28, 28), 2.5, Qt.SolidLine)
+                    elif visual == "GREY":
+                        fill_color = QColor(100, 116, 139, 140)
+                        pen = QPen(QColor(71, 85, 105), 2.5, Qt.SolidLine)
+                    elif is_swap:
                         fill_color = QColor(245, 158, 11, 150)
                         pen = QPen(QColor("#B45309"), 2.5, Qt.SolidLine)
+                    elif visual == "GREEN":
+                        fill_color = QColor(34, 197, 94, 150)
+                        pen = QPen(QColor(21, 128, 61), 2.5, Qt.SolidLine)
                     else:
                         fill_color = QColor(base_color.red(), base_color.green(), base_color.blue(), 145)
                         pen = QPen(QColor(base_color.darker(130)), 2, Qt.DashLine)
@@ -3273,6 +3444,7 @@ class TimetableGrid(QWidget):
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
+        self.table.setVerticalHeader(AsCVerticalHeader(self.table))
         vh = self.table.verticalHeader()
         vh.setSectionResizeMode(QHeaderView.Stretch)
         vh.setMinimumSectionSize(0)

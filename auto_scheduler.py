@@ -165,9 +165,12 @@ def _build_teacher_timeoff_map(data_store: dict, institution_slug: str = None, i
     if include_shared:
         try:
             shared = constraint_sync.shared_teacher_states(institution_slug, day_count, periods)
-            # Split by state first so the name-alias merge can run over plain slot sets.
+            foreign_closed = {k: {s for s, st in v.items() if st == constraint_sync.CLOSED}
+                              for k, v in shared.items()}
             foreign_avoid = {k: {s for s, st in v.items() if st == constraint_sync.AVOID}
                              for k, v in shared.items()}
+            for key, slots in _merge_foreign_teacher_slots(data_store, foreign_closed).items():
+                blocked[key].update(slots)
             for key, slots in _merge_foreign_teacher_slots(data_store, foreign_avoid).items():
                 avoid[key].update(slots)
         except Exception as e:
@@ -1389,7 +1392,7 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                     for cn in target_cls: occ_class1[cn, d, p].append(v)
                     if tk and not independent_classes: occ_teacher1[tk, d, p].append(v)
 
-                    pen = 0
+                    pen = p * 2
                     if any((d, p) in avoid_by_class.get(cn, set()) for cn in target_cls): pen += 5
                     if tk and (d, p) in teacher_avoid.get(tk, set()): pen += 5
                     if tk and (d, p) in cross_inst_map.get(tk, set()): pen += 3000
@@ -1424,7 +1427,7 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                         occ_teacher1[tk, d, p].append(v2)
                         occ_teacher1[tk, d, p + 1].append(v2)
                     
-                    pen = 0
+                    pen = p * 2
                     if any((d, p + off) in avoid_by_class.get(cn, set()) for cn in target_cls for off in range(2)): pen += 5
                     if tk and any((d, p + off) in teacher_avoid.get(tk, set()) for off in range(2)): pen += 5
                     if tk and any((d, p + off) in cross_inst_map.get(tk, set()) for off in range(2)): pen += 3000
@@ -1453,7 +1456,7 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                             occ_teacher1[tk, d, p].append(vh1)
                             occ_teacher1[tk, d, p].append(vh2)
                         
-                        pen = 0
+                        pen = p * 2
                         if any((d, p) in avoid_by_class.get(cn, set()) for cn in target_cls): pen += 5
                         if tk and (d, p) in teacher_avoid.get(tk, set()): pen += 5
                         if tk and (d, p) in cross_inst_map.get(tk, set()): pen += 3000
