@@ -177,33 +177,39 @@ def set_personal(entity: dict, name: str, data_store: dict, grid: list):
 def get_matrix(entity: dict, name: str, data_store: dict) -> list:
     """Bir birimin (öğretmen/sınıf/derslik) 3 durumlu müsaitlik matrisini döndürür.
 
-    İki gösterim de okunur ve birleştirilir; çelişki halinde DAHA KISITLAYICI olan
-    kazanır (kapalı > tercih edilmez > açık). Böylece hangi ekranın en son yazdığından
-    bağımsız olarak kullanıcının koyduğu bir kısıt asla sessizce kaybolmaz.
-
+    Zaman Tablosu (entity["timeoff"]) birincil ve mutlak gerçektir (single source of truth).
+    Eğer timeoff tanımlıysa doğrudan kullanılır; tanımlı değilse kisitlamalar sözlüğünden okunur.
+    
     Dönen matris [gun][saat] şeklindedir ve her zaman tam boyutludur.
     """
     day_count, periods = grid_dimensions(data_store)
     matrix = [[OPEN for _ in range(periods)] for _ in range(day_count)]
 
-    toff = (entity or {}).get("timeoff") or []
-    for d in range(day_count):
-        if d >= len(toff) or not isinstance(toff[d], list):
-            continue
-        for p in range(periods):
-            if p < len(toff[d]):
-                matrix[d][p] = _coerce_state(toff[d][p])
-
-    entry = ((data_store or {}).get("kisitlamalar") or {}).get(name)
-    if isinstance(entry, dict):
-        for key, raw in entry.items():
-            try:
-                d_str, p_str = str(key).split(",")
-                d, p = int(d_str), int(p_str)
-            except (ValueError, TypeError):
-                continue
-            if 0 <= d < day_count and 0 <= p < periods:
-                matrix[d][p] = min(matrix[d][p], _coerce_state(raw))
+    toff = (entity or {}).get("timeoff")
+    if toff and isinstance(toff, list) and len(toff) > 0:
+        for d in range(day_count):
+            if d < len(toff) and isinstance(toff[d], list):
+                # Günün mevcut tüm saatleri kapalı mıydı?
+                all_closed_in_day = len(toff[d]) > 0 and all(_coerce_state(x) == CLOSED for x in toff[d])
+                for p in range(periods):
+                    if p < len(toff[d]):
+                        matrix[d][p] = _coerce_state(toff[d][p])
+                    else:
+                        matrix[d][p] = CLOSED if all_closed_in_day else OPEN
+            else:
+                matrix[d] = [OPEN for _ in range(periods)]
+    else:
+        # Geriye dönük uyumluluk: entity'de timeoff yoksa kisitlamalar'dan oku
+        entry = ((data_store or {}).get("kisitlamalar") or {}).get(name)
+        if isinstance(entry, dict):
+            for key, raw in entry.items():
+                try:
+                    d_str, p_str = str(key).split(",")
+                    d, p = int(d_str), int(p_str)
+                except (ValueError, TypeError):
+                    continue
+                if 0 <= d < day_count and 0 <= p < periods:
+                    matrix[d][p] = _coerce_state(raw)
 
     # Kişisel kısıt her şeyin üstündedir: öğretmen o saatte hiçbir yerde yoksa
     # burada da yoktur.
@@ -217,9 +223,10 @@ def get_matrix(entity: dict, name: str, data_store: dict) -> list:
 
 
 def set_matrix(entity: dict, name: str, data_store: dict, matrix: list):
-    """3 durumlu matrisi HER İKİ gösterime birden yazar.
+    """3 durumlu matrisi HER İKİ gösterime birden ve aynı ada sahip tüm kopyalara yazar.
 
-    Tek yazma noktası olduğu için iki ekranın birbirini ezmesi mümkün değildir.
+    Tek yazma noktası olduğu için iki ekranın birbirini ezmesi veya kopya öğretmenlerin
+    ayrışması imkânsızdır.
     """
     if entity is None or not name:
         return
@@ -228,11 +235,14 @@ def set_matrix(entity: dict, name: str, data_store: dict, matrix: list):
     toff = []
     for d in range(day_count):
         row = []
+        all_closed_in_day = False
+        if d < len(matrix) and isinstance(matrix[d], list) and len(matrix[d]) > 0:
+            all_closed_in_day = all(_coerce_state(x) == CLOSED for x in matrix[d])
         for p in range(periods):
             if d < len(matrix) and p < len(matrix[d]):
                 row.append(_coerce_state(matrix[d][p]))
             else:
-                row.append(OPEN)
+                row.append(CLOSED if all_closed_in_day else OPEN)
         toff.append(row)
     entity["timeoff"] = toff
 
@@ -242,6 +252,26 @@ def set_matrix(entity: dict, name: str, data_store: dict, matrix: list):
         for p in range(periods):
             cell_map[f"{d},{p}"] = toff[d][p]
     kis[name] = cell_map
+
+    # Aynı ada sahip diğer öğretmen/birim kopyalarını da eşitle
+    try:
+        from version_store import normalize_teacher_name
+        n_target = normalize_teacher_name(name)
+    except Exception:
+        n_target = name.strip().lower()
+
+    for grp in ("ogretmenler", "siniflar", "derslikler"):
+        for other in (data_store.get(grp, []) or []):
+            if isinstance(other, dict):
+                o_ad = (other.get("ad") or other.get("name") or "").strip()
+                try:
+                    from version_store import normalize_teacher_name
+                    o_norm = normalize_teacher_name(o_ad)
+                except Exception:
+                    o_norm = o_ad.lower()
+                if o_norm == n_target and other is not entity:
+                    other["timeoff"] = [list(r) for r in toff]
+                    kis[o_ad] = cell_map
 
 
 def sync_all(data_store: dict):

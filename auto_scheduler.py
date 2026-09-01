@@ -1066,6 +1066,12 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
             lp_p = int(lp.get("period", lp.get("row", 0)))
             lp_dur = int(lp.get("duration", 1))
 
+            # Zaman Tablosu mutlak esastır: Kilitli hücre kapalı saate denk geliyorsa kilidi yok say
+            if any((lp_d, lp_p + off) in blocked_by_class.get(lp_cn, set()) for off in range(lp_dur)):
+                continue
+            if lp_t and any((lp_d, lp_p + off) in teacher_timeoff.get(lp_t, set()) for off in range(lp_dur)):
+                continue
+
             for b in raw_blocks:
                 bid = b["id"]
                 if bid in locked_block_bindings:
@@ -2018,8 +2024,17 @@ class AutoSchedulerWorker(QThread):
         # Collect locked/pinned placements that must be preserved
         locked_placements = []
         for p in self.data_store.get("grid_placements", []):
-            if p.get("locked") or p.get("is_manual"):
+            if p.get("locked") or (self.fill_empty and p.get("is_manual")):
                 c_name = (p.get("class_name") or p.get("class") or "").strip()
+                t_name = norm_teacher(p.get("teacher_name") or p.get("teacher") or "")
+                d_p = int(p.get("day", p.get("col", 0)))
+                per_p = int(p.get("period", p.get("row", 0)))
+                dur_p = int(p.get("duration", 1))
+                # Zaman Tablosu kontrolü: Kapalı hücreye denk gelen eski kayıt kilitlenemez
+                if any((d_p, per_p + off) in blocked_by_class.get(c_name, set()) for off in range(dur_p)):
+                    continue
+                if t_name and any((d_p, per_p + off) in teacher_timeoff.get(t_name, set()) for off in range(dur_p)):
+                    continue
                 if any(matches_class(c_name, tgt) for tgt in classes_to_schedule):
                     locked_placements.append(p)
 
