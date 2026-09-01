@@ -2549,6 +2549,8 @@ class DropTableWidget(QTableWidget):
                     painter = QPainter(self.viewport())
                     painter.setRenderHint(QPainter.Antialiasing, True)
                     
+                    is_swap = bool(preview.get("is_swap"))
+                    base_color = QColor(preview.get("color") or "#3B82F6")
                     res = self._placement_map.get((preview.get("row", -1), preview.get("col", -1)))
                     visual = res.visual if res else ("RED" if is_swap else "GREEN")
                     if visual == "RED":
