@@ -692,6 +692,7 @@ class SchoolInfoDialog(QDialog):
         settings["kurum_tipi"] = "fakulte" if self.radio_fakulte.isChecked() else "okul"
         settings["multi_term"] = self.chk_cok_donem.isChecked()
         
+        
         from timetable_grid import DAYS
         # Sync active_days_list and days
         active_list = settings.get("active_days_list", [])

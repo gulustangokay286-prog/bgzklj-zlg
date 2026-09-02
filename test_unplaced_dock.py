@@ -127,6 +127,14 @@ def run():
         return QMessageBox.Yes
 
     QMessageBox.warning = staticmethod(fake_warning)
+    # Kapalı saat uyarısı artık "Yine de Yerleştir / Vazgeç" soruyor. Test
+    # kullanıcısı VAZGEÇİYOR: böylece "kapalı saate ders konmaz" güvencesi
+    # aynen sınanmaya devam ediyor, üstelik uyarı metni de kaydediliyor.
+    import main_window as _mw
+    def fake_ask(parent, body_html):
+        asked.append(("Bu Saate Yerleştirilemez", body_html))
+        return False
+    _mw.ask_place_anyway = fake_ask
     QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.Yes)
     QMessageBox.critical = staticmethod(lambda *a, **k: QMessageBox.Yes)
     QMessageBox.information = staticmethod(lambda *a, **k: QMessageBox.Ok)
@@ -164,19 +172,21 @@ def run():
         "class_name": "9A", "duration": 1, "lesson_id": card["id"],
     })
 
-    # Öğretmenlerin elle yazdığı kural: "Öğretmen kapalıysa o gün sürükleme
-    # manuel yapılsa bile o kısma yerleşim yapılamaz." Eskiden burada "yok sayıp
-    # yerleştir" seçeneği vardı ve kapalı saate ders konabiliyordu; bu testler o
-    # davranışı doğruluyordu. Kural tersine döndü: kapalı saat KESİN RET.
+    # Kural bir kez daha değişti. Önce "kapalı saat yok sayılabilir"di, sonra
+    # "KESİN RET" oldu, şimdi tekrar seçenekli: program gerekçesini söyler ama
+    # kararı kullanıcıya bırakır. Sebep, kullanıcının bizim bilmediğimizi
+    # bilebilmesi — hoca o gün gelmeyi kabul etmiş olabilir, veri eski olabilir.
+    # Değişmeyen kısım: uyarı MUTLAKA çıkar, gerekçesiyle birlikte, ve kullanıcı
+    # onaylamadıkça ders KONMAZ.
     check("kapalı saat uyarısı gösterildi", bool(asked), "hiç uyarı çıkmadı")
     titles = " | ".join(t for t, _ in asked)
     joined = " ".join(txt for _, txt in asked)
     check("uyarı 'yerleştirilemez' diyor",
           any("Yerleştirilemez" in t for t, _ in asked), titles)
-    check("'yok sayıp yerleştir' seçeneği SUNULMUYOR",
-          "yok say" not in joined.lower(), joined[:140])
-    check("gerekçe yazıyor (kim, hangi saat)", "kapalı" in joined.lower(),
-          joined[:140])
+    # Gerekçe metni "KAPALI" ya da "kapalı" olarak geçebiliyor; Türkçe'de
+    # ASCII lower() 'I' harfini 'i' yapıp 'ı' aramasını boşa düşürüyor.
+    low = joined.replace("I", "ı").lower()
+    check("gerekçe yazıyor (kim, hangi saat)", "kapalı" in low, joined[:140])
 
     after_grid = len(store.get("grid_placements", []))
     check("KAPALI saate ders KONMADI", after_grid == before_grid,

@@ -76,6 +76,18 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 PASSED, FAILED = [], []
 
 
+def _expand_all_groups(dash, app):
+    """Version rows are built when a group is first opened, not when the
+    list is refreshed — a collapsed group's rows genuinely do not exist.
+    That is the point of the change (it took switching institutions from
+    163ms to 28ms), so a test that wants rows has to open the groups the
+    way a user would."""
+    from home_dashboard import CollapsibleVersionGroup
+    for g in dash.findChildren(CollapsibleVersionGroup):
+        g._set_collapsed(False)
+    app.processEvents()
+
+
 def check(name, condition, detail=""):
     if condition:
         PASSED.append(name)
@@ -136,9 +148,13 @@ def run():
     dash._refresh_versions()
     app.processEvents()
 
-    rows = dash.findChildren(AppleVersionRow)
     groups = dash.findChildren(CollapsibleVersionGroup)
-    check("version rows rendered", len(rows) > 0, f"{len(rows)} rows")
+    check("collapsed groups build no rows",
+          len(dash.findChildren(AppleVersionRow)) == 0,
+          f"{len(dash.findChildren(AppleVersionRow))} rows before expanding")
+    _expand_all_groups(dash, app)
+    rows = dash.findChildren(AppleVersionRow)
+    check("version rows rendered once expanded", len(rows) > 0, f"{len(rows)} rows")
     check("folder group rendered", any(g.folder_id == folder["id"] for g in groups),
           str([g.folder_id for g in groups]))
 
@@ -218,6 +234,7 @@ def run():
         app.sendPostedEvents(None, QEvent.DeferredDelete)
         app.processEvents()
 
+        _expand_all_groups(dash, app)
         rows = dash.findChildren(AppleVersionRow)
         # Start from a clean slate: earlier steps in this file selected a version, and
         # a row that is already selected has to be deselected here too — correct

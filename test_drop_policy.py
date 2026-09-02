@@ -104,15 +104,22 @@ def run():
           any(c.type == pe.CROSS_INSTITUTION for c in r4.conflicts),
           str([c.type for c in r4.conflicts]))
 
-    print("\n[3. cümle] bırakma yolunda 'yok sayıp yerleştir' KALMADI")
+    print("\n[3. cümle] kapalı saat uyarısı gerekçesiyle ÇIKAR ve kararı sorar")
     import io
     import re
     src = io.open("main_window.py", encoding="utf-8").read()
     start = src.index("def _on_lesson_dropped")
     body = src[start:start + 26000]
+    # Kapalı saatte artık sessizce yerleştirme de, sorgusuz ret de yok:
+    # her ret yolu _ask_place_anyway'den geçip kullanıcıya soruyor. Uyarı
+    # metni ortak yardımcıda (main_window.ask_place_anyway) durduğu için
+    # burada çağrının varlığı aranıyor.
     offenders = re.findall(r"kısıtlamayı yok sayıp", body)
-    check("kapalı saat için override diyaloğu yok", not offenders, str(offenders))
-    check("kesin ret mesajı var", "Bu Saate Yerleştirilemez" in body)
+    check("sessiz override yok", not offenders, str(offenders))
+    check("kapalı saat kararı kullanıcıya soruluyor",
+          "_ask_place_anyway" in body, "çağrı bulunamadı")
+    check("uyarı başlığı yardımcıda duruyor",
+          "Bu Saate Yerleştirilemez" in src, "başlık kayboldu")
     check("dolu hücre akışı duruyor",
           "Takas Edilemiyor" in body or "Dersleri Yer Değiştir" in body)
 

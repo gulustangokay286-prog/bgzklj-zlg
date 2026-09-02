@@ -1,6 +1,7 @@
 """
 dialogs/color_picker_dialog.py - Modern, Kusursuz ve Kalıcı Renk Seçim Paneli
 """
+from functools import lru_cache
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton,
     QLineEdit, QFrame, QWidget, QColorDialog
@@ -116,11 +117,25 @@ ACRONYM_MAP = {
 }
 
 
-def normalize_subject_match(s1, s2) -> bool:
-    if not s1 or not s2:
-        return False
-    str1 = str(s1).strip().replace("🔒", "").strip()
-    str2 = str(s2).strip().replace("🔒", "").strip()
+# Kısaltma tablosunun normalleştirilmiş hâli bir kez kuruluyor. Eskiden her
+# eşleşme denemesinde yirmi girdinin ikisi de yeniden normalleştiriliyordu:
+# başarısız bir eşleşme kırk normalleştirme demekti ve ders rengi çözülürken
+# bu fonksiyon çizelge başına yüz binlerce kez çağrılıyor.
+_ACRONYM_NORMS = None
+
+
+def _acronym_norms():
+    global _ACRONYM_NORMS
+    if _ACRONYM_NORMS is None:
+        from auto_scheduler import normalize_clean
+        _ACRONYM_NORMS = frozenset(
+            (normalize_clean(full), normalize_clean(abbr))
+            for full, abbr in ACRONYM_MAP.items())
+    return _ACRONYM_NORMS
+
+
+@lru_cache(maxsize=4096)
+def _subject_match_cached(str1: str, str2: str) -> bool:
     if str1.upper() == str2.upper():
         return True
 
@@ -130,18 +145,21 @@ def normalize_subject_match(s1, s2) -> bool:
     if n1 and n2 and n1 == n2:
         return True
 
-    # Check known acronyms & reverse lookup (Strict 1-to-1 matching only)
-    for full_name, abbr in ACRONYM_MAP.items():
-        fn_norm = normalize_clean(full_name)
-        ab_norm = normalize_clean(abbr)
-        if (n1 == fn_norm and n2 == ab_norm) or (n2 == fn_norm and n1 == ab_norm):
-            return True
+    norms = _acronym_norms()
+    return (n1, n2) in norms or (n2, n1) in norms
 
-    return False
+
+def normalize_subject_match(s1, s2) -> bool:
+    if not s1 or not s2:
+        return False
+    return _subject_match_cached(
+        str(s1).strip().replace("🔒", "").strip(),
+        str(s2).strip().replace("🔒", "").strip())
 
 
 
 def resolve_subject_color(subject_name: str, data_store: dict = None) -> str:
+    
     """Returns the persistent color for a subject by inspecting data_store."""
     if not subject_name:
         return "#2563EB"

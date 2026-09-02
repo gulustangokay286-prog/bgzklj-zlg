@@ -286,6 +286,69 @@ class APIClient:
             return True, "Kurum anahtarı ve hesabı başarıyla silindi."
         return False, "Hesap bulunamadı."
 
+    def update_user_profile(self, email: str, name: str, avatar_url: str = "", title: str = "") -> tuple:
+        """
+        Updates user profile (full name, avatar, title/duty) locally and syncs to VDS backend.
+        """
+        import time as _time
+        clean_email = (email or "").strip().lower()
+        if not clean_email:
+            return False, "Geçersiz e-posta adresi."
+
+        # 1. Update registered accounts dict if present
+        accounts = self.load_registered_accounts()
+        if clean_email in accounts:
+            accounts[clean_email]["full_name"] = name
+            accounts[clean_email]["name"] = name
+            if title:
+                accounts[clean_email]["title"] = title
+            if avatar_url:
+                accounts[clean_email]["avatar_url"] = avatar_url
+            self.save_registered_accounts_locally(accounts)
+            try:
+                url = f"{self.base_url}/api/sync/_system_accounts/accounts_v1"
+                headers = self.get_headers()
+                self.session.put(url, headers=headers, json={"accounts": accounts}, timeout=6)
+            except Exception:
+                pass
+
+        # 2. Push user profile to VDS cloud sync node
+        try:
+            safe_node = clean_email.replace("@", "_").replace(".", "_")
+            url = f"{self.base_url}/api/sync/_system_profiles/{safe_node}"
+            headers = self.get_headers()
+            prof_payload = {
+                "email": clean_email,
+                "name": name,
+                "full_name": name,
+                "title": title,
+                "avatar_url": avatar_url,
+                "updated_at": int(_time.time())
+            }
+            self.session.put(url, headers=headers, json=prof_payload, timeout=6)
+        except Exception:
+            pass
+
+        # 3. Update token file if current user
+        token_path = _get_token_file_path()
+        if os.path.exists(token_path):
+            try:
+                with open(token_path, "r", encoding="utf-8") as f:
+                    tdata = json.load(f)
+                if isinstance(tdata, dict):
+                    tdata["full_name"] = name
+                    tdata["name"] = name
+                    if title:
+                        tdata["title"] = title
+                    if avatar_url:
+                        tdata["avatar_url"] = avatar_url
+                    with open(token_path, "w", encoding="utf-8") as f:
+                        json.dump(tdata, f, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
+
+        return True, "Profil başarıyla güncellendi."
+
     def login(self, email, password):
         import uuid as _uuid
         clean_email = (email or "").strip().lower()

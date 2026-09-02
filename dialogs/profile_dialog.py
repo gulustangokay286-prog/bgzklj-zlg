@@ -452,6 +452,12 @@ class AppleProfileDialog(bk_ui.HeroSheetDialog):
             avatar_url=self.current_avatar_url,
             title=title
         )
+        try:
+            from api_client import api_client
+            api_client.update_user_profile(self.email, name, self.current_avatar_url, title)
+        except Exception as e:
+            print("[ProfileDialog] VDS sync notice:", e)
+
         self.profile_updated.emit(name, self.current_avatar_url, title)
         self.accept()
 

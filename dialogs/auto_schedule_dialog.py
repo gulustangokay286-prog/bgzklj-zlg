@@ -517,6 +517,54 @@ class CrossConflictResolutionDialog(QDialog):
 # ═══════════════════════════════════════════════════════════════════════
 # 7. MAIN AUTO SCHEDULE DIALOG (Pure Apple Minimalism & BGZ Engine)
 # ═══════════════════════════════════════════════════════════════════════
+def _teachers_with_capacity(data_store, needed_subjects=None):
+    """Boş saati olan öğretmenler: (ad, boş saat, branş, dersi verebilir mi).
+
+    Açıkta kalan dersleri kimin devralabileceğini söylemek için. Müsaitlik
+    tablosundaki açık saat sayısından, o öğretmene atanmış toplam ders saati
+    düşülüyor; kalan, gerçekten devralabileceği yük.
+    """
+    import constraint_sync
+    import lesson_hours
+    from auto_scheduler import norm_teacher, normalize_clean
+
+    D, P = constraint_sync.grid_dimensions(data_store)
+    assigned = {}
+    for a in data_store.get("atamalar", []) or []:
+        if not isinstance(a, dict):
+            continue
+        tk = norm_teacher(a.get("teacher") or a.get("ogretmen") or a.get("teacher_name") or "")
+        if tk:
+            assigned[tk] = assigned.get(tk, 0) + (lesson_hours.hours(a) or 0)
+
+    wanted = {normalize_clean(x) for x in (needed_subjects or set()) if x}
+    out = []
+    seen = set()
+    for t in data_store.get("ogretmenler", []) or []:
+        if not isinstance(t, dict):
+            continue
+        name = (t.get("ad") or t.get("name") or "").strip()
+        tk = norm_teacher(name)
+        if not name or tk in seen:
+            continue
+        seen.add(tk)
+        matrix = constraint_sync.get_matrix(t, name, data_store)
+        open_slots = sum(1 for d in range(min(D, len(matrix)))
+                         for p in range(min(P, len(matrix[d])))
+                         if matrix[d][p] != constraint_sync.CLOSED)
+        spare = open_slots - assigned.get(tk, 0)
+        if spare <= 0:
+            continue
+        branch = (t.get("brans") or "").strip()
+        bn = normalize_clean(branch)
+        fits = bool(wanted and bn and any(w and (w in bn or bn in w) for w in wanted))
+        out.append((name, spare, branch, fits))
+
+    # Dersi verebilecekler önce, sonra en çok boş saati olan.
+    out.sort(key=lambda x: (not x[3], -x[1]))
+    return out
+
+
 class AutoScheduleDialog(QDialog):
     """
     Apple Minimalist & Pure 3D Vector BGZ Yapay Zeka Optimizasyon Motoru Sheet.
@@ -1254,6 +1302,25 @@ class AutoScheduleDialog(QDialog):
                 "   1) Bu öğretmenlerin Zaman Tablosunda kapalı saatlerini açın,",
                 "   2) sınıfların kapalı ders saatlerini açın (örn. 5-8. saatler),",
                 "   3) veya bu derslerin bir kısmını başka bir öğretmene atayın.",
+            ]
+
+            # 3. maddeyi somutlaştır: "başka bir öğretmene atayın" demek, kimin
+            # boş saati olduğunu bilmeyen kullanıcı için bir tavsiye değil.
+            # Boştaki öğretmenleri, açıkta kalan dersi verebilecek olanları öne
+            # alarak isim isim yaz.
+            try:
+                free = _teachers_with_capacity(self.data_store,
+                                               {u.get("subject") for u in unplaced})
+            except Exception:
+                free = []
+            if free:
+                lines += ["", "Yükü devralabilecek öğretmenler:"]
+                for nm, spare, branch, fits in free[:6]:
+                    mark = "  ← dersi verebilir" if fits else ""
+                    br = f", branş: {branch}" if branch else ""
+                    lines.append(f"   • {nm}: {spare} saat boş{br}{mark}")
+
+            lines += [
                 "",
                 "Yerleşemeyen dersler 'Yerleştirilmeyenler' listesinde duruyor;",
                 "oradan sürükleyerek elle de yerleştirebilirsiniz.",

@@ -177,7 +177,10 @@ class AppShell(QMainWindow):
         version_store.touch_institution_timestamp(slug)
         
         # Smoothly dismiss preparation sheet
-        QTimer.singleShot(800, dlg.close_smooth)
+        # Hazırlık sayfası, hazırlık bitince kapanır. Burada sabit 800 ms
+        # bekleniyordu: editör kurulumu artık dörtte bir saniyeye indiği için
+        # bu bekleme, gecikmenin kendisinden uzun kalıyordu.
+        dlg.close_smooth()
         
         # Update title
         v_num = ""

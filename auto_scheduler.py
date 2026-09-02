@@ -1,3 +1,4 @@
+from functools import lru_cache
 import math
 import os
 import random
@@ -18,14 +19,32 @@ def normalize_class_name(cls_name: str) -> str:
     s = s.replace("-", "/").replace("\\", "/")
     return s
 
+# Çeviri tablosu çağrı başına kurulmuyor ve sonuç saklanıyor: bu fonksiyon
+# çizelge açılırken 220 bin kez çağrılıyor ve str.maketrans tek başına
+# ölçülebilir yer tutuyordu. Saf bir dizge dönüşümü, aynı ad yüzlerce kez
+# geçiyor.
+_TR_FOLD = str.maketrans({'İ': 'i', 'I': 'ı', 'ı': 'i', 'Ş': 's', 'ş': 's',
+                          'Ğ': 'g', 'ğ': 'g', 'Ü': 'u', 'ü': 'u',
+                          'Ö': 'o', 'ö': 'o', 'Ç': 'c', 'ç': 'c'})
+
+
+@lru_cache(maxsize=8192)
+def _normalize_clean_cached(s: str) -> str:
+    return "".join(c for c in s.translate(_TR_FOLD).lower() if c.isalnum())
+
+
 def normalize_clean(s: str) -> str:
     if not s: return ""
-    tr_map = str.maketrans({'İ': 'i', 'I': 'ı', 'ı': 'i', 'Ş': 's', 'ş': 's', 'Ğ': 'g', 'ğ': 'g', 'Ü': 'u', 'ü': 'u', 'Ö': 'o', 'ö': 'o', 'Ç': 'c', 'ç': 'c'})
-    return "".join(c for c in str(s).translate(tr_map).lower() if c.isalnum())
+    return _normalize_clean_cached(str(s))
 
 def matches_class(asgn_class_str: str, target_cn: str) -> bool:
     if not asgn_class_str or not target_cn:
         return False
+    return _matches_class_cached(str(asgn_class_str), str(target_cn))
+
+
+@lru_cache(maxsize=16384)
+def _matches_class_cached(asgn_class_str: str, target_cn: str) -> bool:
     norm_target = normalize_class_name(target_cn)
     norm_asgn = normalize_class_name(asgn_class_str)
     if norm_asgn == norm_target:
@@ -43,9 +62,15 @@ def matches_class(asgn_class_str: str, target_cn: str) -> bool:
             return True
     return False
 
+@lru_cache(maxsize=8192)
+def _format_tr_name_cached(name_str: str) -> str:
+    return " ".join(w.capitalize() for w in name_str.strip().split())
+
+
 def format_tr_name(name_str: str) -> str:
+    # Çizelge açılırken 731 bin kez çağrılıyor; ayrı ad sayısı yüzü geçmiyor.
     if not name_str: return ""
-    return " ".join(w.capitalize() for w in str(name_str).strip().split())
+    return _format_tr_name_cached(str(name_str))
 
 def parse_distribution_parts(type_str: str, total_duration: int = 0) -> list:
     """Parses distribution: '2+2' -> [2,2], '2+1+1' -> [2,1,1], or auto-splits total into max-2 blocks."""
@@ -1642,13 +1667,19 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                         if (d, p) in global_teacher_busy.get(tk, set()): continue
                     if _is_slot_forbidden_by_relations(b, d, p, 1): continue
                     
+                    # Öğretmenin KAPALI dediği saat artık sert kısıt. Faz 1'de
+                    # zaten öyleydi; Faz 2'de yalnızca 25000'lik bir cezaydı ve
+                    # ceza demek "pahalı ama serbest" demek — çizelge tam dolsun
+                    # diye motor o saatleri kullanıyordu. Kullanıcı müsaitlik
+                    # tablosunda ✖ dediyse orası kapalıdır; yerleşemeyen ders
+                    # açıkta kalır ve açıkta kalanlar panelinde bildirilir.
+                    if tk and (d, p) in teacher_timeoff.get(tk, set()): continue
                     v = model2.NewBoolVar(f"x2_{bid}_1h_{d}_{p}")
                     u_vars.append((v, d, p))
                     for cn in target_cls: occ_class2[cn, d, p].append(v)
                     if tk and not independent_classes: occ_teacher2[tk, d, p].append(v)
                     
                     pen = p * 2
-                    if tk and (d, p) in teacher_timeoff.get(tk, set()): pen += 25000
                     if any((d, p) in avoid_by_class.get(cn, set()) for cn in target_cls): pen += 5
                     if tk and (d, p) in teacher_avoid.get(tk, set()): pen += 5
                     if tk and (d, p) in cross_inst_map.get(tk, set()): pen += 3000
@@ -1668,6 +1699,8 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                         if any((d, p + off) in global_teacher_busy.get(tk, set()) for off in range(2)): continue
                     if _is_slot_forbidden_by_relations(b, d, p, 2): continue
                     
+                    if tk and any((d, p + off) in teacher_timeoff.get(tk, set())
+                                  for off in range(2)): continue
                     v2 = model2.NewBoolVar(f"x2_{bid}_2h_{d}_{p}")
                     v_2h.append((v2, d, p))
                     for cn in target_cls:
@@ -1678,7 +1711,6 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                         occ_teacher2[tk, d, p + 1].append(v2)
                     
                     pen = p * 2
-                    if tk and any((d, p + off) in teacher_timeoff.get(tk, set()) for off in range(2)): pen += 25000
                     if any((d, p + off) in avoid_by_class.get(cn, set()) for cn in target_cls for off in range(2)): pen += 5
                     if tk and any((d, p + off) in teacher_avoid.get(tk, set()) for off in range(2)): pen += 5
                     if tk and any((d, p + off) in cross_inst_map.get(tk, set()) for off in range(2)): pen += 3000
@@ -1693,6 +1725,7 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                             if (d, p) in global_teacher_busy.get(tk, set()): continue
                         if _is_slot_forbidden_by_relations(b, d, p, 1): continue
                         
+                        if tk and (d, p) in teacher_timeoff.get(tk, set()): continue
                         vh1 = model2.NewBoolVar(f"x2_{bid}_s1_{d}_{p}")
                         vh2 = model2.NewBoolVar(f"x2_{bid}_s2_{d}_{p}")
                         v_s1.append((vh1, d, p))
@@ -1705,7 +1738,6 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                             occ_teacher2[tk, d, p].append(vh2)
                         
                         pen = p * 2
-                        if tk and (d, p) in teacher_timeoff.get(tk, set()): pen += 25000
                         if any((d, p) in avoid_by_class.get(cn, set()) for cn in target_cls): pen += 5
                         if tk and (d, p) in teacher_avoid.get(tk, set()): pen += 5
                         if tk and (d, p) in cross_inst_map.get(tk, set()): pen += 3000
@@ -1733,12 +1765,12 @@ def solve_cpsat(classes_to_schedule, assignments_or_blocks, blocked_by_class, av
                         if tk and not independent_classes:
                             if (d, p) in global_teacher_busy.get(tk, set()): continue
                         if _is_slot_forbidden_by_relations(b, d, p, 1): continue
+                        if tk and (d, p) in teacher_timeoff.get(tk, set()): continue
                         vu = model2.NewBoolVar(f"x2_{bid}_u{u_idx}_{d}_{p}")
                         u_list.append((vu, d, p))
                         for cn in target_cls: occ_class2[cn, d, p].append(vu)
                         if tk and not independent_classes: occ_teacher2[tk, d, p].append(vu)
                         pen = p * 2
-                        if tk and (d, p) in teacher_timeoff.get(tk, set()): pen += 25000
                         obj2.append(vu * (500000 - pen))
                 u_splits.append(u_list)
                 model2.AddAtMostOne([v for v, _, _ in u_list])

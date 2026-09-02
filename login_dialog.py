@@ -69,11 +69,11 @@ except Exception:
     APP_VERSION = ""
 
 # --- Geometry -------------------------------------------------------------
-MARGIN = 24
+MARGIN = 0
 CARD_W, CARD_H = 956, 568
 PANEL_W = 388
-RADIUS = 20
-WIN_W, WIN_H = CARD_W + MARGIN * 2, CARD_H + MARGIN * 2
+RADIUS = 16
+WIN_W, WIN_H = CARD_W, CARD_H
 
 INK = bk_ui.INK
 INK_SOFT = bk_ui.INK_SOFT
@@ -349,8 +349,7 @@ class LoginDialog(QDialog):
     def paintEvent(self, _event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        card = QRectF(MARGIN, MARGIN, CARD_W, CARD_H)
-        bk_ui.paint_sheet_shadow(p, card, RADIUS, layers=16, offset=6)
+        card = QRectF(0, 0, CARD_W, CARD_H)
 
         path = QPainterPath()
         path.addRoundedRect(card, RADIUS, RADIUS)

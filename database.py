@@ -4,6 +4,7 @@ Bu modül tüm veri kalıcılığını VDS (Firebase Realtime Cloud Backend) ve
 yerel .roz / JSON versiyon deposu üzerinden yönetir.
 """
 import os
+import time
 import json
 import zipfile
 from datetime import datetime
@@ -126,12 +127,50 @@ def get_backup_dir():
     return b_dir
 
 
-def create_database_backup(slug=None, note="auto"):
+# Otomatik yedekler arasındaki en kısa süre. Bu sınır olmadan her kayıtta
+# tam bir yedek alınıyordu: ölçümde otuz saniye arayla iki tam yedek, ve her
+# biri BÜTÜN kurumların bütün .roz dosyalarını sıkıştırıyor (20 MB, 161 ms
+# disk ve işlemci). Ana sayfaya dönüşün ağır hissettirmesinin sebebi buydu;
+# dönüş anında aynı anda üç iş parçacığı başlıyor (bulut gönderimi, bu yedek,
+# kurumlar arası yayma) ve üçü de arayüzle disk ve GIL için yarışıyor.
+#
+# On dakikada bir tam yedek, otuz saniyede bir tam yedekle aynı korumayı
+# sağlıyor: aradaki versiyonlar zaten kendi .roz dosyaları olarak duruyor,
+# yedek onların üstüne ikinci bir kopya.
+BACKUP_MIN_INTERVAL_SEC = 600
+
+
+def _recent_backup_age(b_dir):
+    """En son yedeğin kaç saniye önce alındığı (yoksa None)."""
+    try:
+        newest = 0.0
+        for f in os.listdir(b_dir):
+            if f.startswith("backup_") and f.endswith(".zip"):
+                m = os.path.getmtime(os.path.join(b_dir, f))
+                if m > newest:
+                    newest = m
+        if not newest:
+            return None
+        return time.time() - newest
+    except Exception:
+        return None
+
+
+def create_database_backup(slug=None, note="auto", force=False):
     """
     Creates a compressed ZIP backup snapshot of all institutions,
     version files (.roz), and metadata.
+
+    force=True ile çağrılmadıkça, son yedeğin üstünden BACKUP_MIN_INTERVAL_SEC
+    geçmemişse hiçbir şey yapmadan döner. Geri yükleme öncesi güvenlik yedeği
+    gibi kritik çağrılar force kullanmalı.
     """
     b_dir = get_backup_dir()
+
+    if not force:
+        age = _recent_backup_age(b_dir)
+        if age is not None and age < BACKUP_MIN_INTERVAL_SEC:
+            return None
     now_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     tag = slug if slug else "all_institutions"
     zip_name = f"backup_{tag}_{now_str}_{note}.zip"
@@ -174,7 +213,8 @@ def restore_database_backup(backup_zip_path: str) -> bool:
     try:
         import version_store
         inst_base = version_store._ensure_base()
-        create_database_backup(note="pre_restore_snapshot")
+        # Geri yükleme öncesi güvenlik yedeği: sıklık sınırına takılmamalı.
+        create_database_backup(note="pre_restore_snapshot", force=True)
         
         with zipfile.ZipFile(backup_zip_path, "r") as zipf:
             for member in zipf.namelist():

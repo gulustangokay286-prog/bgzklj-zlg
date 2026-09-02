@@ -1,13 +1,14 @@
-import re
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QRadioButton, QButtonGroup, 
-    QComboBox, QPushButton, QLabel, QFrame, QWidget, QGraphicsDropShadowEffect
+    QComboBox, QPushButton, QLabel, QFrame, QWidget, QGraphicsDropShadowEffect,
+    QStyledItemDelegate, QStyleOptionViewItem, QStyle, QScrollArea
 )
-from PySide6.QtCore import Qt, QByteArray, QPointF
+from PySide6.QtCore import Qt, QByteArray, QPointF, QSize, QRectF, Signal
 from PySide6.QtGui import (
     QFont, QColor, QPainter, QPainterPath, QPen, QBrush, QLinearGradient, QPixmap
 )
 from PySide6.QtSvg import QSvgRenderer
+import bk_ui
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -23,45 +24,31 @@ class AppleReport3DIconWidget(QWidget):
         self.setFixedSize(size, size)
         
         self._svg_template = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="64" height="64">
-  <defs>
-    <radialGradient id="reportShadow" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#000000" stop-opacity="0.22"/>
-      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="docGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#FFFFFF"/>
-      <stop offset="100%" stop-color="#E2E8F0"/>
-    </linearGradient>
-    <linearGradient id="docGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0071E3"/>
-      <stop offset="100%" stop-color="#38BDF8"/>
-    </linearGradient>
-  </defs>
-  <!-- Soft ground shadow -->
-  <ellipse cx="50" cy="88" rx="34" ry="7" fill="url(#reportShadow)"/>
-  
-  <!-- Base Paper Tray -->
-  <path d="M 20 54 L 50 70 L 80 54 L 50 38 Z" fill="#CBD5E1"/>
-  <path d="M 20 54 L 50 70 L 50 73 L 20 57 Z" fill="#94A3B8"/>
-  <path d="M 50 70 L 80 54 L 80 57 L 50 73 Z" fill="#64748B"/>
-  
-  <!-- Middle Sheet -->
-  <path d="M 25 47 L 50 60 L 75 47 L 50 34 Z" fill="url(#docGrad1)"/>
-  <path d="M 25 47 L 50 60 L 50 62 L 25 49 Z" fill="#CBD5E1"/>
-  <path d="M 50 60 L 75 47 L 75 49 L 50 62 Z" fill="#94A3B8"/>
-  
-  <!-- Top Document Layer with Blue Gradient -->
-  <path d="M 30 38 L 50 49 L 70 38 L 50 27 Z" fill="url(#docGrad2)"/>
-  <path d="M 30 38 L 50 49 L 50 51 L 30 40 Z" fill="#0058B3"/>
-  <path d="M 50 49 L 70 38 L 70 40 L 50 51 Z" fill="#004691"/>
-  
-  <!-- Content Lines on Top Document -->
-  <line x1="38" y1="35" x2="52" y2="43" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" opacity="0.9"/>
-  <line x1="42" y1="33" x2="60" y2="43" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
-  
-  <!-- Glowing Cyan Laser / Print Beam -->
-  <line x1="22" y1="51" x2="78" y2="51" stroke="#38BDF8" stroke-width="2" stroke-linecap="round" opacity="0.85"/>
-</svg>"""
+            <defs>
+                <linearGradient id="sheetGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#FFFFFF"/>
+                    <stop offset="100%" stop-color="#F1F5F9"/>
+                </linearGradient>
+                <linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#0071E3"/>
+                    <stop offset="100%" stop-color="#005BB5"/>
+                </linearGradient>
+                <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+                    <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#000000" flood-opacity="0.12"/>
+                </filter>
+            </defs>
+            <g filter="url(#shadow)">
+                <rect x="22" y="14" width="56" height="72" rx="10" fill="url(#sheetGrad)" stroke="#CBD5E1" stroke-width="2"/>
+                <path d="M 58 14 L 78 34 L 58 34 Z" fill="#E2E8F0"/>
+                <path d="M 58 14 L 78 34" stroke="#CBD5E1" stroke-width="2"/>
+                <rect x="32" y="30" width="18" height="4" rx="2" fill="url(#brandGrad)"/>
+                <rect x="32" y="42" width="36" height="4" rx="2" fill="#94A3B8"/>
+                <rect x="32" y="52" width="36" height="4" rx="2" fill="#CBD5E1"/>
+                <rect x="32" y="62" width="24" height="4" rx="2" fill="#E2E8F0"/>
+                <circle cx="64" cy="64" r="10" fill="url(#brandGrad)"/>
+                <path d="M 60 64 L 63 67 L 69 61" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            </g>
+        </svg>"""
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -74,76 +61,199 @@ class AppleReport3DIconWidget(QWidget):
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# 2. APPLE NATIVE CHEVRON COMBOBOX
+# 2. APPLE NATIVE CHEVRON COMBOBOX & DELEGATE
 # ═══════════════════════════════════════════════════════════════════════
-class AppleComboBox(QComboBox):
+class AppleComboBox(QPushButton):
     """
-    Apple native ComboBox featuring custom anti-aliased vector chevron.
+    Apple native single-click popover dropdown with curved corners and zero Cocoa glitching.
+    Fully compatible with QComboBox API.
     """
+    currentIndexChanged = Signal(int)
+    currentTextChanged = Signal(str)
+    
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFont(QFont("Segoe UI", 9))
+        self.setFixedHeight(28)
         self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self._items = []
+        self._current_index = -1
+        self._menu = None
+        
         self.setStyleSheet("""
-            QComboBox {
+            QPushButton {
                 background-color: #FFFFFF;
-                border: 1px solid #D1D1D6;
-                border-radius: 7px;
-                padding: 4px 28px 4px 10px;
-                font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui;
-                font-size: 11.5px;
-                color: #1D1D1F;
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
+                padding: 0px 28px 0px 10px;
                 text-align: left;
-            }
-            QComboBox:hover {
-                border-color: #86868B;
-            }
-            QComboBox:focus {
-                border: 1.5px solid #0071E3;
-            }
-            QComboBox:disabled {
-                background-color: #F5F5F7;
-                border-color: #E5E5EA;
-                color: #8E8E93;
-            }
-            QComboBox::drop-down {
-                subcontrol-origin: padding;
-                subcontrol-position: top right;
-                width: 24px;
-                border-left: none;
-            }
-            QComboBox::down-arrow {
-                image: none;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #FFFFFF;
-                border: 1px solid #D1D1D6;
-                border-radius: 8px;
-                padding: 4px;
-                selection-background-color: #0071E3;
-                selection-color: #FFFFFF;
-                outline: none;
-                font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui;
+                font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
                 font-size: 11.5px;
+                font-weight: 500;
+                color: #0F172A;
+                min-height: 28px;
+                max-height: 28px;
+            }
+            QPushButton:hover {
+                border-color: #94A3B8;
+                background-color: #F8FAFC;
+            }
+            QPushButton:focus {
+                border: 1.2px solid #0071E3;
+                background-color: #FFFFFF;
+            }
+            QPushButton:disabled {
+                background-color: #F1F5F9;
+                border-color: #E2E8F0;
+                color: #94A3B8;
             }
         """)
+        self.clicked.connect(self.showPopup)
+
+    def addItems(self, items):
+        for item in items:
+            self.addItem(item)
+
+    def addItem(self, text, data=None):
+        self._items.append({"text": str(text), "data": data})
+        if self._current_index < 0:
+            self.setCurrentIndex(0)
+            
+    def clear(self):
+        self._items.clear()
+        self._current_index = -1
+        self.setText("")
+
+    def count(self):
+        return len(self._items)
+
+    def currentText(self):
+        if 0 <= self._current_index < len(self._items):
+            return self._items[self._current_index]["text"]
+        return ""
+
+    def currentIndex(self):
+        return self._current_index
+
+    def setCurrentIndex(self, index):
+        if 0 <= index < len(self._items):
+            old_idx = self._current_index
+            self._current_index = index
+            text = self._items[index]["text"]
+            self.setText(text.replace("&", "&&"))
+            self.update()
+            if old_idx != index:
+                self.currentIndexChanged.emit(index)
+                self.currentTextChanged.emit(text)
+        elif index == -1:
+            self._current_index = -1
+            self.setText("")
+
+    def setCurrentText(self, text):
+        idx = self.findText(text)
+        if idx >= 0:
+            self.setCurrentIndex(idx)
+
+    def findText(self, text):
+        for i, item in enumerate(self._items):
+            if item["text"] == text:
+                return i
+        return -1
+
+    def itemText(self, index):
+        if 0 <= index < len(self._items):
+            return self._items[index]["text"]
+        return ""
+
+    def itemData(self, index):
+        if 0 <= index < len(self._items):
+            return self._items[index]["data"]
+        return None
+
+    def showPopup(self):
+        if not self.isEnabled() or not self._items:
+            return
+        menu = bk_ui.HeroPopoverMenu(self)
+        menu.card.setMinimumWidth(max(self.width(), 260))
+        menu.card.setMaximumHeight(380)
+        
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("""
+            QScrollArea { border: none; background: transparent; }
+            QScrollBar:vertical { background: transparent; width: 5px; margin: 0; }
+            QScrollBar::handle:vertical { background: #CBD5E1; border-radius: 2.5px; min-height: 24px; }
+            QScrollBar::handle:vertical:hover { background: #94A3B8; }
+        """)
+        
+        container = QWidget()
+        container.setStyleSheet("background: transparent; border: none;")
+        lay = QVBoxLayout(container)
+        lay.setContentsMargins(4, 4, 4, 4)
+        lay.setSpacing(2)
+        
+        for idx, item in enumerate(self._items):
+            t = item["text"]
+            is_selected = (idx == self._current_index)
+            
+            btn = QPushButton(t.replace("&", "&&"))
+            btn.setFixedHeight(28)
+            btn.setCursor(Qt.PointingHandCursor)
+            
+            if is_selected:
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background: #0071E3;
+                        color: #FFFFFF;
+                        border: none;
+                        border-radius: 6px;
+                        padding: 0 10px;
+                        text-align: left;
+                        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+                        font-size: 11.5px;
+                        font-weight: 600;
+                    }
+                """)
+            else:
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background: transparent;
+                        color: #0F172A;
+                        border: none;
+                        border-radius: 6px;
+                        padding: 0 10px;
+                        text-align: left;
+                        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+                        font-size: 11.5px;
+                        font-weight: 500;
+                    }
+                    QPushButton:hover {
+                        background: #F1F5F9;
+                    }
+                """)
+            btn.clicked.connect(lambda _, i=idx: (self.setCurrentIndex(i), menu.close()))
+            lay.addWidget(btn)
+            
+        scroll.setWidget(container)
+        menu.card_lay.addWidget(scroll)
+        menu.popup_below(self, align="left", offset_y=4)
+        self._menu = menu
 
     def paintEvent(self, event):
         super().paintEvent(event)
-        
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         
         w = self.width()
         h = self.height()
-        cx = w - 14
+        cx = w - 12
         cy = h / 2.0
         
-        is_open = self.view().isVisible() if self.view() else False
-        is_enabled = self.isEnabled()
-        
-        pen_color = QColor("#0071E3") if (self.hasFocus() or is_open) else (QColor("#86868B") if is_enabled else QColor("#C7C7CC"))
-        pen = QPen(pen_color, 1.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+        is_open = bool(self._menu and self._menu.isVisible())
+        color = QColor("#0071E3" if (self.hasFocus() or is_open) else "#64748B")
+        pen = QPen(color, 1.5, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
         

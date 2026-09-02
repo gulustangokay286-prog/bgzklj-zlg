@@ -4,6 +4,8 @@ Her kurum bir klasör, her oto/manuel kayıt bir .roz versiyon dosyası.
 """
 from __future__ import annotations
 
+from functools import lru_cache
+
 import copy
 import os
 import json
@@ -82,6 +84,11 @@ def normalize_teacher_name(name: str) -> str:
     """Normalizes teacher names for cross-institution comparison (case and whitespace insensitive)."""
     if not name:
         return ""
+    return _normalize_teacher_name_cached(name)
+
+
+@lru_cache(maxsize=8192)
+def _normalize_teacher_name_cached(name: str) -> str:
     s = name.strip().upper()
     s = s.replace("İ", "I").replace("ı", "I")
     s = s.replace("Ş", "S").replace("ş", "S")
@@ -96,6 +103,11 @@ def _matches_teacher(t1: str, t2: str) -> bool:
     """Smart fuzzy/normalized teacher name matcher."""
     if not t1 or not t2:
         return False
+    return _matches_teacher_cached(t1, t2)
+
+
+@lru_cache(maxsize=16384)
+def _matches_teacher_cached(t1: str, t2: str) -> bool:
     n1 = normalize_teacher_name(t1)
     n2 = normalize_teacher_name(t2)
     if n1 == n2:

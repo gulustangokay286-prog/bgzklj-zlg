@@ -4,6 +4,7 @@ Pixel-perfect aSc k12 Bilişim Ders Planlama 2020 ribbon + workspace
 """
 import os
 import sys
+from functools import lru_cache
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QLabel,
     QSplitter, QTreeWidget, QTreeWidgetItem, QStatusBar,
@@ -34,6 +35,7 @@ PASTEL_DISTINCT_COLORS = [
     "#5E35B1", "#A1887F", "#0097A7", "#C2185B", "#F57C00"
 ]
 
+@lru_cache(maxsize=8192)
 def format_tr_name(name_str: str) -> str:
     """Capitalizes Turkish names properly (e.g. 'hüseyin arman' -> 'Hüseyin Arman', 'ali ihsan' -> 'Ali İhsan')."""
     if not name_str:
@@ -166,6 +168,47 @@ def make_menu_icon(symbol: str, color1: str, color2: str) -> QIcon:
     p.drawText(4, 4, 24, 24, Qt.AlignCenter, symbol)
     p.end()
     return QIcon(pix)
+
+
+# Ders adı eşleştirmesi. Çizelge açılırken 360 bin kez çağrılıyordu ve her
+# çağrı dört ayrı dizge normalleştirmesi yapıyordu; ayrı ad çifti sayısı ise
+# birkaç yüzü geçmiyor. Fonksiyon _refresh_unplaced_lessons'ın içinde tanımlıydı,
+# yani her yenilemede baştan kuruluyor ve hiçbir şey saklanamıyordu.
+@lru_cache(maxsize=16384)
+def _matches_subject(s1, s2):
+    if not s1 or not s2: return False
+    if s1 == s2: return True
+    # Bu iki yardımcı auto_scheduler'dan gelir — bu modülün kendi
+    # format_tr_name'i değil. Fonksiyon yerinde tanımlıyken de öyleydi.
+    from auto_scheduler import format_tr_name as _fmt, normalize_clean as _nc
+    f1 = _fmt(s1).replace(" ", "")
+    f2 = _fmt(s2).replace(" ", "")
+    if f1 == f2: return True
+    n1 = _nc(s1).replace(" ", "")
+    n2 = _nc(s2).replace(" ", "")
+    if n1 == n2: return True
+    if (len(f1) >= 3 and len(f2) >= 3) and (f1.startswith(f2) or f2.startswith(f1) or n1.startswith(n2) or n2.startswith(n1)):
+        return True
+    return False
+
+
+def ask_place_anyway(parent, body_html):
+    """Kapalı saat uyarısını göster; kullanıcı yine de istiyorsa True dön.
+
+    Modül düzeyinde duruyor ki testler tek bir yerden yamalayabilsin. Eskiden
+    bu uyarılar doğrudan QMessageBox.warning ile çıkıyordu ve testler onu
+    yamalıyordu; özel düğme metni ("Yine de Yerleştir") statik warning ile
+    mümkün olmadığı için kutu elle kuruluyor, dikiş de buraya taşınıyor.
+    """
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Warning)
+    box.setWindowTitle("Bu Saate Yerleştirilemez")
+    box.setText(body_html)
+    btn_force = box.addButton("Yine de Yerleştir", QMessageBox.AcceptRole)
+    btn_cancel = box.addButton("Vazgeç", QMessageBox.RejectRole)
+    box.setDefaultButton(btn_cancel)
+    box.exec()
+    return box.clickedButton() is btn_force
 
 
 class TitleBar(QWidget):
@@ -613,61 +656,6 @@ class MainWindow(QMainWindow):
         self._ribbon = RibbonWidget(root)
         self._build_ribbon()
         root_layout.addWidget(self._ribbon)
-
-        # Wire the file menu (Integrated directly on Ribbon Tab Bar)
-        fm = self._ribbon.file_menu
-        
-        act_home = QAction(make_icon("anasayfa", 16), "Ana Sayfa (Dashboard)", self)
-        act_home.triggered.connect(self._go_home)
-        fm.addAction(act_home)
-        
-        fm.addSeparator()
-        
-        act_new = QAction(make_icon("yeni", 16), "Yeni", self)
-        act_new.triggered.connect(self._act_new)
-        fm.addAction(act_new)
-        
-        act_open = QAction(make_icon("ac", 16), "Aç", self)
-        act_open.triggered.connect(self._act_open)
-        fm.addAction(act_open)
-        
-        act_save = QAction(make_icon("kaydet", 16), "Kaydet", self)
-        act_save.triggered.connect(self._act_save)
-        fm.addAction(act_save)
-        
-        act_cloud_pull = QAction(make_icon("bulut", 16), "Buluttan Verileri İndir / Senkronize Et", self)
-        act_cloud_pull.triggered.connect(lambda: self._download_cloud_data(show_message=True))
-        fm.addAction(act_cloud_pull)
-        
-        act_download = QAction(make_icon("bulut_olustur", 16), "Güncel Versiyonu İndir (İndirme Sayfası)", self)
-        act_download.triggered.connect(self._open_download_page)
-        fm.addAction(act_download)
-        
-        act_update = QAction(make_icon("internet", 16), "Evden Güncellemeleri Kontrol Et / İndir", self)
-        act_update.triggered.connect(self._act_check_updates)
-        fm.addAction(act_update)
-        
-        fm.addSeparator()
-        
-        act_print = QAction(make_icon("yazdir", 16), "Yazdır", self)
-        act_print.triggered.connect(self._act_print)
-        fm.addAction(act_print)
-        
-        act_prev = QAction(make_icon("on_izleme", 16), "Ön İzleme", self)
-        act_prev.triggered.connect(self._act_preview)
-        fm.addAction(act_prev)
-        
-        fm.addSeparator()
-        
-        act_about = QAction(make_icon("okul", 16), "Hakkında", self)
-        act_about.triggered.connect(lambda: QMessageBox.about(self, "Hakkında", f"{APP_TITLE} {VERSION}\n\nChenkron Ders Planlama Yazılımı"))
-        fm.addAction(act_about)
-        
-        fm.addSeparator()
-        
-        act_exit = QAction(make_icon("temizle", 16), "Çıkış", self)
-        act_exit.triggered.connect(self.close)
-        fm.addAction(act_exit)
 
         # Workspace
         workspace = self._build_workspace(root)
@@ -1837,18 +1825,7 @@ class MainWindow(QMainWindow):
         else:
             scoped_atamalar = atamalar
 
-        def matches_subject(s1, s2):
-            if not s1 or not s2: return False
-            if s1 == s2: return True
-            f1 = format_tr_name(s1).replace(" ", "")
-            f2 = format_tr_name(s2).replace(" ", "")
-            if f1 == f2: return True
-            n1 = normalize_clean(s1).replace(" ", "")
-            n2 = normalize_clean(s2).replace(" ", "")
-            if n1 == n2: return True
-            if (len(f1) >= 3 and len(f2) >= 3) and (f1.startswith(f2) or f2.startswith(f1) or n1.startswith(n2) or n2.startswith(n1)):
-                return True
-            return False
+        matches_subject = _matches_subject
 
         # ═══ STEP 1: Group atamalar by (subject, class, teacher) ═══
         # Atamalar can be stored as separate rows (e.g. Türkçe 9A = hours:2 + hours:2 = 4 total)
@@ -1955,6 +1932,38 @@ class MainWindow(QMainWindow):
         for cn_key, open_cap in class_open_slots.items():
             class_free_slots[cn_key] = max(0, open_cap - class_placed_hours.get(cn_key, 0))
 
+        # Yerleşimler ders adına göre kovalara ayrılıyor. Aşağıdaki döngü her
+        # grup için bütün yerleşimleri baştan tarıyordu: 768 grup × 1.280
+        # yerleşim, çizelge açılırken bir milyona yakın döngü. Oysa bir grubu
+        # yalnızca kendi dersinin yerleşimleri ilgilendiriyor. Ayrı ders adı
+        # sayısı yirmi otuzu geçmediği için hangi kovanın hangi gruba uyduğu
+        # da bir kez hesaplanıp saklanabiliyor — bulanık eşleştirme aynen
+        # korunuyor, sadece kayıt başına değil kova başına çalışıyor.
+        _subject_buckets = {}
+        for _idx, _p in enumerate(grid_placements):
+            if _p.get("is_filler"):
+                continue
+            _ps = (_p.get("subject_name") or _p.get("subject") or "").strip()
+            if not _ps or _ps.lower() in ["boş", "bos", "atanmadı"]:
+                continue
+            _subject_buckets.setdefault(_ps, []).append((_idx, _p))
+        _bucket_keys = list(_subject_buckets)
+        _bucket_for_subject = {}
+
+        def placements_for_subject(subject):
+            hit = _bucket_for_subject.get(subject)
+            if hit is None:
+                merged = []
+                for key in _bucket_keys:
+                    if matches_subject(key, subject):
+                        merged.extend(_subject_buckets[key])
+                # Sıra korunuyor: birden çok kova eşleşirse sonuç yine
+                # grid_placements sırasında geziliyor.
+                merged.sort(key=lambda pair: pair[0])
+                hit = [pair[1] for pair in merged]
+                _bucket_for_subject[subject] = hit
+            return hit
+
         # ═══ STEP 2: For each group, calculate parts and unplaced cards ═══
         unplaced = []
         for group_key, grp in grouped.items():
@@ -1992,15 +2001,7 @@ class MainWindow(QMainWindow):
             matched_slots = []
             seen_slots = set()
             
-            for p in grid_placements:
-                p_s = (p.get("subject_name") or p.get("subject") or "").strip()
-                if not p_s or p_s.lower() in ["boş", "bos", "atanmadı"]:
-                    continue
-                if p.get("is_filler"):
-                    continue
-                if not matches_subject(p_s, s_name):
-                    continue
-                    
+            for p in placements_for_subject(s_name):
                 p_c = (p.get("class_name") or p.get("class") or "").strip()
                 p_t = (p.get("teacher_name") or p.get("teacher") or "").strip()
                 
@@ -2323,6 +2324,9 @@ class MainWindow(QMainWindow):
 
         return True, ""
 
+    def _ask_place_anyway(self, body_html):
+        return ask_place_anyway(self, body_html)
+
     def _final_placement_check(self, row, col, lesson_info):
         """Bırakma anında SON doğrulama — sürüklerken görünen renkle aynı kaynak.
 
@@ -2355,28 +2359,37 @@ class MainWindow(QMainWindow):
         from auto_scheduler import matches_class, format_tr_name, normalize_clean
         import placement_engine
 
-        # Kapalı/imkânsız hücreye bırakma: motorun gerekçesiyle sor. Aşağıdaki
-        # ayrıntılı kontroller (takas, dock'a alma) olduğu gibi devam eder.
-        # KAPALI SAAT: elle bile yerleştirilemez.
+        # Kapalı/imkânsız hücreye bırakma: motorun gerekçesini göster ve KARARI
+        # KULLANICIYA BIRAK.
         #
-        # Öğretmenlerin kuralı net: "öğretmen kapalıysa, sürükleme manuel yapılsa
-        # bile o kısma yerleşim yapılamaz." Kapalı saat bir tercih değil, fiziksel
-        # bir gerçek — öğretmen o saatte okulda yok, başka kurumda ya da o saati
-        # başka kurum tutmuş. Bu yüzden burada "yine de yerleştir" seçeneği YOK.
+        # Eskiden burada yalnızca "yerleştirilemez, önce Zaman Tablosu'ndan açın"
+        # yazan tek düğmeli bir uyarı vardı. Gerekçe şuydu: kapalı saat bir
+        # tercih değil, öğretmen o saatte okulda yok. Ama bu, ekranın önündeki
+        # kişinin bilmediği bir şeyi bildiğimizi varsayıyor — hoca o gün gelmeyi
+        # kabul etmiş olabilir, veri eski olabilir, ya da kullanıcı bilerek
+        # geçici bir yerleşim deniyor olabilir. Program, elle yapılan bir işi
+        # gerekçesini söyleyip yine de yapmayı reddetmemeli.
         #
-        # "Yine de yerleştir" yalnızca DOLU hücrede sunulur (aşağıdaki takas /
-        # dock akışı): oradaki engel bir çakışmadır, kullanıcı bilerek çözebilir.
+        # Artık uyarı aynı ama iki seçenekli: vazgeç, ya da yine de yerleştir.
+        # Bir bırakma birden çok engele takılabilir: iki saatlik dersin her
+        # saati ayrı ayrı, üstelik sınıf / öğretmen çapraz kısıtı / öğretmen
+        # müsaitliği ayrı ayrı kontrol ediliyor. Her biri kendi penceresini
+        # açınca kullanıcı tek bir sürükleme için dört kez onay veriyordu.
+        # Hepsi burada toplanıyor, en sonda bir kez soruluyor.
+        blocked_reasons = []
+
         verdict = self._final_placement_check(row, col, lesson_info)
         if verdict is not None and verdict.status in (
                 placement_engine.FORBIDDEN, placement_engine.INVALID_GEOMETRY):
             reasons = "<br>".join(f"• {c.message}" for c in verdict.hard_violations[:5])
-            QMessageBox.warning(
-                self, "Bu Saate Yerleştirilemez",
-                f"{reasons or verdict.explanation}<br><br>"
-                f"<b>Bu saate ders konulamaz.</b> Kapalı saat elle de aşılamaz — "
-                f"gerekiyorsa önce Zaman Tablosu ekranından o saati açın.")
-            self.statusBar().showMessage(verdict.explanation, 6000)
-            return
+            # Sorma — gerekçeyi topla. Bütün engeller toplanıp SONUNDA tek
+            # sheet'te bir kez sorulacak (bkz. aşağıdaki "TEK SORU").
+            for c in verdict.hard_violations[:5]:
+                blocked_reasons.append(c.message)
+            if not verdict.hard_violations and verdict.explanation:
+                blocked_reasons.append(verdict.explanation)
+            self.statusBar().showMessage(
+                f"Kapalı saate elle yerleştirildi — {verdict.explanation}", 8000)
 
         display_mode = getattr(self._grid, "current_view_mode", "classes")
         subject_name = lesson_info.get("subject_name", "Ders")
@@ -2686,15 +2699,9 @@ class MainWindow(QMainWindow):
                             # this problem. Making them fight the dialog every time was
                             # the wrong default.
                             # Kapalı saat elle de aşılamaz (öğretmen kuralı).
-                            QMessageBox.warning(
-                                self, "Bu Saate Yerleştirilemez",
-                                f"⚠️ <b>'{chk_c}'</b> sınıfının <b>{day_name}</b> günü "
-                                f"<b>{check_p+1}. ders saati</b> KAPALI.<br><br>"
-                                f"<b>Bu saate ders konulamaz.</b> Gerekiyorsa önce "
-                                f"Zaman Tablosu ekranından o saati açın."
-                                + _blocked_note)
-                            self.statusBar().showMessage(f"Yerleştirilemedi: {chk_c} - {day_name} {check_p+1}. saat kapalı!")
-                            return
+                            blocked_reasons.append(
+                                f"<b>'{chk_c}'</b> sınıfının <b>{day_name}</b> günü "
+                                f"<b>{check_p+1}. ders saati</b> kapalı.")
 
         # Öğretmen Timeoff Kontrolü (Global Kisitlamalar ve Yerel Timeoff)
         if teacher:
@@ -2708,25 +2715,32 @@ class MainWindow(QMainWindow):
                 # Global çapraz kısıtlama
                 is_available = kisitlamalar.get(teacher, {}).get(cell_key, True)
                 if not is_available:
-                    QMessageBox.warning(
-                        self, "Bu Saate Yerleştirilemez",
-                        f"⚠️ <b>'{teacher}'</b> öğretmeninin <b>{day_name}</b> günü "
-                        f"<b>{check_p+1}. ders saatinde</b> ÇALIŞAMAZ kısıtlaması var."
-                        f"<br><br><b>Bu saate ders konulamaz.</b>" + _blocked_note)
-                    self.statusBar().showMessage(f"Yerleştirilemedi: {teacher} - {day_name} {check_p+1}. saat kapalı!")
-                    return
+                    blocked_reasons.append(
+                        f"<b>'{teacher}'</b> öğretmeninin <b>{day_name}</b> günü "
+                        f"<b>{check_p+1}. ders saatinde</b> çalışamaz kısıtlaması var.")
                     
                 # Yerel timeoff (Grid üzerinden ayarlanan)
                 if t_timeoff and day_idx < len(t_timeoff) and check_p < len(t_timeoff[day_idx]):
                     if t_timeoff[day_idx][check_p] == 0:
-                        QMessageBox.warning(
-                            self, "Bu Saate Yerleştirilemez",
-                            f"⚠️ <b>'{teacher}'</b> öğretmeninin <b>{day_name}</b> günü "
-                            f"<b>{check_p+1}. ders saati</b> KAPALI.<br><br>"
-                            f"<b>Bu saate ders konulamaz.</b> Gerekiyorsa önce "
-                            f"Zaman Tablosu ekranından o saati açın." + _blocked_note)
-                        self.statusBar().showMessage(f"Yerleştirilemedi: {teacher} - {day_name} {check_p+1}. saat kapalı!")
-                        return
+                        blocked_reasons.append(
+                            f"<b>'{teacher}'</b> öğretmeninin <b>{day_name}</b> günü "
+                            f"<b>{check_p+1}. ders saati</b> kapalı.")
+
+        # ── TEK SORU: toplanan bütün engeller tek sheet'te, bir kez ──
+        if blocked_reasons:
+            seen = set()
+            uniq = [r for r in blocked_reasons if not (r in seen or seen.add(r))]
+            body = ("⚠️ " + "<br>".join(uniq[:6])
+                    + ("<br>…" if len(uniq) > 6 else "")
+                    + "<br><br><b>Bu saat kapalı işaretli.</b> Yine de yerleştirmek "
+                      "isterseniz ders çizelgede kalır; kapalı saat uyarısı "
+                      "listelerde görünmeye devam eder."
+                    + _blocked_note)
+            if not self._ask_place_anyway(body):
+                self.statusBar().showMessage(
+                    "Yerleştirilemedi: " + re.sub(r"<[^>]+>", "", uniq[0]), 6000)
+                return
+            self.statusBar().showMessage("Kapalı saate elle yerleştirildi.", 8000)
 
         # ── 3. KONTROL: Öğretmen Çakışması Kontrolü
         teacher_info = next((t for t in self.data_store.get("ogretmenler", []) if format_tr_name(t.get("ad", "")) == teacher), {})

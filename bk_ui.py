@@ -1674,95 +1674,58 @@ class EmptyState(QWidget):
         lay.addStretch(1)
 
 
-def paint_sheet_shadow(painter, rect, radius=R_SHEET, layers=16, offset=6):
-    """Stacked hairlines instead of QGraphicsDropShadowEffect: a widget
-    gets one graphics effect, and spending it on a shadow means an
-    entrance animation cannot have it. Also does not re-rasterise the
-    whole sheet on every repaint."""
-    painter.setBrush(Qt.NoBrush)
-    base = QRectF(rect).translated(0, offset)
-    for i in range(layers, 0, -1):
-        alpha = int(3 + (layers - i) * 0.8)
-        painter.setPen(QPen(QColor(15, 23, 42, alpha), 1))
-        painter.drawRoundedRect(base.adjusted(-i, -i, i, i), radius + i, radius + i)
+_SHADOW_CACHE = {}
+
+def get_smooth_shadow(w: int, h: int, radius: float, blur: int = 16, offset_y: int = 4, alpha: int = 40) -> tuple:
+    key = (w, h, int(radius), blur, offset_y, alpha)
+    if key in _SHADOW_CACHE:
+        return _SHADOW_CACHE[key]
+        
+    pad = blur * 2
+    pw = w + pad * 2
+    ph = h + pad * 2
+    
+    scale = 2
+    img = QImage(pw * scale, ph * scale, QImage.Format_ARGB32_Premultiplied)
+    img.fill(Qt.transparent)
+    
+    p = QPainter(img)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.scale(scale, scale)
+    
+    # Draw soft dark core rounded rect
+    rect = QRectF(pad, pad + offset_y, w, h)
+    path = QPainterPath()
+    path.addRoundedRect(rect, radius, radius)
+    p.fillPath(path, QColor(15, 23, 42, alpha))
+    p.end()
+    
+    # Multi-step smooth downscale & upscale provides pristine Gaussian blur
+    down = img.scaled(pw // 2, ph // 2, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+    down2 = down.scaled(pw // 4, ph // 4, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+    up = down2.scaled(pw * scale, ph * scale, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+    
+    pm = QPixmap.fromImage(up)
+    pm.setDevicePixelRatio(scale)
+    _SHADOW_CACHE[key] = (pm, pad)
+    return _SHADOW_CACHE[key]
+
+
+def paint_sheet_shadow(painter, rect, radius=R_SHEET, layers=None, offset=0):
+    """Clean no-op: eliminates all fake wireframe shadow loops and ghost outlines."""
+    pass
 
 
 def elide(text, widget, width):
     return QFontMetrics(widget.font()).elidedText(text, Qt.ElideRight, width)
-    def popup_below(self, anchor_widget, align="right", offset_y=4):
-        self.adjustSize()
-        if anchor_widget:
-            g_pos = anchor_widget.mapToGlobal(QPoint(0, 0))
-            if align == "right":
-                x = g_pos.x() + anchor_widget.width() - self.width() + 12
-            else:
-                x = g_pos.x() - 12
-            y = g_pos.y() + anchor_widget.height() + offset_y - 12
-        else:
-            x, y = QCursor.pos().x() - 12, QCursor.pos().y() - 12
-
-        screen = QApplication.screenAt(QPoint(x, y)) or QApplication.primaryScreen()
-        if screen:
-            geo = screen.availableGeometry()
-            x = max(geo.left() + 8, min(x, geo.right() - self.width() - 8))
-            y = max(geo.top() + 8, min(y, geo.bottom() - self.height() - 8))
-
-        self.move(x, y)
-        self.setWindowOpacity(0.0)
-        self.show()
-        self.raise_()
-
-        anim = QPropertyAnimation(self, b"windowOpacity", self)
-        anim.setDuration(140)
-        anim.setStartValue(0.0)
-        anim.setEndValue(1.0)
-        anim.setEasingCurve(QEasingCurve.OutCubic)
-        anim.finished.connect(lambda: setattr(self, "_anim", None))
-        anim.start()
-        self._anim = anim
-
-    def popup_at(self, target_pos: QPoint):
-        self.adjustSize()
-        x, y = target_pos.x() - 12, target_pos.y() - 12
-        screen = QApplication.screenAt(QPoint(x, y)) or QApplication.primaryScreen()
-        if screen:
-            geo = screen.availableGeometry()
-            x = max(geo.left() + 8, min(x, geo.right() - self.width() - 8))
-            y = max(geo.top() + 8, min(y, geo.bottom() - self.height() - 8))
-
-        self.move(x, y)
-        self.setWindowOpacity(0.0)
-        self.show()
-        self.raise_()
-
-        anim = QPropertyAnimation(self, b"windowOpacity", self)
-        anim.setDuration(140)
-        anim.setStartValue(0.0)
-        anim.setEndValue(1.0)
-        anim.setEasingCurve(QEasingCurve.OutCubic)
-        anim.finished.connect(lambda: setattr(self, "_anim", None))
-        anim.start()
-        self._anim = anim
-
-    def close_hero(self):
-        self.close()
 
 
 # ── Hero Sheet Dialog Base ───────────────────────────────────────────
 class HeroSheetDialog(QDialog):
     """The one modal sheet every dialog in the program is built on.
 
-    Defined twice in this file until now — identical bodies, the second
-    silently shadowing the first — so half the codebase was inheriting
-    from a class that could never be edited into existence. One
-    definition, and every sheet changes when it changes.
-
-    A sheet is: a frameless card on a painted shadow, a title that names
-    the task, a body, and a footer where the confirming action sits on
-    the right. Apple's modality guidance asks for exactly two things a
-    sheet must always have — a name for the task and an obvious way out —
-    and both are built in here rather than left to each caller to
-    remember.
+    A sheet is: a frameless card, a title that names the task, a body,
+    and a footer where the confirming action sits on the right.
     """
 
     def __init__(self, parent=None, width=480, height=520, title="", subtitle=""):
@@ -1773,7 +1736,7 @@ class HeroSheetDialog(QDialog):
         self._radius = R_SHEET
 
         self._outer_lay = QVBoxLayout(self)
-        self._outer_lay.setContentsMargins(18, 18, 18, 18)
+        self._outer_lay.setContentsMargins(0, 0, 0, 0)
         self._outer_lay.setSpacing(0)
 
         self.card = QFrame(self)
@@ -1832,12 +1795,8 @@ class HeroSheetDialog(QDialog):
         self.card_layout.addLayout(row)
         return row
 
-    # -- painting ------------------------------------------------------
     def paintEvent(self, _event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        paint_sheet_shadow(p, self.card.geometry(), self._radius, layers=16, offset=8)
-        p.end()
+        pass
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:

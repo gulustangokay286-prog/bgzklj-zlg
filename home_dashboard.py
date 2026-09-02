@@ -1613,9 +1613,6 @@ _DRAG_PIXMAP_W, _DRAG_PIXMAP_H = 210, 40
 # folder was created above another, which makes the colour useless for
 # recognising a folder — the whole point of giving it one.
 #
-# The palette is the design system's own hues, spaced far enough apart to
-# be told apart at 26px and all pulled to the same weight, so a list of
-# six folders reads as a set rather than as a paintbox.
 _FOLDER_PALETTE = (
     "#0F4AAB",  # brand navy
     "#2E9E5B",  # green
@@ -1658,19 +1655,11 @@ class CollapsibleVersionGroup(QFrame):
         self.folder_id = folder_id
         self.is_drop_target = is_drop_target
 
-        # No card shell per row. A bordered, rounded card for every row
-        # inside a sheet that is already a bordered surface is two
-        # containers doing one container's job, and it turns a list of
-        # five folders into five boxes with five sets of corners. Rows are
-        # rows: one surface, separated by a hairline.
         self._normal_style = f"""
             CollapsibleVersionGroup {{
-                background: #FFFFFF;
+                background: transparent;
                 border: none;
                 border-bottom: 1px solid {bk_ui.HAIRLINE};
-            }}
-            CollapsibleVersionGroup:hover {{
-                background: {bk_ui.HOVER};
             }}
         """
         self._dragover_style = f"""
@@ -1684,30 +1673,38 @@ class CollapsibleVersionGroup(QFrame):
             self.setAcceptDrops(True)
 
         self.main_lay = QVBoxLayout(self)
-        self.main_lay.setContentsMargins(16, 12, 16, 12)
-        self.main_lay.setSpacing(10)
+        self.main_lay.setContentsMargins(0, 0, 0, 0)
+        self.main_lay.setSpacing(0)
 
         # Header Frame
         self.header = QFrame()
+        self.header.setFixedHeight(48)
         self.header.setCursor(Qt.PointingHandCursor)
-        self.header.setStyleSheet("background: transparent; border: none;")
+        self.header.setStyleSheet(f"""
+            QFrame {{
+                background: #FFFFFF;
+                border: none;
+            }}
+            QFrame:hover {{
+                background: {bk_ui.HOVER};
+            }}
+        """)
         hdr_lay = QHBoxLayout(self.header)
-        hdr_lay.setContentsMargins(0, 0, 0, 0)
+        hdr_lay.setContentsMargins(16, 8, 16, 8)
         hdr_lay.setSpacing(12)
 
         # One colour for every folder you made; grey for the pile of
-        # everything you did not file. That is the only distinction the
-        # colour has to carry, so it is the only one it makes.
+        # everything you did not file.
         is_history = icon_name in ("history", "archive")
         if is_history:
             accent = QColor(bk_ui.INK_FAINT)
-            glyph = bk_ui.folder_3d_glyph(accent.name(), 30)
+            glyph = bk_ui.folder_3d_glyph(accent.name(), 28)
         else:
             accent = _folder_colour(None, color_hex)
-            glyph = bk_ui.folder_3d_glyph(accent.name(), 30)
+            glyph = bk_ui.folder_3d_glyph(accent.name(), 28)
 
         icon_lbl = QLabel()
-        icon_lbl.setFixedSize(32, 32)
+        icon_lbl.setFixedSize(30, 30)
         icon_lbl.setAlignment(Qt.AlignCenter)
         icon_lbl.setPixmap(glyph)
         icon_lbl.setStyleSheet("background: transparent; border: none;")
@@ -1720,7 +1717,7 @@ class CollapsibleVersionGroup(QFrame):
         text_vbox.setContentsMargins(0, 0, 0, 0)
 
         title_lbl = QLabel(title)
-        title_lbl.setFont(bk_ui.font(10.2, QFont.DemiBold))
+        title_lbl.setFont(bk_ui.font(9.8, QFont.DemiBold))
         title_lbl.setStyleSheet(f"color: {bk_ui.INK}; background: transparent; border: none;")
         title_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         text_vbox.addWidget(title_lbl)
@@ -1733,7 +1730,7 @@ class CollapsibleVersionGroup(QFrame):
             hdr_lay.addWidget(badge, 0, Qt.AlignVCenter)
 
         if show_folder_actions:
-            btn_dots = AppleThreeDotsButton(color="#64748B", size=24, tooltip="Klasör Seçenekleri", parent=self)
+            btn_dots = AppleThreeDotsButton(color="#64748B", size=24, tooltip="Klasör Seçenekleri", parent=self.header)
             btn_dots.clicked.connect(self._show_folder_menu)
             hdr_lay.addWidget(btn_dots)
 
@@ -1753,8 +1750,8 @@ class CollapsibleVersionGroup(QFrame):
         self.content_widget = QWidget()
         self.content_widget.setStyleSheet("background: transparent; border: none;")
         self.content_lay = QVBoxLayout(self.content_widget)
-        self.content_lay.setContentsMargins(0, 4, 0, 0)
-        self.content_lay.setSpacing(6)
+        self.content_lay.setContentsMargins(0, 0, 0, 0)
+        self.content_lay.setSpacing(0)
 
         self.main_lay.addWidget(self.content_widget)
         self.content_widget.setVisible(not is_collapsed)
@@ -1791,8 +1788,22 @@ class CollapsibleVersionGroup(QFrame):
                 return event.isAccepted()
         return super().eventFilter(obj, event)
 
+    def set_row_factory(self, factory):
+        self._row_factory = factory
+        self._rows_built = False
+
+    def _ensure_rows(self):
+        factory = getattr(self, "_row_factory", None)
+        if factory is None or getattr(self, "_rows_built", False):
+            return
+        self._rows_built = True
+        for w in factory():
+            self.content_lay.addWidget(w)
+
     def _set_collapsed(self, collapsed: bool):
         self.is_collapsed = collapsed
+        if not collapsed:
+            self._ensure_rows()
         self.content_widget.setVisible(not collapsed)
         if hasattr(self, "chevron_lbl") and self.chevron_lbl is not None:
             self.chevron_lbl.setPixmap(
@@ -1800,6 +1811,10 @@ class CollapsibleVersionGroup(QFrame):
             )
 
     def _toggle_collapse(self, event):
+        if hasattr(event, "pos"):
+            child = self.header.childAt(event.pos())
+            if child and isinstance(child, (QPushButton, QAbstractButton)):
+                return
         self._set_collapsed(not self.is_collapsed)
 
     def _accepts(self, event) -> bool:
@@ -1856,11 +1871,11 @@ class AppleVersionRow(QFrame):
         self._is_selected = False
         self._is_last = is_last
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedHeight(50)
+        self.setFixedHeight(46)
         self.setAcceptDrops(True)
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 6, 14, 6)
+        layout.setContentsMargins(44, 4, 16, 4)
         layout.setSpacing(12)
         
         # Version Title Badge (e.g. v121)
@@ -2049,7 +2064,7 @@ class AppleVersionRow(QFrame):
         if self._is_selected:
             self.setStyleSheet(f"""
                 AppleVersionRow {{
-                    background: #F1F5F9;
+                    background: {bk_ui.BRAND_TINT};
                     border: none;
                     {divider}
                 }}
@@ -2057,12 +2072,12 @@ class AppleVersionRow(QFrame):
         else:
             self.setStyleSheet(f"""
                 AppleVersionRow {{
-                    background: transparent;
+                    background: #FFFFFF;
                     border: none;
                     {divider}
                 }}
                 AppleVersionRow:hover {{
-                    background: #FAFAFC;
+                    background: {bk_ui.HOVER};
                 }}
             """)
             
@@ -2072,9 +2087,12 @@ class AppleVersionRow(QFrame):
         self._is_selected = bool(sel)
         self._update_style()
 
-
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
+            child = self.childAt(event.pos())
+            if child and isinstance(child, (QPushButton, QAbstractButton)):
+                super().mousePressEvent(event)
+                return
             self.selected.emit(self.filename)
             self._drag_start_pos = event.pos()
         super().mousePressEvent(event)
@@ -2371,6 +2389,20 @@ class SlidingSelection(QWidget):
         if not target.isValid():
             target = QColor(bk_ui.BRAND)
 
+        if self._geo_anim is not None:
+            try:
+                self._geo_anim.stop()
+            except RuntimeError:
+                pass
+            self._geo_anim = None
+
+        if self._tint_anim is not None:
+            try:
+                self._tint_anim.stop()
+            except RuntimeError:
+                pass
+            self._tint_anim = None
+
         if not self.isVisible() or not animated:
             self._from = self._to = target
             self._mix_t = 1.0
@@ -2386,54 +2418,52 @@ class SlidingSelection(QWidget):
             self._to = target
             self._mix_t = 0.0
             tint = QPropertyAnimation(self, b"mix", self)
-            tint.setDuration(bk_ui.DUR_SLOW)
+            tint.setDuration(bk_ui.DUR_BASE)
             tint.setStartValue(0.0)
             tint.setEndValue(1.0)
             tint.setEasingCurve(bk_ui.EASE_OUT)
-            tint.start(QPropertyAnimation.DeleteWhenStopped)
+            tint.start()
             self._tint_anim = tint
 
-        # OutQuint, not OutBack: overshoot reads as a bounce, a cartoon
-        # gesture. A long deceleration reads as weight.
+        if self.geometry() == rect:
+            return
+
         anim = QPropertyAnimation(self, b"geometry", self)
-        anim.setDuration(bk_ui.DUR_SLOW)
+        anim.setDuration(bk_ui.DUR_BASE)
         anim.setStartValue(self.geometry())
         anim.setEndValue(rect)
-        anim.setEasingCurve(QEasingCurve.OutQuint)
-        anim.start(QPropertyAnimation.DeleteWhenStopped)
+        anim.setEasingCurve(bk_ui.EASE_OUT)
+        anim.start()
         self._geo_anim = anim
 
     def paintEvent(self, _event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        radius = 12.0
-
-        p.setBrush(Qt.NoBrush)
-        for i in range(6, 0, -1):
-            p.setPen(QPen(QColor(15, 23, 42, 4 + (6 - i) * 2), 1))
-            p.drawRoundedRect(r.adjusted(-i, -i + 1, i, i + 1), radius + i, radius + i)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        
+        # Inset slightly so antialiasing does not clip at the widget boundaries
+        r = QRectF(self.rect()).adjusted(1.0, 1.0, -1.0, -1.0)
+        radius = 10.0
 
         path = QPainterPath()
         path.addRoundedRect(r, radius, radius)
+
+        # 1. Clean solid white base
         p.setPen(Qt.NoPen)
         p.setBrush(QColor("#FFFFFF"))
         p.drawPath(path)
 
-        # Flat, not a wash. The selected row used to carry a horizontal
-        # gradient of the institution's colour, which was the last ramp
-        # left on any surface in the program — and on a 56px row it read
-        # as a smudge rather than as a tint. One flat value at the same
-        # average strength says the same thing and holds its edges.
+        # 2. Institution brand tint wash
         c = self._current()
         fill = QColor(c)
-        fill.setAlpha(24)
+        fill.setAlpha(26)
         p.setBrush(fill)
         p.drawPath(path)
 
+        # 3. Crisp, smooth border stroke
         edge = QColor(c)
-        edge.setAlpha(70)
-        p.setPen(QPen(edge, 1))
+        edge.setAlpha(80)
+        p.setPen(QPen(edge, 1.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
         p.setBrush(Qt.NoBrush)
         p.drawRoundedRect(r, radius, radius)
         p.end()
@@ -3508,7 +3538,6 @@ class HomeDashboard(QWidget):
         self.btn_new_empty = self.hero.btn_primary     # old names, same buttons
         self.btn_new_folder = self.hero.btn_new_folder
         self.right_panel_layout.addWidget(self.hero)
-        self.right_panel_layout.addWidget(bk_ui.hairline())
 
         _body = QWidget()
         _body.setStyleSheet("background: transparent;")
@@ -3792,9 +3821,16 @@ class HomeDashboard(QWidget):
         dlg.account_created.connect(lambda acc: self._refresh_institutions())
         dlg.exec()
         
-    def _on_profile_updated(self, new_name: str, new_avatar_url: str):
+    def _on_profile_updated(self, new_name: str, new_avatar_url: str, new_title: str = ""):
         self.display_name = new_name
         self.user_lbl.setText(f"Hoşgeldiniz, <b>{self.display_name}</b>")
+        if isinstance(self.auth_data, dict):
+            self.auth_data["full_name"] = new_name
+            self.auth_data["name"] = new_name
+            if new_title:
+                self.auth_data["title"] = new_title
+            if new_avatar_url:
+                self.auth_data["avatar_url"] = new_avatar_url
         self._refresh_avatar_button()
 
     def _on_logout_clicked(self):
@@ -4335,12 +4371,19 @@ class HomeDashboard(QWidget):
                     title, icon, f"{len(items)} versiyon", color, is_collapsed=not keep_open,
                     folder_id=folder_id, is_drop_target=True, show_folder_actions=show_folder_actions,
                 )
-                for idx, v in enumerate(items):
-                    is_act = (v["filename"] == active_ver)
-                    is_last = (idx == len(items) - 1)
-                    group.content_lay.addWidget(
-                        _wire(AppleVersionRow(self._selected_slug, v, is_active=is_act, is_last=is_last))
-                    )
+                def _rows(items=items, slug=self._selected_slug, active=active_ver):
+                    out = []
+                    for idx, v in enumerate(items):
+                        out.append(_wire(AppleVersionRow(
+                            slug, v,
+                            is_active=(v["filename"] == active),
+                            is_last=(idx == len(items) - 1))))
+                    return out
+
+                group.set_row_factory(_rows)
+                if keep_open:
+                    # Already open on arrival, so its rows are needed now.
+                    group._ensure_rows()
                 group.version_dropped.connect(
                     lambda slug, filename, fid=folder_id: self._on_version_dropped_on_folder(slug, filename, fid)
                 )

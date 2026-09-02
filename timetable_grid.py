@@ -1,6 +1,8 @@
 """
 timetable_grid.py  –  Haftalık ders programı tablosu (drag-drop + sağ tık menüsü destekli)
 """
+import weakref
+from functools import lru_cache
 import json
 import uuid
 import time
@@ -10,8 +12,8 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QFrame, QScrollArea, QMenu, QInputDialog,
     QMessageBox, QStyledItemDelegate, QStyle, QApplication
 )
-from PySide6.QtCore import Qt, QMimeData, Signal, QByteArray, QRect, QRectF, QTimer, QPoint, QPointF, QEvent
-from PySide6.QtGui import QFont, QColor, QBrush, QDrag, QPainter, QPixmap, QAction, QPen, QLinearGradient, QIcon, QPainterPath, QCursor
+from PySide6.QtCore import Qt, QMimeData, Signal, QByteArray, QRect, QRectF, QTimer, QPoint, QPointF, QEvent, QSize
+from PySide6.QtGui import QFont, QColor, QBrush, QDrag, QPainter, QPixmap, QAction, QPen, QLinearGradient, QIcon, QPainterPath, QCursor, QFontMetrics
 from auto_scheduler import matches_class, format_tr_name
 
 FONT_FAMILY = ".AppleSystemUIFont, SF Pro Text, Helvetica Neue, Segoe UI, sans-serif"
@@ -417,12 +419,26 @@ def make_grid_action_icon(name: str, size: int = 18, color_override: str = None)
     icon.addPixmap(_draw('#1E293B'), QIcon.Active, QIcon.Off)
     return icon
 
+# Built once. str.maketrans() was being called for every cell of every
+# repaint — 1280 times per frame on a teachers sheet — to produce the same
+# seven-entry table each time.
+_TR_UPPER_MAP = str.maketrans({'i': 'İ', 'ı': 'I', 'ç': 'Ç', 'ğ': 'Ğ',
+                               'ö': 'Ö', 'ş': 'Ş', 'ü': 'Ü'})
+
+
+@lru_cache(maxsize=2048)
 def get_subject_abbr(subject_name: str, max_len: int = 6) -> str:
-    """Grid cell abbreviation: strictly max 6 chars for clean layout."""
+    """Grid cell abbreviation: strictly max 6 chars for clean layout.
+
+    Memoised. The answer depends only on the arguments, and the arguments
+    come from a set of a few dozen subject names — but this ran in full,
+    including a maketrans and a dozen str.replace calls, once per painted
+    cell. On a 60-teacher sheet that is 1280 executions per repaint, and a
+    repaint happens on every scroll, hover and sheet switch.
+    """
     if not subject_name: return ""
     s = str(subject_name).strip()
-    tr_map = str.maketrans({'i': 'İ', 'ı': 'I', 'ç': 'Ç', 'ğ': 'Ğ', 'ö': 'Ö', 'ş': 'Ş', 'ü': 'Ü'})
-    s_up = s.translate(tr_map).upper()
+    s_up = s.translate(_TR_UPPER_MAP).upper()
     
     # Pre-process specific terms
     s_up = s_up.replace("BEDEN EĞİTİMİ VE SPOR", "BEDEN")
@@ -505,6 +521,14 @@ _HEADER_STATE_COLORS = {
 }
 
 
+# Başlık şeritleri her bölümde yeniden QFont kuruyordu; altmış satırlık bir
+# çarşafta bu kare başına yüzlerce yazı tipi nesnesi demek. QFont
+# QApplication'dan önce kurulamadığı için tembel, ama bir kez.
+@lru_cache(maxsize=32)
+def _header_font(family, size, bold=True):
+    return QFont(family, size, QFont.Bold if bold else QFont.Normal)
+
+
 class AsCTimetableHeader(QHeaderView):
     """aSc Timetables style two-level header: Days on top spanning periods, Period numbers below (Scaled down 25%)."""
     def __init__(self, periods: int = 8, days_list: list = None, parent=None):
@@ -568,7 +592,7 @@ class AsCTimetableHeader(QHeaderView):
                 painter.drawLine(x + w - 1, 0, x + w - 1, vh)
                 
                 painter.setPen(QPen(QColor("#0F172A")))
-                painter.setFont(QFont(FONT_FAMILY, 8.5, QFont.Bold))
+                painter.setFont(_header_font(FONT_FAMILY, 8.5))
                 painter.drawText(rect, Qt.AlignCenter, day_name)
                 
                 # Day separator line on right edge
@@ -599,7 +623,7 @@ class AsCTimetableHeader(QHeaderView):
             painter.drawLine(x_end - 1, 0, x_end - 1, 18)
             
             painter.setPen(QPen(QColor("#0F172A")))
-            font_day = QFont(FONT_FAMILY, 8, QFont.Bold)
+            font_day = _header_font(FONT_FAMILY, 8)
             painter.setFont(font_day)
             
             # Keep day label visible and centered in the viewport portion of that day
@@ -628,7 +652,7 @@ class AsCTimetableHeader(QHeaderView):
             painter.drawLine(x + w - 1, 19, x + w - 1, 37)
             
             painter.setPen(QPen(QColor("#334155")))
-            font_p = QFont(FONT_FAMILY, 7.5, QFont.Bold)
+            font_p = _header_font(FONT_FAMILY, 7.5)
             painter.setFont(font_p)
             painter.drawText(period_rect, Qt.AlignCenter, str(period_num))
             
@@ -644,11 +668,149 @@ class AsCVerticalHeader(QHeaderView):
     """Modern header for rows with support for unplaced hours badges."""
     def __init__(self, parent=None):
         super().__init__(Qt.Vertical, parent)
+        self._unplaced = None
         self.setSectionResizeMode(QHeaderView.Stretch)
         self.setDefaultAlignment(Qt.AlignCenter)
         self.setDefaultSectionSize(36)
         self.setMinimumSectionSize(0)
         self.setMinimumWidth(82)
+
+    # ── AÇIKTA KALAN SAAT ROZETİ ───────────────────────────────────────────
+    #
+    # Bu rozet, satırdaki kişiye atanmış saatlerle çizelgeye yerleşmiş saatlerin
+    # farkı. Hesabı eskiden paintSection'ın içindeydi: her satır boyandığında
+    # bütün atamalar (768) ve bütün yerleşimler (1280) baştan taranıyordu.
+    # Altmış satırlık bir öğretmen çarşafında bu, kare başına 120 bin döngü —
+    # ölçümde çarşaf değiştirmenin en pahalı tek kalemi, 98 ms.
+    #
+    # Sayılar yalnızca veri değişince değişiyor, o yüzden tek geçişte bir kez
+    # hesaplanıp satır numarasına göre saklanıyor; boyama artık sözlükten
+    # okuyor. Bulanık isim eşleştirmesi (birebir, ya da biri diğerinin içinde)
+    # aynen korunuyor: ham ad başına bir kez çözülüp saklanıyor, çünkü ayrı ad
+    # sayısı satır sayısı kadar, kayıt sayısı kadar değil.
+    def invalidate_unplaced(self):
+        self._unplaced = None
+
+    def _unplaced_map(self):
+        cached = getattr(self, "_unplaced", None)
+        if cached is not None:
+            return cached
+
+        table = self.parent()
+        grid = table.parent() if table else None
+        data_store = None
+        curr = self
+        while curr is not None:
+            ds = getattr(curr, "data_store", None)
+            if isinstance(ds, dict):
+                data_store = ds
+                break
+            curr = curr.parent()
+        if data_store is None:
+            app = QApplication.instance()
+            if app:
+                for w in app.topLevelWidgets():
+                    ds = getattr(w, "data_store", None)
+                    if isinstance(ds, dict):
+                        data_store = ds
+                        break
+
+        out = {}
+        if grid is None or data_store is None:
+            self._unplaced = out
+            return out
+
+        display_mode = getattr(grid, "current_view_mode", "classes")
+        if display_mode == "classes":
+            targets = list(getattr(grid, "class_list", []) or [])
+        else:
+            targets = list(getattr(grid, "teacher_list", []) or [])
+        if not targets:
+            self._unplaced = out
+            return out
+
+        norm_targets = [(idx, t, t.replace(" ", "").upper())
+                        for idx, t in enumerate(targets)]
+        match_cache = {}
+
+        def rows_for(raw):
+            hit = match_cache.get(raw)
+            if hit is None:
+                raw_norm = raw.replace(" ", "").upper()
+                hit = tuple(idx for idx, tgt, tgt_norm in norm_targets
+                            if tgt_norm == raw_norm or tgt in raw or raw in tgt)
+                match_cache[raw] = hit
+            return hit
+
+        assigned = [0] * len(targets)
+        placed = [0] * len(targets)
+
+        if display_mode == "classes":
+            a_keys = ("class", "sinif", "class_name")
+            p_keys = ("class_name", "class")
+        else:
+            a_keys = ("teacher", "ogretmen", "teacher_name")
+            p_keys = ("teacher_name", "teacher")
+
+        for a in data_store.get("atamalar", []) or []:
+            if not isinstance(a, dict):
+                continue
+            raw = ""
+            for k in a_keys:
+                v = a.get(k)
+                if v:
+                    raw = str(v)
+                    break
+            if not raw:
+                continue
+            hours = int(a.get("duration", 1) or 1)
+            for idx in rows_for(raw):
+                assigned[idx] += hours
+
+        placed_lessons = getattr(grid, "_placed_lessons", None)
+        if placed_lessons:
+            seen_blocks = set()
+            for (r, c), info in placed_lessons.items():
+                if not isinstance(info, dict):
+                    continue
+                block_key = (info.get("origin_row", r), info.get("origin_col", c),
+                             info.get("block_id") or id(info))
+                if block_key in seen_blocks:
+                    continue
+                seen_blocks.add(block_key)
+                raw = ""
+                for k in p_keys:
+                    v = info.get(k)
+                    if v:
+                        raw = str(v)
+                        break
+                if not raw:
+                    continue
+                hours = int(info.get("duration", 1) or 1)
+                for idx in rows_for(raw):
+                    placed[idx] += hours
+        else:
+            for pl in data_store.get("grid_placements", []) or []:
+                if not isinstance(pl, dict):
+                    continue
+                raw = ""
+                for k in p_keys:
+                    v = pl.get(k)
+                    if v:
+                        raw = str(v)
+                        break
+                if not raw:
+                    continue
+                hours = int(pl.get("duration", 1) or 1)
+                for idx in rows_for(raw):
+                    placed[idx] += hours
+
+        for idx in range(len(targets)):
+            diff = assigned[idx] - placed[idx]
+            if diff > 0:
+                out[idx] = diff
+        self._unplaced = out
+        return out
 
     def paintSection(self, painter, rect, logicalIndex):
         painter.save()
@@ -660,94 +822,12 @@ class AsCVerticalHeader(QHeaderView):
         painter.drawLine(rect.right(), rect.top(), rect.right(), rect.bottom())
         painter.drawLine(rect.left(), rect.bottom(), rect.right(), rect.bottom())
 
-        # 2. Unplaced hours indicator badge (Artan dersler - sağ alt köşe)
-        table = self.parent()
-        grid = table.parent() if table else None
-        
-        # Robustly locate data_store
-        data_store = None
-        curr = self
-        while curr:
-            if hasattr(curr, "data_store") and isinstance(getattr(curr, "data_store"), dict):
-                data_store = curr.data_store
-                break
-            curr = curr.parent()
-        if not data_store:
-            app = QApplication.instance()
-            if app:
-                for w in app.topLevelWidgets():
-                    if hasattr(w, "data_store") and isinstance(getattr(w, "data_store"), dict):
-                        data_store = w.data_store
-                        break
-
-        unplaced_hrs = 0
-        if grid and data_store:
-            display_mode = getattr(grid, "current_view_mode", "classes")
-            target_name = ""
-            if display_mode == "classes":
-                class_list = getattr(grid, "class_list", []) or []
-                if 0 <= logicalIndex < len(class_list):
-                    target_name = class_list[logicalIndex]
-            elif display_mode == "teachers":
-                teacher_list = getattr(grid, "teacher_list", []) or []
-                if 0 <= logicalIndex < len(teacher_list):
-                    target_name = teacher_list[logicalIndex]
-
-            if target_name:
-                norm_tgt = target_name.replace(" ", "").upper()
-                # 1. Total assigned hours
-                total_assigned = 0
-                for a in data_store.get("atamalar", []) or []:
-                    if isinstance(a, dict):
-                        if display_mode == "classes":
-                            c_raw = str(a.get("class") or a.get("sinif") or a.get("class_name") or "")
-                            if norm_tgt == c_raw.replace(" ", "").upper() or target_name in c_raw or c_raw in target_name:
-                                total_assigned += int(a.get("duration", 1) or 1)
-                        else:
-                            t_raw = str(a.get("teacher") or a.get("ogretmen") or a.get("teacher_name") or "")
-                            if norm_tgt == t_raw.replace(" ", "").upper() or target_name in t_raw or t_raw in target_name:
-                                total_assigned += int(a.get("duration", 1) or 1)
-
-                # 2. Total placed hours on the active grid
-                total_placed = 0
-                if hasattr(grid, "_placed_lessons") and grid._placed_lessons:
-                    seen_blocks = set()
-                    for (r, c), info in grid._placed_lessons.items():
-                        if not isinstance(info, dict):
-                            continue
-                        orig_r = info.get("origin_row", r)
-                        orig_c = info.get("origin_col", c)
-                        block_key = (orig_r, orig_c, info.get("block_id") or id(info))
-                        if block_key in seen_blocks:
-                            continue
-                        seen_blocks.add(block_key)
-                        
-                        if display_mode == "classes":
-                            c_raw = str(info.get("class_name") or info.get("class") or "")
-                            if norm_tgt == c_raw.replace(" ", "").upper() or target_name in c_raw or c_raw in target_name:
-                                total_placed += int(info.get("duration", 1) or 1)
-                        else:
-                            t_raw = str(info.get("teacher_name") or info.get("teacher") or "")
-                            if norm_tgt == t_raw.replace(" ", "").upper() or target_name in t_raw or t_raw in target_name:
-                                total_placed += int(info.get("duration", 1) or 1)
-                else:
-                    for p in data_store.get("grid_placements", []) or []:
-                        if isinstance(p, dict):
-                            if display_mode == "classes":
-                                c_raw = str(p.get("class_name") or p.get("class") or "")
-                                if norm_tgt == c_raw.replace(" ", "").upper() or target_name in c_raw or c_raw in target_name:
-                                    total_placed += int(p.get("duration", 1) or 1)
-                            else:
-                                t_raw = str(p.get("teacher_name") or p.get("teacher") or "")
-                                if norm_tgt == t_raw.replace(" ", "").upper() or target_name in t_raw or t_raw in target_name:
-                                    total_placed += int(p.get("duration", 1) or 1)
-
-                unplaced_hrs = max(0, total_assigned - total_placed)
+        unplaced_hrs = self._unplaced_map().get(logicalIndex, 0)
 
         # Draw section text
         model = self.model()
         text = str(model.headerData(logicalIndex, Qt.Vertical, Qt.DisplayRole) or "")
-        painter.setFont(QFont(FONT_FAMILY, 8.5, QFont.Bold))
+        painter.setFont(_header_font(FONT_FAMILY, 8.5))
         painter.setPen(QColor("#0F172A"))
         if unplaced_hrs > 0:
             painter.drawText(rect.adjusted(6, 0, -28, 0), Qt.AlignLeft | Qt.AlignVCenter, text)
@@ -758,7 +838,7 @@ class AsCVerticalHeader(QHeaderView):
             painter.setBrush(QBrush(QColor("#FEE2E2")))
             painter.setPen(QPen(QColor("#EF4444"), 1))
             painter.drawRoundedRect(badge_rect, 3, 3)
-            painter.setFont(QFont("Segoe UI", 7, QFont.Bold))
+            painter.setFont(_header_font("Segoe UI", 7))
             painter.setPen(QColor("#DC2626"))
             painter.drawText(badge_rect, Qt.AlignCenter, badge_text)
         else:
@@ -1842,201 +1922,39 @@ _CELL_COLOR_CACHE = {}
 def clear_cell_color_cache():
     global _CELL_COLOR_CACHE
     _CELL_COLOR_CACHE.clear()
+    _TIMEOFF_INDEX.clear()
+    # Hücre görünümleri renkten ve kapalı-saat tablosundan türüyor; ikisi de
+    # atıldıysa saklanan görünümler de yanlıştır.
+    for tbl in _LIVE_TABLES:
+        try:
+            tbl.invalidate_visuals()
+        except RuntimeError:
+            pass
 
-class TimetableCellDelegate(QStyledItemDelegate):
-    def __init__(self, parent=None):
-        super().__init__(parent)
 
-    def paint(self, painter, option, index):
-        painter.save()
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        
-        rect = option.rect
-        table = self.parent()
-        grid = table.parent() if table else None
-        
-        row = index.row()
-        col = index.column()
-        
-        # Check placed lesson info
-        orig_r, orig_c, orig_dur, info = table._get_lesson_origin(row, col) if hasattr(table, "_get_lesson_origin") else (row, col, 1, None)
-        if not info and grid and hasattr(grid, "_placed_lessons"):
-            info = grid._placed_lessons.get((row, col))
-            
-        bg_brush = index.data(Qt.BackgroundRole)
-        text = index.data(Qt.DisplayRole)
-        clean_str = str(text).replace("🔒", "").strip() if text else ""
-        
-        is_locked = bool(info and info.get("locked"))
-        
-        # Get subject and teacher from info
-        subject_name = ""
-        teacher_name = ""
-        if info:
-            subject_name = info.get("subject_name") or info.get("subject") or ""
-            teacher_name = info.get("teacher_name") or info.get("teacher") or ""
-            
-        # 1. Determine cell background color directly from data_store
-        win = table.window() if table and hasattr(table, "window") else None
-        data_store = getattr(win, "data_store", None)
-        
-        cell_color = None
-        color_key = subject_name or clean_str
-        if color_key:
-            if color_key in _CELL_COLOR_CACHE:
-                cell_color = _CELL_COLOR_CACHE[color_key]
-            else:
-                from dialogs.color_picker_dialog import resolve_subject_color
-                resolved_hex = resolve_subject_color(color_key, data_store)
-                c = QColor(resolved_hex)
-                if not c.isValid():
-                    c = QColor("#2563EB")
-                _CELL_COLOR_CACHE[color_key] = c
-                cell_color = c
-        elif info and info.get("color"):
-            c = QColor(info["color"])
-            if c.isValid():
-                cell_color = c
-        elif bg_brush and isinstance(bg_brush, (QBrush, QColor)):
-            c = bg_brush.color() if isinstance(bg_brush, QBrush) else bg_brush
-            if c.isValid() and c.alpha() > 0 and c.name().upper() not in ("#C0C0C0", "#B4B4B8", "#D0D0D0", "#D8D8D8", "#FFFFFF"):
-                cell_color = c
-                
-        is_filled = bool(clean_str or (info and info.get("subject_name")))
-        is_closed_slot = False
-        if not is_filled and grid:
-            pos = grid.resolve_cell(row, col)
-            day_idx = pos.get("day", -1)
-            period_idx = pos.get("period", -1)
-            c_name = pos.get("class_name", "")
-            t_name = pos.get("teacher_name", "")
-            display_mode = getattr(grid, "current_view_mode", "classes")
-            if day_idx >= 0 and period_idx >= 0 and data_store:
-                if display_mode == "teachers" and t_name:
-                    for t in data_store.get("ogretmenler", []) or []:
-                        if (t.get("ad") or t.get("name") or "").strip() == t_name:
-                            toff = t.get("timeoff", [])
-                            if toff and day_idx < len(toff) and period_idx < len(toff[day_idx]):
-                                is_closed_slot = (toff[day_idx][period_idx] == 0)
-                            break
-                    if not is_closed_slot:
-                        kisit = data_store.get("kisitlamalar", {}).get(t_name, {})
-                        if f"{day_idx},{period_idx}" in kisit:
-                            is_closed_slot = (kisit[f"{day_idx},{period_idx}"] in (0, False))
-                elif c_name:
-                    for c in data_store.get("siniflar", []) or []:
-                        if (c.get("ad") or c.get("name") or "").strip() == c_name:
-                            toff = c.get("timeoff", [])
-                            if toff and day_idx < len(toff) and period_idx < len(toff[day_idx]):
-                                is_closed_slot = (toff[day_idx][period_idx] == 0)
-                            break
-                    if not is_closed_slot:
-                        kisit = data_store.get("kisitlamalar", {}).get(c_name, {})
-                        if f"{day_idx},{period_idx}" in kisit:
-                            is_closed_slot = (kisit[f"{day_idx},{period_idx}"] in (0, False))
+# name -> timeoff matrix, for teachers and for classes.
+#
+# Deciding whether an empty cell is a closed slot used to walk the WHOLE
+# teacher list (or class list) looking for a name match — inside paint(),
+# once per empty cell. On a 60-teacher sheet with about 1,100 empty cells
+# that is some 67,000 dict reads per frame, and a frame happens on every
+# scroll, hover and sheet switch. It was the single largest cost in the
+# program. The same answer comes out of a dict built once per refresh.
+_TIMEOFF_INDEX = {}
 
-        if not cell_color or not cell_color.isValid():
-            cell_color = QColor("#E2E8F0") if is_closed_slot else (QColor("#F8FAFC") if not is_filled else QColor("#FFFFFF"))
-                
-        # 2. Fill background (Exact crisp color)
-        painter.fillRect(rect, cell_color)
-        
-        # 3. Flat hairline grid borders (right and bottom lines only for flat 1px grid)
-        painter.setPen(QPen(QColor("#CBD5E1"), 1))
-        painter.drawLine(rect.right(), rect.top(), rect.right(), rect.bottom())
-        painter.drawLine(rect.left(), rect.bottom(), rect.right(), rect.bottom())
-        
-        # 3.1 Prominent day separator line (flat, crisp)
-        periods = grid._periods if (grid and hasattr(grid, "_periods")) else 8
-        if periods > 0 and (col + 1) % periods == 0:
-            painter.setPen(QPen(QColor("#64748B"), 1.5))
-            painter.drawLine(rect.right(), rect.top(), rect.right(), rect.bottom())
 
-        # 3.2 Closed slot X icon
-        if is_closed_slot and not is_filled:
-            painter.setFont(QFont("Segoe UI", 9, QFont.Bold))
-            painter.setPen(QColor("#94A3B8"))
-            painter.drawText(rect, Qt.AlignCenter, "✕")
-        
-        # 4. Selection border
-        if option.state & QStyle.State_Selected:
-            painter.setPen(QPen(QColor("#0071E3"), 2))
-            painter.setBrush(Qt.NoBrush)
-            painter.drawRect(rect.adjusted(1, 1, -2, -2))
-            
-        # 5. Draw text - High-contrast readable centered text
-        if clean_str or (info and info.get("subject_name")):
-            lum = (0.299 * cell_color.red() + 0.587 * cell_color.green() + 0.114 * cell_color.blue())
-            text_color = QColor("#FFFFFF") if lum < 140 else QColor("#0F172A")
-            painter.setPen(text_color)
-            
-            s_name = info.get("subject_name", "") if info else ""
-            if not s_name:
-                s_name = clean_str
-                
-            display_mode = getattr(grid, "current_view_mode", "classes")
-            
-            if display_mode == "teachers":
-                # In teacher view, display ONLY the CLASS NAME (e.g. 9A, 10B, 11A)
-                c_name = (info.get("class_name") or "") if info else ""
-                if not c_name and clean_str and clean_str != s_name:
-                    c_name = clean_str
-                if "," in c_name or "&" in c_name or "+" in c_name:
-                    main_text = "+".join([c.strip().split("(")[0].strip() for c in c_name.replace("&", ",").replace("+", ",").split(",") if c.strip()])
-                else:
-                    main_text = c_name.strip().split("(")[0].strip() if c_name else clean_str
-                
-                if rect.width() < 35 and len(main_text) > 4:
-                    main_text = main_text[:4]
-            else:
-                # In class view, display ONLY the SUBJECT (e.g. MATE 9, FİZ 9, MAT 10)
-                limit = 6
-                if rect.width() < 45: limit = 4
-                if rect.width() < 32: limit = 3
-                main_text = get_subject_abbr(s_name, max_len=limit) if s_name else clean_str
-                
-            # Dynamic font sizing for crystal clear readability (Scaled down 25%)
-            font_size = 8 if len(main_text) <= 6 else (7.5 if len(main_text) <= 10 else 6.5)
-            if rect.width() < 35: font_size = max(6, font_size - 1)
-            painter.setFont(QFont("Segoe UI", int(font_size), QFont.Bold))
-            painter.drawText(rect, Qt.AlignCenter, main_text)
-                
-            # Lock icon: prominent top-left corner badge
-            if is_locked:
-                lock_bg = QRectF(rect.left() + 0.5, rect.top() + 0.5, 12, 12)
-                painter.setBrush(QBrush(QColor("#FEF3C7")))  # Soft amber background
-                painter.setPen(QPen(QColor("#D97706"), 1))   # Amber border
-                painter.drawRoundedRect(lock_bg, 2.5, 2.5)
-                
-                painter.setFont(QFont("Segoe UI", 6.5, QFont.Bold))
-                painter.setPen(QColor("#78350F"))
-                painter.drawText(lock_bg, Qt.AlignCenter, "🔒")
-                
-            # Combined lesson paperclip badge: prominent top-right corner badge (📎 ataç)
-            c_name_check = str((info.get("class_name") or info.get("class") or "")) if info else ""
-            is_comb = bool(info and (info.get("is_combined") or ("+" in c_name_check) or ("," in c_name_check) or ("&" in c_name_check)))
-            if not is_comb and info and data_store:
-                s_chk = info.get("subject_name") or info.get("subject") or clean_str
-                c_chk = c_name_check
-                if s_chk:
-                    for a in data_store.get("atamalar", []):
-                        if (a.get("is_combined") or ("+" in str(a.get("class", "")))) and a.get("subject") == s_chk:
-                            if not c_chk or any(matches_class(cc, c_chk) for cc in a.get("combined_classes", [])) or matches_class(a.get("class", ""), c_chk):
-                                is_comb = True
-                                break
-                                
-            if is_comb:
-                comb_bg = QRectF(rect.right() - 17, rect.top() + 1, 16, 16)
-                painter.setBrush(QBrush(QColor("#DBEAFE")))  # Soft light blue background
-                painter.setPen(QPen(QColor("#2563EB"), 1.2)) # Crisp blue border
-                painter.drawRoundedRect(comb_bg, 3, 3)
-                
-                painter.setFont(QFont("Segoe UI Emoji", 9, QFont.Bold))
-                painter.setPen(QColor("#1E40AF"))
-                painter.drawText(comb_bg, Qt.AlignCenter, "📎")
-            
-        painter.restore()
-
+def _timeoff_index(data_store, key):
+    """{name: timeoff} for data_store[key], built on demand and dropped
+    by clear_cell_color_cache() — which _refresh_grid already calls."""
+    idx = _TIMEOFF_INDEX.get(key)
+    if idx is None:
+        idx = {}
+        for rec in (data_store.get(key) or []):
+            nm = (rec.get("ad") or rec.get("name") or "").strip()
+            if nm:
+                idx[nm] = rec.get("timeoff", [])
+        _TIMEOFF_INDEX[key] = idx
+    return idx
 
 
 # Başlık şeridinde bir sütuna birden çok satırın durumu düşerse, EN GÜÇLÜ olan
@@ -2046,6 +1964,94 @@ _PLACEMENT_RANK = {"NONE": 0, "SELECTED": 1, "GREEN": 2, "BLUE": 3, "RED": 4, "G
 
 def _placement_rank(visual):
     return _PLACEMENT_RANK.get(visual, 0)
+
+
+# Tek geçişli ızgara çiziminin sabitleri. Kalem, fırça ve renk nesneleri
+# hücre başına yeniden kurulmasın diye modül düzeyinde bir kez yapılır:
+# görünen 1.280 hücrede QPen("#CBD5E1") çağrısı tek başına ölçülebilir yer
+# tutuyordu. QFont ise QApplication'dan önce kurulamaz, o yüzden tembel.
+_MISSING = object()
+# Renk/kapalı-saat önbelleği dışarıdan boşaltıldığında hangi ızgaraların
+# saklanan görünümlerini atacağımızı bilmek için. Zayıf küme: kapanan
+# çizelge burada tutulup sızmasın.
+_LIVE_TABLES = weakref.WeakSet()
+# (yazı, renk, punto, hücre ölçüsü, dpr) -> pişirilmiş pixmap. Bkz. _text_stamp.
+_TEXT_STAMPS = {}
+_MAX_SPAN = 8                      # bir dersin kaplayabileceği en fazla saat
+
+_PEN_HAIRLINE = QPen(QColor("#CBD5E1"), 1)
+_PEN_DAYSEP = QPen(QColor("#64748B"), 1.5)
+_PEN_SELECTED = QPen(QColor("#0071E3"), 2)
+_CLOSED_MARK = QColor("#94A3B8")
+_TEXT_ON_DARK = QColor("#FFFFFF")
+_TEXT_ON_LIGHT = QColor("#0F172A")
+_LOCK_BG = QBrush(QColor("#FEF3C7"))
+_LOCK_PEN = QPen(QColor("#D97706"), 1)
+_LOCK_INK = QColor("#78350F")
+_COMB_BG = QBrush(QColor("#DBEAFE"))
+_COMB_PEN = QPen(QColor("#2563EB"), 1.2)
+_COMB_INK = QColor("#1E40AF")
+_BG_CLOSED = QColor("#E2E8F0")
+_BG_EMPTY = QColor("#F8FAFC")
+_BG_FILLED = QColor("#FFFFFF")
+_BG_FALLBACK = QColor("#2563EB")
+
+
+@lru_cache(maxsize=32)
+def _cell_font(size):
+    f = QFont("Segoe UI", int(size), QFont.Bold)
+    return f
+
+
+@lru_cache(maxsize=8)
+def _emoji_font(size):
+    return QFont("Segoe UI Emoji", int(size), QFont.Bold)
+
+
+class _NullCellDelegate(QStyledItemDelegate):
+    """Draws nothing.
+
+    Qt asks a delegate to paint each cell one at a time, which means one
+    C++→Python call, one QStyleOptionViewItem and one model lookup per
+    visible cell. Measured on a 60-teacher sheet: 1,280 cells, 99.6 ms a
+    frame. Swapping in a delegate whose paint() does nothing at all takes
+    the same frame to 12.0 ms — so 88 ms of it was the per-cell crossing
+    and the Python work behind it, not the pixels.
+
+    So the cells are not painted by a delegate any more. DropTableWidget
+    paints all of them itself, in one pass, in one Python call. This class
+    exists to stop Qt doing the per-cell work at all.
+    """
+
+    def paint(self, painter, option, index):
+        return
+
+
+class _CellVisual:
+    """Everything needed to draw one cell, worked out once.
+
+    The old delegate recomputed all of this on every frame: the colour
+    lookup, the closed-slot test, the abbreviation, the combined-lesson
+    search through data_store["atamalar"]. None of it depends on the
+    frame — only on the data — so it is computed when the grid is filled
+    and then only drawn.
+    """
+
+    __slots__ = ("bg", "fg", "text", "font_px", "locked", "combined",
+                 "closed", "filled", "width")
+
+    def __init__(self, bg, fg, text, font_px, locked, combined, closed,
+                 filled, width):
+        self.bg = bg
+        self.fg = fg
+        self.text = text
+        self.font_px = font_px
+        self.locked = locked
+        self.combined = combined
+        self.closed = closed
+        self.filled = filled
+        # Birleşik ders birden çok sütuna yayılır; dikdörtgen span boyunca.
+        self.width = width
 
 
 class DropTableWidget(QTableWidget):
@@ -2061,7 +2067,12 @@ class DropTableWidget(QTableWidget):
         self.asc_header = AsCTimetableHeader(8, DAYS[:5], self)
         self.setHorizontalHeader(self.asc_header)
         self.horizontalScrollBar().valueChanged.connect(lambda: self.asc_header.viewport().update())
-        self.setItemDelegate(TimetableCellDelegate(self))
+        # Cells are painted by _paint_cells_fast(), not one at a time by a
+        # delegate. See _NullCellDelegate for the measurement behind this.
+        self.setItemDelegate(_NullCellDelegate(self))
+        self._vis_cache = {}
+        self._backing = None
+        _LIVE_TABLES.add(self)
         self._drag_preview_info = None
         # Sürükleme sırasındaki yerleşim analizi (bkz. begin_placement_analysis)
         self._placement_map = {}        # (satır, sütun) -> PlacementAnalysisResult
@@ -2099,6 +2110,30 @@ class DropTableWidget(QTableWidget):
                 return obj
         return None
 
+    @staticmethod
+    def _teacher_for_lesson(data_store, lesson_info):
+        """Kartın dersini/sınıfını veren öğretmeni atamalardan bul."""
+        subj = (lesson_info.get("subject_name") or lesson_info.get("subject") or "").strip()
+        cls = (lesson_info.get("class_name") or lesson_info.get("class") or "").strip()
+        if not subj:
+            return ""
+        best = ""
+        for a in (data_store or {}).get("atamalar", []) or []:
+            if not isinstance(a, dict):
+                continue
+            a_subj = (a.get("subject") or a.get("ders") or "").strip()
+            if not a_subj or a_subj.upper() != subj.upper():
+                continue
+            a_teacher = (a.get("teacher") or a.get("ogretmen") or a.get("teacher_name") or "").strip()
+            if not a_teacher:
+                continue
+            a_cls = (a.get("class") or a.get("sinif") or a.get("class_name") or "").strip()
+            if cls and a_cls and matches_class(a_cls, cls):
+                return a_teacher          # sınıf da tutuyor: kesin eşleşme
+            if not best:
+                best = a_teacher          # yalnız ders tutuyor: yedek
+        return best
+
     def begin_placement_analysis(self, lesson_info: dict):
         """Kart kaldırıldı: bütün aday konumları BİR KEZ değerlendir.
 
@@ -2126,6 +2161,19 @@ class DropTableWidget(QTableWidget):
         except Exception as exc:
             print(f"[Grid] yerleşim analizi kurulamadı: {exc}")
             return
+
+        # Sürüklenen kartta öğretmen yazmıyorsa atamalardan tamamlanır.
+        #
+        # Bu eksikse motor öğretmen kısıtlarını hiç kontrol etmiyor ve kapalı
+        # saati YEŞİL gösteriyordu; kullanıcı bırakınca son kontrol öğretmeni
+        # kendi bulup reddediyordu. Yani ızgara "buraya konur" deyip sonra
+        # "konamaz" diyordu. Analiz ile son kontrol aynı bilgiyle çalışmalı.
+        lesson_info = dict(lesson_info)
+        if not (lesson_info.get("teacher_name") or lesson_info.get("teacher")):
+            resolved = self._teacher_for_lesson(data_store, lesson_info)
+            if resolved:
+                lesson_info["teacher_name"] = resolved
+                self._placement_lesson = lesson_info
 
         duration = max(1, int(lesson_info.get("duration", 1) or 1))
         rows = grid.rows_for_lesson(lesson_info)
@@ -2210,6 +2258,9 @@ class DropTableWidget(QTableWidget):
         return self._placement_map.get((row, col))
 
     def resizeEvent(self, event):
+        # Görünüm ölçüsü değişti: arka tampon da, sütuna göre hesaplanan
+        # hücre görünümleri de artık geçersiz.
+        self.invalidate_visuals()
         super().resizeEvent(event)
         if hasattr(self, "asc_header"):
             self.asc_header.viewport().update()
@@ -2528,8 +2579,482 @@ class DropTableWidget(QTableWidget):
                                     painter.drawRect(r_cell.adjusted(0, 0, -1, -1))
         painter.end()
 
+    # ── TEK GEÇİŞLİ IZGARA ÇİZİMİ ──────────────────────────────────────────
+    #
+    # Eskiden her hücreyi Qt tek tek delegeye sordu: görünen 1.280 hücre için
+    # 1.280 C++→Python geçişi, 1.280 QStyleOptionViewItem, ve her karede
+    # yeniden yapılan renk çözümü, kapalı-saat taraması, kısaltma hesabı.
+    # Ölçüm: kare başına 99,6 ms. Hiçbir şey çizmeyen bir delege ile aynı kare
+    # 12,0 ms. Yani 88 ms piksel değil, hücre başına düşen çağrı maliyetiydi.
+    #
+    # Bu yüzden hücreler artık iki parçaya ayrıldı:
+    #   1) _build_visual — hücrenin nasıl görüneceği. Veriye bağlı, kareye
+    #      değil; bir kez hesaplanır ve veri değişene kadar saklanır.
+    #   2) _paint_cells_fast — tek Python çağrısında bütün ızgarayı çizer;
+    #      sadece sözlükten okur ve boyar, hiçbir şey hesaplamaz.
+
+    def invalidate_visuals(self, row=None):
+        """Saklanan hücre görünümlerini at. row verilirse yalnız o satırı.
+
+        Önbellek satır satır tutulur (satır -> sütun -> görünüm), çünkü tek
+        hücre değiştiğinde atılacak olan o satır: sözlükten bir eleman
+        çıkarmak, bütün önbelleği tarayıp eşleşen anahtarları toplamaktan
+        çizelge dolduran 981 set_cell çağrısı boyunca çok daha ucuz.
+        """
+        cache = getattr(self, "_vis_cache", None)
+        if cache is None:
+            return
+        if row is None:
+            cache.clear()
+        else:
+            cache.pop(row, None)
+        self._backing = None
+        # Satır başlığındaki "açıkta kalan saat" rozeti de aynı veriden
+        # türüyor; hücreler geçersizse o da geçersiz.
+        vh = self.verticalHeader()
+        if vh is not None and hasattr(vh, "invalidate_unplaced"):
+            vh.invalidate_unplaced()
+            if row is None:
+                vh.viewport().update()
+
+    def _paint_context(self):
+        """Bütün hücreler için ortak olan ne varsa: kare başına bir kez.
+
+        _build_visual bunları hücre hücre topluyordu — parent(), window(),
+        getattr(grid, ...) ve en pahalısı, her dolu hücrede baştan sona
+        taranan atamalar listesi. Hepsi ızgara boyunca aynı olduğu için
+        burada bir kez hazırlanıp aşağıya taşınıyor.
+        """
+        grid = self.parent()
+        win = self.window()
+        data_store = getattr(win, "data_store", None)
+
+        # ders adı -> o dersin birleşik atamaları. Eskiden her dolu hücre
+        # atamaların tamamını dolaşıyordu; artık tek sözlük araması.
+        comb_index = {}
+        if data_store:
+            for a in data_store.get("atamalar", []):
+                if a.get("is_combined") or ("+" in str(a.get("class", ""))):
+                    subj = a.get("subject")
+                    if subj:
+                        comb_index.setdefault(subj, []).append(a)
+
+        display_mode = getattr(grid, "current_view_mode", "classes") if grid else "classes"
+        periods = max(1, int(getattr(grid, "_periods", 8) or 8)) if grid else 8
+
+        # Bir hücrenin kapalı olup olmadığı iki bağımsız parçadan çıkıyor:
+        # satırdan (hangi öğretmen/sınıf) ve sütundan (hangi gün, kaçıncı
+        # saat). Eskiden bunu hücre başına resolve_cell çözüyor ve her
+        # seferinde altı anahtarlı bir sözlük kuruyordu. Satır tarafı satır
+        # başına bir kez, sütun tarafı ise bölme işlemiyle çıkıyor.
+        # Bu kısayol yalnız iki gerçek çarşaf için geçerli. resolve_cell'in
+        # üçüncü bir dalı daha var (tek birim görünümü: satır saat, sütun gün);
+        # ızgara oraya hiç girmiyor ama girerse eski yola düşülür.
+        if display_mode == "teachers":
+            row_names = list(getattr(grid, "teacher_list", []) or []) if grid else []
+            store_key = "ogretmenler"
+        elif display_mode == "classes":
+            row_names = list(getattr(grid, "class_list", []) or []) if grid else []
+            store_key = "siniflar"
+        else:
+            row_names = []
+            store_key = ""
+
+        row_closed = {}
+        if data_store and row_names:
+            toff_index = _timeoff_index(data_store, store_key)
+            kisit_all = data_store.get("kisitlamalar", {}) or {}
+            for r_i, who in enumerate(row_names):
+                if not who:
+                    continue
+                row_closed[r_i] = (toff_index.get(who), kisit_all.get(who) or None)
+
+        widths = [self.columnWidth(c) for c in range(self.columnCount())]
+
+        return (grid,
+                getattr(grid, "_placed_lessons", None),
+                data_store,
+                display_mode,
+                comb_index,
+                periods,
+                row_closed,
+                widths)
+
+    def _build_visual(self, row, col, ctx):
+        """Bir hücrenin görünümü. Kapsanan (span içi) hücreler için None."""
+        grid, placed, data_store, display_mode, comb_index, periods, row_closed, widths = ctx
+
+        # _get_lesson_origin'in gövdesi burada açık yazılı: o metot her
+        # çağrıda parent() alıp hasattr yapıyordu ve buraya hücre başına bir
+        # kez giriliyor. Davranış birebir aynı.
+        info = placed.get((row, col)) if placed is not None else None
+        if info is not None:
+            if info.get("origin_row", row) != row or info.get("origin_col", col) != col:
+                return None
+            orig_dur = info.get("duration", 1)
+        else:
+            c_span = self.columnSpan(row, col)
+            r_span = self.rowSpan(row, col)
+            orig_dur = c_span if c_span > r_span else r_span
+
+        item = self.item(row, col)
+        text = item.text() if item is not None else ""
+        clean_str = text.replace("🔒", "").strip() if text else ""
+
+        subject_name = ""
+        if info:
+            subject_name = info.get("subject_name") or info.get("subject") or ""
+
+        cell_color = None
+        color_key = subject_name or clean_str
+        if color_key:
+            cell_color = _CELL_COLOR_CACHE.get(color_key)
+            if cell_color is None:
+                from dialogs.color_picker_dialog import resolve_subject_color
+                c = QColor(resolve_subject_color(color_key, data_store))
+                if not c.isValid():
+                    c = _BG_FALLBACK
+                _CELL_COLOR_CACHE[color_key] = c
+                cell_color = c
+        elif info and info.get("color"):
+            c = QColor(info["color"])
+            if c.isValid():
+                cell_color = c
+        elif item is not None:
+            brush = item.background()
+            c = brush.color() if brush is not None else None
+            if (c is not None and c.isValid() and c.alpha() > 0
+                    and c.name().upper() not in ("#C0C0C0", "#B4B4B8", "#D0D0D0", "#D8D8D8", "#FFFFFF")):
+                cell_color = c
+
+        is_filled = bool(clean_str or (info and info.get("subject_name")))
+
+        is_closed_slot = False
+        if not is_filled and not row_closed and grid is not None and data_store:
+            # Tanınmayan görünüm: eski, hücre başına çözen yol.
+            pos = grid.resolve_cell(row, col)
+            day_idx = pos.get("day", -1)
+            period_idx = pos.get("period", -1)
+            who = (pos.get("teacher_name") or pos.get("class_name") or "")
+            key = "ogretmenler" if pos.get("teacher_name") else "siniflar"
+            if who and day_idx >= 0 and period_idx >= 0:
+                toff = _timeoff_index(data_store, key).get(who)
+                if toff and day_idx < len(toff) and period_idx < len(toff[day_idx]):
+                    is_closed_slot = (toff[day_idx][period_idx] == 0)
+                if not is_closed_slot:
+                    kisit = (data_store.get("kisitlamalar", {}) or {}).get(who) or {}
+                    if kisit:
+                        is_closed_slot = (kisit.get(f"{day_idx},{period_idx}", 1) in (0, False))
+        elif not is_filled:
+            entry = row_closed.get(row)
+            if entry is not None:
+                toff, kisit = entry
+                day_idx, period_idx = divmod(col, periods)
+                if toff and day_idx < len(toff) and period_idx < len(toff[day_idx]):
+                    is_closed_slot = (toff[day_idx][period_idx] == 0)
+                if not is_closed_slot and kisit:
+                    v = kisit.get(f"{day_idx},{period_idx}", 1)
+                    is_closed_slot = (v in (0, False))
+
+        if cell_color is None or not cell_color.isValid():
+            cell_color = (_BG_CLOSED if is_closed_slot
+                          else (_BG_EMPTY if not is_filled else _BG_FILLED))
+
+        # Genişlik sütun genişliğinden okunur; ızgara çizgisi kapalı olduğu
+        # için hücre dikdörtgeni sütunla birebir aynı (setShowGrid(False)).
+        if orig_dur and orig_dur > 1:
+            width = sum(widths[col:col + orig_dur])
+        else:
+            width = widths[col] if col < len(widths) else 0
+
+        main_text = ""
+        fg = None
+        font_px = 8
+        if is_closed_slot and not is_filled:
+            # Kapalı saatin çarpısı da bir yazı: aynı damga yolundan geçer.
+            main_text = "✕"
+            fg = _CLOSED_MARK
+            font_px = 9
+        if is_filled:
+            lum = (0.299 * cell_color.red() + 0.587 * cell_color.green()
+                   + 0.114 * cell_color.blue())
+            fg = _TEXT_ON_DARK if lum < 140 else _TEXT_ON_LIGHT
+
+            s_name = (info.get("subject_name", "") if info else "") or clean_str
+            if display_mode == "teachers":
+                c_name = (info.get("class_name") or "") if info else ""
+                if not c_name and clean_str and clean_str != s_name:
+                    c_name = clean_str
+                if "," in c_name or "&" in c_name or "+" in c_name:
+                    main_text = "+".join(
+                        [x.strip().split("(")[0].strip()
+                         for x in c_name.replace("&", ",").replace("+", ",").split(",")
+                         if x.strip()])
+                else:
+                    main_text = c_name.strip().split("(")[0].strip() if c_name else clean_str
+                if width < 35 and len(main_text) > 4:
+                    main_text = main_text[:4]
+            else:
+                limit = 6
+                if width < 45:
+                    limit = 4
+                if width < 32:
+                    limit = 3
+                main_text = get_subject_abbr(s_name, max_len=limit) if s_name else clean_str
+
+            font_px = 8 if len(main_text) <= 6 else (7.5 if len(main_text) <= 10 else 6.5)
+            if width < 35:
+                font_px = int(font_px) - 1
+                if font_px < 6:
+                    font_px = 6
+            font_px = int(font_px)
+
+        # Kilit ve ataç rozetleri delegede yazı bloğunun içindeydi: boş hücrede
+        # çizilmiyorlardı. Aynı koşul burada da geçerli.
+        is_locked = False
+        is_comb = False
+        if is_filled and info:
+            is_locked = bool(info.get("locked"))
+            c_name_check = str(info.get("class_name") or info.get("class") or "")
+            is_comb = bool(info.get("is_combined") or ("+" in c_name_check)
+                           or ("," in c_name_check) or ("&" in c_name_check))
+            if not is_comb and comb_index:
+                s_chk = info.get("subject_name") or info.get("subject") or clean_str
+                for a in comb_index.get(s_chk, ()):
+                    if (not c_name_check
+                            or any(matches_class(cc, c_name_check) for cc in a.get("combined_classes", []))
+                            or matches_class(a.get("class", ""), c_name_check)):
+                        is_comb = True
+                        break
+
+        return _CellVisual(cell_color, fg, main_text, font_px,
+                           is_locked, is_comb, is_closed_slot and not is_filled,
+                           is_filled, width)
+
+    def _visible_cell_range(self):
+        vp = self.viewport()
+        rows, cols = self.rowCount(), self.columnCount()
+        if rows <= 0 or cols <= 0:
+            return None
+        top = self.rowAt(0)
+        top = 0 if top < 0 else top
+        bottom = self.rowAt(vp.height() - 1)
+        bottom = rows - 1 if bottom < 0 else bottom
+        left = self.columnAt(0)
+        left = 0 if left < 0 else left
+        right = self.columnAt(vp.width() - 1)
+        right = cols - 1 if right < 0 else right
+        # Soldan taşan span kökleri görünmeden kalmasın diye biraz geriye bakılır.
+        return top, min(bottom, rows - 1), max(0, left - _MAX_SPAN), min(right, cols - 1)
+
+    # ── ARKA TAMPON ────────────────────────────────────────────────────────
+    #
+    # Izgaranın görüntüsü yalnızca veri, seçim ve geometri değişince değişir —
+    # ama repaint bunlardan çok daha sık geliyor: kart havadayken her fare
+    # hareketinde, her vurgu değişiminde bütün görünüm yeniden isteniyor.
+    # O yüzden ızgara bir kez tam boyutlu bir pixmap'e basılıyor, sonraki
+    # kareler onu olduğu gibi damgalıyor. Veri değişince tampon atılıyor.
+    def _backing_store(self):
+        vp = self.viewport()
+        dpr = self.devicePixelRatioF()
+        want = QSize(int(vp.width() * dpr), int(vp.height() * dpr))
+        if want.width() <= 0 or want.height() <= 0:
+            return None
+
+        backing = self._backing
+        if backing is not None and backing.size() == want:
+            return backing
+
+        backing = QPixmap(want)
+        backing.setDevicePixelRatio(dpr)
+        painter = QPainter(backing)
+        try:
+            # QAbstractScrollArea zemini böyle siler; stil sayfasındaki
+            # background da bu fırçaya iniyor.
+            painter.fillRect(vp.rect(), vp.palette().brush(vp.backgroundRole()))
+            self._paint_cells_fast(painter)
+        finally:
+            painter.end()
+        self._backing = backing
+        return backing
+
+    def selectionChanged(self, selected, deselected):
+        # Seçim çerçevesi tamponun içinde çizildiği için seçim değişimi
+        # tamponu geçersiz kılar. Vurgu ve sürükleme değiştirmez.
+        self._backing = None
+        super().selectionChanged(selected, deselected)
+
+    def scrollContentsBy(self, dx, dy):
+        self._backing = None
+        super().scrollContentsBy(dx, dy)
+
+    def columnResized(self, column, old_width, new_width):
+        # Hücreye sığan kısaltma sütun genişliğine bağlı ("MATE 9" mu "MAT"
+        # mı), o yüzden genişlik değişince saklanan görünümler de düşer.
+        if old_width != new_width:
+            self.invalidate_visuals()
+        super().columnResized(column, old_width, new_width)
+
+    def rowResized(self, row, old_height, new_height):
+        if old_height != new_height:
+            self._backing = None
+        super().rowResized(row, old_height, new_height)
+
+    def _paint_cells_fast(self, painter):
+        rng = self._visible_cell_range()
+        if rng is None:
+            return
+        top, bottom, left, right = rng
+
+        cache = self._vis_cache
+        build = self._build_visual
+        ctx = None
+        grid = self.parent()
+        periods = getattr(grid, "_periods", 8) or 8
+
+        selected = set()
+        sm = self.selectionModel()
+        if sm is not None and sm.hasSelection():
+            for ix in sm.selectedIndexes():
+                selected.add((ix.row(), ix.column()))
+
+        # Sütun/satır geometrisi kare başına bir kez okunur, hücre başına değil.
+        xs = {}
+        for c in range(left, right + 1):
+            xs[c] = self.columnViewportPosition(c)
+        ys = {}
+        hs = {}
+        for r in range(top, bottom + 1):
+            ys[r] = self.rowViewportPosition(r)
+            hs[r] = self.rowHeight(r)
+
+        # Delege paint()'in ilk satırında kenar yumuşatmayı açıyor ve bir daha
+        # kapatmıyordu; ızgara çizgileri de bu yüzden iki piksele yayılıyor.
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        missing = _MISSING
+        cols = range(left, right + 1)
+
+        # Sıra delegedekiyle birebir aynı: satır satır, hücre hücre, önce
+        # zemin sonra çizgiler. Bu önemli — yumuşatılmış çizgi bir piksel
+        # taşıyor ve bir sonraki hücrenin zemini taşan yarıyı siliyor. Çizgiler
+        # toplu çizilseydi (ki bir buçuk milisaniye daha ucuzdu) hepsi iki
+        # yana simetrik otururdu: daha temiz ama eskisinden farklı bir ızgara.
+        #
+        # Eski çizimle karşılaştırma 755.832 pikselde 35 piksel fark veriyor ve
+        # otuz beşi de Qt'nin tek başına güncellediği dört hücrenin kenarında:
+        # o hücreler bir ara yalnız boyandığı için kenarlarında fazladan yarım
+        # çizgi kalmış. Burada her kare bütün görünümü bastığı için böyle bir
+        # iz oluşmuyor.
+        fill = painter.fillRect
+        line = painter.drawLine
+        stamp = self._text_stamp
+        draw_pix = painter.drawPixmap
+        set_pen = painter.setPen
+
+        for r in range(top, bottom + 1):
+            y = ys[r]
+            h = hs[r]
+            if h <= 0:
+                continue
+            y2 = y + h - 1
+            rowcache = cache.get(r)
+            if rowcache is None:
+                rowcache = cache[r] = {}
+            for c in cols:
+                vis = rowcache.get(c, missing)
+                if vis is missing:
+                    if ctx is None:
+                        ctx = self._paint_context()
+                    vis = build(r, c, ctx)
+                    rowcache[c] = vis
+                if vis is None:
+                    continue
+                w = vis.width
+                if w <= 0:
+                    continue
+                x = xs[c]
+                x2 = x + w - 1
+
+                fill(x, y, w, h, vis.bg)
+
+                set_pen(_PEN_HAIRLINE)
+                line(x2, y, x2, y2)
+                line(x, y2, x2, y2)
+
+                if periods > 0 and (c + 1) % periods == 0:
+                    set_pen(_PEN_DAYSEP)
+                    line(x2, y, x2, y2)
+
+                filled = vis.filled
+                if vis.text and not filled:
+                    draw_pix(x, y, stamp(vis.text, vis.fg, vis.font_px, w, h))
+
+                if (r, c) in selected:
+                    set_pen(_PEN_SELECTED)
+                    painter.setBrush(Qt.NoBrush)
+                    painter.drawRect(x + 1, y + 1, w - 3, h - 3)
+
+                if filled:
+                    if vis.text:
+                        draw_pix(x, y, stamp(vis.text, vis.fg, vis.font_px, w, h))
+                    if vis.locked:
+                        badge = QRectF(x + 0.5, y + 0.5, 12, 12)
+                        painter.setBrush(_LOCK_BG)
+                        set_pen(_LOCK_PEN)
+                        painter.drawRoundedRect(badge, 2.5, 2.5)
+                        painter.setFont(_cell_font(6.5))
+                        set_pen(_LOCK_INK)
+                        painter.drawText(badge, Qt.AlignCenter, "🔒")
+                    if vis.combined:
+                        badge = QRectF(x + w - 17, y + 1, 16, 16)
+                        painter.setBrush(_COMB_BG)
+                        set_pen(_COMB_PEN)
+                        painter.drawRoundedRect(badge, 3, 3)
+                        painter.setFont(_emoji_font(9))
+                        set_pen(_COMB_INK)
+                        painter.drawText(badge, Qt.AlignCenter, "📎")
+
+    def _text_stamp(self, text, colour, font_px, w, h):
+        dpr = self.devicePixelRatioF()
+        key = (text, colour.rgb(), font_px, w, h, dpr)
+        pm = _TEXT_STAMPS.get(key)
+        if pm is not None:
+            return pm
+
+        # Damga hücrenin tam ölçüsünde ve yazı aynı çağrıyla ortalanıyor, yani
+        # sonuç doğrudan hücreye yazmakla birebir aynı piksel. Ayrı sütun
+        # genişliği sayısı iki üçü geçmediği için önbellek küçük kalıyor.
+        pm = QPixmap(int(w * dpr), int(h * dpr))
+        pm.setDevicePixelRatio(dpr)
+        pm.fill(Qt.transparent)
+        pp = QPainter(pm)
+        pp.setFont(_cell_font(font_px))
+        pp.setPen(colour)
+        pp.drawText(0, 0, w, h, Qt.AlignCenter, text)
+        pp.end()
+
+        if len(_TEXT_STAMPS) > 512:
+            _TEXT_STAMPS.clear()
+        _TEXT_STAMPS[key] = pm
+        return pm
+
     def paintEvent(self, event):
-        super().paintEvent(event)
+        # QTableView.paintEvent atlanıyor. Boş delegeyle bile Qt her görünen
+        # hücre için ayrı ayrı dönüyor, QStyleOptionViewItem kuruyor ve modele
+        # soruyordu: ölçümde kare başına 12 ms, tek bir piksel çizmeden.
+        # Izgaranın her pikselini zaten _paint_cells_fast bastığı için o tur
+        # tümüyle gereksizdi. Zemin burada bir kez siliniyor (hücrelerin
+        # dışında kalan sağ/alt boşluk için), gerisini tek geçiş dolduruyor.
+        vp = self.viewport()
+        try:
+            backing = self._backing_store()
+        except Exception as exc:
+            print(f"[Grid] hücre boyama notu: {exc}")
+            backing = None
+        if backing is not None:
+            painter = QPainter(vp)
+            painter.drawPixmap(0, 0, backing)
+            painter.end()
 
         # Sürükleme sırasında yerleşim analizi katmanı (hayaletin ALTINDA durur)
         try:
@@ -3842,6 +4367,9 @@ class TimetableGrid(QWidget):
             self.table.setVerticalHeaderLabels([f"{i+1}" for i in range(self._periods)])
 
     def set_cell(self, row, col, subject_name, color, teacher_name="", duration=1, class_name="", display_mode="classes", locked=False, is_manual=False, is_combined=False, combined_classes=None):
+        # Bu satırın saklanan görünümleri artık geçersiz: hücrenin kendisi de
+        # değişmiş olabilir, span kökü de kaymış olabilir.
+        self.table.invalidate_visuals(row)
         if display_mode == "teachers":
             fmt_c = _CLASS_FMT_CACHE.get(class_name)
             if fmt_c is None:
@@ -3895,6 +4423,7 @@ class TimetableGrid(QWidget):
         self.table.clearContents()
         self.table.clearSpans()
         self._placed_lessons.clear()
+        self.table.invalidate_visuals()
 
     def adjust_columns_to_fit(self):
         """Dynamically scales all columns so the timetable always perfectly fits the available viewport width without right-side overflow."""

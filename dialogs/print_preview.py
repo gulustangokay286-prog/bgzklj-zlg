@@ -5,19 +5,281 @@ Sınıf Haftalık Programı, Öğretmen Programı ve Fotoğraftaki Sınıf Dersl
 import os
 import json
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QComboBox, QFileDialog, QMessageBox
+    QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QComboBox, QFileDialog, QMessageBox,
+    QStyledItemDelegate, QStyleOptionViewItem, QFrame, QStyle, QScrollArea, QWidget
 )
 from PySide6.QtPrintSupport import QPrintPreviewWidget, QPrinter
-from PySide6.QtGui import QPainter, QPen, QFont, QColor, QPageLayout, QBrush, QPageSize
-from PySide6.QtCore import Qt, QRectF, QPointF
+from PySide6.QtGui import QPainter, QPen, QFont, QColor, QPageLayout, QBrush, QPageSize, QPainterPath, QPixmap, QIcon
+from PySide6.QtCore import Qt, QRectF, QPointF, QSize, Signal
 from auto_scheduler import matches_class
 import lesson_hours
+import bk_ui
 
 SUBJECT_COLORS = [
     "#2196F3", "#4CAF50", "#FF9800", "#9C27B0", "#E91E63",
     "#00BCD4", "#8BC34A", "#FFC107", "#795548", "#607D8B",
     "#3F51B5", "#009688", "#E67E22", "#D32F2F", "#16A085"
 ]
+
+
+def make_preview_icon(name: str, size: int = 14, color_hex: str = "#475569") -> QIcon:
+    scale = 2
+    pix = QPixmap(size * scale, size * scale)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.setRenderHint(QPainter.SmoothPixmapTransform)
+    p.scale(scale, scale)
+    c = QColor(color_hex)
+    
+    if name == 'html':
+        p.setPen(QPen(c, 1.3, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.setBrush(Qt.NoBrush)
+        path = QPainterPath()
+        path.moveTo(size * 0.34, size * 0.28)
+        path.lineTo(size * 0.14, size * 0.5)
+        path.lineTo(size * 0.34, size * 0.72)
+        p.drawPath(path)
+        p.drawLine(QPointF(size * 0.42, size * 0.74), QPointF(size * 0.58, size * 0.26))
+        path2 = QPainterPath()
+        path2.moveTo(size * 0.66, size * 0.28)
+        path2.lineTo(size * 0.86, size * 0.5)
+        path2.lineTo(size * 0.66, size * 0.72)
+        p.drawPath(path2)
+    elif name == 'pdf':
+        p.setPen(QPen(c, 1.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.setBrush(Qt.NoBrush)
+        path = QPainterPath()
+        path.moveTo(size * 0.22, size * 0.14)
+        path.lineTo(size * 0.58, size * 0.14)
+        path.lineTo(size * 0.78, size * 0.34)
+        path.lineTo(size * 0.78, size * 0.86)
+        path.lineTo(size * 0.22, size * 0.86)
+        path.closeSubpath()
+        p.drawPath(path)
+        p.drawLine(QPointF(size * 0.58, size * 0.14), QPointF(size * 0.58, size * 0.34))
+        p.drawLine(QPointF(size * 0.58, size * 0.34), QPointF(size * 0.78, size * 0.34))
+        p.drawLine(QPointF(size * 0.36, size * 0.52), QPointF(size * 0.64, size * 0.52))
+        p.drawLine(QPointF(size * 0.36, size * 0.68), QPointF(size * 0.54, size * 0.68))
+    elif name == 'print':
+        p.setPen(QPen(c, 1.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.setBrush(Qt.NoBrush)
+        p.drawRoundedRect(QRectF(size * 0.16, size * 0.34, size * 0.68, size * 0.36), 1.2, 1.2)
+        p.drawLine(QPointF(size * 0.3, size * 0.34), QPointF(size * 0.3, size * 0.16))
+        p.drawLine(QPointF(size * 0.3, size * 0.16), QPointF(size * 0.7, size * 0.16))
+        p.drawLine(QPointF(size * 0.7, size * 0.16), QPointF(size * 0.7, size * 0.34))
+        p.drawLine(QPointF(size * 0.3, size * 0.58), QPointF(size * 0.3, size * 0.84))
+        p.drawLine(QPointF(size * 0.3, size * 0.84), QPointF(size * 0.7, size * 0.84))
+        p.drawLine(QPointF(size * 0.7, size * 0.84), QPointF(size * 0.7, size * 0.58))
+    p.end()
+    return QIcon(pix)
+
+
+class AppleComboBox(QPushButton):
+    """
+    Apple native single-click popover dropdown with curved corners and zero Cocoa glitching.
+    Fully compatible with QComboBox API.
+    """
+    currentIndexChanged = Signal(int)
+    currentTextChanged = Signal(str)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(28)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self._items = []
+        self._current_index = -1
+        self._menu = None
+        
+        self.setStyleSheet("""
+            QPushButton {
+                background-color: #FFFFFF;
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
+                padding: 0px 28px 0px 10px;
+                text-align: left;
+                font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+                font-size: 11.5px;
+                font-weight: 500;
+                color: #0F172A;
+                min-height: 28px;
+                max-height: 28px;
+            }
+            QPushButton:hover {
+                border-color: #94A3B8;
+                background-color: #F8FAFC;
+            }
+            QPushButton:focus {
+                border: 1.2px solid #0071E3;
+                background-color: #FFFFFF;
+            }
+            QPushButton:disabled {
+                background-color: #F1F5F9;
+                border-color: #E2E8F0;
+                color: #94A3B8;
+            }
+        """)
+        self.clicked.connect(self.showPopup)
+
+    def addItems(self, items):
+        for item in items:
+            self.addItem(item)
+
+    def addItem(self, text, data=None):
+        self._items.append({"text": str(text), "data": data})
+        if self._current_index < 0:
+            self.setCurrentIndex(0)
+            
+    def clear(self):
+        self._items.clear()
+        self._current_index = -1
+        self.setText("")
+
+    def count(self):
+        return len(self._items)
+
+    def currentText(self):
+        if 0 <= self._current_index < len(self._items):
+            return self._items[self._current_index]["text"]
+        return ""
+
+    def currentIndex(self):
+        return self._current_index
+
+    def setCurrentIndex(self, index):
+        if 0 <= index < len(self._items):
+            old_idx = self._current_index
+            self._current_index = index
+            text = self._items[index]["text"]
+            self.setText(text.replace("&", "&&"))
+            self.update()
+            if old_idx != index:
+                self.currentIndexChanged.emit(index)
+                self.currentTextChanged.emit(text)
+        elif index == -1:
+            self._current_index = -1
+            self.setText("")
+
+    def setCurrentText(self, text):
+        idx = self.findText(text)
+        if idx >= 0:
+            self.setCurrentIndex(idx)
+
+    def findText(self, text):
+        for i, item in enumerate(self._items):
+            if item["text"] == text:
+                return i
+        return -1
+
+    def itemText(self, index):
+        if 0 <= index < len(self._items):
+            return self._items[index]["text"]
+        return ""
+
+    def itemData(self, index):
+        if 0 <= index < len(self._items):
+            return self._items[index]["data"]
+        return None
+
+    def showPopup(self):
+        if not self.isEnabled() or not self._items:
+            return
+        menu = bk_ui.HeroPopoverMenu(self)
+        menu.card.setMinimumWidth(max(self.width(), 260))
+        menu.card.setMaximumHeight(380)
+        
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("""
+            QScrollArea { border: none; background: transparent; }
+            QScrollBar:vertical { background: transparent; width: 5px; margin: 0; }
+            QScrollBar::handle:vertical { background: #CBD5E1; border-radius: 2.5px; min-height: 24px; }
+            QScrollBar::handle:vertical:hover { background: #94A3B8; }
+        """)
+        
+        container = QWidget()
+        container.setStyleSheet("background: transparent; border: none;")
+        lay = QVBoxLayout(container)
+        lay.setContentsMargins(4, 4, 4, 4)
+        lay.setSpacing(2)
+        
+        for idx, item in enumerate(self._items):
+            t = item["text"]
+            is_selected = (idx == self._current_index)
+            
+            btn = QPushButton(t.replace("&", "&&"))
+            btn.setFixedHeight(28)
+            btn.setCursor(Qt.PointingHandCursor)
+            
+            if is_selected:
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background: #0071E3;
+                        color: #FFFFFF;
+                        border: none;
+                        border-radius: 6px;
+                        padding: 0 10px;
+                        text-align: left;
+                        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+                        font-size: 11.5px;
+                        font-weight: 600;
+                    }
+                """)
+            else:
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background: transparent;
+                        color: #0F172A;
+                        border: none;
+                        border-radius: 6px;
+                        padding: 0 10px;
+                        text-align: left;
+                        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+                        font-size: 11.5px;
+                        font-weight: 500;
+                    }
+                    QPushButton:hover {
+                        background: #F1F5F9;
+                    }
+                """)
+            btn.clicked.connect(lambda _, i=idx: (self.setCurrentIndex(i), menu.close()))
+            lay.addWidget(btn)
+            
+        scroll.setWidget(container)
+        menu.card_lay.addWidget(scroll)
+        menu.popup_below(self, align="left", offset_y=4)
+        self._menu = menu
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        w = self.width()
+        h = self.height()
+        cx = w - 12
+        cy = h / 2.0
+        
+        is_open = bool(self._menu and self._menu.isVisible())
+        color = QColor("#0071E3" if (self.hasFocus() or is_open) else "#64748B")
+        pen = QPen(color, 1.5, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        
+        path = QPainterPath()
+        if is_open:
+            path.moveTo(cx - 3.2, cy + 1.6)
+            path.lineTo(cx, cy - 1.8)
+            path.lineTo(cx + 3.2, cy + 1.6)
+        else:
+            path.moveTo(cx - 3.2, cy - 1.8)
+            path.lineTo(cx, cy + 1.6)
+            path.lineTo(cx + 3.2, cy - 1.8)
+            
+        painter.drawPath(path)
 
 def get_bell_times(data_store: dict, periods: int = 8, separator: str = "-") -> list:
     """
@@ -409,12 +671,21 @@ class TimetablePrintPreview(QDialog):
             self.filtered_teachers = [t for t in self.filtered_teachers if t.get("ad") in self.filters.get("teachers")]
         
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(12, 12, 12, 12)
-        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(14, 14, 14, 14)
+        main_layout.setSpacing(12)
         
-        # ── Controls Header Bar
-        top_bar = QHBoxLayout()
-        top_bar.setSpacing(12)
+        # ── Controls Header Bar Card
+        header_card = QFrame(self)
+        header_card.setStyleSheet("""
+            QFrame {
+                background-color: #FFFFFF;
+                border: 1px solid #E2E8F0;
+                border-radius: 8px;
+            }
+        """)
+        top_bar = QHBoxLayout(header_card)
+        top_bar.setContentsMargins(10, 5, 10, 5)
+        top_bar.setSpacing(10)
         
         self.ALL_REPORT_MODES = [
             "Toplu Çarşaf Liste : Sınıflar",
@@ -428,40 +699,89 @@ class TimetablePrintPreview(QDialog):
             "Tüm Öğretmenlerin Ders Yükü Listesi"
         ]
         
-        top_bar.addWidget(QLabel("Rapor Türü:", self))
-        self.mode_combo = QComboBox(self)
-        self.mode_combo.setMinimumWidth(340)
+        lbl_mode = QLabel("RAPOR TÜRÜ", self)
+        lbl_mode.setStyleSheet("color: #64748B; font-size: 10px; font-weight: 700; border: none; background: transparent; letter-spacing: 0.5px;")
+        top_bar.addWidget(lbl_mode)
+        
+        self.mode_combo = AppleComboBox(self)
+        self.mode_combo.setMinimumWidth(350)
         self.mode_combo.addItems(self.ALL_REPORT_MODES)
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         top_bar.addWidget(self.mode_combo)
         
-        top_bar.addWidget(QLabel("Seçim:", self))
-        self.target_combo = QComboBox(self)
-        self.target_combo.setMinimumWidth(160)
+        lbl_target = QLabel("SEÇİM", self)
+        lbl_target.setStyleSheet("color: #64748B; font-size: 10px; font-weight: 700; border: none; background: transparent; letter-spacing: 0.5px;")
+        top_bar.addWidget(lbl_target)
+        
+        self.target_combo = AppleComboBox(self)
+        self.target_combo.setMinimumWidth(215)
         self.target_combo.currentIndexChanged.connect(self._repaint)
         top_bar.addWidget(self.target_combo)
         
         top_bar.addStretch(1)
         
-        btn_html = QPushButton("HTML (Web) Çıktısı")
-        btn_html.setFixedSize(140, 32)
-        btn_html.setStyleSheet("background: #E67E22; color: white; font-weight: bold; border-radius: 4px;")
+        btn_style = """
+            QPushButton {
+                background-color: #FFFFFF;
+                color: #334155;
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
+                font-weight: 500;
+                font-size: 11.5px;
+                padding: 0 10px;
+                min-height: 28px;
+                max-height: 28px;
+            }
+            QPushButton:hover {
+                background-color: #F8FAFC;
+                border-color: #94A3B8;
+                color: #0F172A;
+            }
+            QPushButton:pressed {
+                background-color: #F1F5F9;
+            }
+        """
+        
+        btn_html = QPushButton("HTML Çıktısı")
+        btn_html.setIcon(make_preview_icon("html", 14, "#334155"))
+        btn_html.setCursor(Qt.PointingHandCursor)
+        btn_html.setStyleSheet(btn_style)
         btn_html.clicked.connect(self._export_html)
         top_bar.addWidget(btn_html)
         
-        btn_pdf = QPushButton("PDF Olarak Kaydet")
-        btn_pdf.setFixedSize(140, 32)
-        btn_pdf.setStyleSheet("background: #27AE60; color: white; font-weight: bold; border-radius: 4px;")
+        btn_pdf = QPushButton("PDF Kaydet")
+        btn_pdf.setIcon(make_preview_icon("pdf", 14, "#334155"))
+        btn_pdf.setCursor(Qt.PointingHandCursor)
+        btn_pdf.setStyleSheet(btn_style)
         btn_pdf.clicked.connect(self._export_pdf)
         top_bar.addWidget(btn_pdf)
         
         btn_print = QPushButton("Yazdır")
-        btn_print.setFixedSize(100, 32)
-        btn_print.setStyleSheet("background: #0078D7; color: white; font-weight: bold; border-radius: 4px;")
+        btn_print.setIcon(make_preview_icon("print", 14, "#FFFFFF"))
+        btn_print.setCursor(Qt.PointingHandCursor)
+        btn_print.setStyleSheet("""
+            QPushButton {
+                background-color: #0071E3;
+                color: #FFFFFF;
+                border: 1px solid #0062C4;
+                border-radius: 6px;
+                font-weight: 500;
+                font-size: 11.5px;
+                padding: 0 14px;
+                min-height: 28px;
+                max-height: 28px;
+            }
+            QPushButton:hover {
+                background-color: #0077ED;
+            }
+            QPushButton:pressed {
+                background-color: #005BB5;
+            }
+        """)
         btn_print.clicked.connect(self._do_print)
         top_bar.addWidget(btn_print)
         
-        main_layout.addLayout(top_bar)
+        main_layout.addWidget(header_card)
         
         # ── Print Preview Widget
         self.preview = QPrintPreviewWidget(self)
@@ -822,8 +1142,9 @@ class TimetablePrintPreview(QDialog):
         """Draws exact timetable grid matching photo: Pa..Cu on left, 1..8 on top, Bold Subject + Teacher/Class"""
         import datetime
         date_str = datetime.datetime.now().strftime("%d/%m/%Y")
-        acad_year = self.data_store.get("settings", {}).get("academic_year", "2026 - 2027")
-        year_short = acad_year[:4] if len(acad_year) >= 4 else "2026"
+        acad_year = self.data_store.get("settings", {}).get("academic_year") or "2026 - 2027"
+        if not acad_year or any(y in str(acad_year) for y in ("2023", "2024", "2025")):
+            acad_year = "2026 - 2027"
         
         # 1. Header Row
         header_h = 36 if is_single_page else 18
@@ -838,10 +1159,10 @@ class TimetablePrintPreview(QDialog):
         painter.setPen(QPen(QColor("#000000"), 1))
         painter.drawText(QRectF(x, y - (2 if is_single_page else 0), w, header_h + (12 if is_single_page else 4)), Qt.AlignCenter, str(target_name).upper())
         
-        # Top Right: Ders Planı : 2026
+        # Top Right: Ders Planı : 2026 - 2027
         painter.setFont(make_font(14 if is_single_page else 8, False))
         painter.setPen(QPen(QColor("#000000"), 1))
-        painter.drawText(QRectF(x + w * 0.65, y, w * 0.35, header_h), Qt.AlignRight | Qt.AlignVCenter, f"Ders Planı : {year_short}")
+        painter.drawText(QRectF(x + w * 0.65, y, w * 0.35, header_h), Qt.AlignRight | Qt.AlignVCenter, f"Ders Planı : {acad_year}")
         
         # 2. Table Grid
         top_gap = 48 if is_single_page else 22
@@ -865,7 +1186,7 @@ class TimetablePrintPreview(QDialog):
         row_h = (grid_h - col_header_h) / len(days)
         
         painter.setPen(QPen(QColor("#000000"), 1.4 if is_single_page else 1.0))
-        painter.setBrush(Qt.NoBrush)
+        painter.setBrush(QBrush(QColor("#FFFFFF")))
         
         # Top-Left Corner Box
         painter.drawRect(QRectF(grid_x, grid_y, hour_col_w, col_header_h))
@@ -875,8 +1196,11 @@ class TimetablePrintPreview(QDialog):
         # Top Period Column Headers (1..periods with times underneath)
         for p_idx in range(periods):
             cx = grid_x + hour_col_w + p_idx * col_w
+            painter.setPen(QPen(QColor("#000000"), 1.4 if is_single_page else 1.0))
+            painter.setBrush(QBrush(QColor("#FFFFFF")))
             painter.drawRect(QRectF(cx, grid_y, col_w, col_header_h))
             
+            painter.setPen(QPen(QColor("#000000"), 1))
             painter.setFont(make_font(18 if is_single_page else 10, True))
             painter.drawText(QRectF(cx, grid_y + 1, col_w, col_header_h * 0.52), Qt.AlignCenter | Qt.AlignBottom, str(p_idx + 1))
             
@@ -887,9 +1211,12 @@ class TimetablePrintPreview(QDialog):
         # Left Day Column Headers & Content Cells
         for d_idx, day_name in enumerate(days):
             ry = grid_y + col_header_h + d_idx * row_h
+            painter.setPen(QPen(QColor("#000000"), 1.4 if is_single_page else 1.0))
+            painter.setBrush(QBrush(QColor("#FFFFFF")))
             painter.drawRect(QRectF(grid_x, ry, hour_col_w, row_h))
             
             painter.setFont(make_font(24 if is_single_page else 12, True))
+            painter.setPen(QPen(QColor("#000000"), 1))
             painter.drawText(QRectF(grid_x, ry, hour_col_w, row_h), Qt.AlignCenter, day_name)
             
             p_idx = 0
@@ -917,6 +1244,8 @@ class TimetablePrintPreview(QDialog):
                             break
                             
                     block_w = col_w * dur
+                    painter.setPen(QPen(QColor("#000000"), 1.4 if is_single_page else 1.0))
+                    painter.setBrush(QBrush(QColor("#FFFFFF")))
                     painter.drawRect(QRectF(cx, ry, block_w, row_h))
                     
                     # Line 1: Subject Short Code in Bold (e.g. BİYO 1, BED, GÖR, MAT)
@@ -1764,7 +2093,7 @@ class TimetablePrintPreview(QDialog):
             used_subjects = {} # {abbr: full_name}
             
             for item in page_items:
-                target_name = item.get("ad", "")
+                target_name = (item.get("ad") or item.get("name") or "").strip()
                 
                 painter.setPen(QPen(QColor("#0F172A"), 1.5))
                 painter.setBrush(QBrush(QColor("#F8FAFC")))
@@ -1802,24 +2131,24 @@ class TimetablePrintPreview(QDialog):
                             is_closed = False
                             if is_teacher:
                                 for t in self.data_store.get("ogretmenler", []) or []:
-                                    if (t.get("ad") or t.get("name") or "").strip() == item_name:
+                                    if (t.get("ad") or t.get("name") or "").strip() == target_name:
                                         toff = t.get("timeoff", [])
                                         if toff and d_idx < len(toff) and p < len(toff[d_idx]):
                                             is_closed = (toff[d_idx][p] == 0)
                                         break
                                 if not is_closed:
-                                    kisit = self.data_store.get("kisitlamalar", {}).get(item_name, {})
+                                    kisit = self.data_store.get("kisitlamalar", {}).get(target_name, {})
                                     if f"{d_idx},{p}" in kisit:
                                         is_closed = (kisit[f"{d_idx},{p}"] in (0, False))
                             else:
                                 for c in self.data_store.get("siniflar", []) or []:
-                                    if (c.get("ad") or c.get("name") or "").strip() == item_name:
+                                    if (c.get("ad") or c.get("name") or "").strip() == target_name:
                                         toff = c.get("timeoff", [])
                                         if toff and d_idx < len(toff) and p < len(toff[d_idx]):
                                             is_closed = (toff[d_idx][p] == 0)
                                         break
                                 if not is_closed:
-                                    kisit = self.data_store.get("kisitlamalar", {}).get(item_name, {})
+                                    kisit = self.data_store.get("kisitlamalar", {}).get(target_name, {})
                                     if f"{d_idx},{p}" in kisit:
                                         is_closed = (kisit[f"{d_idx},{p}"] in (0, False))
 
