@@ -195,3 +195,10 @@ def run_apple_save_sequence(parent, duration_seconds=0.35,
             flash(title)
     except Exception as exc:
         print("[run_apple_save_sequence] note:", exc)
+
+
+def __getattr__(name):
+    if name == "AppleConfirmDialog":
+        from home_dashboard import AppleConfirmDialog
+        return AppleConfirmDialog
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

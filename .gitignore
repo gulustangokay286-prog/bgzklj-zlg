@@ -16,4 +16,6 @@ get_full_func.py
 search_*.py
 check_inst_context.py
 ChatGPT Image *.png
+*.xls
+*.xlsx
 

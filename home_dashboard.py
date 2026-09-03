@@ -1767,8 +1767,11 @@ class CollapsibleVersionGroup(QFrame):
     def _show_folder_menu(self):
         btn = self.sender()
         menu = bk_ui.HeroPopoverMenu(self)
-        menu.add_action("Yeniden Adlandır", bk_ui.pencil_glyph(bk_ui.BRAND, 16), on_click=lambda: self.rename_requested.emit())
-        menu.add_action("Klasörü Sil", bk_ui.trash_glyph(bk_ui.DANGER, 16), is_danger=True, on_click=lambda: self.delete_requested.emit())
+        if self.folder_id is not None and str(self.folder_id).lower() != "active":
+            menu.add_action("Yeniden Adlandır", bk_ui.pencil_glyph(bk_ui.BRAND, 16), on_click=lambda: self.rename_requested.emit())
+            menu.add_action("Klasörü Sil", bk_ui.trash_glyph(bk_ui.DANGER, 16), is_danger=True, on_click=lambda: self.delete_requested.emit())
+        else:
+            menu.add_action("Klasörsüz Çizelgeleri Sil", bk_ui.trash_glyph(bk_ui.DANGER, 16), is_danger=True, on_click=lambda: self.delete_requested.emit())
         menu.popup_below(btn, align="right")
 
     def eventFilter(self, obj, event):
@@ -2927,7 +2930,7 @@ class ListSheet(QFrame):
 
 class HomeDashboard(QWidget):
     open_timetable = Signal(str, str)  # slug, filename
-    new_empty_timetable = Signal(str)  # slug
+    new_empty_timetable = Signal(str, str, str, object, object)  # slug, mode, sch_name, pool_id, pool_name
     logout_requested = Signal()        # Trigger logout & return to login screen
     # Carries a background sync's outcome back onto the GUI thread:
     # (pull_ok, pull_msg, push_ok, push_msg)
@@ -4088,9 +4091,10 @@ class HomeDashboard(QWidget):
     def _on_folder_delete(self, folder_id, folder_name):
         if not self._selected_slug or not folder_id:
             return
+        target_fid = str(folder_id).strip()
         count = sum(
             1 for v in version_store.list_versions(self._selected_slug)
-            if v.get("folder_id") == folder_id
+            if str(v.get("folder_id") or "").strip() == target_fid
         )
         if count:
             message = (
@@ -4112,6 +4116,30 @@ class HomeDashboard(QWidget):
         from save_dialog import run_apple_save_sequence
         run_apple_save_sequence(self, duration_seconds=0.25, title="Klasör Siliniyor", message=f"\"{folder_name}\" ve içeriği siliniyor...")
         version_store.delete_folder(self._selected_slug, folder_id)
+        self._refresh_versions()
+        self._refresh_institutions()
+
+    def _on_delete_unfoldered(self):
+        if not self._selected_slug:
+            return
+        unfoldered = [v for v in version_store.list_versions(self._selected_slug) if not v.get("folder_id")]
+        count = len(unfoldered)
+        if count == 0:
+            show_apple_info(self, "Klasörsüz Çizelge Yok", "Bu kurumda silinecek klasörsüz çizelge bulunmuyor.", is_success=True)
+            return
+        dlg = AppleConfirmDialog(
+            title="Klasörsüz Çizelgeleri Sil",
+            message=f"Klasörsüz (Genel) durumdaki {count} çizelge kalıcı olarak silinecek ve buluttan da kaldırılacaktır. Devam etmek istiyor musunuz?",
+            confirm_text="Tümünü Sil",
+            cancel_text="Vazgeç",
+            is_destructive=True,
+            parent=self
+        )
+        if dlg.exec() != QDialog.Accepted:
+            return
+        from save_dialog import run_apple_save_sequence
+        run_apple_save_sequence(self, duration_seconds=0.3, title="Çizelgeler Siliniyor", message="Klasörsüz çizelgeler kaldırılıyor...")
+        version_store.delete_unfoldered_versions(self._selected_slug)
         self._refresh_versions()
         self._refresh_institutions()
 
@@ -4388,8 +4416,11 @@ class HomeDashboard(QWidget):
                     lambda slug, filename, fid=folder_id: self._on_version_dropped_on_folder(slug, filename, fid)
                 )
                 if show_folder_actions:
-                    group.rename_requested.connect(lambda fid=folder_id, name=title: self._on_folder_rename(fid, name))
-                    group.delete_requested.connect(lambda fid=folder_id, name=title: self._on_folder_delete(fid, name))
+                    if folder_id is not None and str(folder_id).lower() != "active":
+                        group.rename_requested.connect(lambda fid=folder_id, name=title: self._on_folder_rename(fid, name))
+                        group.delete_requested.connect(lambda fid=folder_id, name=title: self._on_folder_delete(fid, name))
+                    elif folder_id is None:
+                        group.delete_requested.connect(self._on_delete_unfoldered)
                 table_lay.addWidget(group)
 
             cur_filter = getattr(self, "_current_filter", "Tümü")
@@ -4421,7 +4452,7 @@ class HomeDashboard(QWidget):
             elif cur_filter == "Arşiv":
                 older_list = [v for v in versions if v["filename"] != active_ver and not v.get("folder_id")]
                 if older_list:
-                    _add_group("Arşiv / Klasörsüz", "history", "#64748B", older_list, folder_id=None, show_folder_actions=False)
+                    _add_group("Arşiv / Klasörsüz", "history", "#64748B", older_list, folder_id=None, show_folder_actions=True)
                 else:
                     empty_f = QLabel("Arşivde çizelge bulunmuyor.")
                     empty_f.setFont(bk_ui.font(9.5))
@@ -4435,7 +4466,7 @@ class HomeDashboard(QWidget):
                     if active_list:
                         _add_group("Aktif Çizelge", "active", _inst_colour, active_list, folder_id="active", show_folder_actions=False)
                     if older_list:
-                        _add_group("Geçmiş Versiyonlar", "history", "#64748B", older_list, folder_id=None, show_folder_actions=False)
+                        _add_group("Geçmiş Versiyonlar", "history", "#64748B", older_list, folder_id=None, show_folder_actions=True)
                 else:
                     by_folder = {fid: [] for fid in folder_order}
                     unfoldered = []
@@ -4450,7 +4481,7 @@ class HomeDashboard(QWidget):
                         _add_group(folder_names[fid], "folder", _inst_colour, by_folder.get(fid, []), folder_id=fid, show_folder_actions=True)
 
                     if unfoldered:
-                        _add_group("Klasörsüz (Genel)", "history", "#64748B", unfoldered, folder_id=None)
+                        _add_group("Klasörsüz (Genel)", "history", "#64748B", unfoldered, folder_id=None, show_folder_actions=True)
 
             self.ver_list_layout.addWidget(table_card)
 
@@ -4586,9 +4617,18 @@ class HomeDashboard(QWidget):
     def _on_new_empty_clicked(self):
         if not self._selected_slug:
             return
-        from save_dialog import run_apple_save_sequence
-        run_apple_save_sequence(self, duration_seconds=0.25, title="Yeni Çizelge Hazırlanıyor", message="Boş çalışma alanı oluşturuluyor...")
-        self.new_empty_timetable.emit(self._selected_slug)
+        from dialogs.new_schedule_dialog import AppleNewScheduleDialog
+        dlg = AppleNewScheduleDialog(slug=self._selected_slug, parent=self)
+        if dlg.exec() == QDialog.Accepted:
+            mode, sch_name, pool_id, pool_name = dlg.get_selection()
+            if not mode:
+                return
+            from save_dialog import run_apple_save_sequence
+            title_msg = "Mevcut Veriler Aktarılıyor" if mode == "current_data" else "Yeni Veri Havuzu Hazırlanıyor"
+            display_name = pool_name or sch_name or "Yeni Çizelge"
+            sub_msg = f"'{display_name}' çalışma alanı oluşturuluyor..."
+            run_apple_save_sequence(self, duration_seconds=0.35, title=title_msg, message=sub_msg)
+            self.new_empty_timetable.emit(self._selected_slug, mode, sch_name, pool_id, pool_name)
         
     def _on_cross_import_clicked(self):
         # Hedef kurum seçili değilse, kullanıcıyı boş bir uyarıyla geri çevirmek

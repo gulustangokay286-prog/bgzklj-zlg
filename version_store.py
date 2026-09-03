@@ -1013,7 +1013,6 @@ def rename_folder(slug: str, folder_id: str, new_name: str) -> bool:
             json.dump(meta, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
-
     try:
         import threading
         import cloud_sync
@@ -1021,6 +1020,144 @@ def rename_folder(slug: str, folder_id: str, new_name: str) -> bool:
     except Exception:
         pass
     return True
+
+
+def list_data_pools(slug: str) -> list[dict]:
+    """Returns the list of distinct data pools for this institution.
+    The primary data pool represents the institution's main data.
+    Any new data pool created from the empty pool workflow is listed here.
+    """
+    if not slug:
+        return []
+    meta = get_institution_meta(slug)
+    inst_name = meta.get("name", "Ana Veri Havuzu")
+
+    pools = meta.get("data_pools", [])
+    pool_map = {}
+
+    default_id = "default"
+    pool_map[default_id] = {
+        "id": default_id,
+        "name": inst_name,
+        "is_default": True,
+        "created": meta.get("created_at", "")
+    }
+
+    for p in pools:
+        pid = p.get("id")
+        if pid:
+            pool_map[pid] = dict(p)
+
+    versions = list_versions(slug)
+    for pid, pool in pool_map.items():
+        pool_versions = []
+        for v in versions:
+            v_pid = v.get("data_pool_id")
+            if (pid == "default" and (not v_pid or v_pid == "default")) or (v_pid == pid):
+                pool_versions.append(v)
+
+        if pool_versions:
+            latest = pool_versions[0]
+            pool["latest_version"] = latest["filename"]
+            try:
+                data = load_version(slug, latest["filename"])
+                pool["teachers_count"] = len(data.get("ogretmenler", []))
+                pool["classes_count"] = len(data.get("siniflar", []))
+                pool["subjects_count"] = len(data.get("dersler", []))
+            except Exception:
+                pool["teachers_count"] = 0
+                pool["classes_count"] = 0
+                pool["subjects_count"] = 0
+        else:
+            pool["latest_version"] = None
+            pool["teachers_count"] = 0
+            pool["classes_count"] = 0
+            pool["subjects_count"] = 0
+
+    return list(pool_map.values())
+
+
+def create_data_pool(slug: str, name: str) -> dict:
+    """Registers a new independent data pool under this institution."""
+    name = (name or "").strip()
+    if not slug or not name:
+        return {}
+    meta_path = os.path.join(_base_dir(), slug, "meta.json")
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception:
+        meta = {"name": slug}
+
+    pools = meta.setdefault("data_pools", [])
+    for p in pools:
+        if p.get("name", "").strip().lower() == name.lower():
+            return p
+
+    new_pool = {
+        "id": _uuid.uuid4().hex[:10],
+        "name": name,
+        "created": datetime.now().isoformat(),
+    }
+    pools.append(new_pool)
+
+    try:
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+        _invalidate_meta_cache(slug)
+    except Exception:
+        pass
+
+    try:
+        import threading
+        import cloud_sync
+        threading.Thread(target=cloud_sync.push_institution_to_rtdb, args=(slug,), daemon=True).start()
+    except Exception:
+        pass
+
+    return new_pool
+
+
+def delete_data_pool(slug: str, pool_id: str) -> bool:
+    """Deletes a custom data pool and all versions associated with it."""
+    if not slug or not pool_id or pool_id == "default":
+        return False
+
+    meta_path = os.path.join(_base_dir(), slug, "meta.json")
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception:
+        return False
+
+    pools = meta.get("data_pools", [])
+    new_pools = [p for p in pools if p.get("id") != pool_id]
+    if len(new_pools) == len(pools):
+        return False
+
+    meta["data_pools"] = new_pools
+
+    try:
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+        _invalidate_meta_cache(slug)
+    except Exception:
+        pass
+
+    # Delete all versions belonging to this pool
+    for v in list_versions(slug):
+        if v.get("data_pool_id") == pool_id:
+            delete_version(slug, v["filename"])
+
+    try:
+        import threading
+        import cloud_sync
+        threading.Thread(target=cloud_sync.push_institution_to_rtdb, args=(slug,), daemon=True).start()
+    except Exception:
+        pass
+
+    return True
+
 
 def delete_folder(slug: str, folder_id: str) -> int:
     """Deletes a folder AND every version filed under it (cascading, incl. from the
@@ -1031,10 +1168,36 @@ def delete_folder(slug: str, folder_id: str) -> int:
         return 0
 
     deleted = 0
+    target_fid = str(folder_id).strip()
+
+    # 1. Match from list_versions
+    matched_filenames = set()
     for v in list_versions(slug):
-        if v.get("folder_id") == folder_id:
-            delete_version(slug, v["filename"])
-            deleted += 1
+        v_fid = str(v.get("folder_id") or "").strip()
+        if v_fid == target_fid:
+            matched_filenames.add(v["filename"])
+
+    # 2. Direct disk scan safeguard to ensure no stale-cache version escapes
+    ver_dir = _versions_dir(slug)
+    if os.path.exists(ver_dir):
+        for fname in os.listdir(ver_dir):
+            if not fname.endswith(".roz"):
+                continue
+            if fname in matched_filenames:
+                continue
+            fpath = os.path.join(ver_dir, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as fh:
+                    d = json.load(fh)
+                v_fid = str(d.get("_version_meta", {}).get("folder_id") or "").strip()
+                if v_fid == target_fid:
+                    matched_filenames.add(fname)
+            except Exception:
+                pass
+
+    for fname in matched_filenames:
+        delete_version(slug, fname)
+        deleted += 1
 
     meta_path = os.path.join(_base_dir(), slug, "meta.json")
     try:
@@ -1044,7 +1207,7 @@ def delete_folder(slug: str, folder_id: str) -> int:
         return deleted
 
     folders = meta.get("folders", [])
-    new_folders = [f for f in folders if f.get("id") != folder_id]
+    new_folders = [f for f in folders if str(f.get("id", "")).strip() != target_fid]
     if len(new_folders) == len(folders):
         return deleted
     meta["folders"] = new_folders
@@ -1065,6 +1228,42 @@ def delete_folder(slug: str, folder_id: str) -> int:
         threading.Thread(target=cloud_sync.push_institution_to_rtdb, args=(slug,), daemon=True).start()
     except Exception:
         pass
+    return deleted
+
+
+def delete_unfoldered_versions(slug: str) -> int:
+    """Deletes all versions in an institution that are not assigned to any folder."""
+    if not slug:
+        return 0
+
+    deleted = 0
+    matched_filenames = set()
+
+    for v in list_versions(slug):
+        if not v.get("folder_id"):
+            matched_filenames.add(v["filename"])
+
+    ver_dir = _versions_dir(slug)
+    if os.path.exists(ver_dir):
+        for fname in os.listdir(ver_dir):
+            if not fname.endswith(".roz"):
+                continue
+            if fname in matched_filenames:
+                continue
+            fpath = os.path.join(ver_dir, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as fh:
+                    d = json.load(fh)
+                v_fid = d.get("_version_meta", {}).get("folder_id")
+                if not v_fid:
+                    matched_filenames.add(fname)
+            except Exception:
+                pass
+
+    for fname in matched_filenames:
+        delete_version(slug, fname)
+        deleted += 1
+
     return deleted
 
 def get_version_folder_id(slug: str, filename: str) -> str | None:
@@ -1170,7 +1369,8 @@ def find_version_by_content(slug: str, data_store: dict) -> str:
 
 
 def save_version(slug: str, data_store: dict, source: str = "manual", note: str = "",
-                 folder_id: str = None, allow_duplicate: bool = False) -> str:
+                 folder_id: str = None, allow_duplicate: bool = False,
+                 data_pool_id: str = None, data_pool_name: str = None) -> str:
     """Saves a new version and returns its filename.
 
     If an existing version already holds byte-identical content, that one is
@@ -1184,6 +1384,10 @@ def save_version(slug: str, data_store: dict, source: str = "manual", note: str 
     orig_meta = data_store.get("_version_meta", {}) if isinstance(data_store, dict) else {}
     if folder_id is None and orig_meta.get("folder_id"):
         folder_id = orig_meta.get("folder_id")
+    if data_pool_id is None and orig_meta.get("data_pool_id"):
+        data_pool_id = orig_meta.get("data_pool_id")
+    if data_pool_name is None and orig_meta.get("data_pool_name"):
+        data_pool_name = orig_meta.get("data_pool_name")
 
     save_data = dict(data_store)
     if "atamalar" in save_data:
@@ -1194,7 +1398,7 @@ def save_version(slug: str, data_store: dict, source: str = "manual", note: str 
         twin = find_version_by_content(slug, save_data)
         if twin:
             # Refresh the note/folder on the existing version rather than cloning it.
-            if note or folder_id:
+            if note or folder_id or data_pool_id or data_pool_name:
                 try:
                     twin_path = os.path.join(_versions_dir(slug), twin)
                     with open(twin_path, "r", encoding="utf-8") as f:
@@ -1204,6 +1408,10 @@ def save_version(slug: str, data_store: dict, source: str = "manual", note: str 
                         meta["note"] = note
                     if folder_id:
                         meta["folder_id"] = folder_id
+                    if data_pool_id:
+                        meta["data_pool_id"] = data_pool_id
+                    if data_pool_name:
+                        meta["data_pool_name"] = data_pool_name
                     with open(twin_path, "w", encoding="utf-8") as f:
                         json.dump(existing, f, ensure_ascii=False, indent=2)
                     invalidate_version_summary(slug, twin)
@@ -1229,6 +1437,8 @@ def save_version(slug: str, data_store: dict, source: str = "manual", note: str 
         "note": note,
         "filename": filename,
         "folder_id": folder_id,
+        "data_pool_id": data_pool_id,
+        "data_pool_name": data_pool_name,
         "data_hash": compute_data_hash(save_data),
     }
 
@@ -1485,6 +1695,8 @@ def _version_summary(filepath: str) -> dict:
         v_meta = d.get("_version_meta", {}) or {}
         summary["note"] = v_meta.get("note", "") or ""
         summary["folder_id"] = v_meta.get("folder_id")
+        summary["data_pool_id"] = v_meta.get("data_pool_id")
+        summary["data_pool_name"] = v_meta.get("data_pool_name")
         summary["last_modified"] = v_meta.get("last_modified")
         placed = sum(int(p.get("duration", 1) or 1) for p in d.get("grid_placements", []))
         # Toplam saat, ekranlarla AYNI kaynaktan: dagilimi ("2+1") olan bir satirda
@@ -1618,6 +1830,8 @@ def list_versions(slug: str, source_filter: str = "all") -> list:
             "unplaced_hours": summary["unplaced_hours"],
             "folder_id": folder_id,
             "folder_name": folders_by_id.get(folder_id, ""),
+            "data_pool_id": summary.get("data_pool_id"),
+            "data_pool_name": summary.get("data_pool_name"),
         })
 
     _assign_display_labels(versions)

@@ -190,46 +190,94 @@ class AppShell(QMainWindow):
             v_num = f"v{int(m.group(1))}"
         self.setWindowTitle(f"Chenkron — {inst_name} — {v_num}")
     
-    def _open_empty_timetable(self, slug):
-        """Create a new version that inherits master data from the current active version (fresh grid)."""
+    def _open_empty_timetable(self, slug, mode="current_data", custom_name="", pool_id=None, pool_name=None):
+        """Create a new version.
+        If mode == "current_data": inherits master data definitions from the selected
+        data pool (or active version) with empty grid placements.
+        If mode == "empty_pool": creates a 100% clean-slate empty data pool with no data duplicated,
+        registers the new data pool under the institution, and saves it.
+        """
         meta = version_store.get_institution_meta(slug)
         inst_name = meta.get("name", slug)
         
-        # Try to load current active version's master data
-        active_ver = version_store.get_active_version(slug)
-        base_data = None
-        if active_ver:
-            base_data = version_store.load_version(slug, active_ver)
-        
-        if base_data and any(base_data.get(k) for k in ("dersler", "siniflar", "ogretmenler", "atamalar")):
-            # Inherit ALL master data, constraints, bell schedules, plan relations — only reset grid
+        if mode == "empty_pool":
+            p_name = (pool_name or custom_name or "Yeni Veri Havuzu").strip()
+            # Register the new data pool so it appears in list_data_pools next time
+            new_pool = version_store.create_data_pool(slug, p_name)
+            p_id = new_pool.get("id")
+
             new_data = {
-                "dersler": list(base_data.get("dersler", [])),
-                "siniflar": list(base_data.get("siniflar", [])),
-                "derslikler": list(base_data.get("derslikler", [])),
-                "ogretmenler": list(base_data.get("ogretmenler", [])),
-                "atamalar": list(base_data.get("atamalar", [])),
-                "settings": dict(base_data.get("settings", {})),
-                "grid_placements": [],  # Fresh empty grid
-                "kisitlamalar": dict(base_data.get("kisitlamalar", {})) if isinstance(base_data.get("kisitlamalar"), dict) else base_data.get("kisitlamalar", {}),
-                "ders_programlari": base_data.get("ders_programlari", {}),
-                "plan_iliskileri": base_data.get("plan_iliskileri", {}),
-                "zil_programi": base_data.get("zil_programi", {}),
-                "temel_bilgiler": base_data.get("temel_bilgiler", {}),
-                "gun_sayisi": base_data.get("gun_sayisi", 5),
-                "ders_saati": base_data.get("ders_saati", 8),
+                "dersler": [],
+                "siniflar": [],
+                "derslikler": [],
+                "ogretmenler": [],
+                "atamalar": [],
+                "settings": {
+                    "school_name": p_name,
+                    "academic_year": "2026 - 2027",
+                    "periods": 8,
+                    "days_count": 5
+                },
+                "grid_placements": [],
+                "kisitlamalar": {},
+                "ders_programlari": {},
+                "plan_iliskileri": {},
+                "zil_programi": {},
+                "temel_bilgiler": {"okul_adi": p_name},
+                "gun_sayisi": 5,
+                "ders_saati": 8,
             }
-            note = f"Yeni çizelge — '{inst_name}' verileri aktarıldı (boş yerleşim)"
+            note = p_name
+            vf = version_store.save_version(
+                slug, new_data, source="manual", note=note,
+                data_pool_id=p_id, data_pool_name=p_name
+            )
+            self._open_timetable(slug, vf)
         else:
-            new_data = {
-                "dersler": [], "siniflar": [], "derslikler": [],
-                "ogretmenler": [], "atamalar": [], "settings": {},
-                "grid_placements": [], "kisitlamalar": {},
-            }
-            note = "Yeni boş çizelge"
-        
-        vf = version_store.save_version(slug, new_data, source="manual", note=note)
-        self._open_timetable(slug, vf)
+            # "current_data" mode: find the latest version for this data pool
+            base_data = None
+            pools = version_store.list_data_pools(slug)
+            target_pool = next((p for p in pools if p.get("id") == pool_id), None)
+            
+            if target_pool and target_pool.get("latest_version"):
+                base_data = version_store.load_version(slug, target_pool["latest_version"])
+            if not base_data:
+                active_ver = version_store.get_active_version(slug)
+                if active_ver:
+                    base_data = version_store.load_version(slug, active_ver)
+
+            target_pool_name = target_pool.get("name") if target_pool else (pool_name or inst_name)
+            target_pool_id = target_pool.get("id") if target_pool else (pool_id or "default")
+
+            if base_data and any(base_data.get(k) for k in ("dersler", "siniflar", "ogretmenler", "atamalar")):
+                new_data = {
+                    "dersler": list(base_data.get("dersler", [])),
+                    "siniflar": list(base_data.get("siniflar", [])),
+                    "derslikler": list(base_data.get("derslikler", [])),
+                    "ogretmenler": list(base_data.get("ogretmenler", [])),
+                    "atamalar": list(base_data.get("atamalar", [])),
+                    "settings": dict(base_data.get("settings", {})),
+                    "grid_placements": [],  # Fresh empty grid
+                    "kisitlamalar": dict(base_data.get("kisitlamalar", {})) if isinstance(base_data.get("kisitlamalar"), dict) else base_data.get("kisitlamalar", {}),
+                    "ders_programlari": base_data.get("ders_programlari", {}),
+                    "plan_iliskileri": base_data.get("plan_iliskileri", {}),
+                    "zil_programi": base_data.get("zil_programi", {}),
+                    "temel_bilgiler": base_data.get("temel_bilgiler", {}),
+                    "gun_sayisi": base_data.get("gun_sayisi", 5),
+                    "ders_saati": base_data.get("ders_saati", 8),
+                }
+            else:
+                new_data = {
+                    "dersler": [], "siniflar": [], "derslikler": [],
+                    "ogretmenler": [], "atamalar": [], "settings": {},
+                    "grid_placements": [], "kisitlamalar": {},
+                }
+            note = custom_name.strip() if custom_name else f"{target_pool_name} Planı"
+            vf = version_store.save_version(
+                slug, new_data, source="manual", note=note,
+                data_pool_id=target_pool_id, data_pool_name=target_pool_name
+            )
+            self._open_timetable(slug, vf)
     
     def _go_home(self):
         """Switch back to the dashboard smoothly, instantaneously and safely.
