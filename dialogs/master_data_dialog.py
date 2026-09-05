@@ -6,12 +6,12 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QSize, QPoint
 from PySide6.QtGui import QFont, QPixmap, QPainter, QColor, QPen, QBrush, QPolygon, QIcon, QLinearGradient, QPainterPath
+from PySide6.QtCore import Signal, QEvent
 
-from dialogs.edit_forms import DersEditDialog, SinifEditDialog, OgretmenEditDialog, DerslikEditDialog
+from dialogs.edit_forms import DersEditDialog, SinifEditDialog, OgretmenEditDialog, DerslikEditDialog, make_edit_svg_icon
 from auto_scheduler import format_tr_name, matches_class
 import lesson_hours
 from database import trigger_save_db
-from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QAbstractItemView
 
 FONT_FAMILY = ".AppleSystemUIFont, SF Pro Text, Helvetica Neue, Segoe UI, sans-serif"
@@ -462,7 +462,10 @@ class MasterDataDialog(QDialog):
             data_store = start_idx
             start_idx = 0
         self.setWindowTitle("Sınıflar") # Will be updated in select_tab
-        self.resize(900, 650)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMinMaxButtonsHint | Qt.WindowCloseButtonHint)
+        self.setSizeGripEnabled(True)
+        self.mag_buttons = []
+        self.resize(950, 680)
         self.setFont(QFont(FONT_FAMILY, 9))
         
         self.main_window = parent
@@ -582,6 +585,25 @@ class MasterDataDialog(QDialog):
             self._add_row(self.table_ogretmen, [
                 t_name, data.get("kisa",""), toplam, zaman_str, so_class, brans, atanan_dersler_str
             ], timeoff=data.get("timeoff"), days_cnt=len(days), periods_cnt=periods)
+
+    def _toggle_maximize_restore(self):
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
+        self._update_magnifier_buttons()
+
+    def _update_magnifier_buttons(self):
+        is_max = self.isMaximized()
+        for b in getattr(self, "mag_buttons", []):
+            if b.text():
+                b.setText("  Normal Boyut (Küçült)" if is_max else "  Tam Ekran (Büyüt)")
+            b.setToolTip("Normal Boyuta Döndür (Küçült)" if is_max else "Tam Ekran Yap (Büyüt)")
+
+    def changeEvent(self, event):
+        if event.type() == QEvent.WindowStateChange:
+            self._update_magnifier_buttons()
+        super().changeEvent(event)
 
     def closeEvent(self, event):
         try:
@@ -740,6 +762,16 @@ class MasterDataDialog(QDialog):
         btn_close.setStyleSheet("background: #FFFFFF; border: 1px solid #CBD5E1; color: #334155; font-weight: 600; border-radius: 6px;")
         btn_close.clicked.connect(self.reject)
         
+        btn_mag_bottom = QPushButton("  Tam Ekran (Büyüt)")
+        btn_mag_bottom.setIcon(make_edit_svg_icon("search", 15, "#334155"))
+        btn_mag_bottom.setFixedHeight(32)
+        btn_mag_bottom.setCursor(Qt.PointingHandCursor)
+        btn_mag_bottom.setFont(QFont("SF Pro Text", 9, QFont.Bold))
+        btn_mag_bottom.setStyleSheet("background: #FFFFFF; border: 1px solid #CBD5E1; color: #334155; font-weight: 600; border-radius: 6px; padding: 0 12px;")
+        btn_mag_bottom.setToolTip("Tam Ekran Yap / Normal Boyuta Dön (Büyüteç)")
+        btn_mag_bottom.clicked.connect(self._toggle_maximize_restore)
+        self.mag_buttons.append(btn_mag_bottom)
+        
         self.btn_help = btn_help
         self.btn_undo = btn_undo
         self.btn_redo = btn_redo
@@ -754,6 +786,7 @@ class MasterDataDialog(QDialog):
         bottom_layout.addWidget(btn_reset_classes)
         bottom_layout.addWidget(btn_info)
         bottom_layout.addStretch(1)
+        bottom_layout.addWidget(btn_mag_bottom)
         bottom_layout.addWidget(btn_close)
         
         main_layout.addLayout(bottom_layout)
@@ -1044,6 +1077,27 @@ class MasterDataDialog(QDialog):
                 
         txt_search.textChanged.connect(do_filter)
         top_bar.addWidget(txt_search)
+        
+        btn_mag = QPushButton()
+        btn_mag.setFixedSize(28, 28)
+        btn_mag.setCursor(Qt.PointingHandCursor)
+        btn_mag.setIcon(make_edit_svg_icon("search", 15, "#1E293B"))
+        btn_mag.setToolTip("Tam Ekran Yap / Normal Boyuta Dön (Büyüteç)")
+        btn_mag.setStyleSheet("""
+            QPushButton {
+                background: #FFFFFF;
+                border: 1px solid #CCCCCC;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background: #F1F5F9;
+                border-color: #94A3B8;
+            }
+        """)
+        btn_mag.clicked.connect(self._toggle_maximize_restore)
+        self.mag_buttons.append(btn_mag)
+        top_bar.addWidget(btn_mag)
+        
         l.addLayout(top_bar)
         l.addWidget(table, 1)
         return w

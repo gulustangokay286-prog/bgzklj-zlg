@@ -14,6 +14,7 @@ class BaseDialog(QDialog):
     def __init__(self, title: str, icon_key: str = "bilgi", parent=None):
         super().__init__(parent)
         self.setWindowTitle(title)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMinMaxButtonsHint | Qt.WindowCloseButtonHint)
         self.setModal(True)
         self.setMinimumWidth(600)
         self._build_frame(title)

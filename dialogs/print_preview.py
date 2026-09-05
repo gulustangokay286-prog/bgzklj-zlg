@@ -1180,7 +1180,7 @@ class TimetablePrintPreview(QDialog):
         periods = int(settings.get("periods", 8))
         
         hour_col_w = max(55 if is_single_page else 40, grid_w * (0.08 if is_single_page else 0.08))
-        col_header_h = max(32 if is_single_page else 24, grid_h * (0.10 if is_single_page else 0.14))
+        col_header_h = max(38 if is_single_page else 30, grid_h * (0.13 if is_single_page else 0.17))
         
         col_w = (grid_w - hour_col_w) / periods
         row_h = (grid_h - col_header_h) / len(days)
@@ -1201,12 +1201,13 @@ class TimetablePrintPreview(QDialog):
             painter.drawRect(QRectF(cx, grid_y, col_w, col_header_h))
             
             painter.setPen(QPen(QColor("#000000"), 1))
-            painter.setFont(make_font(18 if is_single_page else 10, True))
-            painter.drawText(QRectF(cx, grid_y + 1, col_w, col_header_h * 0.52), Qt.AlignCenter | Qt.AlignBottom, str(p_idx + 1))
+            painter.setFont(make_font(18 if is_single_page else 11.5, True))
+            painter.drawText(QRectF(cx, grid_y + 1, col_w, col_header_h * 0.44), Qt.AlignCenter | Qt.AlignBottom, str(p_idx + 1))
             
             t_str = times[p_idx]
-            painter.setFont(make_font(11 if is_single_page else 6.5, False))
-            painter.drawText(QRectF(cx, grid_y + col_header_h * 0.54, col_w, col_header_h * 0.44), Qt.AlignCenter | Qt.AlignTop, t_str)
+            painter.setFont(make_font(13.5 if is_single_page else 9.0, True))
+            painter.setPen(QPen(QColor("#0F172A"), 1))
+            painter.drawText(QRectF(cx, grid_y + col_header_h * 0.46, col_w, col_header_h * 0.52), Qt.AlignCenter | Qt.AlignTop, t_str)
             
         # Left Day Column Headers & Content Cells
         for d_idx, day_name in enumerate(days):
@@ -1322,12 +1323,12 @@ class TimetablePrintPreview(QDialog):
                             if f"{d_idx},{p_idx}" in kisit:
                                 is_closed = (kisit[f"{d_idx},{p_idx}"] in (0, False))
 
-                    painter.setBrush(QBrush(QColor("#E2E8F0" if is_closed else "#FFFFFF")))
+                    painter.setBrush(QBrush(QColor("#F1F5F9" if is_closed else "#FFFFFF")))
                     painter.setPen(QPen(QColor("#000000"), 1.4 if is_single_page else 1.0))
                     painter.drawRect(QRectF(cx, ry, col_w, row_h))
                     if is_closed:
-                        painter.setFont(make_font(14 if is_single_page else 8, True))
-                        painter.setPen(QPen(QColor("#94A3B8"), 1))
+                        painter.setFont(make_font(13 if is_single_page else 8.0, False))
+                        painter.setPen(QPen(QColor("#A0AEC0"), 1))
                         painter.drawText(QRectF(cx, ry, col_w, row_h), Qt.AlignCenter, "✕")
                     p_idx += 1
 
@@ -1928,9 +1929,22 @@ class TimetablePrintPreview(QDialog):
         date_str = datetime.datetime.now().strftime("%d.%m.%Y")
         school_name = self.data_store.get("okul_adi") or self.data_store.get("settings", {}).get("school_name", "Okul Adı")
         
+        tr_map_clean = str.maketrans({'İ': 'i', 'I': 'ı', 'ı': 'i', 'Ş': 's', 'ş': 's', 'Ğ': 'g', 'ğ': 'g', 'Ü': 'u', 'ü': 'u', 'Ö': 'o', 'ö': 'o', 'Ç': 'c', 'ç': 'c'})
+        def normalize_clean(s):
+            if not s: return ""
+            raw = str(s).strip()
+            import re
+            raw = re.sub(r'\s*\((?:ea|say|söz|soz|dil)\)\s*$', '', raw, flags=re.IGNORECASE)
+            return "".join(c for c in raw.translate(tr_map_clean).lower() if c.isalnum())
+
         def smart_abbr(subject_name):
             if not subject_name: return ""
             s = str(subject_name).strip()
+            # If subject has an explicit short code in dersler, prioritize that
+            for d in self.data_store.get("dersler", []):
+                if (d.get("ad") or "").strip().lower() == s.lower() and d.get("kisa"):
+                    return str(d.get("kisa")).strip()
+            
             tr_map = str.maketrans({'i': 'İ', 'ı': 'I', 'ç': 'Ç', 'ğ': 'Ğ', 'ö': 'Ö', 'ş': 'Ş', 'ü': 'Ü'})
             s_up = s.translate(tr_map).upper()
             
@@ -1998,6 +2012,21 @@ class TimetablePrintPreview(QDialog):
                 suf = m.group(2)
                 return f"{base[:3]}{suf}"[:5]
             return s_up[:4]
+
+        def format_tr_teacher_short(name):
+            if not name: return ""
+            clean = str(name).strip()
+            if not clean or clean.lower() in ["boş", "bos", "-", "—"]:
+                return ""
+            parts = clean.split()
+            if len(parts) == 1:
+                w = parts[0]
+                return format_tr_name(w)
+            first_names = [format_tr_name(p) for p in parts[:-1]]
+            last_word = parts[-1]
+            tr_upper = str.maketrans({'i': 'İ', 'ı': 'I', 'ç': 'Ç', 'ğ': 'Ğ', 'ö': 'Ö', 'ş': 'Ş', 'ü': 'Ü'})
+            last_initial = last_word[0].translate(tr_upper).upper()
+            return f"{' '.join(first_names)} {last_initial}."
             
         import re
         def natural_sort_key(s):
@@ -2090,7 +2119,7 @@ class TimetablePrintPreview(QDialog):
             cur_y += header_h
             
             page_items = items[p_idx * rows_per_page : (p_idx + 1) * rows_per_page]
-            used_subjects = {} # {abbr: full_name}
+            used_subjects = {} # {abbr: set of teacher names}
             
             for item in page_items:
                 target_name = (item.get("ad") or item.get("name") or "").strip()
@@ -2152,12 +2181,12 @@ class TimetablePrintPreview(QDialog):
                                     if f"{d_idx},{p}" in kisit:
                                         is_closed = (kisit[f"{d_idx},{p}"] in (0, False))
 
-                            painter.setBrush(QBrush(QColor("#E2E8F0" if is_closed else "#FFFFFF")))
+                            painter.setBrush(QBrush(QColor("#F1F5F9" if is_closed else "#FFFFFF")))
                             painter.setPen(QPen(QColor("#0F172A"), 0.8))
                             painter.drawRect(QRectF(px, cur_y, period_w, row_h))
                             if is_closed:
-                                painter.setFont(make_font(8.5, True))
-                                painter.setPen(QPen(QColor("#94A3B8"), 1))
+                                painter.setFont(make_font(8.0, False))
+                                painter.setPen(QPen(QColor("#A0AEC0"), 1))
                                 painter.drawText(QRectF(px, cur_y, period_w, row_h), Qt.AlignCenter, "✕")
                             p_offset += 1
                             continue
@@ -2177,7 +2206,11 @@ class TimetablePrintPreview(QDialog):
                                 cell_text = smart_abbr(sname)
                         else:
                             cell_text = smart_abbr(sname)
-                            used_subjects[cell_text] = sname
+                            if cell_text not in used_subjects:
+                                used_subjects[cell_text] = set()
+                            t_val = lesson.get("teacher_name") or ""
+                            if t_val and str(t_val).strip() and str(t_val).strip().lower() not in ["boş", "bos", "-", "—", ""]:
+                                used_subjects[cell_text].add(str(t_val).strip())
                             
                         # Detect horizontal contiguous span on this day
                         span = 1
@@ -2253,15 +2286,43 @@ class TimetablePrintPreview(QDialog):
             # --- Structured Legend Section Immediately Under Table ---
             leg_start_y = cur_y + 8
             if not is_teacher:
+                # Also supplement from atamalar for classes on this page
+                for item in page_items:
+                    c_name = (item.get("ad") or item.get("name") or "").strip()
+                    c_norm = normalize_clean(c_name)
+                    for a in self.data_store.get("atamalar", []):
+                        ac_name = (a.get("class") or a.get("sinif") or "").strip()
+                        if normalize_clean(ac_name) == c_norm or matches_class(ac_name, c_name):
+                            s_name = a.get("subject") or a.get("ders") or ""
+                            t_name = a.get("teacher") or a.get("ogretmen") or ""
+                            if s_name:
+                                abbr = smart_abbr(s_name)
+                                if abbr not in used_subjects:
+                                    used_subjects[abbr] = set()
+                                if t_name and str(t_name).strip() and str(t_name).strip().lower() not in ["boş", "bos", "-", "—", ""]:
+                                    used_subjects[abbr].add(str(t_name).strip())
+
                 if not used_subjects:
                     for d_item in self.data_store.get("dersler", []):
                         d_name = d_item.get("ad", "").strip()
                         if d_name:
-                            used_subjects[smart_abbr(d_name)] = d_name
+                            abbr = smart_abbr(d_name)
+                            if abbr not in used_subjects:
+                                used_subjects[abbr] = set()
 
-                legend_items = sorted([(k, v) for k, v in used_subjects.items() if k and v], key=lambda x: x[0])
+                legend_items = []
+                for abbr in sorted(used_subjects.keys()):
+                    raw_teachers = sorted(list(used_subjects[abbr]))
+                    short_teachers = []
+                    for t in raw_teachers:
+                        st = format_tr_teacher_short(t)
+                        if st and st not in short_teachers:
+                            short_teachers.append(st)
+                    t_str = ", ".join(short_teachers)
+                    legend_items.append((abbr, t_str))
+
                 if legend_items:
-                    num_cols = 5
+                    num_cols = 4
                     col_w = (w - 20) / num_cols
                     item_h = 16
                     num_rows = (len(legend_items) + num_cols - 1) // num_cols
@@ -2278,10 +2339,10 @@ class TimetablePrintPreview(QDialog):
                     # Legend Header
                     painter.setFont(make_font(9.5, True))
                     painter.setPen(QPen(QColor("#1E293B"), 1))
-                    painter.drawText(QRectF(margin_x + 10, leg_start_y + 4, w - 20, 16), Qt.AlignLeft | Qt.AlignVCenter, "Ders Kısaltmaları ve Açıklamaları:")
+                    painter.drawText(QRectF(margin_x + 10, leg_start_y + 4, w - 20, 16), Qt.AlignLeft | Qt.AlignVCenter, "Dersler ve Öğretmenler:")
                     
                     # Legend Items Grid
-                    for idx, (abbr, full_name) in enumerate(legend_items):
+                    for idx, (abbr, t_str) in enumerate(legend_items):
                         c_idx = idx % num_cols
                         r_idx = idx // num_cols
                         
@@ -2289,16 +2350,22 @@ class TimetablePrintPreview(QDialog):
                         item_y = leg_start_y + 22 + r_idx * item_h
                         
                         if item_y + item_h <= leg_start_y + box_h:
+                            prefix = f"• {abbr}: " if t_str else f"• {abbr}"
                             painter.setFont(make_font(8.5, True))
-                            painter.setPen(QPen(QColor("#0F172A"), 1))
-                            prefix = f"• {abbr}: "
                             p_w = painter.fontMetrics().horizontalAdvance(prefix)
+                            painter.setPen(QPen(QColor("#0F172A"), 1))
                             painter.drawText(QRectF(item_x, item_y, p_w + 4, item_h), Qt.AlignLeft | Qt.AlignVCenter, prefix)
                             
-                            painter.setFont(make_font(8.5, False))
-                            painter.setPen(QPen(QColor("#334155"), 1))
-                            val_rect = QRectF(item_x + p_w, item_y, col_w - p_w - 6, item_h)
-                            painter.drawText(val_rect, Qt.AlignLeft | Qt.AlignVCenter, full_name)
+                            if t_str:
+                                val_font_sz = 8.5
+                                painter.setFont(make_font(val_font_sz, False))
+                                painter.setPen(QPen(QColor("#334155"), 1))
+                                max_val_w = col_w - p_w - 6
+                                while painter.fontMetrics().horizontalAdvance(t_str) > max_val_w and val_font_sz > 5.5:
+                                    val_font_sz -= 0.5
+                                    painter.setFont(make_font(val_font_sz, False))
+                                val_rect = QRectF(item_x + p_w, item_y, max_val_w, item_h)
+                                painter.drawText(val_rect, Qt.AlignLeft | Qt.AlignVCenter, t_str)
                             
                     leg_bottom = leg_start_y + box_h + 8
                 else:
@@ -2375,7 +2442,8 @@ class TimetablePrintPreview(QDialog):
                 painter.setFont(make_font(16, False))
                 painter.drawText(QRectF(px, table_y + 5, period_w, header_h / 2), Qt.AlignCenter | Qt.AlignBottom, str(p + 1))
                 
-                painter.setFont(make_font(8.5, False))
+                painter.setFont(make_font(10.5, True))
+                painter.setPen(QPen(QColor("#0F172A"), 1))
                 t_str = times[p]
                 painter.drawText(QRectF(px, table_y + header_h / 2, period_w, header_h / 2), Qt.AlignCenter | Qt.AlignTop, t_str)
                 

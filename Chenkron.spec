@@ -22,10 +22,10 @@ hidden_modules = [
     'dialogs.save_location_dialog', 'dialogs.school_info', 'dialogs.startup_wizard',
     'dialogs.statistics_dialog', 'dialogs.subjects_dialog', 'dialogs.teachers_dialog',
     'dialogs.test_timetable_dialog', 'dialogs.timeoff_dialog', 'dialogs.verify_timetable_dialog',
-    'dialogs.wizard_dialog',
+    'dialogs.wizard_dialog', 'dialogs.new_schedule_dialog',
     'advisor', 'api_client', 'auto_scheduler', 'cloud_sync', 'constraint_sync', 'database',
     'exporters', 'home_dashboard', 'lesson_hours', 'login_dialog', 'main_window',
-    'bk_branding', 'bk_update', 'update_notifications', 'ribbon_widget', 'save_dialog',
+    'bk_branding', 'bk_ui', 'bk_update', 'update_notifications', 'ribbon_widget', 'save_dialog',
     'splash_screen', 'state_manager', 'timetable_grid', 'version', 'version_store',
     'core.timetable_data', 'openpyxl', 'openpyxl.styles', 'openpyxl.cell', 'openpyxl.utils',
 ]

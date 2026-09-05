@@ -184,6 +184,7 @@ class BaseEditForm(QDialog):
     def __init__(self, title, parent=None, existing_data=None):
         super().__init__(parent)
         self.setWindowTitle(title)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMinMaxButtonsHint | Qt.WindowCloseButtonHint)
         self.resize(560, 680)
         self.setMinimumSize(520, 560)
         self.existing_data = existing_data or {}
@@ -3454,11 +3455,23 @@ class SinifEditDialog(BaseEditForm):
     def __init__(self, parent=None, existing_data=None):
         super().__init__("Sınıf", parent, existing_data)
         self._color = self.existing_data.get("renk", "#A30F37")
-        self.resize(540, 580)
-        self.setMinimumSize(500, 520)
+        self.resize(580, 720)
+        self.setMinimumSize(520, 580)
         self._build_ui()
         
     def _build_ui(self):
+        # Create scroll area so cards never get squashed or overlap on any screen resolution
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; } QWidget#scrollContent { background: transparent; }")
+        
+        scroll_content = QWidget()
+        scroll_content.setObjectName("scrollContent")
+        content_lay = QVBoxLayout(scroll_content)
+        content_lay.setContentsMargins(0, 0, 0, 0)
+        content_lay.setSpacing(14)
+
         # 1. Header Banner Card
         top_card = QFrame()
         top_card.setObjectName("topBanner")
@@ -3493,7 +3506,7 @@ class SinifEditDialog(BaseEditForm):
         lbl_sub.setStyleSheet("font-size: 12px; color: #86868B; font-weight: normal; border: none;")
         v_title.addWidget(lbl_sub)
         top_lay.addLayout(v_title, 1)
-        self.main_layout.addWidget(top_card)
+        content_lay.addWidget(top_card)
         
         # 2. Main Form Card
         form_card = QFrame()
@@ -3526,6 +3539,7 @@ class SinifEditDialog(BaseEditForm):
         self.w_ad = QLineEdit(self.existing_data.get("ad", ""))
         self.w_ad.setPlaceholderText("Örn: 9A")
         self.w_ad.textChanged.connect(self._auto_short_code_class)
+        self.w_ad.textChanged.connect(lambda: self._update_assignments_list())
         grid_form.addWidget(self.w_ad, 0, 1)
         
         # Kısa Kodu + Özel Alanlar
@@ -3619,7 +3633,7 @@ class SinifEditDialog(BaseEditForm):
         grid_form.addWidget(self.cb_foto, 4, 1)
         
         form_lay.addLayout(grid_form)
-        self.main_layout.addWidget(form_card)
+        content_lay.addWidget(form_card)
         
         # 3. Action Buttons (Ders & Öğretmen Ata + Çizelge Göster / Yazdır)
         h_btn_lay = QHBoxLayout()
@@ -3665,7 +3679,48 @@ class SinifEditDialog(BaseEditForm):
         
         h_btn_lay.addWidget(btn_hoca_ata, 1)
         h_btn_lay.addWidget(btn_cizelge, 1)
-        self.main_layout.addLayout(h_btn_lay)
+        content_lay.addLayout(h_btn_lay)
+
+        # 4. Atandığı Dersler ve Öğretmenler Frame (Tıpkı Öğretmenler Ekranındaki gibi)
+        frame_assignments = QFrame()
+        frame_assignments.setStyleSheet(".QFrame { background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; }")
+        lay_assign = QVBoxLayout(frame_assignments)
+        lay_assign.setContentsMargins(16, 16, 16, 16)
+        lay_assign.setSpacing(10)
+        
+        lbl_assign = QLabel("<b>Atandığı Dersler ve Öğretmenler (Gerçek Zamanlı):</b>")
+        lbl_assign.setStyleSheet("color: #0F172A; font-size: 13px; border: none; background: transparent;")
+        lay_assign.addWidget(lbl_assign)
+        
+        self.list_assignments = QListWidget()
+        self.list_assignments.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.list_assignments.setStyleSheet("""
+            QListWidget {
+                background: #F8FAFC;
+                border: 1px solid #CBD5E1;
+                border-radius: 10px;
+                font-size: 13px;
+                padding: 6px;
+                color: #0F172A;
+            }
+            QListWidget::item {
+                padding: 6px 10px;
+                border-radius: 6px;
+                margin-bottom: 2px;
+            }
+            QListWidget::item:hover {
+                background: #E2E8F0;
+            }
+        """)
+        self.list_assignments.itemDoubleClicked.connect(lambda item: self._assign_lessons_for_this_class())
+        lay_assign.addWidget(self.list_assignments)
+        content_lay.addWidget(frame_assignments)
+        
+        p = self.parent()
+        data_store = getattr(p, "data_store", {}) if p else {}
+        if not data_store and hasattr(p, "main_window"):
+            data_store = getattr(p.main_window, "data_store", {})
+        self._update_assignments_list(data_store)
         
         # Hidden or defaults for extra fields to preserve data compatibility
         self.w_sinif = QComboBox()
@@ -3676,7 +3731,57 @@ class SinifEditDialog(BaseEditForm):
         self.w_num = QLineEdit(str(self.existing_data.get("kapasite", "30")))
         self.w_max_gunluk = QLineEdit(str(self.existing_data.get("ders_bitimi", "15:30")))
 
-        self._add_bottom_buttons()
+        content_lay.addStretch(1)
+        scroll.setWidget(scroll_content)
+        self.main_layout.addWidget(scroll, 1)
+
+        self._add_bottom_buttons(add_stretch=False)
+
+    def _adjust_assignments_height(self):
+        count = self.list_assignments.count()
+        if count == 0:
+            h = 44
+        elif count <= 6:
+            h = count * 36 + 14
+        else:
+            h = 220
+        self.list_assignments.setFixedHeight(h)
+
+    def _update_assignments_list(self, data_store=None):
+        if data_store is None:
+            p = self.parent()
+            data_store = getattr(p, "data_store", {}) if p else {}
+            if not data_store and hasattr(p, "main_window"):
+                data_store = getattr(p.main_window, "data_store", {})
+        
+        self.list_assignments.clear()
+        atamalar = data_store.get("atamalar", [])
+        my_class = self.w_ad.text().strip() or self.existing_data.get("ad", "").strip()
+        my_norm = format_tr_name(my_class).lower()
+        
+        my_atamalar = []
+        for a in atamalar:
+            c = (a.get("class") or a.get("sinif") or "").strip()
+            c_norm = format_tr_name(c).lower()
+            combs = [format_tr_name(x).lower() for x in a.get("combined_classes", []) if isinstance(x, str)]
+            if c_norm == my_norm or my_norm in combs or matches_class(c, my_class):
+                my_atamalar.append(a)
+                
+        for a in my_atamalar:
+            s_name = a.get("subject") or a.get("ders", "")
+            t_name = a.get("teacher") or a.get("ogretmen", "") or "Öğretmen Atanmadı"
+            dur = lesson_hours.hours(a)
+            tip = lesson_hours.type_str(a) or str(dur)
+            comb_info = ""
+            if a.get("combined_classes") and len(a.get("combined_classes")) > 1:
+                comb_info = f" [Ortak: {', '.join(a.get('combined_classes'))}]"
+            item_text = f"•  {s_name}  →  {t_name}  ({dur} Saat: {tip}){comb_info}"
+            self.list_assignments.addItem(QListWidgetItem(item_text))
+            
+        if not my_atamalar:
+            self.list_assignments.addItem(QListWidgetItem("Henüz bu sınıfa atanmış ders veya öğretmen bulunmuyor."))
+            
+        self._adjust_assignments_height()
 
     def _show_class_timetable(self):
         c_name = self.w_ad.text().strip()
@@ -3688,12 +3793,20 @@ class SinifEditDialog(BaseEditForm):
         dlg.exec()
 
     def _assign_lessons_for_this_class(self):
-        c_name = self.w_ad.text().strip()
+        c_name = self.w_ad.text().strip() or self.existing_data.get("ad", "").strip()
         p = self.parent()
         data_store = getattr(p, "data_store", {}) if p else {}
+        if not data_store and hasattr(p, "main_window"):
+            data_store = getattr(p.main_window, "data_store", {})
         d = ClassComprehensiveAssignmentDialog(class_name=c_name, data_store=data_store, parent=p or self)
         if d.exec():
             trigger_save_db(self, data_store)
+            if hasattr(p, "save_db"): p.save_db()
+            if hasattr(p, "_refresh_tree"): p._refresh_tree()
+            if hasattr(p, "_refresh_unplaced_lessons"): p._refresh_unplaced_lessons()
+            if hasattr(p, "_restore_grid_placements"): p._restore_grid_placements()
+            if hasattr(p, "_refresh_grid"): p._refresh_grid()
+            self._update_assignments_list(data_store)
 
     def _pick_color(self):
         from dialogs.color_picker_dialog import ModernColorPickerDialog
