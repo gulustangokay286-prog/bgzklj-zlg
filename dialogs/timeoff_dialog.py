@@ -15,7 +15,6 @@ class TimeoffDialog(QDialog):
     Durumlar:
       2 = Müsait (Yeşil)
       0 = Kapalı / Kısıtlı (Kırmızı)
-      1 = Tercih Edilmez (Sarı)
     """
     def __init__(self, entity_dict, entity_type, data_store, parent=None):
         super().__init__(parent)
@@ -171,7 +170,7 @@ class TimeoffDialog(QDialog):
         
         info_title = QLabel("<b>Zaman Kısıtlama Tablosu</b> — Gün ve saat bazında müsaitlik durumunu ayarlayın.")
         info_title.setStyleSheet("color: #0369A1; font-size: 13px;")
-        info_desc = QLabel("Hücreye tıklayarak durumu değiştirin (Müsait ✓ → Kısıtlı ✕ → Tercih Edilmez ? → Müsait ✓).")
+        info_desc = QLabel("Hücreye tıklayarak durumu değiştirin (Müsait ✓ ↔ Kısıtlı ✕). Satır veya sütun başlığına tıklayarak tüm günü/saati çevirebilirsiniz.")
         info_desc.setStyleSheet("color: #0284C7; font-size: 12px;")
         info_lay.addWidget(info_title)
         info_lay.addWidget(info_desc)
@@ -250,10 +249,8 @@ class TimeoffDialog(QDialog):
         # Lejand (Legend Chips)
         self.lbl_musait = self._create_legend_item("Müsait (0)", "#059669", "#ECFDF5", "#A7F3D0")
         self.lbl_kapali = self._create_legend_item("Kapalı / Kısıtlı (0)", "#E11D48", "#FFF1F2", "#FECDD3")
-        self.lbl_tercih = self._create_legend_item("Tercih Edilmez (0)", "#D97706", "#FFFBEB", "#FDE68A")
         bar_layout.addWidget(self.lbl_musait)
         bar_layout.addWidget(self.lbl_kapali)
-        bar_layout.addWidget(self.lbl_tercih)
         bar_layout.addStretch(1)
         
         layout.addLayout(bar_layout)
@@ -316,13 +313,11 @@ class TimeoffDialog(QDialog):
     def _update_counters(self):
         c_musait = 0
         c_kapali = 0
-        c_tercih = 0
         for d in range(len(self.days)):
             for p in range(self.periods):
                 state = self.timeoff_data[d][p]
                 if state == 2: c_musait += 1
                 elif state == 0: c_kapali += 1
-                elif state == 1: c_tercih += 1
                 
         c_kisisel = sum(1 for d in range(len(self.days)) for p in range(self.periods)
                         if self._is_personal(d, p))
@@ -330,7 +325,6 @@ class TimeoffDialog(QDialog):
         self.lbl_musait.setText(f"● Müsait: {c_musait}")
         self.lbl_kapali.setText(f"● Kısıtlı: {c_kapali}"
                                 + (f" ({c_kisisel} kişisel)" if c_kisisel else ""))
-        self.lbl_tercih.setText(f"● Tercih Edilmez: {c_tercih}")
 
     def _update_item_visuals(self, item, state, d_idx, p_idx):
         item.setTextAlignment(Qt.AlignCenter)
@@ -371,10 +365,6 @@ class TimeoffDialog(QDialog):
             base_text = "✕"
             fg_color = "#E11D48"
             bg_color = "#FFF1F2"
-        elif state == 1:
-            base_text = "?"
-            fg_color = "#D97706"
-            bg_color = "#FFFBEB"
 
         # Kişisel kısıt kurum kısıtının üstünde durur ve farklı görünür: bu saat
         # yalnız burada değil, öğretmenin çalıştığı BÜTÜN kurumlarda kapalıdır.
@@ -475,14 +465,13 @@ class TimeoffDialog(QDialog):
     def _on_cell_clicked(self, row, col):
         # row = p_idx (period), col = d_idx (day)
         current_state = self.timeoff_data[col][row]
-        # Cycle: 2 -> 0 -> 1 -> 2
-        if current_state == 2:
-            new_state = 0
-        elif current_state == 0:
-            new_state = 1
-        else:
-            new_state = 2
-            
+        # İki durumlu: açık <-> kapalı. Eskiden araya "? tercih edilmez" giriyordu
+        # (2 -> 0 -> 1 -> 2), yani kapalı bir saati açmak için iki tıklama
+        # gerekiyordu ve arada sarı bir durum kalıyordu. Kullanıcı bu durumu
+        # istemiyor; tek tıklama artık durumu doğrudan tersine çeviriyor.
+        new_state = 0 if current_state == 2 else 2
+
+
         self.timeoff_data[col][row] = new_state
         item = self.table.item(row, col)
         self._update_item_visuals(item, new_state, col, row)

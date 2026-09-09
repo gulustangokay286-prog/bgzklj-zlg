@@ -70,6 +70,7 @@ class APIClient:
         self._local = threading.local()
         self._supports_index = None  # probed once, then remembered
         self._supports_delta = None  # probed once, then remembered
+        self.last_error = None
 
     # ── Session ───────────────────────────────────────────────────────────
 
@@ -842,7 +843,32 @@ class APIClient:
                         with open(target, "r", encoding="utf-8") as f:
                             local = json.load(f)
                         if version_store.compute_data_hash(local) == remote_hash:
-                            continue  # identical — the common case, costs nothing
+                            # Content equality does not mean metadata equality. A
+                            # folder move or a server revision must still land locally;
+                            # the old early continue is why a correct version appeared
+                            # in the wrong week or stayed absent from a folder.
+                            local_vm = local.setdefault("_version_meta", {})
+                            changed_meta = False
+                            if local_vm.get("filename") != filename:
+                                local_vm["filename"] = filename
+                                changed_meta = True
+                            if entry.get("folder_id") is not None and local_vm.get("folder_id") != entry.get("folder_id"):
+                                local_vm["folder_id"] = entry.get("folder_id")
+                                changed_meta = True
+                            remote_revision = entry.get("sync_revision")
+                            if remote_revision and (local.get("_sync_meta") or {}).get("revision") != remote_revision:
+                                local["_sync_meta"] = {
+                                    "revision": remote_revision,
+                                    "slug": slug,
+                                    "key": key,
+                                    "server_modified": entry.get("last_modified"),
+                                }
+                                changed_meta = True
+                            if changed_meta:
+                                version_store._atomic_write_json(target, local)
+                                version_store.invalidate_version_summary(slug, filename)
+                                changed += 1
+                            continue
                     except Exception:
                         pass
 
@@ -1184,15 +1210,17 @@ class APIClient:
                 # out-rank a genuinely newer edit from another computer and block it
                 # forever. Mixing the two fields compared a modification time against
                 # a creation time, which is not a comparison at all.
-                local_ts = str(local_meta.get("last_modified") or "")
-                remote_ts = str(remote_meta.get("last_modified") or "")
-                if local_ts and remote_ts and local_ts > remote_ts:
-                    return False
-
                 # If content hash and folder_id are identical, nothing to rewrite
                 if (version_store.compute_data_hash(existing) == version_store.compute_data_hash(payload)
                         and local_meta.get("folder_id") == remote_meta.get("folder_id")):
                     return False
+                # Wall-clock timestamps are not a conflict protocol. Preserve an
+                # unsent local edit before the server snapshot replaces it.
+                conflict = f"{path}.conflict-{int(__import__('time').time() * 1000)}"
+                try:
+                    version_store._atomic_write_json(conflict, existing)
+                except Exception:
+                    pass
         except Exception:
             pass
         return version_store._atomic_write_json(path, payload)
@@ -1277,7 +1305,9 @@ class APIClient:
     # ── Push ──────────────────────────────────────────────────────────────
 
     def push_version_to_rtdb(self, slug, filename, roz_data, auth_data=None):
+        self.last_error = None
         if not isinstance(roz_data, dict) or not roz_data:
+            self.last_error = "invalid"
             return False
 
         # Never upload something this device has deleted. This is the half of the
@@ -1287,11 +1317,27 @@ class APIClient:
         import version_store
         if version_store.is_tombstoned(slug, filename):
             version_store.queue_cloud_delete(slug, filename)
+            self.last_error = "deleted"
             return False
 
         url = f"{self.base_url}/api/sync/{slug}/{filename_to_key(filename)}"
         resp = self._request_with_retry("PUT", url, json=roz_data, timeout=25)
+        if resp is not None and resp.status_code == 409:
+            # Keep the exact candidate that lost the compare-and-swap. The next pull
+            # may replace the active file, but it must never erase the user's edit.
+            try:
+                import version_store
+                conflict = os.path.join(
+                    version_store._versions_dir(slug),
+                    f"{filename}.conflict-{int(__import__('time').time() * 1000)}",
+                )
+                version_store._atomic_write_json(conflict, roz_data)
+            except Exception:
+                pass
+            self.last_error = "conflict"
+            return False
         if resp is None or resp.status_code not in (200, 201):
+            self.last_error = "network"
             return False
 
         # The server reports when it folded this push into an existing identical
@@ -1306,6 +1352,20 @@ class APIClient:
             self._drop_local_version(slug, filename)
         elif info.get("deduplicated") and info.get("filename") and info["filename"] != filename:
             self._drop_local_version(slug, filename)
+        elif isinstance(info.get("sync_meta"), dict):
+            # Bind the new server revision to the same content that was submitted.
+            # Do this only when the disk hash still matches; a newer local save may
+            # already have followed on another worker.
+            try:
+                import version_store
+                path = os.path.join(version_store._versions_dir(slug), filename)
+                with open(path, "r", encoding="utf-8") as f:
+                    current = json.load(f)
+                if version_store.compute_data_hash(current) == version_store.compute_data_hash(roz_data):
+                    current["_sync_meta"] = info["sync_meta"]
+                    version_store._atomic_write_json(path, current)
+            except Exception:
+                pass
         return True
 
     @staticmethod
@@ -1325,7 +1385,21 @@ class APIClient:
         resp = self._request_with_retry(
             "POST", f"{self.base_url}/api/institutions", json=payload, timeout=15
         )
-        return resp is not None and resp.status_code in (200, 201)
+        if resp is None or resp.status_code not in (200, 201):
+            return False
+        try:
+            info = resp.json()
+            sync_meta = info.get("sync_meta")
+            if isinstance(sync_meta, dict) and sync_meta.get("revision"):
+                import version_store
+                path = os.path.join(version_store._ensure_base(), slug, "meta.json")
+                local = dict(meta)
+                local["_sync_meta"] = sync_meta
+                version_store._atomic_write_json(path, local)
+                version_store._invalidate_meta_cache(slug)
+        except Exception:
+            pass
+        return True
 
     def delete_institution_from_rtdb(self, slug: str, auth_data=None) -> bool:
         resp = self._request_with_retry(

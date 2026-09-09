@@ -202,6 +202,285 @@ def resolve_subject_color(subject_name: str, data_store: dict = None) -> str:
     return CURATED_PALETTE[hash_val % len(CURATED_PALETTE)]
 
 
+# ── SINIF RENKLERİ ────────────────────────────────────────────────────
+#
+# Öğretmen çarşafında hücrede yazan ad SINIFtir, ders değil. Renk dersten
+# geldiği sürece aynı sınıf her öğretmende başka renkte, iki ayrı sınıf da
+# (aynı dersi aldıklarında) aynı renkte çıkıyordu.
+#
+# Renk seçimi bilerek "hash %% palet" DEĞİL: 28 renklik bir palette 10 sınıf
+# bile doğum günü paradoksu yüzünden neredeyse kesin çakışır. Bunun yerine
+# sınıflar bir kez kanonik sıraya diziliyor ve palet, uzunluğuyla aralarında
+# asal olan bir adımla dolaşılıyor. Adım asal olduğu için gezinti paletin bir
+# permütasyonudur: sınıf sayısı paleti aşmadıkça ÇAKIŞMA MATEMATİKSEL OLARAK
+# İMKÂNSIZ, üstelik ardışık sınıflar paletin yan yana (birbirine benzeyen)
+# tonlarını almıyor. Palet biterse altın açıyla HSL üretilir.
+
+_CLASS_PALETTE_STRIDE = 11          # gcd(11, 28) == 1 → tam permütasyon
+_GOLDEN_RATIO_CONJUGATE = 0.6180339887498949
+
+# Sınıf kaydındaki renk "kullanıcı seçimi" sayılmayan değerler.
+_CLASS_NEUTRAL_COLORS = {"", "#FFFFFF", "#000000", "#C0C0C0", "#B4B4B8",
+                         "#D0D0D0", "#D8D8D8", "#94A3B8"}
+
+_CLASS_COLOR_MAP = {}
+_CLASS_COLOR_SIG = None
+
+
+def clear_class_color_cache():
+    """Sınıf renk dizini geçersiz: sınıf eklendi/silindi/yeniden adlandırıldı."""
+    global _CLASS_COLOR_MAP, _CLASS_COLOR_SIG
+    _CLASS_COLOR_MAP = {}
+    _CLASS_COLOR_SIG = None
+
+
+def normalize_class_key(class_name: str) -> str:
+    """'11-C', '11 C', '11c' aynı anahtar; '11C (ea)' ile '11C(EA)' de aynı."""
+    from auto_scheduler import normalize_clean
+    return normalize_clean(str(class_name or "").replace("\U0001f512", "").strip())
+
+
+def _class_base_key(class_name: str) -> str:
+    """Parantezli ek atılmış hâli: '11C (ea)' → '11c'. Takma ad olarak kullanılır."""
+    return normalize_class_key(str(class_name or "").split("(")[0])
+
+
+def _class_sort_key(class_name: str):
+    """Kanonik sınıf sırası: 9A < 9B < 10A < 11C. Izgaranın satır sırasıyla aynı."""
+    import re
+    s = str(class_name or "").strip()
+    m = re.match(r"\s*(\d+)(.*)$", s)
+    if m:
+        return (0, int(m.group(1)), normalize_class_key(m.group(2)), normalize_class_key(s))
+    return (1, 0, normalize_class_key(s), normalize_class_key(s))
+
+
+def _generated_class_color(step: int) -> str:
+    """Palet bittiğinde: altın açıyla dönen, algısal olarak ayrık HSL renkler."""
+    h = (0.137 + (step + 1) * _GOLDEN_RATIO_CONJUGATE) % 1.0
+    s = 0.62 if step % 2 == 0 else 0.48
+    lightness = 0.40 if step % 3 != 2 else 0.56
+    return QColor.fromHslF(h, s, lightness).name().upper()
+
+
+def _collect_class_names(data_store: dict):
+    """(kayıtlı sınıflar, yalnız atama/yerleşimde geçen sınıflar) — ikisi de sıralı."""
+    registered = []
+    reg_keys = set()
+    reg_aliases = set()
+    for c in (data_store.get("siniflar") or []):
+        if not isinstance(c, dict):
+            continue
+        nm = str(c.get("ad") or c.get("name") or "").strip()
+        k = normalize_class_key(nm)
+        if k and k not in reg_keys:
+            reg_keys.add(k)
+            reg_aliases.add(_class_base_key(nm))
+            registered.append(nm)
+
+    extras = []
+    extra_keys = set()
+
+    def _see(raw):
+        for part in str(raw or "").replace("&", "+").replace(",", "+").split("+"):
+            nm = part.strip()
+            k = normalize_class_key(nm)
+            if not k or k in reg_keys or k in reg_aliases or k in extra_keys:
+                continue
+            extra_keys.add(k)
+            extras.append(nm)
+
+    for a in (data_store.get("atamalar") or []):
+        if isinstance(a, dict):
+            _see(a.get("class") or a.get("sinif"))
+            for cc in (a.get("combined_classes") or []):
+                _see(cc)
+    for p in (data_store.get("grid_placements") or []):
+        if isinstance(p, dict):
+            _see(p.get("class_name") or p.get("class"))
+    yer = data_store.get("yerlesim")
+    if isinstance(yer, dict):
+        for v in yer.values():
+            if isinstance(v, dict):
+                _see(v.get("class_name") or v.get("class"))
+
+    registered.sort(key=_class_sort_key)
+    extras.sort(key=_class_sort_key)
+    return registered, extras
+
+
+def _classes_signature(data_store: dict):
+    """Dizin bu imza değişmedikçe yeniden kurulmaz."""
+    rows = tuple(
+        (str(c.get("ad") or c.get("name") or ""),
+         str(c.get("color") or c.get("renk") or ""))
+        for c in (data_store.get("siniflar") or []) if isinstance(c, dict))
+    overrides = data_store.get("sinif_renkleri")
+    ov = tuple(sorted(overrides.items())) if isinstance(overrides, dict) else ()
+    return (rows, ov,
+            len(data_store.get("atamalar") or []),
+            len(data_store.get("grid_placements") or []),
+            len(data_store.get("yerlesim") or {}))
+
+
+def _class_color_map(data_store: dict) -> dict:
+    """{normalize_class_key(sınıf): '#RRGGBB'} — çakışmasız, sıradan bağımsız."""
+    global _CLASS_COLOR_MAP, _CLASS_COLOR_SIG
+    if not isinstance(data_store, dict):
+        return {}
+    sig = _classes_signature(data_store)
+    if _CLASS_COLOR_MAP and sig == _CLASS_COLOR_SIG:
+        return _CLASS_COLOR_MAP
+
+    registered, extras = _collect_class_names(data_store)
+    ordered = registered + extras
+
+    # 1) Kullanıcının BİLEREK verdiği renkler.
+    explicit = {}
+    overrides = data_store.get("sinif_renkleri")
+    if isinstance(overrides, dict):
+        for k, v in overrides.items():
+            hx = str(v or "").strip().upper()
+            nk = normalize_class_key(k)
+            if nk and hx and QColor(hx).isValid():
+                explicit[nk] = hx
+
+    # siniflar kaydındaki renk ancak TEK bir sınıfta geçiyorsa tercihtır:
+    # SinifEditDialog her yeni sınıfa aynı "#A30F37" varsayılanını yazıyor,
+    # onu tercih sayarsak bütün sınıflar aynı renk olur.
+    candidates = {}
+    freq = {}
+    for c in (data_store.get("siniflar") or []):
+        if not isinstance(c, dict):
+            continue
+        nk = normalize_class_key(c.get("ad") or c.get("name") or "")
+        hx = str(c.get("color") or c.get("renk") or "").strip().upper()
+        if not nk or not hx or hx in _CLASS_NEUTRAL_COLORS or not QColor(hx).isValid():
+            continue
+        candidates[nk] = hx
+        freq[hx] = freq.get(hx, 0) + 1
+    for nk, hx in candidates.items():
+        if nk not in explicit and freq.get(hx, 0) == 1:
+            explicit[nk] = hx
+
+    colors = {}
+    taken = set(explicit.values())
+    n = len(CURATED_PALETTE)
+    cursor = 0
+    step = 0
+
+    for nm in ordered:
+        k = normalize_class_key(nm)
+        if k in explicit:
+            colors[k] = explicit[k]
+            continue
+        hx = None
+        while cursor < n:
+            cand = CURATED_PALETTE[(cursor * _CLASS_PALETTE_STRIDE) % n].upper()
+            cursor += 1
+            if cand not in taken:
+                hx = cand
+                break
+        while hx is None:
+            cand = _generated_class_color(step)
+            step += 1
+            if cand not in taken:
+                hx = cand
+        taken.add(hx)
+        colors[k] = hx
+
+    # 2) Takma adlar: '11C (ea)' rengi düz '11C' ile de bulunabilsin — öğretmen
+    #    çarşafında hücre metni parantezsiz yazılıyor (bkz. set_cell).
+    for nm in ordered:
+        k = normalize_class_key(nm)
+        alias = _class_base_key(nm)
+        if alias and alias != k and alias not in colors:
+            colors[alias] = colors[k]
+
+    _CLASS_COLOR_MAP = colors
+    _CLASS_COLOR_SIG = sig
+    return colors
+
+
+def resolve_class_color(class_name: str, data_store: dict = None) -> str:
+    """Bir sınıfın kalıcı rengi. Aynı sınıf her yerde aynı, farklı sınıflar farklı."""
+    if not class_name:
+        return "#64748B"
+
+    raw = str(class_name).replace("\U0001f512", "").strip()
+
+    # Birleşik ders ('9A + 9B'): kanonik sırada ÖNDE olan sınıf kazanır, böylece
+    # '9B + 9A' de aynı rengi verir — yazım sırası rengi değiştirmez.
+    if "+" in raw or "," in raw or "&" in raw:
+        parts = [p.strip() for p in raw.replace("&", "+").replace(",", "+").split("+") if p.strip()]
+        if parts:
+            parts.sort(key=_class_sort_key)
+            raw = parts[0]
+
+    key = normalize_class_key(raw)
+    if not key:
+        return "#64748B"
+
+    colors = _class_color_map(data_store) if isinstance(data_store, dict) else {}
+    hx = colors.get(key) or colors.get(_class_base_key(raw))
+    if hx:
+        return hx
+
+    # data_store yok (ya da sınıf hiçbir yerde geçmiyor): en azından kararlı ol.
+    h = 0
+    for ch in key:
+        h = (h * 131 + ord(ch)) & 0xFFFFFFFF
+    return _generated_class_color(h % 4096)
+
+
+def update_class_color_globally(widget_or_parent, data_store: dict, class_name: str, new_hex: str):
+    """Sınıf rengini kalıcı yapar ve bütün çarşafları tazeler."""
+    if not class_name or not new_hex:
+        return
+    new_hex = str(new_hex).upper().strip()
+
+    win = None
+    cur = widget_or_parent
+    while cur is not None:
+        if getattr(cur, "data_store", None):
+            win = cur
+            break
+        cur = cur.parent() if (hasattr(cur, "parent") and callable(cur.parent)) else None
+    if win is not None:
+        data_store = win.data_store
+    if not isinstance(data_store, dict):
+        return
+
+    key = normalize_class_key(class_name)
+    overrides = data_store.setdefault("sinif_renkleri", {})
+    overrides[key] = new_hex
+    for c in (data_store.get("siniflar") or []):
+        if isinstance(c, dict) and normalize_class_key(c.get("ad") or c.get("name") or "") == key:
+            c["renk"] = new_hex
+            c["color"] = new_hex
+
+    clear_class_color_cache()
+    try:
+        from timetable_grid import clear_cell_color_cache
+        clear_cell_color_cache()
+    except Exception:
+        pass
+
+    if win is not None:
+        if hasattr(win, "save_db"):
+            win.save_db(sync_from_grid=False)
+        if hasattr(win, "_refresh_grid"):
+            win._refresh_grid()
+        if hasattr(win, "_refresh_unplaced_lessons"):
+            win._refresh_unplaced_lessons()
+    else:
+        try:
+            from database import trigger_save_db
+            trigger_save_db(widget_or_parent, data_store)
+        except Exception:
+            pass
+
+
 def update_subject_color_globally(widget_or_parent, data_store: dict, subject_name: str, new_hex: str):
     """
     Globally updates and immediately persists subject color across data_store and UI.

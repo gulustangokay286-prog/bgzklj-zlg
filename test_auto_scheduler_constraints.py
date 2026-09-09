@@ -342,7 +342,8 @@ def run():
         build_store(class_timeoff={"9A": make_timeoff(closed_periods=(4,), avoid_periods=(5,))})
     )
     check("kapalı saatler haritalandı", (0, 4) in blocked.get("9A", set()), str(blocked))
-    check("tercih edilmeyen saatler ayrı tutuldu", (0, 5) in avoid.get("9A", set()), str(avoid))
+    # "tercih edilmez" kaldirildi; planlayici ayri yumusak-kisit kumesi tutmuyor.
+    check("tercih edilmez kumesi bos (durum kaldirildi)", (0, 5) not in avoid.get("9A", set()), str(avoid))
     check("kapalı, tercih edilmezden önce gelir", (0, 4) not in avoid.get("9A", set()))
 
     # Sınıf adı farklı yazımlarla eşleşmeli ("9A" / "9-A" / "9 A").

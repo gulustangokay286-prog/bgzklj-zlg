@@ -893,21 +893,10 @@ class RibbonScrollArea(QScrollArea):
 # ── Ribbon Button ─────────────────────────────────────────────────────────────
 class RibbonButton(QToolButton):
     """Vertical icon+label button matching aSc ribbon style"""
-    def __init__(self, label: str, icon_key: str, callback=None, parent=None):
-        super().__init__(parent)
-        self.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-        self.setIcon(make_icon(icon_key, 32))
-        self.setIconSize(QSize(32, 32))
-        self.setText(label)
-        self.setMinimumWidth(56)
-        self.setMaximumWidth(76)
-        self.setFixedHeight(62)
-        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        self.setCheckable(False)
-        self.setCursor(Qt.PointingHandCursor)
-        font = QFont(FONT_FAMILY, 7)
-        self.setFont(font)
-        self.setStyleSheet("""
+
+    # Varsayılan (nötr) görünüm. Eskiden __init__ içinde satır içi yazılıydı;
+    # set_actionable iki görünüm arasında gidip gelebilsin diye sınıf sabiti.
+    BASE_QSS = """
             QToolButton {
                 background: transparent;
                 border: 1px solid transparent;
@@ -930,9 +919,102 @@ class RibbonButton(QToolButton):
                 border: 1px solid transparent;
                 color: #A0AEC0;
             }
-        """)
+    """
+
+    def __init__(self, label: str, icon_key: str, callback=None, parent=None):
+        super().__init__(parent)
+        self.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        self.setIcon(make_icon(icon_key, 32))
+        self.setIconSize(QSize(32, 32))
+        self.setText(label)
+        self.setMinimumWidth(56)
+        self.setMaximumWidth(76)
+        self.setFixedHeight(62)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.setCheckable(False)
+        self.setCursor(Qt.PointingHandCursor)
+        font = QFont(FONT_FAMILY, 7)
+        self.setFont(font)
+        self.setStyleSheet(self.BASE_QSS)
+        self._actionable = None
         if callback:
             self.clicked.connect(callback)
+
+    # ── İki durumlu görünüm (Geri Al / Yinele gibi duruma bağlı komutlar) ──
+    #
+    # A ribbon command that can be UNAVAILABLE has to LOOK unavailable — the
+    # way the Geri Al / Yinele pair inside the master-data sheet already does
+    # (master_data_dialog._update_undo_redo_ui). setEnabled(False) alone only
+    # greys the text via QToolButton:disabled above; when the command IS
+    # available it must also read as available, so it gets the accent look.
+    ACTIONABLE_QSS = """
+            QToolButton {
+                background: #E8F1FB;
+                border: 1px solid #B8CCE4;
+                border-radius: 6px;
+                padding: 0px 2px;
+                color: #0B4A8F;
+                font-size: 7pt;
+                font-weight: 700;
+                text-align: center;
+            }
+            QToolButton:hover {
+                background: #DAE8FC;
+                border: 1px solid #7FA9D6;
+            }
+            QToolButton:pressed {
+                background: #B8D4F0;
+            }
+            QToolButton:disabled {
+                background: transparent;
+                border: 1px solid transparent;
+                color: #A0AEC0;
+            }
+    """
+
+    def set_actionable(self, actionable: bool):
+        """Enable + accent the button, or disable + flatten it.
+
+        Cheap to call on every push/undo/redo: the stylesheet is only re-applied
+        when the state actually flips, because setStyleSheet() forces a full
+        style re-polish of the widget.
+        """
+        actionable = bool(actionable)
+        self.setEnabled(actionable)
+        if self._actionable is actionable:
+            return
+        self._actionable = actionable
+        self.setStyleSheet(self.ACTIONABLE_QSS if actionable else self.BASE_QSS)
+
+
+# NOTE: BASE_QSS must be added as a class attribute on RibbonButton, directly
+# under the `class RibbonButton(QToolButton):` docstring (i.e. before __init__),
+# holding the ORIGINAL stylesheet text verbatim:
+#
+#     BASE_QSS = """
+#             QToolButton {
+#                 background: transparent;
+#                 border: 1px solid transparent;
+#                 border-radius: 6px;
+#                 padding: 0px 2px;
+#                 color: #0F172A;
+#                 font-size: 7pt;
+#                 font-weight: 500;
+#                 text-align: center;
+#             }
+#             QToolButton:hover {
+#                 background: #DAE8FC;
+#                 border: 1px solid #B8CCE4;
+#             }
+#             QToolButton:pressed {
+#                 background: #B8D4F0;
+#             }
+#             QToolButton:disabled {
+#                 background: transparent;
+#                 border: 1px solid transparent;
+#                 color: #A0AEC0;
+#             }
+#     """
 
 
 class RibbonWideButton(QToolButton):

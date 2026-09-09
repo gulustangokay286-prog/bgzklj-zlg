@@ -71,6 +71,14 @@ def get_subject_color(subject_name: str, data_store: dict = None) -> str:
     from dialogs.color_picker_dialog import resolve_subject_color
     return resolve_subject_color(subject_name, data_store)
 
+def get_class_color(class_name: str, data_store: dict = None) -> str:
+    """Returns the persistent color for a class. Same class -> same color everywhere,
+    different classes -> always different colors (see resolve_class_color)."""
+    if not class_name:
+        return "#64748B"
+    from dialogs.color_picker_dialog import resolve_class_color
+    return resolve_class_color(class_name, data_store)
+
 def get_teacher_color(teacher_name: str, data_store: dict = None) -> str:
     """Returns a deterministic color for a teacher."""
     if not teacher_name:
@@ -187,8 +195,21 @@ def _matches_subject(s1, s2):
     n1 = _nc(s1).replace(" ", "")
     n2 = _nc(s2).replace(" ", "")
     if n1 == n2: return True
-    if (len(f1) >= 3 and len(f2) >= 3) and (f1.startswith(f2) or f2.startswith(f1) or n1.startswith(n2) or n2.startswith(n1)):
-        return True
+
+    # Sayı son eklerini ayıkla (Matematik vs Matematik2, Biyoloji1 vs Biyoloji2 gibi derslerin birbirini ezmesini önler)
+    import re
+    m1 = re.search(r"\d+$", f1)
+    m2 = re.search(r"\d+$", f2)
+    d1 = m1.group(0) if m1 else ""
+    d2 = m2.group(0) if m2 else ""
+    if d1 != d2:
+        return False
+
+    base1 = f1[:-len(d1)] if d1 else f1
+    base2 = f2[:-len(d2)] if d2 else f2
+    if len(base1) >= 3 and len(base2) >= 3:
+        if base1 == base2 or base1.startswith(base2) or base2.startswith(base1):
+            return True
     return False
 
 
@@ -309,12 +330,26 @@ class MainWindow(QMainWindow):
         self._active_entity_name = ""
         self.current_roz_path = self.db_path
         self.data_store = {"dersler": [], "siniflar": [], "derslikler": [], "ogretmenler": [], "atamalar": [], "settings": {}}
+        self._history_stack = []
+        self._redo_stack = []
+        # Short Turkish description of the action each snapshot belongs to.
+        # Kept OUTSIDE the two stacks on purpose — see _push_undo_state().
+        self._undo_labels = []
         
         # Cloud sync handled by background worker — do NOT block init
         # if self.auth_data and self.auth_data.get("uid"):
         #     self._download_cloud_data()
             
         self._build_ui()
+        
+        # Global Rollback / Undo / Redo Shortcuts
+        from PySide6.QtGui import QKeySequence, QShortcut
+        QShortcut(QKeySequence.Undo, self, self._act_undo)
+        QShortcut(QKeySequence("Ctrl+Z"), self, self._act_undo)
+        QShortcut(QKeySequence.Redo, self, self._act_redo)
+        QShortcut(QKeySequence("Ctrl+Y"), self, self._act_redo)
+        QShortcut(QKeySequence("Ctrl+Shift+Z"), self, self._act_redo)
+
         if not defer_load:
             self.load_db()
             self._refresh_tree()
@@ -723,8 +758,8 @@ class MainWindow(QMainWindow):
         self.btn_ribbon_new_main = p1.add_button("Yeni", "yeni", self._act_new)
         p1.add_button("Aç",             "ac",       self._act_open)
         p1.add_button("Kaydet",         "kaydet",   self._act_save)
-        p1.add_button("Geri Al\nCtrl+Z","geri_al",  self._act_undo)
-        p1.add_button("Yinele\nCtrl+Y", "yinele",   self._act_redo)
+        self.btn_undo_main = p1.add_button("Geri Al\nCtrl+Z","geri_al",  self._act_undo)
+        self.btn_redo_main = p1.add_button("Yinele\nCtrl+Y", "yinele",   self._act_redo)
         p1.add_button("Yazdır",         "yazdir",   self._act_print)
         p1.add_button("Ön İzleme",      "on_izleme",self._act_preview)
         p1.add_divider()
@@ -787,8 +822,8 @@ class MainWindow(QMainWindow):
         # ── 4. Görünüm ───────────────────────────────────────────────────────
         p4 = r.add_tab("Görünüm")
         p4.add_back(self._go_main_tab)
-        p4.add_button("Geri Al\nCtrl+Z","geri_al",self._act_undo)
-        p4.add_button("Tekrarla\nCtrl+Y","yinele",self._act_redo)
+        self.btn_undo_view = p4.add_button("Geri Al\nCtrl+Z","geri_al",self._act_undo)
+        self.btn_redo_view = p4.add_button("Tekrarla\nCtrl+Y","yinele",self._act_redo)
         p4.add_divider()
         p4.add_button("Görünüm",    "iliskiler",   self._act_view_mode)
         p4.add_button("Yakınlaştır","on_izleme",self._act_zoom)
@@ -1078,6 +1113,22 @@ class MainWindow(QMainWindow):
 
     def load_db(self, path=None):
         self._is_loading = True
+        # Bir geçmiş yığını TEK bir dosyaya aittir. Başka bir kurum açıldığında
+        # önceki dosyanın anlık görüntüleri duruyordu; ilk Ctrl+Z başka bir
+        # okulun çizelgesini bunun üzerine yapıştırıp diske yazıyordu.
+        #
+        # YERİNDE temizlik: bu listeler MasterDataDialog ile referansla
+        # paylaşılıyor (master_data_dialog.py:685 —
+        # self._history_stack = parent._history_stack). Yeni liste ataması
+        # açık bir sheet'i öksüz bir yığına yazar hâle getirirdi.
+        if isinstance(getattr(self, "_history_stack", None), list):
+            self._history_stack.clear()
+        if isinstance(getattr(self, "_redo_stack", None), list):
+            self._redo_stack.clear()
+        if isinstance(getattr(self, "_undo_labels", None), list):
+            self._undo_labels.clear()
+        if hasattr(self, "_update_undo_redo_ui"):
+            self._update_undo_redo_ui()
         import json
         load_path = path or getattr(self, "current_roz_path", None) or self.db_path
         if not load_path or not os.path.exists(load_path):
@@ -1377,6 +1428,18 @@ class MainWindow(QMainWindow):
             subject_color_cache[name] = c
             return c
 
+        # Öğretmen çarşafının hücre rengi SINIFtan gelir (hücrede yazan ad o).
+        class_color_cache = {}
+
+        def fast_c_color(name):
+            if not name:
+                return "#64748B"
+            c = class_color_cache.get(name)
+            if c is None:
+                c = get_class_color(name, self.data_store)
+                class_color_cache[name] = c
+            return c
+
         try:
             if mode == "teachers":
                 teachers = self.data_store.get("ogretmenler", [])
@@ -1414,7 +1477,7 @@ class MainWindow(QMainWindow):
                             teacher_match_cache[t_name] = matching_row
                                 
                     if 0 <= matching_row < len(teacher_names) and 0 <= col < len(days_list):
-                        color = fast_t_color(t_name)
+                        color = fast_c_color(c_name)
                         for ext in range(dur):
                             p_idx = period + ext
                             if p_idx < periods:
@@ -1773,12 +1836,19 @@ class MainWindow(QMainWindow):
         self._update_ribbon_new_btn_state()
         self._refresh_unplaced_lessons(target_entity=target_entity)
 
-    def _refresh_unplaced_lessons(self, target_entity=None):
+    def _refresh_unplaced_lessons(self, target_entity=None, _compute_only=False, _placements=None):
+        # _compute_only: doku hiç ellemeden yalnız kart listesini döndür. Satır
+        # başlığındaki rozet bunu kullanıyor — rozetin sayısı, dokun aynı varlık
+        # için ürettiği kartların saat toplamının ta kendisi olsun diye.
+        # _placements: bütün varlıklar için aynı olan yerleşim listesi dışarıdan
+        # verilsin diye; varlık başına yeniden kurulmasın.
         if not hasattr(self, "_grid") or not hasattr(self._grid, "unplaced_dock"):
-            return
+            return [] if _compute_only else None
             
         atamalar = self.data_store.get("atamalar", [])
-        grid_placements = self.data_store.get("grid_placements", [])
+        # Ekranda gerçekten duran yerleşimler. Rozet ile dok bu tek listeyi
+        # paylaşıyor; iki ayrı kopyası olduğu sürece iki sayı sapabiliyordu.
+        grid_placements = _placements if _placements is not None else self._active_grid_placements()
         
         from auto_scheduler import matches_class, format_tr_name, normalize_clean, parse_distribution_parts
         from version_store import _matches_teacher
@@ -1786,9 +1856,26 @@ class MainWindow(QMainWindow):
         
         display_mode = getattr(self._grid, "current_view_mode", "classes")
         
+        # Kullanıcının en son açıkça seçtiği varlık hatırlanıyor. _refresh_grid
+        # ve _refresh_tree doku hedefsiz yeniliyor; ızgara yeniden kurulurken
+        # setRowCount seçili satırı -1'e düşürdüğü ve _current_selected_pos
+        # yalnız hücreye tıklandığında yazıldığı için, satır BAŞLIĞINA tıklamış
+        # kullanıcıda dok sessizce listenin ilk öğretmenine kayıyordu: rozet
+        # tıklanan satırda kırmızı kalırken dok bomboş görünüyordu.
+        if target_entity and not _compute_only:
+            self._last_unplaced_entity = target_entity
+
         # If target_entity is None, infer from active selection in grid table or left tree
         if target_entity is None:
-            if hasattr(self._grid, "table"):
+            last_ent = getattr(self, "_last_unplaced_entity", None)
+            if last_ent:
+                if display_mode == "classes":
+                    known_ents = list(getattr(self._grid, "class_list", []) or [])
+                else:
+                    known_ents = list(getattr(self._grid, "teacher_list", []) or [])
+                if last_ent in known_ents:
+                    target_entity = last_ent
+            if target_entity is None and hasattr(self._grid, "table"):
                 cur_r = self._grid.table.currentRow()
                 if cur_r < 0 and hasattr(self._grid, "_current_selected_pos") and self._grid._current_selected_pos:
                     cur_r = self._grid._current_selected_pos[0]
@@ -1817,10 +1904,14 @@ class MainWindow(QMainWindow):
                        ("+" in str(a.get("class", "")) and any(matches_class(p, target_entity) for p in str(a.get("class", "")).replace("&", "+").replace(",", "+").split("+") if p.strip()))
                 ]
             else: # teachers
+                tgt_clean = normalize_clean(target_entity)
+                tgt_fmt = format_tr_name(target_entity)
                 scoped_atamalar = [
                     a for a in atamalar
                     if _matches_teacher(a.get("teacher", ""), target_entity) or 
-                       format_tr_name(a.get("teacher", "")) == format_tr_name(target_entity)
+                       format_tr_name(a.get("teacher", "")) == tgt_fmt or
+                       normalize_clean(a.get("teacher", "")) == tgt_clean or
+                       (str(a.get("teacher", "")).strip() and (tgt_fmt in format_tr_name(a.get("teacher", "")) or format_tr_name(a.get("teacher", "")) in tgt_fmt))
                 ]
         else:
             scoped_atamalar = atamalar
@@ -1850,7 +1941,11 @@ class MainWindow(QMainWindow):
             group_key = (format_tr_name(s_name), format_tr_name(c_name), format_tr_name(t_name))
             
             if group_key not in grouped:
-                color = resolve_subject_color(s_name, self.data_store)
+                if display_mode == "teachers" and c_name:
+                    from dialogs.color_picker_dialog import resolve_class_color
+                    color = resolve_class_color(c_name, self.data_store)
+                else:
+                    color = resolve_subject_color(s_name, self.data_store)
                 target_classes = set()
                 if is_comb:
                     if atama.get("combined_classes"):
@@ -1891,46 +1986,6 @@ class MainWindow(QMainWindow):
             lc_key = (format_tr_name(lc.get("subject_name", "")), format_tr_name(lc.get("class_name", "")), format_tr_name(lc.get("teacher", "")))
             loose_hours_by_group[lc_key] = loose_hours_by_group.get(lc_key, 0) + int(lc.get("duration", 1))
 
-        # ═══ STEP 1.5: Calculate Free Open Slots per Class on the Grid ═══
-        settings = self.data_store.get("settings", {})
-        periods = int(settings.get("periods", self.data_store.get("ders_saati", 8)))
-        if periods <= 0: periods = 8
-        days_list = settings.get("days")
-        if not days_list:
-            cnt = int(settings.get("day_count", self.data_store.get("gun_sayisi", 5)))
-            from timetable_grid import DAYS
-            days_list = DAYS[:cnt]
-        D = len(days_list)
-        P = periods
-
-        from auto_scheduler import _build_class_timeoff_map
-        blocked_class_map, _ = _build_class_timeoff_map(self.data_store)
-
-        # 1. Total open capacity per class
-        class_open_slots = {}
-        for cls in self.data_store.get("siniflar", []):
-            cn = (cls.get("ad") or cls.get("name") or "").strip()
-            if not cn: continue
-            closed_cnt = len(blocked_class_map.get(cn, set()))
-            class_open_slots[format_tr_name(cn)] = max(0, (D * P) - closed_cnt)
-
-        # 2. Currently placed non-filler hours on the grid per class
-        class_placed_hours = {}
-        for p in grid_placements:
-            if p.get("is_filler"): continue
-            p_s = (p.get("subject_name") or p.get("subject") or "").strip()
-            if not p_s or p_s.lower() in ["boş", "bos", "atanmadı"]: continue
-            p_c = (p.get("class_name") or p.get("class") or "").strip()
-            dur = int(p.get("duration", 1))
-            for sc in p_c.replace("&", "+").replace(",", "+").split("+"):
-                sc_clean = format_tr_name(sc.strip().split("(")[0].strip())
-                if sc_clean:
-                    class_placed_hours[sc_clean] = class_placed_hours.get(sc_clean, 0) + dur
-
-        # 3. Available free open slots per class
-        class_free_slots = {}
-        for cn_key, open_cap in class_open_slots.items():
-            class_free_slots[cn_key] = max(0, open_cap - class_placed_hours.get(cn_key, 0))
 
         # Yerleşimler ders adına göre kovalara ayrılıyor. Aşağıdaki döngü her
         # grup için bütün yerleşimleri baştan tarıyordu: 768 grup × 1.280
@@ -2128,13 +2183,21 @@ class MainWindow(QMainWindow):
                     if not matches_class(lc.get("class_name", ""), target_entity):
                         continue
                 else:
-                    if format_tr_name(lc.get("teacher", "")) != format_tr_name(target_entity):
+                    lc_t = lc.get("teacher", "")
+                    if not (_matches_teacher(lc_t, target_entity) or 
+                            format_tr_name(lc_t) == format_tr_name(target_entity) or
+                            normalize_clean(lc_t) == normalize_clean(target_entity) or
+                            (lc_t and (format_tr_name(target_entity) in format_tr_name(lc_t) or format_tr_name(lc_t) in format_tr_name(target_entity)))):
                         continue
             s_name = lc.get("subject_name", "")
             c_name = lc.get("class_name", "")
             t_name = lc.get("teacher", "")
             dur = int(lc.get("duration", 1) or 1)
-            card_col = resolve_subject_color(s_name, self.data_store) or lc.get("color", "#94A3B8")
+            if display_mode == "teachers" and c_name:
+                from dialogs.color_picker_dialog import resolve_class_color
+                card_col = resolve_class_color(c_name, self.data_store) or lc.get("color", "#94A3B8")
+            else:
+                card_col = resolve_subject_color(s_name, self.data_store) or lc.get("color", "#94A3B8")
             unplaced.append({
                 "id": lc.get("id", f"{s_name}_{c_name}_{dur}"),
                 "subject_name": s_name,
@@ -2158,7 +2221,11 @@ class MainWindow(QMainWindow):
             cnt = int(item.get("count", 1) or 1)
             is_c = bool(item.get("is_combined", False))
             comb_cls = list(item.get("combined_classes", []))
-            color = resolve_subject_color(s_name, self.data_store) or item.get("color", "#94A3B8")
+            if display_mode == "teachers" and c_name:
+                from dialogs.color_picker_dialog import resolve_class_color
+                color = resolve_class_color(c_name, self.data_store) or item.get("color", "#94A3B8")
+            else:
+                color = resolve_subject_color(s_name, self.data_store) or item.get("color", "#94A3B8")
             
             s_key = format_tr_name(s_name)
             c_key = format_tr_name(c_name)
@@ -2192,6 +2259,20 @@ class MainWindow(QMainWindow):
         final_unplaced.sort(key=lambda x: (format_tr_name(x.get("subject_name", "")), -x.get("duration", 1)))
 
         has_assignments = bool(scoped_atamalar) if target_entity else bool(atamalar)
+        if _compute_only:
+            # Rozet hesabı buradan dönüyor: dok widget'ına dokunulmuyor ve
+            # aşağıdaki geçersiz kılma çalışmıyor. paintSection içinden
+            # çağrıldığı için burada viewport().update() çağırmak sonsuz
+            # yeniden boyama döngüsü olurdu.
+            return final_unplaced
+
+        # Dok yenilendiyse rozet de bayat: ikisi aynı veriden türüyor. Bu tek
+        # kanca doku yenileyen bütün çağrı yerlerini kapsıyor —
+        # invalidate_unplaced'in projedeki tek çağrısı invalidate_visuals'tı ve
+        # ızgara hücrelerine hiç dokunmayan yollar (Seçmeli Dersler, Planlama
+        # İlişkileri) rozeti eski sayıyla bırakıyordu.
+        self._invalidate_unplaced_badges()
+
         self._grid.unplaced_dock.load_unplaced(
             final_unplaced, 
             has_assignments=has_assignments, 
@@ -2199,6 +2280,119 @@ class MainWindow(QMainWindow):
             target_entity=target_entity or "",
             empty_slot_count=0
         )
+
+    def _load_unplaced_lessons(self, target_entity=None):
+        return self._refresh_unplaced_lessons(target_entity=target_entity)
+
+    # ── ROZET = DOK ────────────────────────────────────────────────────────
+    #
+    # Sol başlıktaki kırmızı rozet ile dokta duran kartlar tek hesaptan
+    # besleniyor. Aşağıdaki üç yardımcı bunun bağlantı noktaları.
+
+    def _active_grid_placements(self):
+        """Ekranda gerçekten duran yerleşimler; blok başına tek kayıt.
+
+        Izgara aktifse ve görsel hücreleri tutan _placed_lessons doluysa
+        ekranda ne varsa tam olarak o baz alınıyor; değilse veri deposundaki
+        ham yerleşimlere düşülüyor. Eskiden bu kod _refresh_unplaced_lessons'ın
+        içindeydi ve rozetin kendi yakın kopyası vardı — iki kopya arasındaki
+        küçük farklar iki sayının sapmasının kaynaklarından biriydi.
+        """
+        grid = getattr(self, "_grid", None)
+        placed = getattr(grid, "_placed_lessons", None) if grid is not None else None
+        if not placed:
+            return list(self.data_store.get("grid_placements", []) or [])
+
+        active_placements = []
+        seen_blocks = set()
+        periods = int(getattr(grid, "_periods", 8))
+        if periods <= 0: periods = 8
+        for (r, c), info in placed.items():
+            if not isinstance(info, dict):
+                continue
+            orig_r = info.get("origin_row", r)
+            orig_c = info.get("origin_col", c)
+            b_id = info.get("block_id") or id(info)
+            block_key = (orig_r, orig_c, b_id)
+            if block_key in seen_blocks:
+                continue
+            seen_blocks.add(block_key)
+
+            day_idx = info.get("day_idx")
+            if day_idx is None:
+                day_idx = info.get("day", orig_c // periods)
+            period_idx = info.get("period")
+            if period_idx is None:
+                period_idx = orig_c % periods
+
+            p_copy = dict(info)
+            p_copy["day"] = int(day_idx)
+            p_copy["period"] = int(period_idx)
+            p_copy["duration"] = int(info.get("duration", 1))
+            active_placements.append(p_copy)
+        return active_placements
+
+    def unplaced_hours_by_entity(self):
+        """{varlık adı: açıkta kalan saat} — rozetin okuduğu sözlük.
+
+        Sayı uydurulmuyor: dokun o varlık için ürettiği kartların saatleri
+        toplanıyor. Her kart `duration` saatlik `count` adetlik bir deste, o
+        yüzden çarpılıyor. Rozet ile dok tanım gereği aynı sayıyı gösteriyor.
+
+        Anahtarlar doğrudan grid.class_list / grid.teacher_list'ten geliyor;
+        satır başlığı da aynı listeden çizildiği için arada hiçbir bulanık ad
+        eşleştirmesi kalmıyor.
+        """
+        out = {}
+        grid = getattr(self, "_grid", None)
+        if grid is None or not hasattr(grid, "unplaced_dock"):
+            return out
+
+        display_mode = getattr(grid, "current_view_mode", "classes")
+        if display_mode == "classes":
+            entities = list(getattr(grid, "class_list", []) or [])
+        else:
+            entities = list(getattr(grid, "teacher_list", []) or [])
+        if not entities:
+            return out
+
+        # Yerleşim listesi bütün varlıklar için aynı; varlık başına yeniden
+        # kurulmasın diye bir kez hesaplanıp aşağıya veriliyor.
+        shared_placements = self._active_grid_placements()
+
+        for name in entities:
+            if not name:
+                continue
+            try:
+                cards = self._refresh_unplaced_lessons(
+                    target_entity=name,
+                    _compute_only=True,
+                    _placements=shared_placements,
+                ) or []
+            except Exception:
+                continue
+            total = 0
+            for card in cards:
+                try:
+                    total += int(card.get("duration", 1) or 1) * int(card.get("count", 1) or 1)
+                except (TypeError, ValueError):
+                    continue
+            if total > 0:
+                out[name] = total
+        return out
+
+    def _invalidate_unplaced_badges(self):
+        """Satır başlığındaki rozet önbelleğini at ve başlığı yeniden çizdir."""
+        grid = getattr(self, "_grid", None)
+        table = getattr(grid, "table", None) if grid is not None else None
+        if table is None:
+            return
+        vh = table.verticalHeader()
+        if vh is not None and hasattr(vh, "invalidate_unplaced"):
+            vh.invalidate_unplaced()
+            vp = vh.viewport()
+            if vp is not None:
+                vp.update()
 
     def _remove_placement_by_data(self, p_item):
         if not p_item or not isinstance(self.data_store.get("grid_placements"), list):
@@ -2879,7 +3073,7 @@ class MainWindow(QMainWindow):
 
         # ── 4. TÜM KONTROLLER BAŞARILI: Atomik ve Güvenli Yerleşim
         self.mark_dirty()
-        self._push_undo_state()
+        self._push_undo_state("Ders taşındı" if is_move else "Ders yerleştirildi")
 
         # A lesson that was in the way is MOVED, never deleted. Snapshot it before the
         # origin is cleared below, because a swap needs to know where to send it.
@@ -3311,10 +3505,11 @@ class MainWindow(QMainWindow):
         wizard = StartupWizard(self)
         if wizard.exec():
             # Create fresh data store ONLY when confirmed
-            self.data_store = {
-                "dersler": [], "siniflar": [], "derslikler": [], 
+            self.data_store.clear()
+            self.data_store.update({
+                "dersler": [], "siniflar": [], "derslikler": [],
                 "ogretmenler": [], "atamalar": [], "settings": {}
-            }
+            })
             # Kurum adı ile kaydet
             kurum_adi = self.data_store.get("kurum", {}).get("isim", "Yeni_Kurum").replace(" ", "_")
             default_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"{kurum_adi}.roz")
@@ -3428,97 +3623,311 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def _act_close(self):
-        self.data_store = {
-            "dersler": [], "siniflar": [], "derslikler": [], 
+        # data_store'u YENİDEN BAĞLAMA — yerinde boşalt. Açık bir
+        # MasterDataDialog kendi self.data_store'unu kurulduğu anda bu nesneye
+        # bağlıyor (master_data_dialog.py:672-674); yeni bir sözlük atamak o
+        # sheet'i öksüz bir sözlüğü düzenler hâlde bırakıyor.
+        self.data_store.clear()
+        self.data_store.update({
+            "dersler": [], "siniflar": [], "derslikler": [],
             "ogretmenler": [], "atamalar": [], "settings": {}
-        }
+        })
+        # Kapanan dosyanın geçmişi de kapanır; yoksa Ctrl+Z kapatılan çizelgeyi
+        # geri getirip diske yazar.
+        if isinstance(getattr(self, "_history_stack", None), list):
+            self._history_stack.clear()
+        if isinstance(getattr(self, "_redo_stack", None), list):
+            self._redo_stack.clear()
+        if isinstance(getattr(self, "_undo_labels", None), list):
+            self._undo_labels.clear()
+        self._update_undo_redo_ui()
         if hasattr(self, "_grid"):
             self._grid.clear_grid()
         self._refresh_tree()
         self.statusBar().showMessage("Dosya kapatıldı.")
 
-    def _push_undo_state(self):
-        import copy
+    # Vaktiyle 200'dü: 200 tam çizelgenin kopyası bellekte tutuluyordu.
+    # Kimse 200 adım geri almıyor; sheet'teki karşılığı da 50.
+    UNDO_HISTORY_LIMIT = 40
+    UNDO_DEFAULT_LABEL = "Son değişiklik"
+
+    # ── Snapshot yardımcıları ────────────────────────────────────────────
+
+    def _snapshot_store(self, store=None):
+        """Deep-copy of the data_store for the history stack.
+
+        data_store is JSON-shaped by construction (it is written to disk with
+        json.dump in save_db), so the generic copy.deepcopy spends most of its
+        time on memo bookkeeping and type dispatch this structure never needs.
+        Key types are preserved exactly (unlike a json round-trip, which would
+        turn any non-string key into a string), and anything unexpected falls
+        back to the real deepcopy.
+        """
+        if store is None:
+            store = self.data_store
+
+        def _cp(obj):
+            t = type(obj)
+            if t is dict:
+                return {k: _cp(v) for k, v in obj.items()}
+            if t is list:
+                return [_cp(v) for v in obj]
+            if t is str or t is int or t is float or t is bool or obj is None:
+                return obj
+            if t is tuple:
+                return tuple(_cp(v) for v in obj)
+            import copy as _copy
+            return _copy.deepcopy(obj)
+
+        return _cp(store)
+
+    _UNDO_SIG_KEYS = ("dersler", "siniflar", "derslikler", "ogretmenler",
+                      "atamalar", "grid_placements", "auto_schedule_results",
+                      "loose_unplaced_cards", "manual_unplaced_cards")
+
+    def _stores_equal(self, a, b):
+        """Exactly the same answer as `a == b`, without always paying for it.
+
+        The old code deep-compared the whole data_store on every push. A push
+        happens precisely when something is about to change, so that walk
+        almost always ended in False after visiting tens of thousands of
+        nested objects. Comparing the cheap shape first (top-level key count +
+        the length of each big list) rejects the overwhelming majority of
+        those cases in microseconds; the full `==` still runs whenever the
+        shapes match, so the RESULT is unchanged.
+        """
+        if a is b:
+            return True
+        if not isinstance(a, dict) or not isinstance(b, dict):
+            return a == b
+        if len(a) != len(b):
+            return False
+        for k in self._UNDO_SIG_KEYS:
+            va, vb = a.get(k), b.get(k)
+            la = len(va) if isinstance(va, (list, dict)) else -1
+            lb = len(vb) if isinstance(vb, (list, dict)) else -1
+            if la != lb:
+                return False
+        return a == b
+
+    # ── Etiket defteri ───────────────────────────────────────────────────
+    #
+    # The history list is SHARED BY REFERENCE with MasterDataDialog
+    # (master_data_dialog.py:685 — self._history_stack = parent._history_stack),
+    # and the dialog feeds each popped element straight into
+    # data_store.update(). So every element has to stay a plain data_store
+    # dict: no (label, state) tuples, and no extra "_undo_label" key either,
+    # since that key would ride into data_store on undo and then be written
+    # into the .roz file by save_db. Labels therefore live beside the stacks,
+    # matched to their snapshot by object identity. Holding a strong reference
+    # to the snapshot in the tuple is what makes id() safe here: the object
+    # cannot be freed and its address cannot be recycled while we hold it.
+
+    def _remember_undo_label(self, state, label):
+        if not label:
+            return
+        if not isinstance(getattr(self, "_undo_labels", None), list):
+            self._undo_labels = []
+        self._undo_labels.append((state, str(label)))
+
+    def _label_for_state(self, state, default=None):
+        for s, lbl in reversed(getattr(self, "_undo_labels", None) or []):
+            if s is state:
+                return lbl
+        return self.UNDO_DEFAULT_LABEL if default is None else default
+
+    def _prune_undo_labels(self):
+        labels = getattr(self, "_undo_labels", None)
+        if not labels:
+            return
+        live = {id(s) for s in (getattr(self, "_history_stack", None) or [])}
+        live |= {id(s) for s in (getattr(self, "_redo_stack", None) or [])}
+        if len(labels) > len(live):
+            self._undo_labels = [(s, l) for (s, l) in labels if id(s) in live]
+
+    # ── Şerit düğmelerinin durumu ────────────────────────────────────────
+    #
+    # The Geri Al / Yinele pair exists TWICE (Ana Menü and Görünüm tabs) and
+    # both copies drive the same two stacks, so both are updated together.
+    def _update_undo_redo_ui(self):
+        self._prune_undo_labels()
+        hist = getattr(self, "_history_stack", None) or []
+        redo = getattr(self, "_redo_stack", None) or []
+        can_undo, can_redo = bool(hist), bool(redo)
+
+        if can_undo:
+            undo_tip = ("Geri Al: %s\nCtrl+Z — %d adım geri alınabilir"
+                        % (self._label_for_state(hist[-1]), len(hist)))
+        else:
+            undo_tip = "Geri Al\nGeri alınacak işlem yok"
+        if can_redo:
+            redo_tip = ("Yinele: %s\nCtrl+Y — %d adım yinelenebilir"
+                        % (self._label_for_state(redo[-1]), len(redo)))
+        else:
+            redo_tip = "Yinele\nYinelenecek işlem yok"
+
+        for attr, ok, tip in (("btn_undo_main", can_undo, undo_tip),
+                              ("btn_undo_view", can_undo, undo_tip),
+                              ("btn_redo_main", can_redo, redo_tip),
+                              ("btn_redo_view", can_redo, redo_tip)):
+            btn = getattr(self, attr, None)
+            if btn is None:
+                continue
+            if hasattr(btn, "set_actionable"):
+                btn.set_actionable(ok)
+            else:
+                btn.setEnabled(ok)
+            btn.setToolTip(tip)
+
+    def _announce_undo_redo(self, text):
+        """Say what just happened somewhere the user can actually see it.
+
+        statusBar() is hidden during startup (self.statusBar().hide(), line
+        350), so every showMessage() in this file is invisible. The message is
+        still sent — anything that un-hides the bar gets it — but the visible
+        channel is a short tooltip popped over whichever copy of the Geri Al
+        button is currently on screen.
+        """
+        try:
+            self.statusBar().showMessage(text, 4000)
+        except Exception:
+            pass
+        from PySide6.QtWidgets import QToolTip
+        for attr in ("btn_undo_main", "btn_undo_view"):
+            btn = getattr(self, attr, None)
+            if btn is not None and btn.isVisible():
+                QToolTip.showText(btn.mapToGlobal(btn.rect().bottomLeft()), text, btn)
+                break
+
+    def _push_undo_state(self, label=None):
+        """Snapshot data_store BEFORE a mutation.
+
+        `label` is a short Turkish description of the action that is about to
+        happen ("Ders taşındı"). It is optional so that every existing call
+        site — including timetable_grid.py and dialogs/edit_forms.py, which
+        call win._push_undo_state() with no arguments — keeps working.
+        """
         if not hasattr(self, "_history_stack"): self._history_stack = []
         if not hasattr(self, "_redo_stack"): self._redo_stack = []
-        if len(self._history_stack) > 200:
+        if self._history_stack and self._stores_equal(self._history_stack[-1], self.data_store):
+            self._update_undo_redo_ui()
+            return
+        snap = self._snapshot_store(self.data_store)
+        self._history_stack.append(snap)
+        while len(self._history_stack) > self.UNDO_HISTORY_LIMIT:
             self._history_stack.pop(0)
-        self._history_stack.append(copy.deepcopy(self.data_store))
         self._redo_stack.clear()
+        self._remember_undo_label(snap, label)
+        self._update_undo_redo_ui()
+
+    def _push_undo_snapshot(self, snapshot, label=None):
+        if snapshot is None:
+            return
+        if not hasattr(self, "_history_stack"): self._history_stack = []
+        if not hasattr(self, "_redo_stack"): self._redo_stack = []
+        if self._history_stack and self._stores_equal(self._history_stack[-1], snapshot):
+            self._update_undo_redo_ui()
+            return
+        snap = self._snapshot_store(snapshot)
+        self._history_stack.append(snap)
+        while len(self._history_stack) > self.UNDO_HISTORY_LIMIT:
+            self._history_stack.pop(0)
+        self._redo_stack.clear()
+        self._remember_undo_label(snap, label)
+        self._update_undo_redo_ui()
+
+    def _apply_restored_state(self):
+        """Put a freshly restored data_store on screen and on disk — ONCE.
+
+        Undo used to write the whole store three times per step: a raw
+        json.dump to current_roz_path, a direct
+        version_store.update_version_in_place, and then save_db() — which does
+        the version write, the institution timestamp and the async cloud push
+        itself. The raw dump was not only redundant, it skipped
+        version_store.sanitize_atamalar, so the file on disk briefly held
+        unsanitised data. save_db() alone does everything, in the right order.
+        """
+        settings = self.data_store.get("settings", {})
+        try:
+            periods = int(settings.get("periods", self.data_store.get("ders_saati", 8)))
+        except Exception:
+            periods = 8
+        if hasattr(self, "_grid"):
+            self._grid.set_periods(periods)
+
+        self.save_db(sync_from_grid=False)
+        self._refresh_tree()
+        self._restore_grid_placements()
+        self._refresh_unplaced_lessons()
+        self._refresh_grid()
+
+        # Satır başlığındaki "açıkta kalan saat" rozeti bir ÖNBELLEK
+        # (AsCVerticalHeader._unplaced). _refresh_grid onu clear_grid ->
+        # invalidate_visuals yolundan düşürür, ama invalidate_visuals
+        # _vis_cache yoksa header'a hiç ulaşmadan return ediyor. Geri alma
+        # sonrasında kırmızı sayıların eski veriyi göstermemesi için burada
+        # açıkça düşürülüyor.
+        grid = getattr(self, "_grid", None)
+        table = getattr(grid, "table", None) if grid is not None else None
+        if table is not None:
+            vh = table.verticalHeader()
+            if vh is not None and hasattr(vh, "invalidate_unplaced"):
+                vh.invalidate_unplaced()
+                vh.viewport().update()
+            table.viewport().update()
 
     def _act_undo(self):
-        import copy
-        if hasattr(self, "_history_stack") and self._history_stack:
-            if not hasattr(self, "_redo_stack"): self._redo_stack = []
-            self._redo_stack.append(copy.deepcopy(self.data_store))
-            prev_state = self._history_stack.pop()
-            self.data_store = prev_state
-            
-            self._is_loading = True
-            save_path = getattr(self, "current_roz_path", None) or self.db_path
-            if save_path:
-                try:
-                    with open(save_path, "w", encoding="utf-8") as f:
-                        import json
-                        json.dump(self.data_store, f, ensure_ascii=False, indent=4)
-                except Exception as e:
-                    print("Undo Save Error:", e)
-            if hasattr(self, "institution_slug") and hasattr(self, "version_filename") and self.institution_slug and self.version_filename:
-                try:
-                    import version_store
-                    version_store.update_version_in_place(self.institution_slug, self.version_filename, self.data_store)
-                except Exception as e:
-                    print("Undo version store update error:", e)
-            self._is_loading = False
-            
-            settings = self.data_store.get("settings", {})
-            periods = int(settings.get("periods", self.data_store.get("ders_saati", 8)))
-            if hasattr(self, "_grid"):
-                self._grid.set_periods(periods)
-            self._refresh_tree()
-            self._refresh_grid()
-            self._restore_grid_placements()
-            self._refresh_unplaced_lessons()
-            self.statusBar().showMessage("↺ İşlem başarıyla geri alındı (Undo / Ctrl+Z).")
-        else:
-            self.statusBar().showMessage("⚠️ Geri alınacak başka işlem yok.")
+        if not (hasattr(self, "_history_stack") and self._history_stack):
+            self._update_undo_redo_ui()
+            self._announce_undo_redo("⚠️ Geri alınacak başka işlem yok.")
+            return
+
+        prev_state = self._history_stack.pop()
+        label = self._label_for_state(prev_state)
+
+        from dialogs.master_data_dialog import check_undo_removes_assigned_entity, purge_entity_references
+        removed_entities = []
+        if not check_undo_removes_assigned_entity(self, self.data_store, prev_state, out_removed_entities=removed_entities):
+            self._history_stack.append(prev_state)
+            self._update_undo_redo_ui()
+            return
+
+        if not hasattr(self, "_redo_stack"): self._redo_stack = []
+        redo_snap = self._snapshot_store(self.data_store)
+        self._redo_stack.append(redo_snap)
+        # The redo entry re-applies the SAME action, so it carries the same
+        # label: "Yinele: Ders taşındı".
+        self._remember_undo_label(redo_snap, label)
+
+        self.data_store.clear()
+        self.data_store.update(prev_state)
+        for etype, ename in removed_entities:
+            purge_entity_references(self.data_store, etype, ename)
+
+        self._apply_restored_state()
+        self._update_undo_redo_ui()
+        self._announce_undo_redo("↺ Geri alındı: %s  (Ctrl+Z)" % label)
 
     def _act_redo(self):
-        import copy
-        if hasattr(self, "_redo_stack") and self._redo_stack:
-            if not hasattr(self, "_history_stack"): self._history_stack = []
-            self._history_stack.append(copy.deepcopy(self.data_store))
-            next_state = self._redo_stack.pop()
-            self.data_store = next_state
-            
-            self._is_loading = True
-            save_path = getattr(self, "current_roz_path", None) or self.db_path
-            if save_path:
-                try:
-                    with open(save_path, "w", encoding="utf-8") as f:
-                        import json
-                        json.dump(self.data_store, f, ensure_ascii=False, indent=4)
-                except Exception as e:
-                    print("Redo Save Error:", e)
-            if hasattr(self, "institution_slug") and hasattr(self, "version_filename") and self.institution_slug and self.version_filename:
-                try:
-                    import version_store
-                    version_store.update_version_in_place(self.institution_slug, self.version_filename, self.data_store)
-                except Exception as e:
-                    print("Redo version store update error:", e)
-            self._is_loading = False
-            
-            settings = self.data_store.get("settings", {})
-            periods = int(settings.get("periods", self.data_store.get("ders_saati", 8)))
-            if hasattr(self, "_grid"):
-                self._grid.set_periods(periods)
-            self._refresh_tree()
-            self._refresh_grid()
-            self._restore_grid_placements()
-            self._refresh_unplaced_lessons()
-            self.statusBar().showMessage("↻ İşlem başarıyla tekrar uygulandı (Redo / Ctrl+Y).")
-        else:
-            self.statusBar().showMessage("⚠️ Yinelenecek başka işlem yok.")
+        if not (hasattr(self, "_redo_stack") and self._redo_stack):
+            self._update_undo_redo_ui()
+            self._announce_undo_redo("⚠️ Yinelenecek başka işlem yok.")
+            return
+
+        next_state = self._redo_stack.pop()
+        label = self._label_for_state(next_state)
+
+        if not hasattr(self, "_history_stack"): self._history_stack = []
+        hist_snap = self._snapshot_store(self.data_store)
+        self._history_stack.append(hist_snap)
+        self._remember_undo_label(hist_snap, label)
+
+        self.data_store.clear()
+        self.data_store.update(next_state)
+
+        self._apply_restored_state()
+        self._update_undo_redo_ui()
+        self._announce_undo_redo("↻ Yinelendi: %s  (Ctrl+Y)" % label)
 
     def keyPressEvent(self, event):
         if event.modifiers() == Qt.ControlModifier:
@@ -3535,13 +3944,13 @@ class MainWindow(QMainWindow):
         super().keyPressEvent(event)
 
     def _open_subjects(self):
-        self._push_undo_state()
         d = MasterDataDialog(0, self)
-        if d.exec():
-            self.save_db()
-            self._refresh_tree()
-            self._restore_grid_placements()
-            self._refresh_unplaced_lessons()
+        d.exec()
+        self.save_db(sync_from_grid=False)
+        self._refresh_tree()
+        self._restore_grid_placements()
+        self._refresh_unplaced_lessons()
+        self._refresh_grid()
 
     def _open_school_info(self):
         self._push_undo_state()
@@ -3581,16 +3990,15 @@ class MainWindow(QMainWindow):
             self._refresh_unplaced_lessons()
 
     def _open_classes(self):
-        self._push_undo_state()
         d = MasterDataDialog(1, self)
-        if d.exec():
-            self.save_db()
-            self._refresh_tree()
-            self._restore_grid_placements()
-            self._refresh_unplaced_lessons()
+        d.exec()
+        self.save_db(sync_from_grid=False)
+        self._refresh_tree()
+        self._restore_grid_placements()
+        self._refresh_unplaced_lessons()
+        self._refresh_grid()
 
     def _open_class_assignments(self, target_class=None):
-        self._push_undo_state()
         from dialogs.edit_forms import ClassComprehensiveAssignmentDialog
         from PySide6.QtWidgets import QInputDialog
         
@@ -3613,12 +4021,17 @@ class MainWindow(QMainWindow):
             else:
                 return
                 
+        import copy
+        snapshot = copy.deepcopy(self.data_store)
         d = ClassComprehensiveAssignmentDialog(class_name=selected_class, data_store=self.data_store, parent=self)
         if d.exec():
+            if self.data_store != snapshot:
+                self._push_undo_snapshot(snapshot)
             self.save_db(sync_from_grid=False)
             self._refresh_tree()
-            self._refresh_grid()
+            self._restore_grid_placements()
             self._refresh_unplaced_lessons()
+            self._refresh_grid()
 
     def _show_tree_context_menu(self, pos):
         from PySide6.QtWidgets import QMenu
@@ -3640,32 +4053,36 @@ class MainWindow(QMainWindow):
             act = menu.addAction(f"🎓 {entity_name} Öğretmenin Atamaları")
             chosen = menu.exec_(self._tree.mapToGlobal(pos))
             if chosen == act:
-                self._push_undo_state()
+                import copy
+                snapshot = copy.deepcopy(self.data_store)
                 from dialogs.edit_forms import LessonAssignmentDialog
                 d = LessonAssignmentDialog(data_store=self.data_store, parent=self, selected_teacher=entity_name)
                 if d.exec():
-                    self.save_db()
+                    if self.data_store != snapshot:
+                        self._push_undo_snapshot(snapshot)
+                    self.save_db(sync_from_grid=False)
                     self._refresh_tree()
                     self._restore_grid_placements()
                     self._refresh_unplaced_lessons()
+                    self._refresh_grid()
 
     def _open_rooms(self):
-        self._push_undo_state()
         d = MasterDataDialog(2, self)
-        if d.exec():
-            self.save_db()
-            self._refresh_tree()
-            self._restore_grid_placements()
-            self._refresh_unplaced_lessons()
+        d.exec()
+        self.save_db(sync_from_grid=False)
+        self._refresh_tree()
+        self._restore_grid_placements()
+        self._refresh_unplaced_lessons()
+        self._refresh_grid()
 
     def _open_teachers(self):
-        self._push_undo_state()
         d = MasterDataDialog(3, self)
-        if d.exec():
-            self.save_db()
-            self._refresh_tree()
-            self._restore_grid_placements()
-            self._refresh_unplaced_lessons()
+        d.exec()
+        self.save_db(sync_from_grid=False)
+        self._refresh_tree()
+        self._restore_grid_placements()
+        self._refresh_unplaced_lessons()
+        self._refresh_grid()
 
     def _open_electives(self):
         self._push_undo_state()
@@ -3693,13 +4110,13 @@ class MainWindow(QMainWindow):
                 "Sıfırdan sihirbaz çalıştırmak yerine üst menüdeki Dersler, Sınıflar ve Öğretmenler butonlarını kullanabilirsiniz."
             )
             return
-        self._push_undo_state()
         d = MasterDataDialog(0, self)
         d.exec()
-        self.save_db()
+        self.save_db(sync_from_grid=False)
         self._refresh_tree()
         self._restore_grid_placements()
         self._refresh_unplaced_lessons()
+        self._refresh_grid()
 
     def _act_auto_schedule(self):
         self._push_undo_state()

@@ -509,9 +509,29 @@ class SearchableComboBox(QComboBox):
         
         # We handle text edited to dynamically update completer model (for Turkish support)
         if self.lineEdit():
-            self.lineEdit().setStyleSheet("border: none; background: transparent; padding-right: 20px;")
+            # Dikey ortalama: kutunun kendisinde "padding: 4px 10px" var ve iç
+            # QLineEdit buna kendi varsayılan kenar boşluğunu ekleyince yazı
+            # yukarı kayıyordu. İç alanın dikey boşluğu sıfırlanıp hizalama
+            # açıkça ortaya alınıyor.
+            self.lineEdit().setStyleSheet(
+                "border: none; background: transparent;"
+                "padding: 0px 20px 0px 0px; margin: 0px;")
+            self.lineEdit().setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            self.lineEdit().setTextMargins(0, 0, 0, 0)
             self.lineEdit().textEdited.connect(self._on_text_edited)
             self.lineEdit().textChanged.connect(self.currentTextChanged.emit)
+
+    def wheelEvent(self, event):
+        """Fare tekerleği yalnızca açılır liste AÇIKKEN seçimi değiştirir.
+
+        Panelde satırlar arasında gezinirken tekerlek, imlecin altında kalan ders
+        kutusunun seçimini sessizce değiştiriyordu — kullanıcı farkına varmadan
+        yanlış ders atanıyordu. NoScrollComboBox'taki koruma buraya da geliyor.
+        """
+        if self.view() and self.view().isVisible():
+            super().wheelEvent(event)
+        else:
+            event.ignore()
 
     def setItems(self, items):
         self._all_items = list(items)
@@ -2980,7 +3000,15 @@ class SubjectTeacherAssignmentDialog(QDialog):
                 cb_tip.lineEdit().editingFinished.connect(lambda t=t_name, cb=cb_tip: self._on_current_type_changed(t, cb.currentText()))
             
         cur_str = str(current_val).strip()
-        cb_tip.setCurrentText(cur_str if cur_str and cur_str != "0" else "")
+        if not cur_str or cur_str == "0":
+            # Normal ders saati kutusu öğretmen seçilir seçilmez DOLU gelir: en
+            # yaygın değer olan 2 hazır yazılı olur, kullanıcı silip başka bir şey
+            # yazabilir. Kaydetme değeri doğrudan bu kutudan okuduğu için
+            # (_save_assignments) dokunulmadan kaydedilirse 2 olarak gider —
+            # eskiden boş kalıp saatsiz atamaya yol açıyordu.
+            # Birleşik ders saatinin varsayılanı yok: orası boş kalır.
+            cur_str = "" if is_combined else "2"
+        cb_tip.setCurrentText(cur_str)
         if is_combined:
             cb_tip.activated.connect(lambda idx, t=t_name, cb=cb_tip: self._on_combined_type_changed(t, cb.currentText()))
         else:
@@ -3454,7 +3482,17 @@ class SubjectTeacherAssignmentDialog(QDialog):
 class SinifEditDialog(BaseEditForm):
     def __init__(self, parent=None, existing_data=None):
         super().__init__("Sınıf", parent, existing_data)
-        self._color = self.existing_data.get("renk", "#A30F37")
+        # Varsayılanı sabit bir hex yapmak bütün sınıfları aynı renk yapıyordu;
+        # çarşafın kullanacağı renkle aynı yerden başlat.
+        _seed = self.existing_data.get("renk") or self.existing_data.get("color")
+        if not _seed:
+            try:
+                from dialogs.color_picker_dialog import resolve_class_color
+                _ds = getattr(self.parent(), "data_store", None) if self.parent() else None
+                _seed = resolve_class_color(self.existing_data.get("ad", ""), _ds)
+            except Exception:
+                _seed = "#A30F37"
+        self._color = _seed
         self.resize(580, 720)
         self.setMinimumSize(520, 580)
         self._build_ui()

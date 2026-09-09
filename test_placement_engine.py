@@ -124,12 +124,16 @@ def run():
     r = analyze(d, lesson(), 2, 2)
     check("ders kapalı -> FORBIDDEN", r.status == pe.FORBIDDEN, r.status)
 
-    print("\n[8] 'tercih edilmez' saat -> mavi")
+    print("\n[8] 'tercih edilmez' KALDIRILDI -> saat normal acik sayilir")
+    # Sari "?" (tercih edilmez) durumu kaldirildi: zaman tablosu artik iki
+    # durumlu (acik / kapali). Eskiden yazilmis AVOID hucreleri
+    # constraint_sync._coerce_state icinde ACIK'a cozuluyor; kapaliya cevirmek
+    # kullanicinin hic kapatmadigi saatleri kapatmak olurdu.
     d = store(ogretmenler=[{"ad": "Ahmet Yılmaz", "timeoff": timeoff(avoid=[(0, 5)])},
                            {"ad": "Ayşe Demir"}])
     r = analyze(d, lesson(), 0, 5)
-    check("yumuşak kısıt -> QUESTIONABLE", r.status == pe.QUESTIONABLE, r.status)
-    check("mavi", r.visual == pe.V_BLUE, r.visual)
+    check("eski AVOID hucresi artik engel degil", r.status == pe.VALID, r.status)
+    check("yesil", r.visual == pe.V_GREEN, r.visual)
     check("sert ihlal yok", not r.hard_violations, str(r.hard_violations))
 
     print("\n[9] kesişim semantiği: öğretmen açık ama sınıf kapalı")

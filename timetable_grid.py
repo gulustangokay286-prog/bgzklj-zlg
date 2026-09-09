@@ -35,7 +35,9 @@ def _fast_text_brush(color_str: str) -> QBrush:
     if tb is None:
         c = QColor(color_str)
         luminance = (0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue())
-        tb = QBrush(Qt.white if luminance < 160 else Qt.black)
+        # Eşik 140: _build_visual (hücreyi gerçekten boyayan yer) bunu kullanıyor.
+        # Farklı eşikler aynı rengin üzerinde kart siyah, hücre beyaz yazı çiziyordu.
+        tb = QBrush(Qt.white if luminance < 140 else Qt.black)
         _CELL_TEXT_BRUSH_CACHE[color_str] = tb
     return tb
 
@@ -674,49 +676,93 @@ class AsCVerticalHeader(QHeaderView):
         self.setDefaultSectionSize(36)
         self.setMinimumSectionSize(0)
         self.setMinimumWidth(82)
+        # QTableView yalnızca KENDİ kurduğu varsayılan başlığı tıklanabilir
+        # yapıyor; setVerticalHeader() ile takılan özel başlıkta QHeaderView'in
+        # kendi varsayılanı (clickableSections=False) geçerli kalıyor ve
+        # sectionClicked hiç yayılmıyor. Öğretmen/sınıf adına tıklayınca dock'un
+        # dolması bu sinyale bağlı olduğu için açıkça açıyoruz.
+        self.setSectionsClickable(True)
+        # paintSection tamamen elle çizildiğinden Qt'nin seçili/basılı vurgusunun
+        # görsel bir karşılığı yok; araya girmesin diye kapatıyoruz.
+        self.setHighlightSections(False)
 
-    # ── AÇIKTA KALAN SAAT ROZETİ ───────────────────────────────────────────
+    # ── AÇIKTA KALAN SAAT ROZETİ ─────────────────────────────────
     #
-    # Bu rozet, satırdaki kişiye atanmış saatlerle çizelgeye yerleşmiş saatlerin
-    # farkı. Hesabı eskiden paintSection'ın içindeydi: her satır boyandığında
-    # bütün atamalar (768) ve bütün yerleşimler (1280) baştan taranıyordu.
-    # Altmış satırlık bir öğretmen çarşafında bu, kare başına 120 bin döngü —
-    # ölçümde çarşaf değiştirmenin en pahalı tek kalemi, 98 ms.
+    # Rozet ile dokun içeriği aynı soruyu yanıtlıyor: bu satırdaki kişinin kaç
+    # saati hâlâ yerleşmedi. Eskiden bu soruya iki ayrı hesap cevap veriyordu.
+    # Rozet atanan saatlerden yerleşen saatleri düpedüz çıkarıyordu; dok ise
+    # dağılım bloklarını (2+2+1) grup grup eşleştirip her grubu ayrı ayrı
+    # sıfırda kesiyordu. Farklı isim eşleştirmesi, farklı saat kaynağı, farklı
+    # blok muhasebesi, farklı önbellek — iki sayı birbirini tutmuyordu:
+    #   • bir dersi ızgarada fazla yerleşmiş öğretmende rozet o fazlalıkla
+    #     başka dersin eksiğini götürüp hiç kırmızı göstermiyordu,
+    #   • ham ad içinde geçme testi ("1A" ⊂ "11A", "SEÇİL ÖZKAN" ⊂
+    #     "SEÇİL ÖZKANOĞLU") başka satırın saatlerini bu satıra yazıyordu,
+    #   • .upper() Türkçe bilmediği için "Hüseyin" ile "HÜSEYİN" eşleşmiyordu.
     #
-    # Sayılar yalnızca veri değişince değişiyor, o yüzden tek geçişte bir kez
-    # hesaplanıp satır numarasına göre saklanıyor; boyama artık sözlükten
-    # okuyor. Bulanık isim eşleştirmesi (birebir, ya da biri diğerinin içinde)
-    # aynen korunuyor: ham ad başına bir kez çözülüp saklanıyor, çünkü ayrı ad
-    # sayısı satır sayısı kadar, kayıt sayısı kadar değil.
+    # Artık tek kaynak var: rozet, dokun kendi hesabını çağırıp o varlık için
+    # gösterilen kartların saatlerini topluyor. Sonuç satır numarasına göre
+    # saklanıyor, boyama sözlükten okuyor; hesap yalnızca invalidate_unplaced
+    # çağrılınca yenileniyor.
     def invalidate_unplaced(self):
         self._unplaced = None
+
+    def _owner_window(self):
+        """Doku hesaplayan pencere: MainWindow ya da onun _editor'ü.
+
+        Izgara gömülü bir düzenleyicide de yaşayabildiği için önce ebeveyn
+        zinciri, bulunamazsa üst düzey pencereler taranıyor. Yalnızca
+        _unplaced_map yeniden hesaplarken çağrılıyor, yani boyama başına değil
+        geçersiz kılma başına bir kez.
+        """
+        def _pick(obj):
+            if obj is None:
+                return None
+            editor = getattr(obj, "_editor", None)
+            if editor is not None and hasattr(editor, "unplaced_hours_by_entity"):
+                return editor
+            if hasattr(obj, "unplaced_hours_by_entity"):
+                return obj
+            return None
+
+        curr = self
+        while curr is not None:
+            hit = _pick(curr)
+            if hit is not None:
+                return hit
+            curr = curr.parent()
+
+        app = QApplication.instance()
+        if app:
+            for w in app.topLevelWidgets():
+                hit = _pick(w)
+                if hit is not None:
+                    return hit
+        return None
 
     def _unplaced_map(self):
         cached = getattr(self, "_unplaced", None)
         if cached is not None:
             return cached
 
+        # paintSection'ın içinden çağrılıyoruz. Hesap saf (doka dokunmuyor,
+        # olay döngüsü işletmiyor) ama araya bir yeniden boyama girerse sonsuz
+        # özyineleme boya işleyicisinin ortasında patlar; o yüzden hesap
+        # sürerken gelen ikinci çağrı boş sözlükle dönüyor.
+        if getattr(self, "_unplaced_busy", False):
+            return {}
+        self._unplaced_busy = True
+        try:
+            return self._compute_unplaced_map()
+        finally:
+            self._unplaced_busy = False
+
+    def _compute_unplaced_map(self):
+        out = {}
         table = self.parent()
         grid = table.parent() if table else None
-        data_store = None
-        curr = self
-        while curr is not None:
-            ds = getattr(curr, "data_store", None)
-            if isinstance(ds, dict):
-                data_store = ds
-                break
-            curr = curr.parent()
-        if data_store is None:
-            app = QApplication.instance()
-            if app:
-                for w in app.topLevelWidgets():
-                    ds = getattr(w, "data_store", None)
-                    if isinstance(ds, dict):
-                        data_store = ds
-                        break
-
-        out = {}
-        if grid is None or data_store is None:
+        win = self._owner_window()
+        if grid is None or win is None:
             self._unplaced = out
             return out
 
@@ -729,86 +775,22 @@ class AsCVerticalHeader(QHeaderView):
             self._unplaced = out
             return out
 
-        norm_targets = [(idx, t, t.replace(" ", "").upper())
-                        for idx, t in enumerate(targets)]
-        match_cache = {}
+        try:
+            hours_by_name = win.unplaced_hours_by_entity() or {}
+        except Exception:
+            hours_by_name = {}
 
-        def rows_for(raw):
-            hit = match_cache.get(raw)
-            if hit is None:
-                raw_norm = raw.replace(" ", "").upper()
-                hit = tuple(idx for idx, tgt, tgt_norm in norm_targets
-                            if tgt_norm == raw_norm or tgt in raw or raw in tgt)
-                match_cache[raw] = hit
-            return hit
+        # Satır etiketi ile dokun hedef adı birebir aynı dizge: ikisi de
+        # grid.class_list / grid.teacher_list'ten geliyor, o yüzden burada
+        # hiçbir bulanık eşleştirmeye gerek yok — sapmanın kaynağı buydu.
+        for idx, name in enumerate(targets):
+            try:
+                hrs = int(hours_by_name.get(name, 0) or 0)
+            except (TypeError, ValueError):
+                hrs = 0
+            if hrs > 0:
+                out[idx] = hrs
 
-        assigned = [0] * len(targets)
-        placed = [0] * len(targets)
-
-        if display_mode == "classes":
-            a_keys = ("class", "sinif", "class_name")
-            p_keys = ("class_name", "class")
-        else:
-            a_keys = ("teacher", "ogretmen", "teacher_name")
-            p_keys = ("teacher_name", "teacher")
-
-        for a in data_store.get("atamalar", []) or []:
-            if not isinstance(a, dict):
-                continue
-            raw = ""
-            for k in a_keys:
-                v = a.get(k)
-                if v:
-                    raw = str(v)
-                    break
-            if not raw:
-                continue
-            hours = int(a.get("duration", 1) or 1)
-            for idx in rows_for(raw):
-                assigned[idx] += hours
-
-        placed_lessons = getattr(grid, "_placed_lessons", None)
-        if placed_lessons:
-            seen_blocks = set()
-            for (r, c), info in placed_lessons.items():
-                if not isinstance(info, dict):
-                    continue
-                block_key = (info.get("origin_row", r), info.get("origin_col", c),
-                             info.get("block_id") or id(info))
-                if block_key in seen_blocks:
-                    continue
-                seen_blocks.add(block_key)
-                raw = ""
-                for k in p_keys:
-                    v = info.get(k)
-                    if v:
-                        raw = str(v)
-                        break
-                if not raw:
-                    continue
-                hours = int(info.get("duration", 1) or 1)
-                for idx in rows_for(raw):
-                    placed[idx] += hours
-        else:
-            for pl in data_store.get("grid_placements", []) or []:
-                if not isinstance(pl, dict):
-                    continue
-                raw = ""
-                for k in p_keys:
-                    v = pl.get(k)
-                    if v:
-                        raw = str(v)
-                        break
-                if not raw:
-                    continue
-                hours = int(pl.get("duration", 1) or 1)
-                for idx in rows_for(raw):
-                    placed[idx] += hours
-
-        for idx in range(len(targets)):
-            diff = assigned[idx] - placed[idx]
-            if diff > 0:
-                out[idx] = diff
         self._unplaced = out
         return out
 
@@ -995,12 +977,17 @@ class DraggableLessonCard(QWidget):
         base_color = QColor(self.color)
         if not base_color.isValid() or str(self.color).upper() in ("#FFFFFF", "#000000", "#94A3B8", ""):
             try:
-                from dialogs.color_picker_dialog import resolve_subject_color
                 win = self.window()
                 ds = getattr(win, "data_store", None)
                 if not ds and hasattr(win, "parent") and callable(win.parent):
                     ds = getattr(win.parent(), "data_store", None)
-                cur = resolve_subject_color(self.subject_name, ds)
+                # Öğretmen modunda kartın üzerinde yazan ad SINIF; renk de oradan.
+                if self.display_mode == "teachers" and self.class_name:
+                    from dialogs.color_picker_dialog import resolve_class_color
+                    cur = resolve_class_color(self.class_name, ds)
+                else:
+                    from dialogs.color_picker_dialog import resolve_subject_color
+                    cur = resolve_subject_color(self.subject_name, ds)
                 if cur:
                     self.color = cur
                     base_color = QColor(cur)
@@ -1628,8 +1615,14 @@ class UnplacedLessonsDock(QWidget):
         if not hasattr(win, "data_store") and hasattr(win, "parent") and hasattr(win.parent(), "data_store"):
             win = win.parent()
         data_store = getattr(win, "data_store", {})
-        from dialogs.color_picker_dialog import resolve_subject_color
-        color = resolve_subject_color(s_name, data_store)
+        display_mode = getattr(self, "display_mode", None) or \
+            getattr(self.window(), "_grid", None) and getattr(self.window()._grid, "current_view_mode", "classes") or "classes"
+        if display_mode == "teachers" and c_name:
+            from dialogs.color_picker_dialog import resolve_class_color
+            color = resolve_class_color(c_name, data_store)
+        else:
+            from dialogs.color_picker_dialog import resolve_subject_color
+            color = resolve_subject_color(s_name, data_store)
         
         card_durs = [2, 2] if duration == 4 else [duration]
         manual_list = data_store.setdefault("manual_unplaced_cards", [])
@@ -1799,7 +1792,11 @@ class UnplacedLessonsDock(QWidget):
                 teacher = l.get("teacher", "")
                 cls_name = l.get("class_name", "")
                 s_name = l.get("subject_name", "")
-                card_col = resolve_subject_color(s_name, ds_context) or l.get("color") or "#94A3B8"
+                if display_mode == "teachers" and cls_name:
+                    from dialogs.color_picker_dialog import resolve_class_color
+                    card_col = resolve_class_color(cls_name, ds_context) or l.get("color") or "#94A3B8"
+                else:
+                    card_col = resolve_subject_color(s_name, ds_context) or l.get("color") or "#94A3B8"
                 card = DraggableLessonCard(
                     l["id"], s_name, card_col,
                     duration=dur, count=count, teacher=teacher,
@@ -1877,7 +1874,11 @@ class UnplacedLessonsDock(QWidget):
             t_name = (a.get("teacher") or a.get("ogretmen") or "").strip()
             dur = int(a.get("duration", 1))
             type_str = str(a.get("type", "")).strip()
-            color = resolve_subject_color(s_name, data_store)
+            if display_mode == "teachers" and c_name:
+                from dialogs.color_picker_dialog import resolve_class_color
+                color = resolve_class_color(c_name, data_store)
+            else:
+                color = resolve_subject_color(s_name, data_store)
             
             from auto_scheduler import parse_distribution_parts
             parts = parse_distribution_parts(type_str, dur)
@@ -1923,6 +1924,14 @@ def clear_cell_color_cache():
     global _CELL_COLOR_CACHE
     _CELL_COLOR_CACHE.clear()
     _TIMEOFF_INDEX.clear()
+    # Sınıf renkleri sınıf listesindeki SIRAYA göre dağıtılıyor; sınıf eklenip
+    # silinince o dizin de geçersizdir. Burada atılıyor çünkü _refresh_grid
+    # zaten her tazelemede burayı çağırıyor.
+    try:
+        from dialogs.color_picker_dialog import clear_class_color_cache
+        clear_class_color_cache()
+    except Exception:
+        pass
     # Hücre görünümleri renkten ve kapalı-saat tablosundan türüyor; ikisi de
     # atıldıysa saklanan görünümler de yanlıştır.
     for tbl in _LIVE_TABLES:
@@ -2354,6 +2363,7 @@ class DropTableWidget(QTableWidget):
         prev = self._drag_preview_info
         if (prev and prev.get("row") == row and prev.get("col") == col
                 and prev.get("duration") == dur and prev.get("subject_name") == subj
+                and prev.get("class_name") == (lesson_info.get("class_name") or lesson_info.get("class") or "")
                 and prev.get("is_swap") == occupied):
             return
 
@@ -2364,8 +2374,13 @@ class DropTableWidget(QTableWidget):
         if not hasattr(win, "data_store") and hasattr(win, "parent") and hasattr(win.parent(), "data_store"):
             win = win.parent()
         data_store = getattr(win, "data_store", None)
-        from dialogs.color_picker_dialog import resolve_subject_color
-        color = resolve_subject_color(subj, data_store) if subj else (lesson_info.get("color") or "#2563EB")
+        display_mode = getattr(grid, "current_view_mode", "classes") if grid else "classes"
+        if display_mode == "teachers" and cls:
+            from dialogs.color_picker_dialog import resolve_class_color
+            color = resolve_class_color(cls, data_store)
+        else:
+            from dialogs.color_picker_dialog import resolve_subject_color
+            color = resolve_subject_color(subj, data_store) if subj else (lesson_info.get("color") or "#2563EB")
 
         new_preview = {
             "row": row,
@@ -2706,12 +2721,29 @@ class DropTableWidget(QTableWidget):
             subject_name = info.get("subject_name") or info.get("subject") or ""
 
         cell_color = None
-        color_key = subject_name or clean_str
-        if color_key:
+        # Öğretmen çarşafında hücrede yazan ad SINIFtir (bkz. aşağıdaki main_text),
+        # o yüzden renk de sınıftan gelir: 11C her öğretmende aynı renk, 10A ile
+        # 11C hiçbir zaman aynı renk değil. Sınıf çarşafında ise yazan ders adi,
+        # renk de dersten gelir. Önbellek anahtarı bu yüzden mod taşıyor — tek
+        # bir ad ile anahtarlansaydı çarşaf değiştirince öbür modun rengi dönerdi.
+        if display_mode == "teachers":
+            class_key = ""
+            if info:
+                class_key = str(info.get("class_name") or info.get("class") or "").strip()
+            if not class_key and clean_str and clean_str != subject_name:
+                class_key = clean_str
+            color_key = ("C", class_key) if class_key else ("S", subject_name or clean_str)
+        else:
+            color_key = ("S", subject_name or clean_str)
+
+        if color_key[1]:
             cell_color = _CELL_COLOR_CACHE.get(color_key)
             if cell_color is None:
-                from dialogs.color_picker_dialog import resolve_subject_color
-                c = QColor(resolve_subject_color(color_key, data_store))
+                if color_key[0] == "C":
+                    from dialogs.color_picker_dialog import resolve_class_color as _resolve_color
+                else:
+                    from dialogs.color_picker_dialog import resolve_subject_color as _resolve_color
+                c = QColor(_resolve_color(color_key[1], data_store))
                 if not c.isValid():
                     c = _BG_FALLBACK
                 _CELL_COLOR_CACHE[color_key] = c
@@ -3120,6 +3152,12 @@ class DropTableWidget(QTableWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.drag_start_pos = event.pos()
+            r = self.rowAt(event.pos().y())
+            c = self.columnAt(event.pos().x())
+            if r >= 0 and c >= 0:
+                grid = self.parent()
+                if grid and hasattr(grid, "_on_cell_clicked"):
+                    grid._on_cell_clicked(r, c)
         super().mousePressEvent(event)
 
     def _lookup_placement_fallback(self, row, col):
@@ -3435,8 +3473,8 @@ class DropTableWidget(QTableWidget):
         # Extract metadata from primary placement or info
         if matching_block_placements:
             ref_p = matching_block_placements[0]
-            c_name = ref_p.get("class_name") or ref_p.get("class") or row_header_name
-            t_name = ref_p.get("teacher_name") or ref_p.get("teacher") or ""
+            c_name = ref_p.get("class_name") or ref_p.get("class") or (row_header_name if view_mode == "classes" else "")
+            t_name = ref_p.get("teacher_name") or ref_p.get("teacher") or (row_header_name if view_mode == "teachers" else "")
             s_name = ref_p.get("subject_name") or ref_p.get("subject") or ""
             is_locked = bool(ref_p.get("locked"))
             is_comb = bool(ref_p.get("is_combined") or ("+" in c_name or "," in c_name or "&" in c_name))
@@ -3444,8 +3482,8 @@ class DropTableWidget(QTableWidget):
             removed_color = ref_p.get("color") or ""
             removed_combined_classes = ref_p.get("combined_classes") or []
         else:
-            c_name = (info.get("class_name") or info.get("class") or row_header_name) if info else row_header_name
-            t_name = (info.get("teacher_name") or info.get("teacher") or "") if info else ""
+            c_name = (info.get("class_name") or info.get("class") or (row_header_name if view_mode == "classes" else "")) if info else (row_header_name if view_mode == "classes" else "")
+            t_name = (info.get("teacher_name") or info.get("teacher") or (row_header_name if view_mode == "teachers" else "")) if info else (row_header_name if view_mode == "teachers" else "")
             s_name = (info.get("subject_name") or info.get("subject") or "") if info else ""
             is_locked = bool(info and info.get("locked"))
             is_comb = bool(info and (info.get("is_combined") or ("+" in c_name or "," in c_name or "&" in c_name)))
@@ -3465,7 +3503,8 @@ class DropTableWidget(QTableWidget):
                 return
 
         if hasattr(win, "_push_undo_state"):
-            win._push_undo_state()
+            win._push_undo_state(
+                ("'%s' dersi kaldırıldı (%s)" % (s_name, c_name)) if s_name else "Ders kaldırıldı")
 
         target_entity = c_name if view_mode == "classes" else (t_name or row_header_name)
         
@@ -3651,7 +3690,7 @@ class DropTableWidget(QTableWidget):
                 if not hasattr(win, "data_store") and hasattr(win, "parent") and hasattr(win.parent(), "data_store"):
                     win = win.parent()
                 if hasattr(win, "_push_undo_state"):
-                    win._push_undo_state()
+                    win._push_undo_state("Ders kilitlendi" if new_lock_state else "Ders kilidi kaldırıldı")
                 if hasattr(grid, "_placed_lessons") and (orig_r, orig_c) in grid._placed_lessons:
                     info = grid._placed_lessons[(orig_r, orig_c)]
                     s_name = info.get("subject_name", "")
@@ -3733,6 +3772,8 @@ class DropTableWidget(QTableWidget):
                 from dialogs.color_picker_dialog import ModernColorPickerDialog, update_subject_color_globally
                 grid = self.parent()
                 win = self.window()
+                if not hasattr(win, "data_store") and hasattr(win, "parent") and hasattr(win.parent(), "data_store"):
+                    win = win.parent()
                 data_store = getattr(win, "data_store", None)
                 if hasattr(grid, "_placed_lessons") and (orig_r, orig_c) in grid._placed_lessons:
                     info = grid._placed_lessons[(orig_r, orig_c)]
@@ -3745,6 +3786,11 @@ class DropTableWidget(QTableWidget):
                         subject_name=s_name
                     )
                     if new_color and new_color.isValid():
+                        # update_subject_color_globally bütün mağazayı yeniden
+                        # yazıyor; geri alınabilir olmalı. Anlık görüntü, renk
+                        # gerçekten seçildikten SONRA ama uygulanmadan ÖNCE.
+                        if hasattr(win, "_push_undo_state"):
+                            win._push_undo_state(f"'{s_name}' rengi değiştirildi")
                         update_subject_color_globally(self, data_store, s_name, new_color.name())
             elif action == act_move:
                 # Instant move dialog
@@ -3761,6 +3807,11 @@ class DropTableWidget(QTableWidget):
                     p_choice, ok2 = QInputDialog.getItem(self, "Dersi Taşı", "Hedef Saat:", period_strs, 0, False)
                     if ok2 and p_choice:
                         target_row = period_strs.index(p_choice)
+                        # Her iki soru da yanıtlandı: taşıma kesin olarak
+                        # yapılacak. İlk mutasyondan ÖNCE anlık görüntü al —
+                        # aşağısı hücreyi boşaltıp save_db() ile diske yazıyor.
+                        if hasattr(win, "_push_undo_state"):
+                            win._push_undo_state("Ders taşındı (sağ tık)")
                         if orig_item and hasattr(self.parent(), "set_cell"):
                             txt = orig_item.text()
                             bg = orig_item.background().color().name()
@@ -4163,21 +4214,36 @@ class TimetableGrid(QWidget):
             cur_color = data_store["dersler"][0].get("color", "#2563EB")
             
         if s_name:
-            from dialogs.color_picker_dialog import ModernColorPickerDialog, update_subject_color_globally, resolve_subject_color
-            cur_color = resolve_subject_color(s_name, data_store)
+            from dialogs.color_picker_dialog import (ModernColorPickerDialog,
+                                                     update_subject_color_globally,
+                                                     update_class_color_globally,
+                                                     resolve_subject_color,
+                                                     resolve_class_color)
+            view_mode = getattr(self, "current_view_mode", "classes")
+            c_name = (info.get("class_name") or info.get("class") or "").strip() if info else ""
+            # Öğretmen çarşafında kutuda görülen renk SINIFin rengi; düzenlenen de o
+            # olmalı. Aksi hâlde kullanıcı "11C pembe olsun" derken bütün Matematik
+            # hücrelerini pembe yapmış oluyor.
+            edit_class = bool(view_mode == "teachers" and c_name)
+            target_name = c_name if edit_class else s_name
+            cur_color = (resolve_class_color(c_name, data_store) if edit_class
+                         else resolve_subject_color(s_name, data_store))
             new_color = ModernColorPickerDialog.pick_color(
                 initial_color=cur_color,
                 parent=self,
-                title=f"{s_name} — Renk Seçimi",
+                title=f"{target_name} — Renk Seçimi",
                 data_store=data_store,
-                subject_name=s_name
+                subject_name=None if edit_class else s_name
             )
             if new_color and new_color.isValid():
                 new_hex = new_color.name()
-                if info:
+                if info and not edit_class:
                     info["color"] = new_hex
                 self.info_color_box.setStyleSheet(f"background: {new_hex}; border: 2px solid #334155; border-radius: 4px;")
-                update_subject_color_globally(self, data_store, s_name, new_hex)
+                if edit_class:
+                    update_class_color_globally(self, data_store, c_name, new_hex)
+                else:
+                    update_subject_color_globally(self, data_store, s_name, new_hex)
 
     def _update_view_btn_styles(self):
         active_style = f"QPushButton {{ background-color: #0071E3; color: #FFFFFF; border: none; border-radius: 14px; padding: 0 16px; font-weight: 700; font-family: {FONT_FAMILY}; font-size: 12px; }} QPushButton:hover {{ background-color: #0062C4; }}"
@@ -4225,11 +4291,57 @@ class TimetableGrid(QWidget):
     def _on_vertical_header_clicked(self, logicalIndex):
         if logicalIndex < 0:
             return
-        self.table.selectRow(logicalIndex)
-        self._on_cell_clicked(logicalIndex, 0)
+        # table.selectRow() burada hiçbir şey yapmıyor: tablo SingleSelection +
+        # (varsayılan) SelectItems olduğu için QTableView::selectRow() daha ilk
+        # satırda geri dönüyor. Sonuçta currentRow() eski satırda ya da -1'de
+        # kalıyordu ve sonradan target_entity=None ile çağrılan
+        # _refresh_unplaced_lessons dock'u bir önceki öğretmene geri çeviriyordu.
+        # Geçerli hücreyi doğrudan kuruyoruz: hem satır seçimi doğru oluyor hem
+        # de currentRow() bu satırı gösteriyor.
+        col = self.table.currentColumn()
+        if col < 0:
+            col = 0
+        self._suppress_cell_click = True
+        try:
+            self.table.setCurrentCell(logicalIndex, col)
+        finally:
+            self._suppress_cell_click = False
+
+        entity_name = ""
+        if self.current_view_mode == "classes":
+            if hasattr(self, "class_list") and 0 <= logicalIndex < len(self.class_list):
+                entity_name = self.class_list[logicalIndex]
+        else:
+            if hasattr(self, "teacher_list") and 0 <= logicalIndex < len(self.teacher_list):
+                entity_name = self.teacher_list[logicalIndex]
+
+        # İsme tıklayınca bilgi paneli boşalıyor; o hâlde seçili ders bilgisi de
+        # temizlenmeli, yoksa renk kutusuna basınca bir önceki hücrenin dersi
+        # düzenlenir.
+        self._current_selected_lesson_info = None
+        self._current_selected_pos = (logicalIndex, col)
+        self.update_info_panel(None)
+        win = self.window()
+        if hasattr(win, "_editor") and getattr(win, "_editor"):
+            win = win._editor
+        elif not hasattr(win, "_refresh_unplaced_lessons"):
+            curr = self
+            while curr is not None:
+                if hasattr(curr, "_refresh_unplaced_lessons"):
+                    win = curr
+                    break
+                curr = curr.parent()
+        if hasattr(win, "_refresh_unplaced_lessons"):
+            win._refresh_unplaced_lessons(target_entity=entity_name)
 
     def _on_cell_clicked(self, row, col):
         """Show lesson info in the bottom-left panel when a cell is clicked (aSc-style) and filter unplaced dock."""
+        # Satır başlığına (öğretmen/sınıf adına) tıklandığında setCurrentCell ->
+        # currentCellChanged -> buraya geliyoruz. Başlık işleyicisi dock'u doğru
+        # varlık için zaten tazeleyecek; burada ikinci kez çalışmak hem bilgi
+        # panelini titretiyor hem de pahalı yenilemeyi iki kez yaptırıyor.
+        if getattr(self, "_suppress_cell_click", False):
+            return
         orig_r, orig_c, orig_dur, info = self.table._get_lesson_origin(row, col) if hasattr(self.table, "_get_lesson_origin") else (row, col, 1, None)
         if not info:
             info = self._placed_lessons.get((row, col))
@@ -4255,6 +4367,15 @@ class TimetableGrid(QWidget):
                 entity_name = self.teacher_list[row]
                 
         win = self.window()
+        if hasattr(win, "_editor") and getattr(win, "_editor"):
+            win = win._editor
+        elif not hasattr(win, "_refresh_unplaced_lessons"):
+            curr = self
+            while curr is not None:
+                if hasattr(curr, "_refresh_unplaced_lessons"):
+                    win = curr
+                    break
+                curr = curr.parent()
         if hasattr(win, "_refresh_unplaced_lessons"):
             win._refresh_unplaced_lessons(target_entity=entity_name)
 
@@ -4277,9 +4398,13 @@ class TimetableGrid(QWidget):
         
         win = self.window()
         data_store = getattr(win, "data_store", None)
-        from dialogs.color_picker_dialog import resolve_subject_color
-        color_key = subj or ""
-        color = resolve_subject_color(color_key, data_store) if color_key else info.get("color", "#2563EB")
+        view_mode = getattr(self, "current_view_mode", "classes")
+        if view_mode == "teachers" and cls:
+            from dialogs.color_picker_dialog import resolve_class_color
+            color = resolve_class_color(cls, data_store)
+        else:
+            from dialogs.color_picker_dialog import resolve_subject_color
+            color = resolve_subject_color(subj, data_store) if subj else info.get("color", "#2563EB")
         info["color"] = color
         
         # Color Box

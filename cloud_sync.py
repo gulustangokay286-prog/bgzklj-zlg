@@ -205,6 +205,16 @@ class CloudSyncWorker(QObject):
                             self._queue.popleft()
                     self._safe_emit(self.sync_status_changed, "Veritabanı korunuyor")
                 else:
+                    # A CAS conflict is a completed decision, not a transient
+                    # network failure. Drop that queue item after its conflict copy
+                    # has been preserved; retrying it forever would keep replaying
+                    # the stale snapshot over every one-second pull.
+                    if getattr(api_client, "last_error", None) in ("conflict", "deleted"):
+                        with self._lock:
+                            if len(self._queue) > 0:
+                                self._queue.popleft()
+                        self._safe_emit(self.sync_status_changed, "Çakışan kayıt yerel yedeğe alındı")
+                        continue
                     self._safe_emit(self.sync_status_changed, "Bağlantı bekleniyor...")
                     self._sleep_interruptible(3)
             else:
@@ -262,7 +272,10 @@ class CloudSyncWorker(QObject):
         """
         if self._offline_streak:
             return min(10.0 * (2 ** min(self._offline_streak, 5)), 300.0)
-        return 3.0
+        # The index is hash-only and the WebSocket is the primary path. Keep a
+        # one-second safety poll so a blocked corporate proxy still converges almost
+        # immediately; the request is only a few KB and downloads changed versions.
+        return 1.0
 
     def request_pull(self):
         """Asks the worker to sync now — called when a realtime nudge arrives."""

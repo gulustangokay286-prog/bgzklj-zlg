@@ -1073,14 +1073,17 @@ class AutoScheduleDialog(QDialog):
                 s = item.get("subject_name") or item.get("subject") or ""
                 cl = item.get("class_name") or item.get("class") or ""
                 dur = int(item.get("duration", 1))
-                color = get_subject_color(s)
+                # Renk yerleştirmeye YAZILMAZ. Tek doğru kaynak resolve_class_color /
+                # resolve_subject_color; buraya bir hex çakılırsa oto ile manuel
+                # aynı sınıfa farklı renk verir ve çarşaf değiştirince bayat kalır.
+                color = None
                 is_locked = bool(item.get("locked", False))
                 new_placements.append({
                     "row": r, "col": c, "period": r, "day": c,
                     "teacher_name": t, "teacher": t,
                     "subject_name": s, "subject": s,
                     "class_name": cl, "class": cl,
-                    "color": color,
+
                     "duration": dur,
                     "locked": is_locked,
                     "block_id": item.get("block_id", ""),

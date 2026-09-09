@@ -16,6 +16,205 @@ from PySide6.QtWidgets import QAbstractItemView
 
 FONT_FAMILY = ".AppleSystemUIFont, SF Pro Text, Helvetica Neue, Segoe UI, sans-serif"
 
+def check_undo_removes_assigned_entity(widget, current_store, prev_store, out_removed_entities=None) -> bool:
+    """
+    Checks if restoring prev_store would delete/remove any lesson, teacher, or class
+    that currently has active assignments (atamalar).
+    If so, prompts the user:
+    "Geri alma işlemi sonucunda '{entity_name}' {entity_type} kaldırılacaktır.
+     Bu kayda ait {count} adet ders ataması bulunmaktadır.
+     Kaydı geri alıp bağlı tüm atamalarını da kaldırmak istiyor musunuz?"
+    
+    Returns:
+        True: User confirmed or no assigned entity is being deleted -> proceed with undo.
+        False: User declined (No) -> cancel undo.
+    """
+    from auto_scheduler import format_tr_name, matches_class
+    from version_store import _matches_teacher
+    from PySide6.QtWidgets import QMessageBox
+
+    test_mode = getattr(widget, "_test_mode", False) or getattr(getattr(widget, "main_window", None), "_test_mode", False)
+    test_confirm = getattr(widget, "_test_confirm_undo", True)
+
+    to_remove = []
+
+    # 1. Check Dersler (Lessons)
+    curr_lessons = [d.get("ad", "").strip() for d in current_store.get("dersler", []) if d.get("ad")]
+    prev_lessons_fmt = {format_tr_name(d.get("ad", "")) for d in prev_store.get("dersler", []) if d.get("ad")}
+    
+    for l_name in curr_lessons:
+        l_fmt = format_tr_name(l_name)
+        if l_fmt not in prev_lessons_fmt:
+            matching_atama = [
+                a for a in current_store.get("atamalar", [])
+                if format_tr_name(a.get("subject", "")) == l_fmt
+            ]
+            if matching_atama:
+                count = len(matching_atama)
+                if test_mode:
+                    if not test_confirm:
+                        return False
+                    to_remove.append(("lesson", l_name))
+                    continue
+                r = QMessageBox.question(
+                    widget,
+                    "Geri Alma Onayı — Atanmış Ders",
+                    f"Geri alma işlemi sonucunda '{l_name}' dersi kaldırılacaktır.\n\n"
+                    f"Bu derse ait {count} adet ders ataması bulunmaktadır.\n\n"
+                    f"Dersi geri alıp bağlı tüm atamalarını da kaldırmak istiyor musunuz?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+                if r != QMessageBox.Yes:
+                    return False
+                to_remove.append(("lesson", l_name))
+
+    # 2. Check Öğretmenler (Teachers)
+    curr_teachers = [t.get("ad", "").strip() for t in current_store.get("ogretmenler", []) if t.get("ad")]
+    prev_teachers_fmt = {format_tr_name(t.get("ad", "")) for t in prev_store.get("ogretmenler", []) if t.get("ad")}
+    
+    for t_name in curr_teachers:
+        t_fmt = format_tr_name(t_name)
+        if t_fmt not in prev_teachers_fmt:
+            matching_atama = [
+                a for a in current_store.get("atamalar", [])
+                if _matches_teacher(a.get("teacher", ""), t_name) or format_tr_name(a.get("teacher", "")) == t_fmt
+            ]
+            if matching_atama:
+                count = len(matching_atama)
+                if test_mode:
+                    if not test_confirm:
+                        return False
+                    to_remove.append(("teacher", t_name))
+                    continue
+                r = QMessageBox.question(
+                    widget,
+                    "Geri Alma Onayı — Görevlendirilmiş Öğretmen",
+                    f"Geri alma işlemi sonucunda '{t_name}' öğretmeni kaldırılacaktır.\n\n"
+                    f"Bu öğretmene ait {count} adet ders ataması bulunmaktadır.\n\n"
+                    f"Öğretmeni geri alıp bağlı tüm atamalarını da kaldırmak istiyor musunuz?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+                if r != QMessageBox.Yes:
+                    return False
+                to_remove.append(("teacher", t_name))
+
+    # 3. Check Sınıflar (Classes)
+    curr_classes = [c.get("ad", "").strip() for c in current_store.get("siniflar", []) if c.get("ad")]
+    prev_classes_fmt = {format_tr_name(c.get("ad", "")) for c in prev_store.get("siniflar", []) if c.get("ad")}
+    
+    for c_name in curr_classes:
+        c_fmt = format_tr_name(c_name)
+        if c_fmt not in prev_classes_fmt:
+            matching_atama = [
+                a for a in current_store.get("atamalar", [])
+                if matches_class(a.get("class", ""), c_name) or format_tr_name(a.get("class", "")) == c_fmt or (isinstance(a.get("combined_classes"), list) and any(matches_class(x, c_name) for x in a["combined_classes"]))
+            ]
+            if matching_atama:
+                count = len(matching_atama)
+                if test_mode:
+                    if not test_confirm:
+                        return False
+                    to_remove.append(("class", c_name))
+                    continue
+                r = QMessageBox.question(
+                    widget,
+                    "Geri Alma Onayı — Atanmış Sınıf",
+                    f"Geri alma işlemi sonucunda '{c_name}' sınıfı kaldırılacaktır.\n\n"
+                    f"Bu sınıfa ait {count} adet ders ataması bulunmaktadır.\n\n"
+                    f"Sınıfı geri alıp bağlı tüm atamalarını da kaldırmak istiyor musunuz?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+                if r != QMessageBox.Yes:
+                    return False
+                to_remove.append(("class", c_name))
+
+    if out_removed_entities is not None:
+        out_removed_entities.extend(to_remove)
+
+    return True
+
+
+def purge_entity_references(data_store, entity_type, entity_name):
+    """
+    Purges assignments, grid placements, and yerlesim only for the specific entity
+    that was confirmed to be removed during undo.
+    """
+    from auto_scheduler import format_tr_name, matches_class
+    from version_store import _matches_teacher
+
+    del_fmt = format_tr_name(entity_name)
+
+    if entity_type == "lesson":
+        data_store["atamalar"] = [
+            a for a in data_store.get("atamalar", [])
+            if format_tr_name(a.get("subject", "")) != del_fmt
+        ]
+        data_store["grid_placements"] = [
+            p for p in data_store.get("grid_placements", [])
+            if format_tr_name(p.get("subject_name") or p.get("subject", "")) != del_fmt
+        ]
+        yerlesim = data_store.get("yerlesim", {})
+        if isinstance(yerlesim, dict):
+            for k in list(yerlesim.keys()):
+                info = yerlesim[k]
+                if isinstance(info, dict) and format_tr_name(info.get("subject_name") or info.get("subject", "")) == del_fmt:
+                    yerlesim.pop(k, None)
+        if "auto_schedule_results" in data_store:
+            data_store["auto_schedule_results"] = [
+                p for p in data_store.get("auto_schedule_results", [])
+                if format_tr_name(p.get("subject_name") or p.get("subject", "")) != del_fmt
+            ]
+
+    elif entity_type == "teacher":
+        data_store["atamalar"] = [
+            a for a in data_store.get("atamalar", [])
+            if not _matches_teacher(a.get("teacher", ""), entity_name) and format_tr_name(a.get("teacher", "")) != del_fmt
+        ]
+        data_store["grid_placements"] = [
+            p for p in data_store.get("grid_placements", [])
+            if not _matches_teacher(p.get("teacher_name") or p.get("teacher", ""), entity_name) and format_tr_name(p.get("teacher_name") or p.get("teacher", "")) != del_fmt
+        ]
+        yerlesim = data_store.get("yerlesim", {})
+        if isinstance(yerlesim, dict):
+            for k in list(yerlesim.keys()):
+                info = yerlesim[k]
+                if isinstance(info, dict) and (_matches_teacher(info.get("teacher_name") or info.get("teacher", ""), entity_name) or format_tr_name(info.get("teacher_name") or info.get("teacher", "")) == del_fmt):
+                    yerlesim.pop(k, None)
+        if "auto_schedule_results" in data_store:
+            data_store["auto_schedule_results"] = [
+                p for p in data_store.get("auto_schedule_results", [])
+                if not _matches_teacher(p.get("teacher_name") or p.get("teacher", ""), entity_name) and format_tr_name(p.get("teacher_name") or p.get("teacher", "")) != del_fmt
+            ]
+
+    elif entity_type == "class":
+        data_store["atamalar"] = [
+            a for a in data_store.get("atamalar", [])
+            if not (matches_class(a.get("class", ""), entity_name) or a.get("class") == entity_name or
+                    (isinstance(a.get("combined_classes"), list) and any(matches_class(x, entity_name) for x in a["combined_classes"])))
+        ]
+        data_store["grid_placements"] = [
+            p for p in data_store.get("grid_placements", [])
+            if not (matches_class(p.get("class_name") or p.get("class", ""), entity_name) or
+                    (isinstance(p.get("combined_classes"), list) and any(matches_class(x, entity_name) for x in p["combined_classes"])))
+        ]
+        yerlesim = data_store.get("yerlesim", {})
+        if isinstance(yerlesim, dict):
+            for k in list(yerlesim.keys()):
+                info = yerlesim[k]
+                if isinstance(info, dict) and (matches_class(info.get("class_name") or info.get("class", ""), entity_name) or
+                                               (isinstance(info.get("combined_classes"), list) and any(matches_class(x, entity_name) for x in info["combined_classes"]))):
+                    yerlesim.pop(k, None)
+        if "auto_schedule_results" in data_store:
+            data_store["auto_schedule_results"] = [
+                p for p in data_store.get("auto_schedule_results", [])
+                if not (matches_class(p.get("class_name") or p.get("class", ""), entity_name) or
+                        (isinstance(p.get("combined_classes"), list) and any(matches_class(x, entity_name) for x in p["combined_classes"])))
+            ]
+
+
 class DragDropTableWidget(QTableWidget):
     row_dropped = Signal(int, int) # start_row, dest_row
 
@@ -329,59 +528,85 @@ class MiniTimeoffGridWidget(QWidget):
         self.periods = max(1, int(periods))
         self.setToolTip("Çift Tıklayarak Zaman Tablosu / Kısıtlama Ayarlarını Açın")
         
-        # Sizing: Days on X-axis (e.g. 5 cols * 11px = 56px), Periods on Y-axis (e.g. 8 rows * 2.8px = 23px)
-        w = max(48, min(75, self.days * 11 + 1))
-        h = max(20, min(28, self.periods * 3 + 1))
+        # ÖLÇÜ: hücre boyutu ÖNCE seçilir, kutu ondan türetilir.
+        #
+        # Eskiden tersiydi: sabit bir kutu boyutu alınıp hücre sınırları
+        # int(p*(h-1)/rows) ile hesaplanıyordu. Bölme tam bölünmediğinde
+        # satırların kimi 2 kimi 3 piksel çıkıyor, ızgara çizgileri de hücrenin
+        # ÜSTÜNE çizildiği için ince satırların rengi yeniyordu: en alttaki
+        # neredeyse görünmüyor, aradaki bazı siyah çizgiler kalın duruyordu.
+        #
+        # Artık her hücre birebir aynı boyutta ve çizgiler hücrelerin ARASINDA
+        # duruyor (kutu önce siyaha boyanıp hücreler 1 piksel içeriden
+        # dolduruluyor), yani hiçbir satır bir diğerinden ince olamaz.
+        self.cell_w, self.cell_h = self._pick_cell_size()
+        w = self.days * (self.cell_w + 1) + 1
+        h = self.periods * (self.cell_h + 1) + 1
         self.setFixedSize(w, h)
+
+    # Kutuya GERÇEKTE kalan yer: satır 44 piksel, QTableWidget::item dikey iç
+    # boşluğu 4+4 = 8 piksel alıyor -> 36. Bu tavan aşılırsa widget alttan
+    # kırpılır ve son ders saatleri hiç görünmez (yaşanan hata buydu).
+    # Satır artık kutuya göre büyüdüğü için (bkz. _add_row) tavan yalnızca
+    # kutunun makul kalmasını sağlıyor; kırpılmayı önleyen şey tavan değil,
+    # satırın kutuya uydurulması.
+    MAX_H = 40
+    MAX_W = 76
+
+    def _pick_cell_size(self):
+        """(hücre_genişliği, hücre_yüksekliği) — sığan en büyük boy.
+
+        Ayraç çizgileri HER ZAMAN kalır; sığdırmak için hücre küçültülür.
+        Ayraçları kaldırıp hücreyi büyütmeyi denemek yanlıştı: aynı renkteki
+        komşu saatler tek bir bloğa yapışıyor, kullanıcı kaç saat olduğunu
+        ayırt edemiyordu. 1 piksellik hücre bile ayraçla birlikte sayılabilir
+        kalıyor.
+        """
+        cw = 2
+        for cand in range(13, 1, -1):
+            if self.days * (cand + 1) + 1 <= self.MAX_W:
+                cw = cand
+                break
+
+        ch = 1
+        for cand in (4, 3, 2, 1):
+            if self.periods * (cand + 1) + 1 <= self.MAX_H:
+                ch = cand
+                break
+        return cw, ch
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, False)
-        
-        w = self.width()
-        h = self.height()
-        
-        cols = self.days     # X-axis: Days (Pazartesi .. Cuma)
-        rows = self.periods  # Y-axis: Periods (1. Ders .. 8. Ders, top to bottom)
-        
-        # 1. Fill solid colored cells: row p (periods, top to bottom), col d (days, left to right)
+
+        cols = self.days     # X ekseni: günler
+        rows = self.periods  # Y ekseni: ders saatleri (yukarıdan aşağı)
+        cw, ch = self.cell_w, self.cell_h
+
+        # Izgara, hücrelerin ÜSTÜNE çizilmiyor: önce bütün kutu siyaha boyanıp
+        # hücreler 1 piksel içeriden dolduruluyor. Böylece çizgiler tam olarak
+        # hücrelerin arasında kalıyor, her çizgi tam 1 piksel ve her hücre
+        # birebir aynı boyutta oluyor.
+        painter.fillRect(self.rect(), QColor("#000000"))
+
         for p in range(rows):
-            y_start = int(p * (h - 1) / rows)
-            y_end = int((p + 1) * (h - 1) / rows)
-            cell_h = y_end - y_start
-            
+            y = 1 + p * (ch + 1)
             for d in range(cols):
-                x_start = int(d * (w - 1) / cols)
-                x_end = int((d + 1) * (w - 1) / cols)
-                cell_w = x_end - x_start
-                
-                # timeoff_data is indexed as [day_idx][period_idx]
-                val = 2  # Default open/ideal
-                if self.timeoff_data and d < len(self.timeoff_data) and p < len(self.timeoff_data[d]):
+                x = 1 + d * (cw + 1)
+
+                # timeoff_data, constraint_sync.get_matrix'ten gelen HAZIR matris:
+                # boyutu her zaman gün x saat, kişisel kısıtlar işlenmiş, durumlar
+                # normalleştirilmiş. Eskiden burası entity["timeoff"]'u HAM okuyup
+                # dizinin kısa kaldığı saatleri "açık" sayıyordu; diyalog ise
+                # get_matrix kullandığı için ikisi ayrışıyor, kapatılan son saat
+                # önizlemede yeşil kalıyordu.
+                val = 2
+                if d < len(self.timeoff_data or []) and p < len(self.timeoff_data[d]):
                     val = self.timeoff_data[d][p]
-                    
-                if val == 2:
-                    color = QColor("#00C800")  # Authentic bright green
-                elif val == 1:
-                    color = QColor("#FACC15")  # Yellow
-                else:
-                    color = QColor("#DC2626")  # Red
-                    
-                painter.fillRect(x_start, y_start, cell_w, cell_h, color)
-                
-        # 2. Draw crisp 1px black grid lines and outer border
-        painter.setPen(QPen(QColor("#000000"), 1))
-        
-        # Vertical grid lines (between days)
-        for d in range(cols + 1):
-            x = int(d * (w - 1) / cols)
-            painter.drawLine(x, 0, x, h - 1)
-            
-        # Horizontal grid lines (between periods)
-        for p in range(rows + 1):
-            y = int(p * (h - 1) / rows)
-            painter.drawLine(0, y, w - 1, y)
+
+                painter.fillRect(x, y, cw, ch,
+                                 QColor("#00C800") if val == 2 else QColor("#DC2626"))
 
 
 class ActionButton(QPushButton):
@@ -481,12 +706,72 @@ class MasterDataDialog(QDialog):
             if k not in self.data_store:
                 self.data_store[k] = []
         
+        if parent and hasattr(parent, "_history_stack"):
+            self._history_stack = parent._history_stack
+            self._redo_stack = parent._redo_stack
+        else:
+            self._history_stack = []
+            self._redo_stack = []
+        
         self._build_ui()
         self._load_existing_data()
         self._select_tab(start_idx)
+        self._update_undo_redo_ui()
 
     def _load_data(self):
         self._load_existing_data()
+
+    def _update_count_labels(self):
+        """Sekmelerin sağ üstündeki sade özeti tazeler: kaç kayıt, kaç saat.
+
+        Saat, atamalardaki haftalık ders saatlerinin toplamı. Ders sekmesinde
+        o dersin, sınıf sekmesinde o sınıfın, öğretmen sekmesinde o öğretmenin
+        saatleri toplanıyor; derslikte saat kavramı olmadığı için yalnız sayı
+        gösteriliyor.
+        """
+        labels = getattr(self, "count_labels", None)
+        if not labels:
+            return
+
+        atamalar = self.data_store.get("atamalar", []) or []
+
+        def _hours(field):
+            tot = 0
+            for a in atamalar:
+                if not isinstance(a, dict):
+                    continue
+                if not str(a.get(field) or "").strip():
+                    continue
+                try:
+                    tot += int(a.get("duration") or a.get("hours") or 1)
+                except (TypeError, ValueError):
+                    tot += 1
+            return tot
+
+        # Sekme sırası: Dersler, Sınıflar, Derslikler, Öğretmenler.
+        specs = [
+            ("dersler", "ders", "subject", "Tanımlı ders sayısı ve bu derslere atanmış toplam haftalık ders saati."),
+            ("siniflar", "sınıf", "class", "Tanımlı sınıf sayısı ve sınıflara atanmış toplam haftalık ders saati."),
+            ("derslikler", "derslik", None, "Tanımlı derslik sayısı."),
+            ("ogretmenler", "öğretmen", "teacher", "Tanımlı öğretmen sayısı ve öğretmenlere atanmış toplam haftalık ders saati."),
+        ]
+        icons = getattr(self, "count_icons", []) or []
+
+        for i, (key, word, field, tip) in enumerate(specs):
+            if i >= len(labels):
+                break
+            n = len([x for x in (self.data_store.get(key) or [])
+                     if isinstance(x, dict) and str(x.get("ad") or "").strip()])
+            if field:
+                h = _hours(field)
+                labels[i].setText(f"{n} {word}  ·  {h} saat")
+                full_tip = f"{tip}\n\n{n} {word}, toplam {h} saat."
+            else:
+                labels[i].setText(f"{n} {word}")
+                full_tip = f"{tip}\n\n{n} {word}."
+            labels[i].setToolTip(full_tip)
+            if i < len(icons):
+                icons[i].setToolTip(full_tip)
 
     def _load_existing_data(self):
         # Reset row counts to avoid duplicate row stacking
@@ -525,7 +810,7 @@ class MasterDataDialog(QDialog):
 
         for data in self.data_store.get("dersler", []):
             toplam = str(totals["dersler"].get(data.get("ad", ""), 0))
-            self._add_row(self.table_ders, [data.get("ad",""), data.get("kisa",""), toplam, "Mevcut", "İdeal", str(data.get("max_gunluk", periods))], timeoff=data.get("timeoff"), days_cnt=len(days), periods_cnt=periods)
+            self._add_row(self.table_ders, [data.get("ad",""), data.get("kisa",""), toplam, "Mevcut", "İdeal", str(data.get("max_gunluk", periods))], timeoff=self._timeoff_matrix(data), days_cnt=len(days), periods_cnt=periods)
         
         for data in self.data_store.get("siniflar", []):
             toplam = str(totals["siniflar"].get(data.get("ad", ""), 0))
@@ -536,9 +821,9 @@ class MasterDataDialog(QDialog):
                 open_cells = sum(1 for r in timeoff for c in r if c > 0)
                 zaman_str = f"{open_cells} Ders"
                 
-            self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), toplam, zaman_str, data.get("ders_bitimi","15:30"), data.get("sinif_ogretmeni",""), data.get("kapasite","30")], timeoff=data.get("timeoff"), days_cnt=len(days), periods_cnt=periods)
+            self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), toplam, zaman_str, data.get("ders_bitimi","15:30"), data.get("sinif_ogretmeni",""), data.get("kapasite","30")], timeoff=self._timeoff_matrix(data), days_cnt=len(days), periods_cnt=periods)
         for data in self.data_store.get("derslikler", []):
-            self._add_row(self.table_derslik, [data.get("ad",""), data.get("kisa",""), "0", "Mevcut", data.get("kapasite",""), "Merkez"], timeoff=data.get("timeoff"), days_cnt=len(days), periods_cnt=periods)
+            self._add_row(self.table_derslik, [data.get("ad",""), data.get("kisa",""), "0", "Mevcut", data.get("kapasite",""), "Merkez"], timeoff=self._timeoff_matrix(data), days_cnt=len(days), periods_cnt=periods)
         # Build Class Teacher mapping strictly from siniflar
         class_teacher_map = {}
         for s in self.data_store.get("siniflar", []):
@@ -584,7 +869,10 @@ class MasterDataDialog(QDialog):
             
             self._add_row(self.table_ogretmen, [
                 t_name, data.get("kisa",""), toplam, zaman_str, so_class, brans, atanan_dersler_str
-            ], timeoff=data.get("timeoff"), days_cnt=len(days), periods_cnt=periods)
+            ], timeoff=self._timeoff_matrix(data), days_cnt=len(days), periods_cnt=periods)
+
+        # Tablolar yeniden dolduğuna göre sağ üstteki sayılar da tazelenmeli.
+        self._update_count_labels()
 
     def _toggle_maximize_restore(self):
         if self.isMaximized():
@@ -813,6 +1101,16 @@ class MasterDataDialog(QDialog):
                 self.btn_redo.setStyleSheet("background: #0078D7; border: 1px solid #005A9E; color: #FFFFFF; font-weight: bold; border-radius: 4px;")
             else:
                 self.btn_redo.setStyleSheet("background: #F1F5F9; border: 1px solid #CBD5E1; color: #94A3B8; font-weight: bold; border-radius: 4px;")
+        # Yığın ana pencereyle PAYLAŞILIYOR (bkz. __init__: self._history_stack
+        # = parent._history_stack). Sheet içinde yapılan her itme şeritteki
+        # Geri Al düğmesini de canlandırmalı; yoksa sheet kapandığında şerit
+        # dolu bir yığınla soluk kalıyor.
+        mw = getattr(self, "main_window", None)
+        if mw is not None and hasattr(mw, "_update_undo_redo_ui"):
+            try:
+                mw._update_undo_redo_ui()
+            except Exception:
+                pass
 
     def _sync_class_teacher_two_way(self):
         """
@@ -852,108 +1150,164 @@ class MasterDataDialog(QDialog):
             assigned_cls = teacher_to_class.get(t_fmt, "")
             t["sinif_ogretmeni"] = assigned_cls
 
+    def _notify_main_window_refresh(self):
+        win = getattr(self, "main_window", None) or self.parent() or self.window()
+        if not win or not hasattr(win, "_grid"):
+            p = self.parent()
+            while p:
+                if hasattr(p, "_grid"):
+                    win = p
+                    break
+                p = p.parent()
+        if win:
+            if hasattr(win, "data_store") and win.data_store is not self.data_store:
+                win.data_store.clear()
+                win.data_store.update(self.data_store)
+            if hasattr(win, "save_db") and callable(getattr(win, "save_db")):
+                try:
+                    win.save_db(sync_from_grid=False)
+                except Exception as e:
+                    print("save_db error:", e)
+            if hasattr(win, "_refresh_tree") and callable(getattr(win, "_refresh_tree")):
+                try:
+                    win._refresh_tree()
+                except Exception as e:
+                    print("_refresh_tree error:", e)
+            if hasattr(win, "_load_unplaced_lessons") and callable(getattr(win, "_load_unplaced_lessons")):
+                try:
+                    win._load_unplaced_lessons()
+                except Exception as e:
+                    print("_load_unplaced_lessons error:", e)
+            if hasattr(win, "_restore_grid_placements") and callable(getattr(win, "_restore_grid_placements")):
+                try:
+                    win._restore_grid_placements()
+                except Exception as e:
+                    print("_restore_grid_placements error:", e)
+            if hasattr(win, "_refresh_unplaced_lessons") and callable(getattr(win, "_refresh_unplaced_lessons")):
+                try:
+                    win._refresh_unplaced_lessons()
+                except Exception as e:
+                    print("_refresh_unplaced_lessons error:", e)
+            if hasattr(win, "_refresh_grid") and callable(getattr(win, "_refresh_grid")):
+                try:
+                    win._refresh_grid()
+                except Exception as e:
+                    print("_refresh_grid error:", e)
+
     def _push_undo_state(self):
         import copy
         if not hasattr(self, "_history_stack"): self._history_stack = []
         if not hasattr(self, "_redo_stack"): self._redo_stack = []
+        if self._history_stack and self._history_stack[-1] == self.data_store:
+            return
         if len(self._history_stack) > 50:
             self._history_stack.pop(0)
         self._history_stack.append(copy.deepcopy(self.data_store))
         self._redo_stack.clear()
         self._update_undo_redo_ui()
 
+    def _push_undo_snapshot(self, snapshot):
+        import copy
+        if snapshot is None:
+            return
+        if not hasattr(self, "_history_stack"): self._history_stack = []
+        if not hasattr(self, "_redo_stack"): self._redo_stack = []
+        if self._history_stack and self._history_stack[-1] == snapshot:
+            return
+        if len(self._history_stack) > 50:
+            self._history_stack.pop(0)
+        self._history_stack.append(copy.deepcopy(snapshot))
+        self._redo_stack.clear()
+        self._update_undo_redo_ui()
+
     def _act_undo(self):
         import copy
         if hasattr(self, "_history_stack") and self._history_stack:
+            prev_state = self._history_stack.pop()
+
+            removed_entities = []
+            if not check_undo_removes_assigned_entity(self, self.data_store, prev_state, out_removed_entities=removed_entities):
+                self._history_stack.append(prev_state)
+                self._update_undo_redo_ui()
+                return
+
             if not hasattr(self, "_redo_stack"): self._redo_stack = []
             self._redo_stack.append(copy.deepcopy(self.data_store))
-            prev_state = self._history_stack.pop()
+
             self.data_store.clear()
             self.data_store.update(prev_state)
+            for etype, ename in removed_entities:
+                purge_entity_references(self.data_store, etype, ename)
             self._sync_class_teacher_two_way()
-            trigger_save_db(self, self.data_store)
             if hasattr(self, "_load_existing_data"):
                 self._load_existing_data()
+            self._notify_main_window_refresh()
             self._update_undo_redo_ui()
             win = self.window() or self.parent()
-            if win and hasattr(win, "_refresh_tree"):
-                win._refresh_tree()
-            if win and hasattr(win, "_refresh_grid"):
-                win._refresh_grid()
-            if win and hasattr(win, "statusBar"):
-                win.statusBar().showMessage("↺ Yapılan son işlem başarıyla geri alındı.")
+            if win and hasattr(win, "statusBar") and callable(getattr(win, "statusBar")):
+                sb = win.statusBar()
+                if sb: sb.showMessage("↺ Yapılan son işlem başarıyla geri alındı.")
         else:
+            self._update_undo_redo_ui()
             win = self.window() or self.parent()
-            if win and hasattr(win, "statusBar"):
-                win.statusBar().showMessage("⚠️ Geri alınacak başka işlem yok.")
+            if win and hasattr(win, "statusBar") and callable(getattr(win, "statusBar")):
+                sb = win.statusBar()
+                if sb: sb.showMessage("⚠️ Geri alınacak başka işlem yok.")
 
     def _act_redo(self):
         import copy
         if hasattr(self, "_redo_stack") and self._redo_stack:
+            next_state = self._redo_stack.pop()
+
             if not hasattr(self, "_history_stack"): self._history_stack = []
             self._history_stack.append(copy.deepcopy(self.data_store))
-            next_state = self._redo_stack.pop()
+
             self.data_store.clear()
             self.data_store.update(next_state)
             self._sync_class_teacher_two_way()
-            trigger_save_db(self, self.data_store)
             if hasattr(self, "_load_existing_data"):
                 self._load_existing_data()
+            self._notify_main_window_refresh()
             self._update_undo_redo_ui()
             win = self.window() or self.parent()
-            if win and hasattr(win, "_refresh_tree"):
-                win._refresh_tree()
-            if win and hasattr(win, "_refresh_grid"):
-                win._refresh_grid()
-            if win and hasattr(win, "statusBar"):
-                win.statusBar().showMessage("↻ İşlem başarıyla tekrar uygulandı.")
+            if win and hasattr(win, "statusBar") and callable(getattr(win, "statusBar")):
+                sb = win.statusBar()
+                if sb: sb.showMessage("↻ İşlem başarıyla tekrar uygulandı.")
         else:
+            self._update_undo_redo_ui()
             win = self.window() or self.parent()
-            if win and hasattr(win, "statusBar"):
-                win.statusBar().showMessage("⚠️ Yinelenecek başka işlem yok.")
+            if win and hasattr(win, "statusBar") and callable(getattr(win, "statusBar")):
+                sb = win.statusBar()
+                if sb: sb.showMessage("⚠️ Yinelenecek başka işlem yok.")
 
     def _reset_all_class_assignments(self):
-        r = QMessageBox.question(
-            self,
-            "Tüm Sınıf Atamalarını Sıfırla",
-            "TÜM sınıflara ait ders ve öğretmen görevlendirmeleri tamamen silinecektir.\n\nEmin misiniz?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
+        test_mode = getattr(self, "_test_mode", False) or getattr(getattr(self, "main_window", None), "_test_mode", False)
+        if not test_mode:
+            r = QMessageBox.question(
+                self,
+                "Tüm Sınıf Atamalarını Sıfırla",
+                "TÜM sınıflara ait ders ve öğretmen görevlendirmeleri tamamen silinecektir.\n\nEmin misiniz?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+        else:
+            r = QMessageBox.Yes
         if r == QMessageBox.Yes:
+            self._push_undo_state()
             self.data_store["atamalar"] = []
             self.data_store["grid_placements"] = []
             self.data_store["yerlesim"] = {}
-            trigger_save_db(self, self.data_store)
-            
-            # Find main window to refresh grid and tree
-            win = self.window()
-            if not win or not hasattr(win, "_grid"):
-                p = self.parent()
-                while p:
-                    if hasattr(p, "_grid"):
-                        win = p
-                        break
-                    p = p.parent()
-            if win:
-                if hasattr(win, "save_db"):
-                    win.save_db(sync_from_grid=False)
-                if hasattr(win, "_refresh_tree"):
-                    win._refresh_tree()
-                if hasattr(win, "_load_unplaced_lessons"):
-                    win._load_unplaced_lessons()
-                if hasattr(win, "_grid") and hasattr(win._grid, "load_lessons"):
-                    win._grid.load_lessons({})
-                    
-            if hasattr(self, "_load_data"):
-                self._load_data()
-            QMessageBox.information(self, "Başarılı", "Tüm sınıf atamaları başarıyla sıfırlandı.")
+            if hasattr(self, "_load_existing_data"):
+                self._load_existing_data()
+            self._notify_main_window_refresh()
+            if not test_mode:
+                QMessageBox.information(self, "Başarılı", "Tüm sınıf atamaları başarıyla sıfırlandı.")
 
     def _create_table(self, headers):
         t = DragDropTableWidget(0, len(headers))
         t.setHorizontalHeaderLabels(headers)
         t.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        t.verticalHeader().setDefaultSectionSize(40)
+        t.verticalHeader().setDefaultSectionSize(44)
         t.verticalHeader().setVisible(False)
         t.setEditTriggers(QTableWidget.NoEditTriggers)
         t.setAlternatingRowColors(True)
@@ -970,7 +1324,10 @@ class MasterDataDialog(QDialog):
                 selection-color: #0369A1;
             }
             QTableWidget::item {
-                padding: 8px 12px;
+                /* Dikey iç boşluk 8'di: 40 piksellik satırdan 16 piksel yiyor,
+                   Zaman Tablosu önizlemesine 24 piksel kalıyor ve kutunun altı
+                   (son 2-3 ders saati) kırpılıyordu. */
+                padding: 4px 12px;
                 border-bottom: 1px solid #E2E8F0;
             }
             QHeaderView::section {
@@ -994,21 +1351,21 @@ class MasterDataDialog(QDialog):
         data_list = self.data_store.get(stores[idx], [])
         if 0 <= start < len(data_list):
             dest = max(0, min(dest, len(data_list) - 1))
-            
-            # Pop and insert manually in memory
-            item = data_list.pop(start)
-            data_list.insert(dest, item)
-            
-            # Re-render UI table to match memory
-            self._load_existing_data()
-            
-            # Highlight newly moved row
-            tables = [self.table_ders, self.table_sinif, self.table_derslik, self.table_ogretmen]
-            t = tables[idx]
-            t.selectRow(dest)
-            
-            p = self.parent() or getattr(self, "main_window", None)
-            if p and hasattr(p, "save_db"): p.save_db()
+            if start != dest:
+                self._push_undo_state()
+                # Pop and insert manually in memory
+                item = data_list.pop(start)
+                data_list.insert(dest, item)
+                
+                # Re-render UI table to match memory
+                self._load_existing_data()
+                
+                # Highlight newly moved row
+                tables = [self.table_ders, self.table_sinif, self.table_derslik, self.table_ogretmen]
+                t = tables[idx]
+                t.selectRow(dest)
+                
+                self._notify_main_window_refresh()
 
     def _on_table_clicked(self, row, col):
         pass # Let row selection happen naturally
@@ -1034,7 +1391,32 @@ class MasterDataDialog(QDialog):
         lbl.setStyleSheet("padding: 4px;")
         top_bar.addWidget(lbl)
         top_bar.addStretch(1)
-        
+
+        # Sağ üstte özet: "16 öğretmen · 128 saat". Çıplak (nude) — kutu, çerçeve,
+        # dolgu yok; yalnız gri ince yazı. Solunda tooltip taşıyan bir bilgi
+        # simgesi var, sayının neyi saydığı oradan okunuyor. Sekme sırasıyla
+        # saklanıyor (Dersler, Sınıflar, Derslikler, Öğretmenler);
+        # _load_existing_data her veri değişiminde tazeliyor.
+        info_icon = QLabel("ⓘ")
+        info_icon.setFont(QFont(FONT_FAMILY, 10))
+        info_icon.setStyleSheet("color: #94A3B8; background: transparent; border: none;")
+        info_icon.setCursor(Qt.WhatsThisCursor)
+
+        count_lbl = QLabel("")
+        count_lbl.setFont(QFont(FONT_FAMILY, 9))
+        count_lbl.setStyleSheet("color: #64748B; background: transparent; border: none;")
+
+        if not hasattr(self, "count_labels"):
+            self.count_labels = []
+            self.count_icons = []
+        self.count_labels.append(count_lbl)
+        self.count_icons.append(info_icon)
+
+        top_bar.addWidget(info_icon)
+        top_bar.addSpacing(5)
+        top_bar.addWidget(count_lbl)
+        top_bar.addSpacing(12)
+
         txt_search = QLineEdit()
         txt_search.setPlaceholderText("Gerçek Zamanlı Ara...")
         txt_search.setFixedWidth(220)
@@ -1055,10 +1437,10 @@ class MasterDataDialog(QDialog):
                 parts = re.split(r'(\d+)', name)
                 return [int(p) if p.isdigit() else p.lower() for p in parts]
                 
+            self._push_undo_state()
             data_list.sort(key=smart_sort)
             self._load_existing_data()
-            p = self.parent() or getattr(self, "main_window", None)
-            if p and hasattr(p, "save_db"): p.save_db()
+            self._notify_main_window_refresh()
             
         btn_sort.clicked.connect(do_sort)
         
@@ -1116,6 +1498,8 @@ class MasterDataDialog(QDialog):
         # All actions are kept enabled for now as they are universally valid in this design
 
     def _act_assign(self, teacher_name=None):
+        import copy
+        snapshot = copy.deepcopy(self.data_store)
         idx = self.stack.currentIndex()
         if idx == 1:  # Sınıflar tab
             r = self.table_sinif.currentRow()
@@ -1133,13 +1517,10 @@ class MasterDataDialog(QDialog):
                 from dialogs.edit_forms import ClassComprehensiveAssignmentDialog
                 d = ClassComprehensiveAssignmentDialog(class_name=c_name, data_store=self.data_store, parent=self)
                 if d.exec():
+                    if self.data_store != snapshot:
+                        self._push_undo_snapshot(snapshot)
                     self._load_existing_data()
-                    p = self.parent() or getattr(self, "main_window", None)
-                    if p:
-                        if hasattr(p, "save_db"): p.save_db(sync_from_grid=False)
-                        if hasattr(p, "_refresh_tree"): p._refresh_tree()
-                        if hasattr(p, "_refresh_grid"): p._refresh_grid()
-                        if hasattr(p, "_refresh_unplaced_lessons"): p._refresh_unplaced_lessons()
+                    self._notify_main_window_refresh()
                 return
 
         from dialogs.edit_forms import LessonAssignmentDialog
@@ -1151,22 +1532,22 @@ class MasterDataDialog(QDialog):
                 
         d = LessonAssignmentDialog(data_store=self.data_store, parent=self, selected_teacher=teacher_name)
         if d.exec():
+            if self.data_store != snapshot:
+                self._push_undo_snapshot(snapshot)
             self._load_existing_data()
-            p = self.parent() or getattr(self, "main_window", None)
-            if p:
-                if hasattr(p, "save_db"): p.save_db(sync_from_grid=False)
-                if hasattr(p, "_refresh_tree"): p._refresh_tree()
-                if hasattr(p, "_refresh_grid"): p._refresh_grid()
-                if hasattr(p, "_refresh_unplaced_lessons"): p._refresh_unplaced_lessons()
+            self._notify_main_window_refresh()
 
     def _act_new(self):
-        self._push_undo_state()
+        import copy
+        snapshot = copy.deepcopy(self.data_store)
         idx = self.stack.currentIndex()
+        saved = False
         if idx == 0:  # Dersler
             d = DersEditDialog(self)
             if d.exec():
                 data = d.get_data()
                 self.data_store["dersler"].append(data)
+                saved = True
         elif idx == 1:  # Sınıflar
             d = SinifEditDialog(self)
             if d.exec():
@@ -1183,11 +1564,13 @@ class MasterDataDialog(QDialog):
                             t["sinif_ogretmeni"] = c_name
                         elif t.get("sinif_ogretmeni", "").strip().upper() == c_name.upper():
                             t["sinif_ogretmeni"] = ""
+                saved = True
         elif idx == 2:  # Derslikler
             d = DerslikEditDialog(self)
             if d.exec():
                 data = d.get_data()
                 self.data_store["derslikler"].append(data)
+                saved = True
         elif idx == 3:  # Öğretmenler
             d = OgretmenEditDialog(self)
             if d.exec():
@@ -1204,14 +1587,17 @@ class MasterDataDialog(QDialog):
                             s["sinif_ogretmeni"] = t_name
                         elif format_tr_name(s.get("sinif_ogretmeni", "")) == format_tr_name(t_name):
                             s["sinif_ogretmeni"] = ""
+                # Push snapshot for teacher creation first so teacher creation and its assignments are separate undo steps
+                self._push_undo_snapshot(snapshot)
+                self._load_existing_data()
+                self._notify_main_window_refresh()
                 self._act_assign(teacher_name=data.get("ad"))
+                return
 
-        self._load_existing_data()
-        trigger_save_db(self, self.data_store)
-        p = self.parent()
-        if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
-        if p and hasattr(p, "_refresh_unplaced_lessons"): p._refresh_unplaced_lessons()
-        if p and hasattr(p, "_load_unplaced_lessons"): p._load_unplaced_lessons()
+        if saved:
+            self._push_undo_snapshot(snapshot)
+            self._load_existing_data()
+            self._notify_main_window_refresh()
 
     def _act_update(self):
         idx = self.stack.currentIndex()
@@ -1239,9 +1625,10 @@ class MasterDataDialog(QDialog):
                 break
                 
         if matched_idx >= 0 and old_data:
+            import copy
+            snapshot = copy.deepcopy(self.data_store)
             d = dialogs[idx](parent=self, existing_data=old_data)
             if d.exec():
-                self._push_undo_state()
                 new_data = d.get_data()
                 old_name = old_data.get("ad")
                 new_name = new_data.get("ad")
@@ -1323,15 +1710,10 @@ class MasterDataDialog(QDialog):
                                 s["sinif_ogretmeni"] = ""
 
                 data_list[matched_idx] = new_data
+                if self.data_store != snapshot:
+                    self._push_undo_snapshot(snapshot)
                 self._load_existing_data()
-                
-                trigger_save_db(self, self.data_store)
-                p = self.parent()
-                if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
-                if p and hasattr(p, "_load_unplaced_lessons"): p._load_unplaced_lessons()
-                if p and hasattr(p, "_refresh_unplaced_lessons"): p._refresh_unplaced_lessons()
-                if p and hasattr(p, "_restore_grid_placements"): p._restore_grid_placements()
-                if p and hasattr(p, "_refresh_grid"): p._refresh_grid()
+                self._notify_main_window_refresh()
 
     def _act_delete(self):
         from PySide6.QtWidgets import QMessageBox
@@ -1438,14 +1820,7 @@ class MasterDataDialog(QDialog):
                             t["sinif_ogretmeni"] = ""
                 
                 self._load_existing_data()
-                trigger_save_db(self, self.data_store)
-                p = self.parent() or getattr(self, "main_window", None)
-                if p and hasattr(p, "save_db"): p.save_db(sync_from_grid=False)
-                if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
-                if p and hasattr(p, "_load_unplaced_lessons"): p._load_unplaced_lessons()
-                if p and hasattr(p, "_refresh_unplaced_lessons"): p._refresh_unplaced_lessons()
-                if p and hasattr(p, "_restore_grid_placements"): p._restore_grid_placements()
-                if p and hasattr(p, "_refresh_grid"): p._refresh_grid()
+                self._notify_main_window_refresh()
 
     def _refresh_unplaced_lessons(self, *args, **kwargs):
         p = self.parent() or getattr(self, "main_window", None)
@@ -1495,10 +1870,13 @@ class MasterDataDialog(QDialog):
                 entity = self.data_store[stores[idx]][r]
         
         if entity:
+            import copy
+            snapshot = copy.deepcopy(self.data_store)
             from dialogs.timeoff_dialog import TimeoffDialog
             dlg = TimeoffDialog(entity, names[idx], self.data_store, self)
             if dlg.exec() == QDialog.Accepted:
-                trigger_save_db(self, self.data_store)
+                if self.data_store != snapshot:
+                    self._push_undo_snapshot(snapshot)
                 
                 # Anlık UI yenileme
                 self.table_ders.setRowCount(0)
@@ -1506,8 +1884,11 @@ class MasterDataDialog(QDialog):
                 self.table_derslik.setRowCount(0)
                 self.table_ogretmen.setRowCount(0)
                 self._load_existing_data()
+                self._notify_main_window_refresh()
 
     def _act_constraints(self):
+        import copy
+        snapshot = copy.deepcopy(self.data_store)
         from dialogs.constraints_dialog import ConstraintsDialog
         idx = self.stack.currentIndex()
         target_type = "ogretmen" if idx == 3 else "sinif"
@@ -1519,7 +1900,10 @@ class MasterDataDialog(QDialog):
             
         dlg = ConstraintsDialog(self.data_store, target_type=target_type, parent=self, preselected_name=preselected_name)
         if dlg.exec():
-            trigger_save_db(self, self.data_store)
+            if self.data_store != snapshot:
+                self._push_undo_snapshot(snapshot)
+            self._load_existing_data()
+            self._notify_main_window_refresh()
 
     def _act_delete_all(self):
         from PySide6.QtWidgets import QMessageBox
@@ -1528,18 +1912,37 @@ class MasterDataDialog(QDialog):
         stores = ["dersler", "siniflar", "derslikler", "ogretmenler"]
         names = ["derslerin", "sınıfların", "dersliklerin", "öğretmenlerin"]
         
-        r = QMessageBox.question(
-            self, "Tümünü Sil Onayı",
-            f"Tanımlı tüm {names[idx]} listesini silmek istediğinize emin misiniz?\nBu işlem geri alınamaz!",
-            QMessageBox.Yes | QMessageBox.No
-        )
+        test_mode = getattr(self, "_test_mode", False) or getattr(getattr(self, "main_window", None), "_test_mode", False)
+        if not test_mode:
+            r = QMessageBox.question(
+                self, "Tümünü Sil Onayı",
+                f"Tanımlı tüm {names[idx]} listesini silmek istediğinize emin misiniz?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+        else:
+            r = QMessageBox.Yes
         if r == QMessageBox.Yes:
+            self._push_undo_state()
             tables[idx].setRowCount(0)
             self.data_store[stores[idx]] = []
-            if idx in (0, 1, 3):
+            if stores[idx] in ("dersler", "siniflar", "ogretmenler"):
                 self.data_store["atamalar"] = []
-            trigger_save_db(self, self.data_store)
-            if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
+                self.data_store["grid_placements"] = []
+                self.data_store["yerlesim"] = {}
+                if "auto_schedule_results" in self.data_store:
+                    self.data_store["auto_schedule_results"] = []
+            elif stores[idx] == "derslikler":
+                for a in self.data_store.get("atamalar", []):
+                    a["room"] = ""
+                for p in self.data_store.get("grid_placements", []):
+                    p["room_name"] = ""
+                yerlesim = self.data_store.get("yerlesim", {})
+                if isinstance(yerlesim, dict):
+                    for info in yerlesim.values():
+                        if isinstance(info, dict):
+                            info["room"] = ""
+            self._load_existing_data()
+            self._notify_main_window_refresh()
 
     def _act_groups(self):
         from dialogs.groups_dialog import GroupsDialog
@@ -1547,14 +1950,15 @@ class MasterDataDialog(QDialog):
         dlg.exec()
 
     def _act_auto_schedule(self):
+        import copy
+        snapshot = copy.deepcopy(self.data_store)
         from dialogs.auto_schedule_dialog import AutoScheduleDialog
         dlg = AutoScheduleDialog(self.data_store, self)
         if dlg.exec():
+            if self.data_store != snapshot:
+                self._push_undo_snapshot(snapshot)
             self._load_existing_data()
-            p = self.parent() or getattr(self, "main_window", None)
-            if p and hasattr(p, "save_db"): p.save_db()
-            if p and hasattr(p, "_refresh_tree"): p._refresh_tree()
-            if p and hasattr(p, "_restore_grid_placements"): p._restore_grid_placements()
+            self._notify_main_window_refresh()
 
     def _open_2025_dialog(self, dlg_id):
         from dialogs.extracted_dialog import open_extracted_dialog
@@ -1562,14 +1966,24 @@ class MasterDataDialog(QDialog):
 
     def accept(self):
         try:
-            p = self.parent() or getattr(self, "main_window", None)
-            if p and hasattr(p, "save_db"):
-                p.save_db()
-            if p and hasattr(p, "_refresh_tree"):
-                p._refresh_tree()
+            self._notify_main_window_refresh()
         except Exception as e:
             print("accept Exception Handled:", e)
         super().accept()
+
+    def reject(self):
+        try:
+            self._notify_main_window_refresh()
+        except Exception as e:
+            print("reject Exception Handled:", e)
+        super().reject()
+
+    def closeEvent(self, event):
+        try:
+            self._notify_main_window_refresh()
+        except Exception as e:
+            print("closeEvent Exception Handled:", e)
+        super().closeEvent(event)
 
     def _act_move_row(self, direction):
         idx = self.stack.currentIndex()
@@ -1582,11 +1996,33 @@ class MasterDataDialog(QDialog):
         target_row = row + direction
         data_list = self.data_store.get(stores[idx], [])
         if 0 <= target_row < len(data_list) and 0 <= row < len(data_list):
+            self._push_undo_state()
             data_list[row], data_list[target_row] = data_list[target_row], data_list[row]
             self._load_existing_data()
             table.setCurrentCell(target_row, 0)
-            p = self.parent() or getattr(self, "main_window", None)
-            if p and hasattr(p, "save_db"): p.save_db()
+            self._notify_main_window_refresh()
+
+    def _timeoff_matrix(self, entity):
+        """Mini önizlemenin çizeceği matris — Zaman Tablosu diyalogunun okuduğunun AYNISI.
+
+        Önizleme eskiden entity["timeoff"] listesini ham okuyordu; diyalog ise
+        constraint_sync.get_matrix() kullanıyordu. İki okuyucu üç noktada ayrılıyordu:
+        kayıtlı dizi ekrandaki saat sayısından kısaysa önizleme eksik saatleri
+        "açık" sayıyor, kişisel kısıtları hiç görmüyor, "timeoff" yokken
+        kisitlamalar'a düşmüyordu. Sonuç: kapatılan son saat önizlemede yeşil
+        kalıyordu. Artık tek kaynak var.
+        """
+        try:
+            import constraint_sync
+            name = (entity.get("ad") or entity.get("name") or "").strip()
+            return constraint_sync.get_matrix(entity, name, self.data_store)
+        except Exception as exc:
+            print(f"[MINI_TIMEOFF] matris okunamadi: {exc}")
+            return entity.get("timeoff") or []
+
+    # Zaman Tablosu hücresinde kutunun etrafına bırakılan pay: QTableWidget::item
+    # dikey iç boşluğu (4+4) + alt kenar çizgisi + emniyet payı.
+    TIMEOFF_CELL_PAD = 12
 
     def _add_row(self, table, texts, timeoff=None, days_cnt=5, periods_cnt=8):
         r = table.rowCount()
@@ -1609,7 +2045,23 @@ class MasterDataDialog(QDialog):
                 container_layout.setContentsMargins(0, 0, 0, 0)
                 container_layout.setAlignment(Qt.AlignCenter)
                 container_layout.addWidget(mini_grid)
-                
+
+                # SATIR KUTUYA GÖRE BÜYÜR — tersi değil.
+                #
+                # Kutu sabit bir tavana sığdırılmaya çalışılıyordu ama hücreye
+                # gerçekte kalan yer satır yüksekliğinden AZ: QTableWidget::item
+                # dikey iç boşluğu ve resizeRowsToContents birlikte 44 piksellik
+                # satırda widget'a 29 piksel bırakıyordu. Kutu 33 piksel olduğu
+                # için alttan kırpılıyor, son 1-2 ders saati hiç görünmüyordu —
+                # ölçtüm: 8 saatin 7'si çiziliyordu.
+                #
+                # Artık satır, kutunun gerçek yüksekliğine göre açılıyor; kırpılma
+                # kaynağı ne olursa olsun (iç boşluk, kenar çizgisi, tema) kutunun
+                # tamamı her zaman sığıyor.
+                container.setMinimumHeight(mini_grid.height())
+                table.setRowHeight(r, max(table.rowHeight(r),
+                                          mini_grid.height() + self.TIMEOFF_CELL_PAD))
+
                 table.setCellWidget(r, c, container)
             else:
                 table.setItem(r, c, item)

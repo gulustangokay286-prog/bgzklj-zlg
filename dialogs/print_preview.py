@@ -983,7 +983,7 @@ class TimetablePrintPreview(QDialog):
         elif mode == "Sınıf Dersleri & Atama Listesi (Liste Formatı)":
             self._render_class_lessons_list(painter, printer, VW, VH)
         elif mode == "Tüm Öğretmenlerin Ders Yükü Listesi":
-            self._render_teacher_summary_list(painter, VW, VH)
+            self._render_teacher_summary_list(painter, VW, VH, printer)
         else:
             self._render_weekly_grid(painter, printer, VW, VH, is_teacher=False)
             
@@ -1853,73 +1853,129 @@ class TimetablePrintPreview(QDialog):
             placements = self._get_pseudo_placements(item_name, is_teacher)
             self._draw_mini_grid(painter, margin_x, margin_y, grid_w, grid_h, item_name, school_name, placements, is_teacher=is_teacher, is_single_page=True)
 
-    def _render_teacher_summary_list(self, painter, VW, VH):
+    def _render_teacher_summary_list(self, painter, VW, VH, printer=None):
+        """Tüm öğretmenlerin ders yükü — sayfalanır, kimse dışarıda kalmaz.
+
+        Eskiden tek sayfaya çizilip sayfa dolunca `break` ediliyordu: sığmayan
+        öğretmenler sessizce düşüyordu (sayfaya ancak 19 satır sığıyor). Artık
+        satırlar sayfalara bölünüyor ve her sayfaya "Sayfa x/y" ile toplam
+        öğretmen sayısı yazılıyor, böylece eksik olup olmadığı gözle görülüyor.
+
+        Öğretmen–atama eşleşmesi de birebir ad karşılaştırmasıydı; "HÜSEYİN
+        BİLİR" ile "Hüseyin Bilir" ya da çift boşluklu yazımlar tutmuyor ve o
+        öğretmen 0 saat görünüyordu. Artık çarşafın kullandığı bulanık
+        eşleştiricinin aynısı kullanılıyor.
+        """
+        from version_store import _matches_teacher
+
         teachers = sorted(self.data_store.get("ogretmenler", []), key=lambda t: t.get("ad", ""))
         atamalar = self.data_store.get("atamalar", [])
-        
-        # Header banner box with clean border
-        painter.setPen(QPen(QColor("#64748B"), 1.2))
-        painter.setBrush(QBrush(QColor("#F8FAFC")))
-        painter.drawRoundedRect(30, 20, VW - 60, 50, 6, 6)
-        
-        painter.setPen(QPen(QColor("#0F172A"), 1))
-        painter.setFont(make_font(17, True))
-        painter.drawText(QRectF(50, 25, 600, 40), Qt.AlignLeft | Qt.AlignVCenter, "Tüm Öğretmenlerin Ders Yükü Raporu")
-        
-        start_y = 85
+
         tbl_w = VW - 60
         cols = [("Öğretmen Adı", 280), ("Kısa Kodu", 140), ("Atanan Dersler", 460), ("Toplam Saat", 180)]
-        
-        cur_x = 30
+        start_y = 85
         header_h = 34
-        painter.setBrush(QBrush(QColor("#E2E8F0")))
-        painter.setPen(QPen(QColor("#64748B"), 1.2))
-        painter.drawRect(QRectF(30, start_y, tbl_w, header_h))
-        
-        # Draw bold high-contrast column headers
-        painter.setPen(QPen(QColor("#0F172A"), 1))
-        painter.setFont(make_font(12, True))
-        for col_name, col_w in cols:
-            painter.drawText(QRectF(cur_x, start_y, col_w, header_h), Qt.AlignCenter, col_name)
-            cur_x += col_w
-            
-        cur_y = start_y + header_h
-        row_h = 32
-        
-        for idx, t in enumerate(teachers):
-            if cur_y + row_h > VH - 40:
-                break
-            bg_color = QColor("#F8FAFC") if idx % 2 == 1 else QColor("#FFFFFF")
-            painter.setBrush(QBrush(bg_color))
-            painter.setPen(QPen(QColor("#94A3B8"), 1))
-            painter.drawRect(QRectF(30, cur_y, tbl_w, row_h))
-            
-            tname = t.get("ad", "")
-            tkisa = t.get("kisa", "")
-            t_atamalar = [a for a in atamalar if format_tr_name(a.get("ogretmen") or a.get("teacher", "")) == format_tr_name(tname)]
-            subs_str = ", ".join(list({(a.get("ders") or a.get("subject", "")) for a in t_atamalar if (a.get("ders") or a.get("subject"))})) or "—"
-            tot_hours = sum(lesson_hours.hours(a) for a in t_atamalar)
-            
-            # Text pen MUST be high-contrast crisp black / dark slate
+        bottom_limit = VH - 40
+        total = len(teachers)
+
+        # TEK SAYFAYA SIĞDIR. Sabit 32 birimlik satırla sayfaya ancak 19 kişi
+        # sığıyordu; gerisi ya düşüyordu (eski hata) ya da ikinci kağıda taşıp
+        # boşuna kağıt harcıyordu. Satır yüksekliği artık kadroya göre
+        # hesaplanıyor: herkes tek sayfaya sığana kadar küçülüyor, ama okunaklık
+        # sınırının (14 birim) altına inmiyor. Ancak o sınırda bile sığmıyorsa
+        # (çok büyük kadro) sayfalamaya düşülüyor — kimse gene de kaybolmuyor.
+        avail = bottom_limit - (start_y + header_h)
+        MIN_ROW_H, MAX_ROW_H = 14.0, 32.0
+        if total > 0:
+            row_h = max(MIN_ROW_H, min(MAX_ROW_H, avail / total))
+        else:
+            row_h = MAX_ROW_H
+
+        rows_per_page = max(1, int(avail // row_h))
+        total_pages = max(1, (total + rows_per_page - 1) // rows_per_page)
+
+        # Satır daraldıkça yazı da orantılı küçülsün, ama tabanı okunaklı kalsın.
+        body_pt = max(7.5, min(11.0, row_h * 0.34))
+        name_pt = max(8.0, min(11.0, row_h * 0.36))
+
+        for p_idx in range(total_pages):
+            if p_idx > 0:
+                if printer is None:
+                    break
+                printer.newPage()
+                painter.fillRect(0, 0, VW, VH, Qt.white)
+
+            # Header banner box with clean border
+            painter.setPen(QPen(QColor("#64748B"), 1.2))
+            painter.setBrush(QBrush(QColor("#F8FAFC")))
+            painter.drawRoundedRect(30, 20, tbl_w, 50, 6, 6)
+
             painter.setPen(QPen(QColor("#0F172A"), 1))
-            painter.setFont(make_font(11, True))
-            
+            painter.setFont(make_font(17, True))
+            painter.drawText(QRectF(50, 25, 600, 40), Qt.AlignLeft | Qt.AlignVCenter,
+                             "Tüm Öğretmenlerin Ders Yükü Raporu")
+
+            # Sağ üstte toplam ve sayfa bilgisi: rapor eksikse hemen belli olsun.
+            painter.setFont(make_font(10.5, False))
+            painter.setPen(QPen(QColor("#475569"), 1))
+            painter.drawText(QRectF(30, 25, tbl_w - 20, 40), Qt.AlignRight | Qt.AlignVCenter,
+                             f"Toplam {total} Öğretmen   |   Sayfa {p_idx + 1}/{total_pages}")
+
             cur_x = 30
-            painter.drawText(QRectF(cur_x + 12, cur_y, cols[0][1] - 14, row_h), Qt.AlignLeft | Qt.AlignVCenter, tname)
-            cur_x += cols[0][1]
-            
-            painter.setFont(make_font(11, False))
-            painter.setPen(QPen(QColor("#334155"), 1))
-            painter.drawText(QRectF(cur_x, cur_y, cols[1][1], row_h), Qt.AlignCenter, tkisa)
-            cur_x += cols[1][1]
-            
-            painter.drawText(QRectF(cur_x + 10, cur_y, cols[2][1] - 14, row_h), Qt.AlignLeft | Qt.AlignVCenter, subs_str)
-            cur_x += cols[2][1]
-            
+            painter.setBrush(QBrush(QColor("#E2E8F0")))
+            painter.setPen(QPen(QColor("#64748B"), 1.2))
+            painter.drawRect(QRectF(30, start_y, tbl_w, header_h))
+
+            # Draw bold high-contrast column headers
+            painter.setPen(QPen(QColor("#0F172A"), 1))
             painter.setFont(make_font(12, True))
-            painter.setPen(QPen(QColor("#0284C7") if tot_hours > 0 else QColor("#94A3B8"), 1))
-            painter.drawText(QRectF(cur_x, cur_y, cols[3][1], row_h), Qt.AlignCenter, f"{tot_hours} Saat")
-            cur_y += row_h
+            for col_name, col_w in cols:
+                painter.drawText(QRectF(cur_x, start_y, col_w, header_h), Qt.AlignCenter, col_name)
+                cur_x += col_w
+
+            cur_y = start_y + header_h
+            chunk = teachers[p_idx * rows_per_page:(p_idx + 1) * rows_per_page]
+
+            for idx, t in enumerate(chunk):
+                bg_color = QColor("#F8FAFC") if (p_idx * rows_per_page + idx) % 2 == 1 else QColor("#FFFFFF")
+                painter.setBrush(QBrush(bg_color))
+                painter.setPen(QPen(QColor("#94A3B8"), 1))
+                painter.drawRect(QRectF(30, cur_y, tbl_w, row_h))
+
+                tname = t.get("ad", "")
+                tkisa = t.get("kisa", "")
+                t_atamalar = [a for a in atamalar
+                              if _matches_teacher(a.get("ogretmen") or a.get("teacher", ""), tname)]
+                subs_str = ", ".join(sorted({(a.get("ders") or a.get("subject", ""))
+                                             for a in t_atamalar
+                                             if (a.get("ders") or a.get("subject"))})) or "—"
+                tot_hours = sum(lesson_hours.hours(a) for a in t_atamalar)
+
+                # Text pen MUST be high-contrast crisp black / dark slate
+                painter.setPen(QPen(QColor("#0F172A"), 1))
+                painter.setFont(make_font(name_pt, True))
+
+                cur_x = 30
+                painter.drawText(QRectF(cur_x + 12, cur_y, cols[0][1] - 14, row_h), Qt.AlignLeft | Qt.AlignVCenter, tname)
+                cur_x += cols[0][1]
+
+                painter.setFont(make_font(body_pt, False))
+                painter.setPen(QPen(QColor("#334155"), 1))
+                painter.drawText(QRectF(cur_x, cur_y, cols[1][1], row_h), Qt.AlignCenter, tkisa)
+                cur_x += cols[1][1]
+
+                # Ders listesi sütuna sığmıyorsa kırpılıp "..." ile bitiyor;
+                # eskiden taşıp yan sütunun üstüne yazıyordu.
+                subj_rect = QRectF(cur_x + 10, cur_y, cols[2][1] - 14, row_h)
+                elided = painter.fontMetrics().elidedText(
+                    subs_str, Qt.ElideRight, int(subj_rect.width()))
+                painter.drawText(subj_rect, Qt.AlignLeft | Qt.AlignVCenter, elided)
+                cur_x += cols[2][1]
+
+                painter.setFont(make_font(max(8.0, body_pt + 0.5), True))
+                painter.setPen(QPen(QColor("#0284C7") if tot_hours > 0 else QColor("#94A3B8"), 1))
+                painter.drawText(QRectF(cur_x, cur_y, cols[3][1], row_h), Qt.AlignCenter, f"{tot_hours} Saat")
+                cur_y += row_h
 
     def _render_carsaf_liste(self, painter, printer, VW, VH, is_teacher=False):
         """Toplu Çarşaf Liste: Sınıflar/Öğretmenler. 8 saatlik birebir aSc formatı."""
@@ -1937,14 +1993,58 @@ class TimetablePrintPreview(QDialog):
             raw = re.sub(r'\s*\((?:ea|say|söz|soz|dil)\)\s*$', '', raw, flags=re.IGNORECASE)
             return "".join(c for c in raw.translate(tr_map_clean).lower() if c.isalnum())
 
+        # Bir ders hücresi bu çarşafta ~25 birim genişliğinde. Oraya sığmayan her
+        # metin için font 4.5 punto'ya kadar düşürülüyordu: "GÖRSEL SANATLAR",
+        # "BEDEN EĞİTİMİ", "DİN KÜLTÜRÜ" gibi kısaltmalar okunamaz hâle geliyor,
+        # çizelgede neredeyse hiç görünmüyordu. Sebep sıralamaydı: kullanıcının
+        # "kisa" alanı (15 karaktere kadar çıkabiliyor) kürasyonlu kısa kod
+        # tablosunun ÖNÜNDE geliyordu. Artık kisa yalnızca gerçekten kısaysa
+        # kullanılıyor, uzunsa sıkıştırılıyor.
+        ABBR_BUDGET = 5
+
+        def _squeeze(text, budget=ABBR_BUDGET):
+            """Herhangi bir kısaltmayı bütçeye sıkıştırır; sondaki sayıyı korur.
+
+            Sayı kritik: "Matematik 1" ile "Matematik 2" ayrı derslerdir, sayı
+            düşerse çizelgede birbirine karışırlar.
+            """
+            import re
+            t = re.sub(r'\s+', ' ', str(text or "").strip())
+            if not t:
+                return ""
+            m = re.search(r'(\d+)\s*$', t)
+            num = m.group(1) if m else ""
+            body = t[:m.start()].strip() if m else t
+            room = max(1, budget - len(num))
+            if len(body) <= room:
+                return f"{body}{num}"
+            words = [w for w in body.split(" ") if w]
+            if len(words) > 1:
+                # Çok kelimeli ad: baş harfler ("GÖRSEL SANATLAR" -> "GS")
+                initials = "".join(w[0] for w in words)[:room]
+                if len(initials) >= 2:
+                    return f"{initials}{num}"
+            # Tek kelime: ünlüleri atarak kısalt, yetmezse kes.
+            head = body[0]
+            rest = "".join(ch for ch in body[1:] if ch not in "AEIİOÖUÜaeııoöuü")
+            cand = (head + rest)[:room]
+            if len(cand) < min(3, room):
+                cand = body[:room]
+            return f"{cand}{num}"
+
         def smart_abbr(subject_name):
             if not subject_name: return ""
             s = str(subject_name).strip()
-            # If subject has an explicit short code in dersler, prioritize that
+            # Kullanıcının verdiği kısa kod, ancak zaten kısaysa aynen geçerli.
+            # Uzunsa kürasyonlu tabloya bakılır, o da tutmazsa sıkıştırılır.
+            user_short = ""
             for d in self.data_store.get("dersler", []):
                 if (d.get("ad") or "").strip().lower() == s.lower() and d.get("kisa"):
-                    return str(d.get("kisa")).strip()
-            
+                    user_short = str(d.get("kisa")).strip()
+                    break
+            if user_short and len(user_short) <= ABBR_BUDGET:
+                return user_short
+
             tr_map = str.maketrans({'i': 'İ', 'ı': 'I', 'ç': 'Ç', 'ğ': 'Ğ', 'ö': 'Ö', 'ş': 'Ş', 'ü': 'Ü'})
             s_up = s.translate(tr_map).upper()
             
@@ -2003,15 +2103,15 @@ class TimetablePrintPreview(QDialog):
                     import re
                     m = re.search(r'\s*(\d+)$', s_up)
                     num_s = f"{m.group(1)}" if m else ""
-                    return f"{v}{num_s}"[:5]
-                    
-            import re
-            m = re.search(r'^(.+?)\s*(\d+)$', s_up)
-            if m:
-                base = m.group(1).strip()
-                suf = m.group(2)
-                return f"{base[:3]}{suf}"[:5]
-            return s_up[:4]
+                    return f"{v}{num_s}"[:ABBR_BUDGET]
+
+            # Tabloda yoksa: kullanıcının uzun kısa kodunu sıkıştır, o da yoksa
+            # ders adının kendisini. Her hâlükârda bütçeye sığan bir şey döner.
+            return _squeeze(user_short or s_up)
+
+        # Kısaltma mantığı çizim döngüsünün içinde tanımlı; testin ve başka
+        # raporların aynı sonucu doğrulayabilmesi için dışarı da veriliyor.
+        self._smart_abbr = smart_abbr
 
         def format_tr_teacher_short(name):
             if not name: return ""
@@ -2261,7 +2361,12 @@ class TimetablePrintPreview(QDialog):
                             if "+" in cell_text and painter.fontMetrics().horizontalAdvance(cell_text) > (block_w - 2):
                                 cell_text = cell_text.replace("+", "\n")
                             
-                            while painter.fontMetrics().horizontalAdvance(cell_text) > (block_w - 2) and font_sz > 4.5:
+                            # Taban 4.5 punto idi: sığmayan her kısaltma okunamaz
+                            # bir lekeye dönüşüyordu. Artık 7.0'ın altına inmiyor;
+                            # kısaltmalar zaten bütçeye sıkıştırıldığı için bu
+                            # sınıra pratikte hiç dayanılmıyor, dayanılırsa da
+                            # metin kırpılıp okunaklı kalıyor.
+                            while painter.fontMetrics().horizontalAdvance(cell_text) > (block_w - 2) and font_sz > 7.0:
                                 font_sz -= 0.5
                                 painter.setFont(make_font(font_sz, True))
                             painter.setPen(QPen(QColor("#0F172A"), 1))

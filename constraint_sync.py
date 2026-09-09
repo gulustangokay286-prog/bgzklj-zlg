@@ -51,7 +51,14 @@ def _coerce_state(value) -> int:
         ival = int(value)
     except (TypeError, ValueError):
         return OPEN
-    if ival in (OPEN, AVOID, CLOSED):
+    # "? tercih edilmez" (AVOID) durumu kaldırıldı: kullanıcı iki durum istiyor —
+    # saat ya açık ya kapalı. Eskiden yazılmış AVOID hücreleri burada AÇIK'a
+    # çözülüyor; kapalıya çevirmek kullanıcının hiç kapatmadığı saatleri kapatmak
+    # olurdu. Tek çözümleme noktası burası olduğu için sarı durum veriden de,
+    # planlayıcıdan da, önizlemeden de tek hamlede kalkıyor.
+    if ival == AVOID:
+        return OPEN
+    if ival in (OPEN, CLOSED):
         return ival
     return OPEN if ival > 0 else CLOSED
 

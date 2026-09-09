@@ -98,7 +98,8 @@ def run():
     check("boş hücre YEŞİL", visual(0, 0) == pe.V_GREEN, str(visual(0, 0)))
     check("sınıfın dolu hücresi KIRMIZI", visual(0, 1) == pe.V_RED, str(visual(0, 1)))
     check("öğretmenin kapalı saati GRİ", visual(2, 0) == pe.V_GREY, str(visual(2, 0)))
-    check("tercih edilmez saat MAVİ", visual(3, 1) == pe.V_BLUE, str(visual(3, 1)))
+    # "tercih edilmez" (mavi) durumu kaldirildi; o saat artik normal acik.
+    check("eski tercih-edilmez saat artik YESIL", visual(3, 1) == pe.V_GREEN, str(visual(3, 1)))
 
     print("\n[sınıf boş ama öğretmen başka sınıfta -> KIRMIZI]")
     check("9A boş olmasına rağmen kırmızı", visual(1, 2) == pe.V_RED, str(visual(1, 2)))
