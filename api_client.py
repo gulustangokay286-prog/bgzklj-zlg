@@ -852,9 +852,28 @@ class APIClient:
                             if local_vm.get("filename") != filename:
                                 local_vm["filename"] = filename
                                 changed_meta = True
-                            if entry.get("folder_id") is not None and local_vm.get("folder_id") != entry.get("folder_id"):
-                                local_vm["folder_id"] = entry.get("folder_id")
-                                changed_meta = True
+                            # KLASÖR TAŞIMA İKİ YÖNLÜ.
+                            #
+                            # Burada yalnızca sunucudan gelen klasör yerele
+                            # yazılıyordu. Ters yön yoktu: kullanıcı bir sürümü
+                            # başka klasöre taşıdığında içerik hash'i DEĞİŞMEDİĞİ
+                            # için (folder_id, hash'in dışladığı _version_meta
+                            # içinde durur) istemci "değişiklik yok" deyip taşımayı
+                            # hiç yüklemiyordu — üstelik bir sonraki senkronda
+                            # sunucudaki eski klasörü yerele geri yazıp kullanıcının
+                            # taşımasını siliyordu. Taşıma yapıldığı makinede kalıyordu.
+                            #
+                            # Artık ayrışma varsa YEREL kazanır ve sunucuya gönderilir:
+                            # taşımayı yapan kullanıcıdır, sunucunun elindeki değer
+                            # yalnızca daha önce yüklenmiş olandır.
+                            remote_fid = entry.get("folder_id")
+                            local_fid = local_vm.get("folder_id")
+                            if remote_fid is not None and local_fid != remote_fid:
+                                if local_fid:
+                                    version_store.queue_cloud_push(slug, filename, local)
+                                else:
+                                    local_vm["folder_id"] = remote_fid
+                                    changed_meta = True
                             remote_revision = entry.get("sync_revision")
                             if remote_revision and (local.get("_sync_meta") or {}).get("revision") != remote_revision:
                                 local["_sync_meta"] = {

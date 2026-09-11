@@ -1247,6 +1247,8 @@ class MainWindow(QMainWindow):
         mode = getattr(self._grid, "current_view_mode", "classes")
         placed = self._grid.get_placed_lessons()
         if not placed:
+            if self.data_store.get("grid_placements"):
+                return
             self.data_store["grid_placements"] = []
             return
             
@@ -1318,6 +1320,9 @@ class MainWindow(QMainWindow):
                 p["color"] = get_subject_color(s_name, self.data_store)
                 new_global.append(p)
                 
+        existing_count = len(self.data_store.get("grid_placements", []))
+        if existing_count > 50 and len(new_global) < existing_count // 3:
+            return
         self.data_store["grid_placements"] = new_global
 
     def _restore_grid_placements(self, view_type=None, entity_name=None):
@@ -2447,6 +2452,24 @@ class MainWindow(QMainWindow):
 
         new_total_daily_hours = existing_subj_daily_hours + duration
 
+        # Existing lessons of THIS teacher on this day in this class
+        existing_teacher_day_lessons = []
+        for r, data in current_day_lessons:
+            d_t = data.get("teacher_name", data.get("teacher", ""))
+            d_cls = data.get("class_name", data.get("class", ""))
+            if teacher and norm_teacher(d_t) == norm_teacher(teacher):
+                if not class_name or matches_class(d_cls, class_name) or matches_class(class_name, d_cls):
+                    existing_teacher_day_lessons.append((r, data))
+
+        # TEMEL KURAL: Aynı öğretmenin dersleri (farklı dersler dahi olsa, örn: Geo + Mat)
+        # aynı sınıfta peş peşe (art arda) gelemez!
+        if teacher and existing_teacher_day_lessons:
+            for r_ex, data_ex in existing_teacher_day_lessons:
+                dur_ex = data_ex.get("duration", 1)
+                other_subj = data_ex.get("subject_name", data_ex.get("subject", "Ders"))
+                if (r_ex + dur_ex == period) or (period + duration == r_ex):
+                    return False, f"⚠️ <b>{teacher}</b> öğretmeninin dersleri (<b>{subject}</b> ve <b>{other_subj}</b>) {day_name} gününde bu sınıfta ({class_name}) <b>art arda (peş peşe)</b> gelemez!"
+
         for rel in relations:
             r_type = rel.get("kural", "")
             val = rel.get("parametre", 2)
@@ -2481,10 +2504,20 @@ class MainWindow(QMainWindow):
             elif "tekrar etmesin" in r_type:
                 if existing_subj_daily_hours > 0:
                     return False, f"⚠️ <b>'Aynı ders aynı gün tekrar etmesin'</b> kuralına göre <b>{subject}</b> dersi {day_name} gününde zaten mevcuttur!"
+                if teacher and existing_teacher_day_lessons:
+                    other_subj = existing_teacher_day_lessons[0][1].get("subject_name", existing_teacher_day_lessons[0][1].get("subject", "Ders"))
+                    return False, f"⚠️ <b>'Aynı ders/öğretmen aynı gün tekrar etmesin'</b> kuralına göre <b>{teacher}</b> öğretmeni {day_name} gününde bu sınıfta zaten <b>{other_subj}</b> dersine girmektedir!"
 
             # Rule 4: İki ders aynı güne gelmesin
             elif "aynı güne gelmesin" in r_type or "İki ders aynı güne" in r_type:
-                pass
+                if f_subjs and len(f_subjs) >= 2:
+                    for r_ex, data_ex in current_day_lessons:
+                        d_subj = data_ex.get("subject_name", data_ex.get("subject", ""))
+                        if any(normalize_clean(d_subj) == normalize_clean(fs) for fs in f_subjs if normalize_clean(fs) != normalize_clean(subject)):
+                            return False, f"⚠️ <b>'İki ders aynı güne gelmesin'</b> kuralına göre <b>{subject}</b> ve <b>{d_subj}</b> aynı gün ({day_name}) olamaz!"
+                elif teacher and existing_teacher_day_lessons:
+                    other_subj = existing_teacher_day_lessons[0][1].get("subject_name", existing_teacher_day_lessons[0][1].get("subject", "Ders"))
+                    return False, f"⚠️ <b>'Aynı ders / öğretmen aynı güne gelmesin'</b> kuralına göre <b>{teacher}</b> öğretmeni {day_name} gününde bu sınıfta zaten <b>{other_subj}</b> dersine girmektedir!"
 
             # Rule 5: Öğretmenin dersleri öğleden önce toplansın (Period < 4)
             elif "öğleden önce toplansın" in r_type or "Sabah" in r_type:
@@ -4165,7 +4198,10 @@ class MainWindow(QMainWindow):
                         "class_name": c_name,
                         "class": c_name,
                         "locked": is_lock,
-                        "is_manual": is_lock
+                        "is_manual": is_lock,
+                        "block_id": r.get("block_id", ""),
+                        "is_combined": bool(r.get("is_combined", False)),
+                        "combined_classes": r.get("combined_classes", [])
                     })
                 
                 # Update datastore and save cleanly

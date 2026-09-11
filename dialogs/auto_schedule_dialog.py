@@ -824,7 +824,7 @@ class AutoScheduleDialog(QDialog):
         row_ignore, self.sw_ignore_cross = make_switch_row(
             "Diğer Kurumları Yoksay",
             "Aynı öğretmen başka kurumda derste olsa bile bu kuruma yerleştir",
-            False
+            True
         )
 
         # Off by default, and deliberately worded so the cost is visible before it is

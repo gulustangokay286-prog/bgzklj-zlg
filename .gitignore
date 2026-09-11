@@ -8,6 +8,8 @@ __pycache__/
 test_*.png
 debug_*.py
 scratch_*
+scratch/
+diag_*.py
 *.txt
 full_recovery.py
 patch_*.py

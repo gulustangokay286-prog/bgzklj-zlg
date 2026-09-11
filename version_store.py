@@ -1463,128 +1463,31 @@ def save_version(slug: str, data_store: dict, source: str = "manual", note: str 
     return filename
 
 def propagate_primary_timeoff_to_secondary(primary_slug: str, primary_data: dict):
+    """KAPATILDI — kurumlar zaman tablosu bakımından tamamen bağımsızdır.
+
+    Bu fonksiyon, "ana kurum" (Boğaziçi) kaydedildiğinde diğer kurumların
+    öğretmen zaman tablolarını yeniden yazıyordu. Yazdığı şey ana kurumun TERSİ
+    idi: ana kurumda kapalı olan saat ikincil kurumda AÇILIYOR, açık olan
+    KAPANIYORDU. Üstüne iki kural daha vardı ve ikisi de kapalı saatleri zorla
+    açıyordu ("öğretmenin yüküne yetecek kadar saat aç", "hepsi kapalıysa
+    tamamen aç").
+
+    Sonuç: kullanıcının bir kurumda kendi eliyle kapattığı gün, her kayıtta —
+    özellikle otomatik planlama sonrası kayıtta — sessizce geri açılıyordu.
+    Değişiklik arka plan iş parçacığında yapılıp dosyaya yazılıyor ve buluta
+    gönderiliyordu, yani kullanıcı hiçbir uyarı görmeden kısıtlamalarını
+    kaybediyordu.
+
+    Kurumlar birbirinden bağımsız yönetiliyor: her kurum kendi zaman tablosunu
+    kendi kurar. Bu yüzden yayılım tamamen kaldırıldı; fonksiyon çağrı
+    yerlerini bozmamak için duruyor ama hiçbir şey yapmıyor.
+
+    Öğretmenin başka bir kurumda o saatte derste olduğu bilgisi kaybolmuyor:
+    çakışmalar Zaman Tablosu ekranında okunuyor (bkz. timeoff_dialog'daki
+    get_cross_institution_teacher_busy_slots) ve orada kullanıcıya gösteriliyor
+    — kimsenin tablosunu arkadan değiştirmeden.
     """
-    Boğaziçi'nde (ana kurumda) kısıtlamalar veya dersler değiştiğinde diğer bağlı kurumlara (Birey vb.)
-    tam tersi olarak otomatik yansır.
-    İkincil kurumlardaki (Birey) değişimler asla ana kuruma (Boğaziçi) yansımaz.
-    """
-    if not primary_slug or not primary_data:
-        return
-    if primary_slug != "bogazici_egitim_kurumlari":
-        meta = get_institution_meta(primary_slug)
-        if not meta.get("is_primary"):
-            return  # Yalnızca ana kurum dışa doğru yayılım yapar
-
-    bgz_teachers = {normalize_teacher_name(t.get("ad", "")): t for t in primary_data.get("ogretmenler", []) if t.get("ad")}
-    bgz_kisit = primary_data.get("kisitlamalar", {})
-
-    bgz_busy = {}
-    for p in primary_data.get("grid_placements", []):
-        t_name = p.get("teacher_name") or p.get("teacher") or ""
-        if t_name:
-            tk = normalize_teacher_name(t_name)
-            try:
-                d = int(p.get("day", p.get("col", 0)))
-                per = int(p.get("period", p.get("row", 0)))
-                dur = int(p.get("duration", 1))
-                for off in range(dur):
-                    bgz_busy.setdefault(tk, set()).add((d, per + off))
-            except Exception:
-                pass
-
-    for inst in list_institutions():
-        sec_slug = inst.get("slug")
-        if not sec_slug or sec_slug == primary_slug:
-            continue
-
-        sec_active = get_active_version(sec_slug)
-        if not sec_active:
-            continue
-        sec_data = load_version(sec_slug, sec_active)
-        if not sec_data:
-            continue
-
-        changed = False
-        sec_kisit = sec_data.setdefault("kisitlamalar", {})
-        sec_settings = sec_data.get("settings", {}) or {}
-        sec_periods = int(sec_settings.get("periods") or sec_settings.get("ders_saati") or 5)
-        sec_days = len(sec_settings.get("days") or []) or 5
-
-        # Calculate assigned load per teacher in secondary institution
-        sec_teacher_load = {}
-        for a in sec_data.get("atamalar", []) or []:
-            if isinstance(a, dict):
-                t_k = normalize_teacher_name(a.get("teacher") or a.get("ogretmen") or "")
-                if t_k:
-                    sec_teacher_load[t_k] = sec_teacher_load.get(t_k, 0) + int(a.get("duration", 1) or 1)
-
-        for t in sec_data.get("ogretmenler", []):
-            t_name = t.get("ad", "").strip()
-            if not t_name:
-                continue
-            tk = normalize_teacher_name(t_name)
-            if tk not in bgz_teachers and t_name not in bgz_kisit:
-                continue
-
-            bgz_t = bgz_teachers.get(tk)
-            bgz_mat = None
-            if bgz_t and bgz_t.get("timeoff"):
-                bgz_mat = bgz_t.get("timeoff")
-            elif t_name in bgz_kisit:
-                bgz_mat = [[bgz_kisit[t_name].get(f"{d},{p}", 2) for p in range(sec_periods)] for d in range(sec_days)]
-            else:
-                bgz_mat = [[2] * sec_periods for _ in range(sec_days)]
-
-            inv_mat = []
-            inv_dict = {}
-            for d in range(sec_days):
-                row = []
-                for p in range(sec_periods):
-                    k = f"{d},{p}"
-                    v = bgz_mat[d][p] if d < len(bgz_mat) and p < len(bgz_mat[d]) else 2
-                    if (d, p) in bgz_busy.get(tk, set()):
-                        inv_v = 0
-                    elif v == 0:
-                        inv_v = 2
-                    else:
-                        inv_v = 0
-                    row.append(inv_v)
-                    inv_dict[k] = inv_v
-                inv_mat.append(row)
-
-            # Ensure teacher has enough open hours for their assigned load in secondary institution
-            req_hours = sec_teacher_load.get(tk, 0)
-            open_count = sum(sum(1 for val in row if val == 2) for row in inv_mat)
-            if open_count < req_hours:
-                # Open slots where teacher is not actively busy at primary institution
-                for d in range(sec_days):
-                    for p in range(sec_periods):
-                        if inv_mat[d][p] == 0 and (d, p) not in bgz_busy.get(tk, set()):
-                            inv_mat[d][p] = 2
-                            inv_dict[f"{d},{p}"] = 2
-                            open_count += 1
-                            if open_count >= req_hours:
-                                break
-                    if open_count >= req_hours:
-                        break
-
-            # If still all closed, default to fully open
-            if all(c == 0 for r in inv_mat for c in r):
-                inv_mat = [[2] * sec_periods for _ in range(sec_days)]
-                inv_dict = {f"{d},{p}": 2 for d in range(sec_days) for p in range(sec_periods)}
-
-            if t.get("timeoff") != inv_mat or sec_kisit.get(t_name) != inv_dict:
-                t["timeoff"] = inv_mat
-                sec_kisit[t_name] = inv_dict
-                changed = True
-
-        if changed:
-            update_version_in_place(sec_slug, sec_active, sec_data)
-            try:
-                import cloud_sync
-                cloud_sync.push_version_to_rtdb(sec_slug, sec_active, sec_data)
-            except Exception:
-                pass
+    return
 
 
 def update_version_in_place(slug: str, filename: str, data_store: dict) -> bool:
@@ -2073,6 +1976,27 @@ def _load_pending_deletes() -> list:
 
 def _save_pending_deletes(items: list):
     _atomic_write_json(_pending_deletes_path(), items)
+
+
+def queue_cloud_push(slug: str, filename: str, data: dict):
+    """Bir sürümü buluta gönderir — içerik aynı olsa bile.
+
+    Klasör taşıma gibi değişiklikler yalnızca _version_meta'yı değiştirir ve
+    içerik hash'ine girmez; bu yüzden normal senkron yolu onları "değişmemiş"
+    sayıp hiç yüklemiyordu. Kullanıcının taşıması yaptığı makinede kalıyordu.
+    Burası o değişikliği açıkça yukarı iter.
+
+    Ağ yoksa sessizce geçilir: bir sonraki senkronda ayrışma yine görülür ve
+    yeniden denenir, yani kaybolmaz.
+    """
+    if not slug or not filename or not isinstance(data, dict):
+        return False
+    try:
+        import cloud_sync
+        return bool(cloud_sync.push_version_to_rtdb(slug, filename, data))
+    except Exception as exc:
+        print(f"[queue_cloud_push] {filename}: {exc}")
+        return False
 
 
 def queue_cloud_delete(slug: str, filename: str):

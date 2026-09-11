@@ -6,5 +6,5 @@ publish, and the value passed to publish_release.py must match the build actuall
 shipped in the package. APP_VERSION is only ever shown to a human.
 """
 
-APP_VERSION = "4.0.1"
-APP_BUILD = 401
+APP_VERSION = "4.0.6"
+APP_BUILD = 406
