@@ -843,7 +843,12 @@ class AutoScheduleDialog(QDialog):
         p_lay.addLayout(row_zero)
         p_lay.addLayout(row_fill)
         p_lay.addLayout(row_ignore)
-        p_lay.addLayout(row_independent)
+        self.sw_independent.setChecked(False)
+        self.sw_independent.setEnabled(False)
+        for i in range(row_independent.count()):
+            widget = row_independent.itemAt(i).widget()
+            if widget:
+                widget.hide()
         
         root_layout.addWidget(param_card)
         
@@ -991,7 +996,7 @@ class AutoScheduleDialog(QDialog):
             fill_empty=fill_empty, institution_slug=inst_slug, use_vds=use_vds,
             infinite_mode=True,
             ignore_other_institutions=self.sw_ignore_cross.isChecked(),
-            independent_classes=self.sw_independent.isChecked(),
+            independent_classes=False,
         )
         self.worker.progress_updated.connect(self._on_progress)
         self.worker.iteration_updated.connect(self._on_iteration)
@@ -1036,18 +1041,20 @@ class AutoScheduleDialog(QDialog):
         self.lbl_info.setStyleSheet("color: #DC2626; font-weight: 500;")
 
     def _on_finished(self, result):
-        self.progress.setValue(100)
-        self.lbl_pct.setText("100%")
+        placed = result.get("placed_hours", 0)
+        demand = result.get("total_assigned_hours", result.get("total_hours", 0))
+        self._on_progress(placed, demand)
         self.icon_3d.stop_pulse()
         self.skeleton.set_active(False)
-        self.skeleton.set_placed_ratio(1.0)
+        self.skeleton.set_placed_ratio(placed / max(1, demand))
         
         schedule = result.get("schedule", [])
-        total_hrs = result.get("placed_hours") or sum(item.get("duration", 1) for item in schedule)
-        target_hrs = result.get("total_hours", total_hrs)
+        total_hrs = result.get("placed_hours", 0)
+        target_hrs = result.get("total_assigned_hours", result.get("total_hours", total_hrs))
         self.lbl_val_placed.setText(f"{total_hrs} Saat")
-        self.lbl_info.setText(f"Otomatik planlama tamamlandı ({total_hrs} ders saati yerleştirildi).")
-        self.lbl_info.setStyleSheet("color: #34C759; font-weight: 600;")
+        complete = bool(result.get("complete", total_hrs == target_hrs))
+        self.lbl_info.setText(f"{'Planlama tamamlandı' if complete else 'Planlama eksik'} ({total_hrs}/{target_hrs} saat).")
+        self.lbl_info.setStyleSheet(f"color: {'#34C759' if complete else '#B45309'}; font-weight: 600;")
         self.data_store["auto_schedule_results"] = schedule
         # Carried through so the window can explain, right after the run, exactly why
         # any cell was left empty instead of just announcing success.
@@ -1055,7 +1062,10 @@ class AutoScheduleDialog(QDialog):
             "understaffed_slots": result.get("understaffed_slots", []),
             "unplaced_summary": result.get("unplaced_summary", []),
             "placed_real_hours": result.get("placed_real_hours", 0),
-            "total_assigned_hours": result.get("total_hours", 0),
+            "total_assigned_hours": target_hrs,
+            "status": result.get("status"),
+            "diagnostics": result.get("diagnostics", []),
+            "warnings": result.get("warnings", []),
         }
         
         new_placements = []
@@ -1103,7 +1113,7 @@ class AutoScheduleDialog(QDialog):
         # override it (see _on_lesson_dropped).
         import uuid as _uuid_unplaced
 
-        leftovers = result.get("unplaced_summary", []) or []
+        leftovers = result.get("unplaced_cards", result.get("unplaced_summary", [])) or []
         existing = self.data_store.setdefault("loose_unplaced_cards", [])
         existing[:] = [c for c in existing if not c.get("from_scheduler")]
 
@@ -1125,13 +1135,21 @@ class AutoScheduleDialog(QDialog):
                 else:
                     reason = (f"{teacher} öğretmeninin müsait olduğu saatlerde "
                               f"{cls} sınıfının boş yeri kalmadı.")
-                for _ in range(max(1, int(item.get("hours", 1) or 1))):
+                related = [x["message"] for x in result.get("diagnostics", [])
+                           if item.get("card_id") in x.get("cards", [])]
+                if related:
+                    reason = "\n".join(related)
+                elif result.get("status") == "timeout":
+                    reason = "Arama süresi içinde uygun yer bulunamadı; bu, çözümün imkânsız olduğu anlamına gelmez."
+                durations = [item["duration"]] if "duration" in item else [1] * max(1, int(item.get("hours", 1) or 1))
+                for block_duration in durations:
                     existing.append({
                         "id": f"loose_{_uuid_unplaced.uuid4().hex[:8]}",
                         "subject_name": subject, "subject": subject,
                         "teacher_name": teacher, "teacher": teacher,
                         "class_name": cls, "class": cls,
-                        "duration": 1,
+                        "duration": block_duration,
+                        "block_id": item.get("block_id", ""),
                         "color": get_subject_color(subject) if subject else "#94A3B8",
                         "is_filler": False,
                         "is_combined": False,
@@ -1171,6 +1189,8 @@ class AutoScheduleDialog(QDialog):
             "capacity_problems": result.get("capacity_problems", []),
             "unplaced_summary": result.get("unplaced_summary", []),
             "teacher_clashes": result.get("teacher_clashes", []),
+            "diagnostics": result.get("diagnostics", []),
+            "warnings": result.get("warnings", []),
         }
         
         self.accept()
@@ -1183,8 +1203,12 @@ class AutoScheduleDialog(QDialog):
         parent = self.parent()
         
         super().accept()
-        
-        if parent and violations:
+
+        if parent and summary.get("diagnostics"):
+            message = f"{total_hrs}/{target_hrs} saat yerleşti. Aktif kurallar korundu.\n\n" + "\n\n".join(
+                x["message"] for x in summary["diagnostics"])
+            QMessageBox.warning(parent, "Planlama kısıtları", message)
+        elif parent and violations:
             days_tr = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
             viol_teachers = set()
             viol_details = []

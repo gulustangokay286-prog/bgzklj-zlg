@@ -21,3 +21,13 @@ ChatGPT Image *.png
 *.xls
 *.xlsx
 
+
+# Generated native executable (source is versioned).
+scheduler/native/chenkron-scheduler
+scheduler/native/chenkron-scheduler.exe
+artifacts/scheduler/
+
+# Derlenmiş C++ motoru (kaynaktan üretilir)
+scheduler/native/chenkron
+scheduler/native/chenkron-scheduler
+scheduler/native/*.exe

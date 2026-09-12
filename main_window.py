@@ -2461,16 +2461,10 @@ class MainWindow(QMainWindow):
                 if not class_name or matches_class(d_cls, class_name) or matches_class(class_name, d_cls):
                     existing_teacher_day_lessons.append((r, data))
 
-        # TEMEL KURAL: Aynı öğretmenin dersleri (farklı dersler dahi olsa, örn: Geo + Mat)
-        # aynı sınıfta peş peşe (art arda) gelemez!
-        if teacher and existing_teacher_day_lessons:
-            for r_ex, data_ex in existing_teacher_day_lessons:
-                dur_ex = data_ex.get("duration", 1)
-                other_subj = data_ex.get("subject_name", data_ex.get("subject", "Ders"))
-                if (r_ex + dur_ex == period) or (period + duration == r_ex):
-                    return False, f"⚠️ <b>{teacher}</b> öğretmeninin dersleri (<b>{subject}</b> ve <b>{other_subj}</b>) {day_name} gününde bu sınıfta ({class_name}) <b>art arda (peş peşe)</b> gelemez!"
-
+        from scheduler.rules import _hardness_from, HARD
         for rel in relations:
+            if _hardness_from(rel.get("onem")) < HARD:
+                continue
             r_type = rel.get("kural", "")
             val = rel.get("parametre", 2)
             f_subjs = rel.get("dersler", [])
@@ -2502,11 +2496,11 @@ class MainWindow(QMainWindow):
 
             # Rule 3: Aynı ders aynı gün tekrar etmesin (Tek blok kuralı)
             elif "tekrar etmesin" in r_type:
-                if existing_subj_daily_hours > 0:
+                if "ogretmen" in normalize_clean(r_type):
+                    if teacher and existing_teacher_day_lessons:
+                        return False, f"{teacher}, {day_name} günü {class_name} sınıfında zaten ders veriyor."
+                elif existing_subj_daily_hours > 0:
                     return False, f"⚠️ <b>'Aynı ders aynı gün tekrar etmesin'</b> kuralına göre <b>{subject}</b> dersi {day_name} gününde zaten mevcuttur!"
-                if teacher and existing_teacher_day_lessons:
-                    other_subj = existing_teacher_day_lessons[0][1].get("subject_name", existing_teacher_day_lessons[0][1].get("subject", "Ders"))
-                    return False, f"⚠️ <b>'Aynı ders/öğretmen aynı gün tekrar etmesin'</b> kuralına göre <b>{teacher}</b> öğretmeni {day_name} gününde bu sınıfta zaten <b>{other_subj}</b> dersine girmektedir!"
 
             # Rule 4: İki ders aynı güne gelmesin
             elif "aynı güne gelmesin" in r_type or "İki ders aynı güne" in r_type:

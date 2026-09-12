@@ -357,6 +357,7 @@ class EditRelationDialog(QDialog):
             "Günde maksimum ders sayısı",
             "Beden Eğitimi / Uygulamalı dersler günde en fazla 2 saat olsun",
             "Aynı ders aynı gün tekrar etmesin",
+            "Aynı öğretmen aynı gün tekrar etmesin",
             "Dersler haftanın günlerine eşit dağıtılsın",
             "Seçilen dersler aynı gün peş peşe gelsin",
             "İki ders aynı güne gelmesin",
@@ -684,7 +685,10 @@ class EditRelationDialog(QDialog):
         rule = self.cb_rule.currentText()
         has_param = rule in ["Günde maksimum ders sayısı", "Beden Eğitimi / Uygulamalı dersler günde en fazla 2 saat olsun"]
         has_period = rule == "X dersi belirli saatlerde kalmalı"
+        from scheduler.rules import _match_rule_name
+        from scheduler.model import norm_key
         return {
+            "kind": _match_rule_name(norm_key(rule)),
             "aktif": self.relation_data.get("aktif", True),
             "kural": rule,
             "dersler": self.selected_subjects if self.cb_subj.currentIndex() == 1 else [],

@@ -77,6 +77,11 @@ from PyInstaller.utils.hooks import collect_all
 
 datas_ortools, binaries_ortools, hiddenimports_ortools = collect_all('ortools')
 
+native_filename = 'chenkron-scheduler.exe' if sys.platform == 'win32' else 'chenkron-scheduler'
+native_path = os.path.join(HERE, 'scheduler', 'native', native_filename)
+if not os.path.isfile(native_path):
+    raise SystemExit('Önce python tools/build_scheduler.py ile C++ motorunu derleyin.')
+
 pathex_list = [HERE]
 if os.path.isdir(RELEASE_SYSTEM):
     pathex_list.append(RELEASE_SYSTEM)
@@ -84,7 +89,7 @@ if os.path.isdir(RELEASE_SYSTEM):
 a = Analysis(
     ['main.py'],
     pathex=pathex_list,
-    binaries=binaries_ortools,
+    binaries=binaries_ortools + [(native_path, 'scheduler/native')],
     datas=app_datas + datas_ortools,
     hiddenimports=hidden_modules + hiddenimports_ortools,
     hookspath=[],
