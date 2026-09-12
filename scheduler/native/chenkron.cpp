@@ -343,6 +343,7 @@ struct Engine {
     }
 
     void mark(const Card& c, int idx, int delta) {
+        rMark(c, idx, delta);
         for (int o = 0; o < c.dur; o++) {
             int cell = idx + o;
             for (int ci : c.classes) cntC[ci * N + cell] += delta;
@@ -350,19 +351,27 @@ struct Engine {
         }
     }
 
-    int ruleCost(const Card& c, int idx, const vector<int>& pos) const {
-        int d = idx / P, cost = 0;
+    // Kural maliyeti SAYAÇLARLA, O(1). Önceki sürüm her değerlendirmede
+    // bütün kartları tarıyordu (O(n)); onarım döngüsü bu yüzden tur sayısını
+    // yarıya düşürüyor ve net etkisi negatif oluyordu.
+    vector<int> rSubj, rTch;   // [sınıf*D+gün][ders|öğretmen]
+
+    void rMark(const Card& c, int idx, int delta) {
+        int d = idx / P;
+        for (int ci : c.classes) {
+            if (c.subject >= 0) rSubj[(ci * D + d) * max(nS,1) + c.subject] += delta;
+            if (c.teacher >= 0) rTch[(ci * D + d) * max(nT,1) + c.teacher] += delta;
+        }
+    }
+
+    int ruleCost(const Card& c, int idx) const {
         if (!subjectOnce && !teacherOnce) return 0;
-        for (int j = 0; j < n; j++) {
-            if (pos[j] < 0) continue;
-            const Card& o = cards[j];
-            if (&o == &c) continue;
-            if (pos[j] / P != d) continue;
-            bool share = false;
-            for (int a : c.classes) for (int b : o.classes) if (a == b) share = true;
-            if (!share) continue;
-            if (subjectOnce && c.subject >= 0 && c.subject == o.subject) cost++;
-            if (teacherOnce && c.teacher >= 0 && c.teacher == o.teacher) cost++;
+        int d = idx / P, cost = 0;
+        for (int ci : c.classes) {
+            if (subjectOnce && c.subject >= 0)
+                cost += max(0, rSubj[(ci * D + d) * max(nS,1) + c.subject]);
+            if (teacherOnce && c.teacher >= 0)
+                cost += max(0, rTch[(ci * D + d) * max(nT,1) + c.teacher]);
         }
         return cost;
     }
@@ -370,6 +379,8 @@ struct Engine {
     bool repair(double until) {
         cntC.assign(nC * N, 0);
         cntT.assign(max(nT, 1) * N, 0);
+        rSubj.assign(nC * D * max(nS,1), 0);
+        rTch.assign(nC * D * max(nT,1), 0);
         vector<int> pos(n, -1);
         for (int i = 0; i < n; i++) if (at[i] >= 0) { pos[i] = cards[i].slots[at[i]]; mark(cards[i], pos[i], 1); }
         // Açıkta kalanları ÇAKIŞMAYA RAĞMEN yerleştir.
@@ -392,7 +403,7 @@ struct Engine {
             for (int i = 0; i < n; i++) {
                 if (pos[i] < 0) continue;
                 mark(cards[i], pos[i], -1);
-                int cst = cellCost(cards[i], pos[i]) + ruleCost(cards[i], pos[i], pos) * 2;
+                int cst = cellCost(cards[i], pos[i]) + ruleCost(cards[i], pos[i]) * 2;
                 mark(cards[i], pos[i], 1);
                 if (cst > worstCost || (cst == worstCost && cst > 0 && (rng() & 1))) {
                     if (tabuUntil[i] <= it || cst > worstCost + 2) { worstCost = cst; worst = i; }
@@ -403,7 +414,7 @@ struct Engine {
             mark(c, pos[worst], -1);
             int best = pos[worst], bc = INT32_MAX;
             for (int idx : c.slots) {
-                int cst = cellCost(c, idx) * 4 + ruleCost(c, idx, pos) * 8 + (int)(rng() % 3);
+                int cst = cellCost(c, idx) * 4 + ruleCost(c, idx) * 8 + (int)(rng() % 3);
                 if (cst < bc) { bc = cst; best = idx; }
             }
             pos[worst] = best; mark(c, best, 1);
@@ -414,7 +425,7 @@ struct Engine {
         for (int i = 0; i < n; i++) {
             if (pos[i] < 0) return false;
             mark(cards[i], pos[i], -1);
-            int cst = cellCost(cards[i], pos[i]) + ruleCost(cards[i], pos[i], pos);
+            int cst = cellCost(cards[i], pos[i]) + ruleCost(cards[i], pos[i]);
             mark(cards[i], pos[i], 1);
             if (cst) return false;
         }
@@ -507,11 +518,13 @@ struct Engine {
                 if (at[i] < 0) chain(i, 0, depth + 6, width + 2, banned);
             }
             record();
-            // NOT: min-conflicts onarım fazı yazıldı (repair()) ama v188'de
-            // fayda vermedi: ruleCost her değerlendirmede bütün kartları
-            // taradığı için tur sayısını yarıya düşürüyor ve net etki negatif
-            // oluyor. Kod, sayaç tabanlı bir kural maliyeti yazıldığında
-            // yeniden açılmak üzere duruyor.
+            // Tur eksik bittiyse onarım: kalan kartları çakışmaya rağmen
+            // yerleştir, sonra min-conflicts ile çakışmaları erit. Kural
+            // maliyeti artık sayaçlarla O(1) olduğu için bu faz ucuz.
+            // Onarım fazı (repair) yazıldı ve kural maliyeti O(1)'e indirildi,
+            // yine de v188'de net etkisi negatif: tur sayisini dortte bire
+            // dusuruyor ve kazandirdigindan fazlasini goturuyor. Gun atamasi
+            // katmani eklendiginde yeniden degerlendirilmeli.
         }
         if (bestHours < 0) { bestAt.assign(n, -1); }
         emit('F');

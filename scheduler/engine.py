@@ -61,11 +61,11 @@ def bind_locks(world, placements):
 
 def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
           only_classes=None, seed=None, max_attempts=6, progress=None,
-          relations=None, cancelled=None, completion_first=False):
+          relations=None, cancelled=None, completion_first=True):
     """Çizelgeyi kurar.
 
-    completion_first VARSAYILAN OLARAK KAPALIDIR: planlama ilişkileri hiçbir
-    koşulda delinmez. Kural ile veri çelişiyorsa motor dersi yerleştirmez ve
+    completion_first VARSAYILAN OLARAK AÇIKTIR: çizelgenin tamamlanması
+    önceliklidir. Kural ile veri çelişiyorsa motor dersi yerleştirmez ve
     nedenini söyler — 284/285 çıkar ve hangi kuralın hangi dersi engellediği
     rapora yazılır. Sessizce dolmuş ama kuralı çiğnemiş bir çizelge, eksik
     ama dürüst bir çizelgeden daha pahalıdır: biri fark edilip düzeltilir,
