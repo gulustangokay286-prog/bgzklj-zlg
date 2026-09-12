@@ -21,7 +21,7 @@ parça 3 saatlik tek karttır ve bitişik oturur.
 import constraint_sync
 import lesson_hours
 
-from .model import World, Card, norm_key, norm_class
+from .model import World, Card, norm_key, norm_class, subject_family
 from . import rules as R
 
 
@@ -196,6 +196,15 @@ def build_world(data_store, D=None, P=None, cross_busy=None,
                 subject_name=s_name, teacher_name=t_name,
                 class_names=tuple(class_names[i] for i in idxs),
             ))
+
+    # Her karta ders AİLESİ indeksi: "Matematik9" ile "Matematik11" aynı aile.
+    fam_ix, fam_names = {}, []
+    for c in cards:
+        key = subject_family(c.subject_name)
+        if key not in fam_ix:
+            fam_ix[key] = len(fam_names)
+            fam_names.append(key)
+        c.family = fam_ix[key]
 
     world = World(D=D, P=P, classes=class_names, teachers=teacher_names,
                   subjects=subject_names, cards=cards,

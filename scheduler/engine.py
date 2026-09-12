@@ -61,7 +61,7 @@ def bind_locks(world, placements):
 
 def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
           only_classes=None, seed=None, max_attempts=6, progress=None,
-          relations=None, cancelled=None, completion_first=True):
+          relations=None, cancelled=None, completion_first=True, use_cpsat=True):
     """Çizelgeyi kurar.
 
     completion_first VARSAYILAN OLARAK AÇIKTIR: çizelgenin tamamlanması
@@ -240,6 +240,66 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
                             res.positions=rec2['positions']
                             res.steps+=rec2['steps']
                             res.attempts+=rec2['restarts']+1
+    # ── CP-SAT BİTİRİCİ ──
+    #
+    # Tabu araması çizelgenin tamamına hızla yaklaşır ama son bir iki kartta
+    # takılır: her adımda tek kart oynattığı için, ancak üç dört kartın
+    # birlikte kaymasıyla ulaşılabilen çözümleri göremez. v188'de 60 saniye
+    # ile 180 saniye aynı sonucu veriyordu — sorun süre değil, hamlenin
+    # kendisi.
+    #
+    # CP-SAT tam bu boşluğu doldurur; kartların hepsini aynı anda değerlendirir
+    # ve "şu kart şuraya giderse şu üçü şöyle kayar" türü çıkarımları kendisi
+    # yapar. Tabu sonucu ipucu olarak verilir: sıfırdan aramak yerine eldeki
+    # çizelgeyi doğrulayıp üstüne çıkmaya odaklanır.
+    #
+    # Sonuç yalnızca DAHA İYİYSE ve denetimden geçerse alınır; CP-SAT'in
+    # bulduğu bir çizelge, ana aramanınkini hiçbir koşulda kötüleştiremez.
+    if use_cpsat and any(i < 0 for i in res.positions):
+        kalan = time_budget - (time.monotonic() - start)
+        if kalan > 1.0:
+            try:
+                from .cpsat import solve_cpsat as _cpsat
+                pos2, placed2, durum = _cpsat(w, rules, seconds=max(5.0, kalan),
+                                              warm_start=res.positions)
+                placed1 = sum(c.duration * len(c.classes)
+                              for c, i in zip(w.cards, res.positions) if i >= 0)
+                if placed2 > placed1:
+                    hata, _, _ = validate(w, rules, pos2, bend_rules=completion_first)
+                    if not hata:
+                        res.positions = pos2
+                        res.warnings.append(
+                            f"CP-SAT {placed2 - placed1} saat daha yerleştirdi ({durum}).")
+                elif durum == "OPTIMAL" and placed2 == placed1:
+                    res.warnings.append(
+                        "CP-SAT bu kurallarla daha fazlasının mümkün olmadığını kanıtladı.")
+            except Exception as exc:
+                res.warnings.append(f"CP-SAT çalışmadı: {exc}")
+
+    # ── BİTİRME GEÇİŞİ ──
+    #
+    # Tabu araması her adımda TEK kart oynatır. Son kartın yerleşmesi için
+    # çoğu zaman üç dört kartın birlikte kayması gerekir ve böyle bir hamle,
+    # tek kartlık adımların hiçbir dizilişinde ara durumu kötüleştirmeden
+    # görünmez. v188'de 60 saniye ile 180 saniye aynı sonucu veriyordu: sorun
+    # süre değil, hamlenin kendisiydi.
+    #
+    # Bu geçiş yalnızca açıkta kalan kartları hedefler ve onlar için tüketici
+    # arama yapar — alan küçük olduğu için hesaplı. Ana aramanın çizelgesini
+    # bozmaz: dal tutmazsa her şey birebir eski hâline döner.
+    if any(i < 0 for i in res.positions):
+        try:
+            from .finish import Finisher
+            fin = Finisher(w, rules, res.positions)
+            yeni, kazanc = fin.run()
+            if kazanc > 0:
+                hata, _, _ = validate(w, rules, yeni, bend_rules=completion_first)
+                if not hata:
+                    res.positions = yeni
+                    res.warnings.append(f"Bitirme geçişi {kazanc} saat daha yerleştirdi.")
+        except Exception as exc:
+            res.warnings.append(f"Bitirme geçişi çalışmadı: {exc}")
+
     errors,soft,bent=validate(w,rules,res.positions,bend_rules=completion_first)
     if errors:
         raise RuntimeError('Çizelge son denetimden geçmedi; sonuç uygulanmadı:\n'+'\n'.join(errors[:12]))

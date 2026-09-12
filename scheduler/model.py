@@ -55,6 +55,26 @@ def norm_key(s: str) -> str:
     return "".join(ch for ch in t if ch.isalnum())
 
 
+def subject_family(name: str) -> str:
+    """Ders adının AİLE anahtarı: sondaki sınıf/seviye rakamları atılır.
+
+        "Matematik9", "Matematik10", "Matematik11", "Matematik 1"  ->  "matematik"
+        "Fizik1", "Fizik11"                                        ->  "fizik"
+        "Kimya 9"                                                  ->  "kimya"
+
+    "Aynı ders aynı gün tekrar etmesin" kuralı bu anahtar üzerinden ölçülür.
+    Ders adları seviye numarasıyla yazıldığında ham ad karşılaştırması onları
+    AYRI DERS sanıyor ve kural boşa düşüyordu: 11. sınıfın Cuma günü 1-2.
+    saatte Matematik11, 4-5. saatte Matematik10 görmesi kuralı çiğnemiyormuş
+    gibi davranılıyordu. Öğrenci açısından ikisi de matematik.
+
+    Geometri kasıtlı olarak AYRI kalır; adı matematikle başlamaz ve okulda
+    ayrı bir ders olarak okutulur.
+    """
+    k = norm_key(name)
+    return k.rstrip("0123456789") or k
+
+
 def norm_class(s: str) -> str:
     """Sınıf adı anahtarı: '11A (MF)' -> '11amf', '9-A' -> '9a'."""
     return norm_key(s)
@@ -78,6 +98,7 @@ class Card:
     origin: int               # kaynak atamanın indeksi (rapor için)
     group: int                # aynı atamadan gelen kartlar aynı grup
     locked_at: Optional[int] = None   # kilitli kart: sabit idx
+    family: int = -1                  # ders ailesi (Matematik9/10/11 -> aynı)
 
     # Ön hesaplanan aday yerler; World.build() doldurur.
     slots: tuple = field(default_factory=tuple)      # (idx, footprint) çiftleri

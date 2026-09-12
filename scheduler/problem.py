@@ -118,7 +118,7 @@ class Problem:
         tch_groups = defaultdict(list)
         for c in w.cards:
             for ci in c.classes:
-                subj_groups[(ci, c.subject)].append(c)
+                subj_groups[(ci, c.family)].append(c)
                 if c.teacher >= 0:
                     tch_groups[(ci, c.teacher)].append(c)
 
@@ -154,7 +154,7 @@ class Problem:
                             and any(r.applies_class(ci) for ci in shared)]
                 checks = []
                 for r in relevant:
-                    if r.kind == R.X_SUBJECT_ONCE_DAY and a.subject == b.subject:
+                    if r.kind == R.X_SUBJECT_ONCE_DAY and a.family == b.family:
                         checks.append((0, r))
                     elif r.kind == R.X_TEACHER_ONCE_DAY and teacher:
                         checks.append((0, r))
@@ -165,8 +165,8 @@ class Problem:
                     elif r.kind == R.X_MIN_DAYS_BETWEEN and a.subject == b.subject:
                         checks.append((2, r))
                 shared = set(a.classes) & set(b.classes)
-                forced_subject = (a.subject == b.subject and
-                                  any(('s', ci, a.subject) in self.forced_groups
+                forced_subject = (a.family == b.family and
+                                  any(('s', ci, a.family) in self.forced_groups
                                       for ci in shared))
                 forced_teacher = (a.teacher >= 0 and a.teacher == b.teacher and
                                   any(('t', ci, a.teacher) in self.forced_groups
