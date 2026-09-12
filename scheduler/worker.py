@@ -51,7 +51,7 @@ def run_worker(worker):
     def progress(hours,total,attempt):
         worker.progress_updated.emit(hours,total)
         worker.iteration_updated.emit(attempt,0,hours)
-    result=solve(data,D=D,P=P,only_classes=selected,time_budget=60.0,   # tavan; motor tam çizelgeyi bulunca erken durur
+    result=solve(data,D=D,P=P,only_classes=selected,time_budget=240.0,  # tavan; motor tam çizelgeyi bulunca erken durur
                 
                  progress=progress,cancelled=lambda:not worker._is_running)
     per_key=defaultdict(int)

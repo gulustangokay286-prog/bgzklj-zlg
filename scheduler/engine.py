@@ -178,8 +178,15 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
         # başlar. İlk tam çizelge bulunduğunda döngü hemen biter.
         pr=Problem(w,rules,completion_first=completion_first)
         generation=0
+        # Tabu turlarina butcenin en fazla YARISI verilir; kalan yari CP-SAT'e
+        # ayrilir. Olcum bunu gerektirdi: v190'da tabu 283'te plato yapiyor,
+        # son iki saati CP-SAT buluyor. Tabu butcenin sonuna kadar kosarsa
+        # CP-SAT'e zaman kalmiyor ve cizelge, cozulebilir oldugu halde eksik
+        # bitiyor — kullanicinin gordugu 284/285 tam olarak buydu.
+        tabu_deadline = start + time_budget * 0.5
         while (rec['hours']<search_target and not rec['cancelled'] and generation<40):
-            left=time_budget-(time.monotonic()-start)
+            left=min(time_budget-(time.monotonic()-start),
+                     tabu_deadline-time.monotonic())
             if left<=1.0: break
             generation+=1
             lanes=max(2,(os.cpu_count() or 4))
@@ -260,7 +267,7 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
         if kalan > 1.0:
             try:
                 from .cpsat import solve_cpsat as _cpsat
-                pos2, placed2, durum = _cpsat(w, rules, seconds=max(5.0, kalan),
+                pos2, placed2, durum = _cpsat(w, rules, seconds=max(30.0, kalan),
                                               warm_start=res.positions)
                 placed1 = sum(c.duration * len(c.classes)
                               for c, i in zip(w.cards, res.positions) if i >= 0)
