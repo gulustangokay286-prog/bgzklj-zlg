@@ -100,23 +100,44 @@ class Problem:
 
 
     def _impossible_groups(self):
-        """Kart sayısı, öğretmenin açık gün sayısını aşan (sınıf, ders) grupları."""
+        """Kart sayısı, ulaşılabilir gün sayısını aşan gruplar.
+
+        İki tür grup vardır ve İKİSİ DE gereklidir:
+
+          (sınıf, ders)     "Aynı ders aynı gün tekrar etmesin" bunu sayar.
+          (sınıf, öğretmen) "Aynı öğretmen aynı gün tekrar etmesin" bunu sayar.
+
+        İkincisi başta atlanmıştı ve bedeli doğrudan ölçüldü: Yasemin Özkaya
+        üç ayrı on birinci sınıfın her birine dört kart veriyor ama haftada üç
+        gün okulda. Öğretmen kuralı açıldığında bu kartların bir kısmı hiçbir
+        güne sığmıyor; grup imkânsız diye işaretlenmediği için de motor onları
+        yerleştiremeden bırakıyor ve çizelge dört saat eksik kalıyordu.
+        """
         w = self.world
-        groups = defaultdict(list)
+        subj_groups = defaultdict(list)
+        tch_groups = defaultdict(list)
         for c in w.cards:
             for ci in c.classes:
-                groups[(ci, c.subject)].append(c)
-        out = set()
-        for (ci, si), items in groups.items():
+                subj_groups[(ci, c.subject)].append(c)
+                if c.teacher >= 0:
+                    tch_groups[(ci, c.teacher)].append(c)
+
+        def impossible(items):
             if len(items) < 2:
-                continue
-            t = items[0].teacher
+                return False
             days = set()
             for c in items:
                 for idx, _ in c.slots:
                     days.add(idx // w.P)
-            if len(items) > len(days):
-                out.add((ci, si))
+            return len(items) > len(days)
+
+        out = set()
+        for key, items in subj_groups.items():
+            if impossible(items):
+                out.add(('s',) + key)
+        for key, items in tch_groups.items():
+            if impossible(items):
+                out.add(('t',) + key)
         return out
 
     def _compile_pairs(self):
@@ -144,8 +165,13 @@ class Problem:
                     elif r.kind == R.X_MIN_DAYS_BETWEEN and a.subject == b.subject:
                         checks.append((2, r))
                 shared = set(a.classes) & set(b.classes)
-                forced_pair = (a.subject == b.subject and
-                               any((ci, a.subject) in self.forced_groups for ci in shared))
+                forced_subject = (a.subject == b.subject and
+                                  any(('s', ci, a.subject) in self.forced_groups
+                                      for ci in shared))
+                forced_teacher = (a.teacher >= 0 and a.teacher == b.teacher and
+                                  any(('t', ci, a.teacher) in self.forced_groups
+                                      for ci in shared))
+                forced_pair = forced_subject or forced_teacher
                 hard, soft = [], []
                 for ax, af in a.slots:
                     ad, ap = divmod(ax, w.P)
@@ -163,8 +189,22 @@ class Problem:
                                     s += r.penalty()
                                 elif forced_pair:
                                     # Bu grup aritmetik olarak sağlanamıyor:
-                                    # kural burada ağır ceza olur, yasak olmaz.
-                                    s += FORCED_WEIGHT
+                                    # kartlardan bir kısmı AYNI GÜNE düşmek
+                                    # zorunda. O zaman tek makul biçim, aynı
+                                    # güne düşenlerin BİTİŞİK olmasıdır:
+                                    # öğrenci dersi tek kesintisiz blok olarak
+                                    # görür, gün içinde iki ayrı seferde değil.
+                                    #
+                                    # Bitişik olmayan aynı-gün yerleşimi çok
+                                    # ağır cezalandırılır; bitişik olan serbest
+                                    # bırakılır. Aksi hâlde motor iki kartı
+                                    # günün iki ucuna atıyor ve sonuç, kuralın
+                                    # engellemek istediği şeyin ta kendisi
+                                    # oluyordu.
+                                    adjacent = (ap + a.duration == bp
+                                                or bp + b.duration == ap)
+                                    if not adjacent:
+                                        s += FORCED_WEIGHT
                                 else:
                                     h = 1
                         hard.append(h)

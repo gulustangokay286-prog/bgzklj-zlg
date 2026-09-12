@@ -380,4 +380,27 @@ def compile_rules(raw_relations, world, defaults=True) -> tuple:
         for k in (Y_TEACHER_CLASH, Y_CLASS_CLASH, Y_CLOSED_CELL, Y_CROSS_INSTITUTION):
             rules.append(Rule(kind=k, axis=Y, hardness=HARD, label=f"[çekirdek] {k}"))
 
+        # X ekseni tabanı. Bu iki kural, kullanıcı ekranda ayrıca tanımlamasa
+        # bile yürürlüktedir; çünkü ikisi de "çizelge okunabilir olsun"un
+        # asgari şartı:
+        #
+        #   Aynı ders aynı güne iki AYRI seferde gelmemeli. Öğrencinin
+        #   matematiği sabah görüp araya üç ders girdikten sonra öğleden
+        #   sonra tekrar görmesi, kimsenin isteyerek kurduğu bir çizelge
+        #   değildir.
+        #
+        #   Aynı öğretmen aynı sınıfa aynı gün İKİ FARKLI DERS vermemeli.
+        #   Matematik ve Geometri'yi aynı hoca veriyorsa, sınıf o gün onu
+        #   iki ayrı ders için görmemeli.
+        #
+        # Kullanıcı ekranda aynı kuralı tanımlamışsa oradaki kapsam (seçili
+        # ders/sınıf/öğretmen) geçerlidir; buradaki taban yalnızca hiç
+        # tanımlanmamışsa devreye girer.
+        if X_SUBJECT_ONCE_DAY not in have:
+            rules.append(Rule(kind=X_SUBJECT_ONCE_DAY, axis=X, hardness=HARD,
+                              label="Aynı ders aynı gün tekrar etmesin"))
+        if X_TEACHER_ONCE_DAY not in have:
+            rules.append(Rule(kind=X_TEACHER_ONCE_DAY, axis=X, hardness=HARD,
+                              label="Aynı öğretmen aynı gün tekrar etmesin"))
+
     return rules, rep
