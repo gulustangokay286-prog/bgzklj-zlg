@@ -42,17 +42,38 @@ def run_worker(worker):
         key=norm_teacher(pl.get('teacher_name') or pl.get('teacher'))
         d=int(pl.get('day',pl.get('col',0)));p=int(pl.get('period',pl.get('row',0)))
         for off in range(int(pl.get('duration') or 1)): cross.setdefault(key,set()).add((d,p+off))
+    # Öğretmenin KENDİ zaman tablosuna dokunulmaz.
+    #
+    # Burada eskiden çapraz kurum kısıtları ve paylaşılan öğretmen saatleri
+    # doğrudan t['timeoff'] içine yazılıyordu. Sonuç kaydedildiğinde o saatler
+    # öğretmenin kalıcı müsaitliği hâline geliyor ve bir daha geri gelmiyordu:
+    # planlayıcı her çalıştığında zaman tablosu biraz daha daralıyordu.
+    # Birey'de tam olarak bu oldu — 10 Eylül'de 237/237 oturan çizelgenin
+    # kullandığı 35 saat, üç PAYLAŞILAN öğretmende (Mesut Çolak, Niyazi Kaya,
+    # Muharrem Yavuz) kapanmıştı; kapananların hepsinin paylaşılan hocalar
+    # olması da sebebin bu birleştirme olduğunu gösteriyor.
+    #
+    # Doğrusu: kısıtlar çözücüye AYRI bir parametre olarak verilir, kullanıcının
+    # verisine yazılmaz. Zaman tablosunu yalnızca kullanıcı değiştirir.
+    engel={}
     for t in data.get('ogretmenler',[]):
         name=t.get('ad') or t.get('name');key=norm_teacher(name)
-        matrix=constraint_sync.get_matrix(t,name,data)
-        for d,p in closed.get(key,set()) | cross.get(key,set()):
-            if 0<=d<D and 0<=p<P: matrix[d][p]=0
-        t['timeoff']=matrix
+        t['timeoff']=constraint_sync.get_matrix(t,name,data)
+        ek=closed.get(key,set()) | cross.get(key,set())
+        if ek: engel[name]={(d,p) for d,p in ek if 0<=d<D and 0<=p<P}
     def progress(hours,total,attempt):
         worker.progress_updated.emit(hours,total)
         worker.iteration_updated.emit(attempt,0,hours)
-    result=solve(data,D=D,P=P,only_classes=selected,time_budget=240.0,  # tavan; motor tam çizelgeyi bulunca erken durur
-                
+    # OPTİMAL KİP — worker üzerinde açıksa süre hedef değil emniyet sübabıdır:
+    # motor CP-SAT'in OPTIMAL kanıtını bekler, kanıt gelince durur. Bloklar
+    # gerekirse 1 saatlik parçalara bölünür ve ikinci aşamada mevcut tablodan
+    # en az sapmayı veren çözüm seçilir.
+    optimal=bool(getattr(worker,'optimal_mode',False))
+    result=solve(data,D=D,P=P,only_classes=selected,cross_busy=engel,
+                 time_budget=3.0,   # normal kipte tavan; motor tam çizelgeyi bulunca erken durur
+                 optimal_mode=optimal,
+                 allow_split=bool(getattr(worker,'allow_split',True)),
+                 azami_saniye=float(getattr(worker,'azami_saniye',3600.0)),
                  progress=progress,cancelled=lambda:not worker._is_running)
     per_key=defaultdict(int)
     for x in result.unplaced: per_key[x['class'],x['subject'],x['teacher']]+=x['hours']

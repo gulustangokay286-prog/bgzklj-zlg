@@ -839,10 +839,31 @@ class AutoScheduleDialog(QDialog):
             False
         )
 
+        # Süre bir hedef değil: motor CP-SAT'in OPTIMAL kanıtını bekler ve
+        # kanıt gelince durur. Karşılığında "şu an elde edilebilecek en iyi
+        # sonuç bu" denebilir — normal kipte bu söylenemez, çünkü bütçe
+        # dolduğu için durmuş olabilir.
+        row_optimal, self.sw_optimal = make_switch_row(
+            "Optimale Kadar Çalış",
+            "Kanıt gelene kadar durmaz, takas yapa yapa ilerler — uzun sürebilir",
+            False
+        )
+        # 2 saatlik ders 1+1, 2+2+1 ise 1+1+1+1+1 olabilir. Sınıfın gününde
+        # tek saatlik bir açıklık kaldığında bütün blok oraya sığmaz ve o saat
+        # ölü kalır; bölme tam bu boşluğu doldurur. Bedelli, ancak gerektiğinde
+        # devreye girer.
+        row_split, self.sw_split = make_switch_row(
+            "Blokları Bölebilsin",
+            "2 saatlik dersi 1+1, 2+2+1'i 1+1+1+1+1 yapabilir — yalnızca gerekirse",
+            True
+        )
+
         p_lay.addLayout(row_vds)
         p_lay.addLayout(row_zero)
         p_lay.addLayout(row_fill)
         p_lay.addLayout(row_ignore)
+        p_lay.addLayout(row_optimal)
+        p_lay.addLayout(row_split)
         self.sw_independent.setChecked(False)
         self.sw_independent.setEnabled(False)
         for i in range(row_independent.count()):
@@ -997,6 +1018,8 @@ class AutoScheduleDialog(QDialog):
             infinite_mode=True,
             ignore_other_institutions=self.sw_ignore_cross.isChecked(),
             independent_classes=False,
+            optimal_mode=self.sw_optimal.isChecked(),
+            allow_split=self.sw_split.isChecked(),
         )
         self.worker.progress_updated.connect(self._on_progress)
         self.worker.iteration_updated.connect(self._on_iteration)

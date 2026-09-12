@@ -56,23 +56,22 @@ def norm_key(s: str) -> str:
 
 
 def subject_family(name: str) -> str:
-    """Ders adının AİLE anahtarı: sondaki sınıf/seviye rakamları atılır.
+    """Ders adının kimlik anahtarı: ADIN TAMAMI.
 
-        "Matematik9", "Matematik10", "Matematik11", "Matematik 1"  ->  "matematik"
-        "Fizik1", "Fizik11"                                        ->  "fizik"
-        "Kimya 9"                                                  ->  "kimya"
+        "Matematik1", "Matematik2"  ->  ayrı dersler
+        "Matematik",  "Geometri"    ->  ayrı dersler
 
     "Aynı ders aynı gün tekrar etmesin" kuralı bu anahtar üzerinden ölçülür.
-    Ders adları seviye numarasıyla yazıldığında ham ad karşılaştırması onları
-    AYRI DERS sanıyor ve kural boşa düşüyordu: 11. sınıfın Cuma günü 1-2.
-    saatte Matematik11, 4-5. saatte Matematik10 görmesi kuralı çiğnemiyormuş
-    gibi davranılıyordu. Öğrenci açısından ikisi de matematik.
 
-    Geometri kasıtlı olarak AYRI kalır; adı matematikle başlamaz ve okulda
-    ayrı bir ders olarak okutulur.
+    Bir ara bu işlev sondaki rakamları atıp "Matematik1" ile "Matematik2"yi tek
+    aile sayıyordu. Kullanıcının kastı bu değil: numaralı adlar Birey'de ayrı
+    ders saatleridir ve aynı güne gelmeleri sorun değil ("mat1 mat2 yan yana
+    gelebilir sıkıntı yok"). Birleştirme, kuralı olduğundan sert yapıyordu ve
+    ölçülen bedeli tam 2 saatti: Birey v111'de aile birleştirmesi açıkken tavan
+    235/237, kapalıyken 237/237 (ikisi de CP-SAT OPTIMAL). Kural artık ekranda
+    yazdığı gibi çalışıyor — aynı ders, yani aynı ad.
     """
-    k = norm_key(name)
-    return k.rstrip("0123456789") or k
+    return norm_key(name)
 
 
 def norm_class(s: str) -> str:

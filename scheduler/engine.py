@@ -18,6 +18,7 @@ class Result:
         self.elapsed=0.0;self.attempts=0;self.placed_hours=0;self.total_hours=0
         self.steps=0;self.chain_calls=0;self.status='not_started';self.upper_bound=0
         self.positions=[];self.soft_cost=0;self.bent_rules=[];self.forced_minimums=[]
+        self.split_pieces={}
 
     @property
     def complete(self):
@@ -59,9 +60,115 @@ def bind_locks(world, placements):
         c.locked_at=idx;used.add(c.cid)
 
 
+
+
+def _kayitli_yer(data_store, world, card):
+    """Kartın KAYITLI çizelgedeki yeri (ızgara indeksi) — yoksa None.
+
+    Optimal kipin ikinci aşaması "mevcut tablodan en az sapma"yı arar; sapma
+    ancak mevcut tablo bilinirse ölçülebilir. Eşleme kart kimliğiyle değil
+    sınıf/ders/öğretmen/süre ile yapılır: kullanıcı elle yerleştirdiğinde
+    kart kimlikleri tutmuyor.
+    """
+    if not hasattr(data_store, 'get'):
+        return None
+    eslesme = getattr(_kayitli_yer, '_tablo', None)
+    if eslesme is None or eslesme.get('_kaynak') is not data_store:
+        eslesme = {'_kaynak': data_store}
+        for pl in data_store.get('grid_placements') or []:
+            try:
+                d=int(pl.get('day',pl.get('col',0)));p=int(pl.get('period',pl.get('row',0)))
+            except (TypeError,ValueError):
+                continue
+            anahtar=(norm_class(pl.get('class_name') or pl.get('class')),
+                     norm_key(pl.get('subject_name') or pl.get('subject')),
+                     norm_key(pl.get('teacher_name') or pl.get('teacher')),
+                     int(pl.get('duration') or 1))
+            eslesme.setdefault(anahtar,[]).append(d*world.P+p)
+        _kayitli_yer._tablo = eslesme
+    for cn in card.class_names:
+        anahtar=(norm_class(cn), norm_key(card.subject_name),
+                 norm_key(card.teacher_name), card.duration)
+        yerler=eslesme.get(anahtar)
+        if yerler:
+            return yerler.pop(0)
+    return None
+
+
+def _bitir(res, w, rules, data_store, completion_first, start):
+    """Doğrulama + çizelgenin kurulması. Bütün kipler buradan çıkar."""
+    errors,soft,bent=validate(w,rules,res.positions,bend_rules=completion_first)
+    if errors:
+        raise RuntimeError('Çizelge son denetimden geçmedi; sonuç uygulanmadı:\n'+'\n'.join(errors[:12]))
+    res.warnings.extend(soft)
+    if res.status!='cancelled':
+        res.status='complete' if res.placed_hours==res.total_hours else 'timeout'
+    # Bu notlar KURAL İHLALİ DEĞİLDİR.
+    #
+    # "Aynı ders aynı gün tekrar etmesin" bir dersin kartlarını ayrı günlere
+    # dağıtmayı ister. Bir dersin kart sayısı, o dersi veren öğretmenin okulda
+    # olduğu gün sayısını aşıyorsa bu istek hiçbir çizelgede karşılanamaz:
+    # 9A Matematik beş saat, bloklar en fazla iki saat olabildiği için en az
+    # üç kart, öğretmen ise haftada iki gün okulda. Üç kartı iki güne koymak
+    # zorunludur; alternatifi dersin hiç yapılmamasıdır.
+    #
+    # Programın ilk motoru da bu kuralı hep böyle uygulamıştı: gün sayısı
+    # yetiyorsa günde bir, yetmiyorsa tavan ceil(kart/gün). Kuralın anlamı
+    # "gün sayısının elverdiği ölçüde en fazla bir kez"dir. Aritmetiğin
+    # dayattığı taban, kuralın ihlali değil uygulanabilir en sıkı hâlidir.
+    #
+    # Bu yüzden bu durumlar ihlal sayılmaz; nerede ve neden oluştuğu rapora
+    # bilgi notu olarak yazılır, kullanıcı isterse öğretmenin gününü açarak
+    # tabanı bire indirir.
+    res.forced_minimums=bent
+    res.bent_rules=[]
+    for b in bent:
+        res.warnings.append('ARİTMETİK TABAN — '+b+
+                            ' (bu ders için mümkün olan en az tekrar)')
+    parcalar=getattr(res,'split_pieces',None) or {}
+    for i,(c,idx) in enumerate(zip(w.cards,res.positions)):
+        if idx<0 and i in parcalar:
+            # BÖLÜNMÜŞ KART — 1 saatlik parçalar halinde yerleşti.
+            original=data_store.get('atamalar',[])[c.origin]
+            for k,pidx in enumerate(parcalar[i]):
+                d,p=divmod(pidx,w.P)
+                res.placed_hours+=len(c.classes)
+                for cn in c.class_names:
+                    res.placements.append(dict(class_name=cn,**{'class':cn},subject_name=c.subject_name,
+                        subject=c.subject_name,teacher_name=c.teacher_name,teacher=c.teacher_name,
+                        day=d,day_idx=d,col=d,period=p,row=p,duration=1,
+                        is_combined=len(c.classes)>1,combined_classes=list(c.class_names) if len(c.classes)>1 else [],
+                        block_id=f'c{c.cid}b{k}',card_id=c.cid,assignment_index=c.origin,
+                        locked=False,is_manual=False,is_filler=False,is_split=True,
+                        color=original.get('color') or original.get('renk')))
+            continue
+        if idx<0:
+            for cn in c.class_names:
+                res.unplaced.append(dict(card_id=c.cid,**{'class':cn},subject=c.subject_name,
+                                         teacher=c.teacher_name,duration=c.duration,hours=c.duration,
+                                         block_id=f'c{c.cid}'))
+            continue
+        d,p=divmod(idx,w.P)
+        res.placed_hours+=c.duration*len(c.classes)
+        original=data_store.get('atamalar',[])[c.origin]
+        for cn in c.class_names:
+            res.placements.append(dict(class_name=cn,**{'class':cn},subject_name=c.subject_name,
+                subject=c.subject_name,teacher_name=c.teacher_name,teacher=c.teacher_name,
+                day=d,day_idx=d,col=d,period=p,row=p,duration=c.duration,
+                is_combined=len(c.classes)>1,combined_classes=list(c.class_names) if len(c.classes)>1 else [],
+                block_id=f'c{c.cid}',card_id=c.cid,assignment_index=c.origin,
+                locked=c.locked_at is not None,is_manual=c.locked_at is not None,is_filler=False,
+                color=original.get('color') or original.get('renk')))
+    if res.complete: res.status='complete'
+    elif res.diagnostics and res.status!='cancelled': res.status='infeasible'
+    res.elapsed=time.monotonic()-start
+    return res
+
+
 def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
           only_classes=None, seed=None, max_attempts=6, progress=None,
-          relations=None, cancelled=None, completion_first=True, use_cpsat=True):
+          relations=None, cancelled=None, completion_first=True, use_cpsat=True,
+          optimal_mode=False, allow_split=True, azami_saniye=3600.0):
     """Çizelgeyi kurar.
 
     completion_first VARSAYILAN OLARAK AÇIKTIR: çizelgenin tamamlanması
@@ -115,7 +222,80 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
     for c in w.cards:
         if c.locked_at is not None and not c.slots:
             raise ValueError(f"Kilitli kart kapalı saate veya planlama kuralına aykırı: {c}")
-    if w.cards:
+    # ── OPTİMAL KİP ──
+    #
+    # "Optimale çıkana kadar durmasın, optimale ulaşınca dursun; uzun sürmesi
+    # önemli değil, sürekli takas yapa yapa ilerlesin."
+    #
+    # Burada süre bir hedef değil, yalnızca emniyet sübabıdır: motor CP-SAT'in
+    # OPTIMAL kanıtını bekler. Kanıt geldiğinde ikinci aşama başlar ve aynı
+    # saat sayısına ulaşan çözümler arasından kullanıcının mevcut tablosuna
+    # EN AZ TAKASLA ulaşanı seçilir. Bloklar gerekirse 1 saatlik parçalara
+    # bölünür (2 saat -> 1+1, 2+2+1 -> 1+1+1+1+1).
+    if w.cards and optimal_mode:
+        from .cpsat import solve_optimal
+        mevcut = {i: c.locked_at for i, c in enumerate(w.cards) if c.locked_at is not None}
+        for i, c in enumerate(w.cards):
+            if i in mevcut: continue
+            yer = _kayitli_yer(data_store, w, c)
+            if yer is not None: mevcut[i] = yer
+        def _ilerle(rec):
+            res.diagnostics = res.diagnostics
+            if callable(progress):
+                progress(rec.get('saat', 0), res.total_hours, rec.get('tur', 1))
+        pos, parcalar, placed, durum, tur = solve_optimal(
+            w, rules, referans=mevcut, allow_split=allow_split,
+            azami_saniye=azami_saniye, progress=_ilerle, cancelled=cancelled)
+        res.positions = pos
+        res.split_pieces = parcalar
+        res.status = 'optimal' if durum == 'OPTIMAL' else durum.lower()
+        res.warnings.append(
+            f"Optimal kip: {tur} tur, {placed}/{res.total_hours} saat, CP-SAT {durum}."
+            + (f" {len(parcalar)} blok parçalara bölündü." if parcalar else ""))
+        return _bitir(res, w, rules, data_store, completion_first, start)
+
+    cozuldu=False
+    cp_is=None; cp_sonuc={}
+    # ── CP-SAT PARALEL ATIŞ ──
+    #
+    # Birey'de CP-SAT tam çizelgeyi 0,4 saniyede OPTIMAL olarak buluyor;
+    # tabu araması aynı veride 235'te takılıyor. Boğaziçi'de ise tam tersi:
+    # CP-SAT süre dolana dek yalnızca FEASIBLE veriyor, tabu 285'e ulaşıyor.
+    # Hangisinin kazanacağı veriye bağlı, o yüzden ikisi de çalışır.
+    #
+    # CP-SAT sıraya konduğunda (önce ya da sonra fark etmez) diğerinin
+    # bütçesini yiyordu: başa alınca Boğaziçi 285'ten 273'e düşüyor, sona
+    # alınca 3 saniyelik bütçede sırası hiç gelmiyor ve Birey 235'te kalıyordu.
+    # Çözüm ikisini yarıştırmak: CP-SAT ayrı bir iş parçacığında koşar
+    # (OR-Tools yerel kodda GIL'i bırakır), ana aramanın saati ise kısa
+    # yoklamadan SONRA başlar. Böylece tabu bütçesinden tek saniye gitmez.
+    if w.cards and use_cpsat:
+        import threading
+        def _cp_kosu():
+            try:
+                from .cpsat import solve_cpsat as _c
+                # Az iş parçacığı: tabu portföyü 16 çekirdeği kullanıyor,
+                # CP-SAT varsayılan 8 işçiyle açılınca ikisi birbirini
+                # aç bırakıyor ve Boğaziçi 279'dan 275'e düşüyordu.
+                # Kolay örnekleri CP-SAT 2 işçiyle de saniyenin yarısında
+                # çözüyor; zor örneklerde zaten kazanan tabu.
+                cp_sonuc['r']=_c(w,rules,seconds=max(1.0,time_budget*0.9),
+                                 allow_split=True,workers=2)
+            except Exception as exc:
+                cp_sonuc['hata']=exc
+        cp_is=threading.Thread(target=_cp_kosu,daemon=True); cp_is.start()
+        cp_is.join(min(0.6,max(0.2,time_budget*0.25)))
+        if 'r' in cp_sonuc:
+            pos0,placed0,durum0=cp_sonuc['r']
+            if all(i>=0 for i in pos0):
+                hata0,_,_=validate(w,rules,pos0,bend_rules=completion_first)
+                if not hata0:
+                    res.positions=pos0; cozuldu=True
+                    res.warnings.append(f"CP-SAT tam çizelgeyi buldu ({durum0}).")
+        # Yoklamada harcanan süre ana aramadan düşülmez.
+        start=time.monotonic()
+
+    if w.cards and not cozuldu:
         def on_progress(rec):
             if callable(progress): progress(rec['hours'],res.total_hours,rec['restarts']+1)
         # A proved day-capacity deficit gives a candidate set of absent cards.
@@ -262,26 +442,27 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
     #
     # Sonuç yalnızca DAHA İYİYSE ve denetimden geçerse alınır; CP-SAT'in
     # bulduğu bir çizelge, ana aramanınkini hiçbir koşulda kötüleştiremez.
-    if use_cpsat and any(i < 0 for i in res.positions):
-        kalan = time_budget - (time.monotonic() - start)
-        if kalan > 1.0:
-            try:
-                from .cpsat import solve_cpsat as _cpsat
-                pos2, placed2, durum = _cpsat(w, rules, seconds=max(30.0, kalan),
-                                              warm_start=res.positions)
-                placed1 = sum(c.duration * len(c.classes)
-                              for c, i in zip(w.cards, res.positions) if i >= 0)
-                if placed2 > placed1:
-                    hata, _, _ = validate(w, rules, pos2, bend_rules=completion_first)
-                    if not hata:
-                        res.positions = pos2
-                        res.warnings.append(
-                            f"CP-SAT {placed2 - placed1} saat daha yerleştirdi ({durum}).")
-                elif durum == "OPTIMAL" and placed2 == placed1:
+    if use_cpsat and not cozuldu and any(i < 0 for i in res.positions):
+        # Paralel CP-SAT hâlâ koşuyor olabilir; kalan bütçe kadar beklenir.
+        # Sonuç yalnızca DAHA İYİYSE ve denetimden geçerse alınır — CP-SAT'in
+        # çizelgesi ana aramanınkini hiçbir koşulda kötüleştiremez.
+        if cp_is is not None:
+            cp_is.join(max(0.0, time_budget - (time.monotonic() - start)))
+        if 'hata' in cp_sonuc:
+            res.warnings.append(f"CP-SAT çalışmadı: {cp_sonuc['hata']}")
+        elif 'r' in cp_sonuc:
+            pos2, placed2, durum = cp_sonuc['r']
+            placed1 = sum(c.duration * len(c.classes)
+                          for c, i in zip(w.cards, res.positions) if i >= 0)
+            if placed2 > placed1:
+                hata, _, _ = validate(w, rules, pos2, bend_rules=completion_first)
+                if not hata:
+                    res.positions = pos2
                     res.warnings.append(
-                        "CP-SAT bu kurallarla daha fazlasının mümkün olmadığını kanıtladı.")
-            except Exception as exc:
-                res.warnings.append(f"CP-SAT çalışmadı: {exc}")
+                        f"CP-SAT {placed2 - placed1} saat daha yerleştirdi ({durum}).")
+            elif durum == "OPTIMAL" and placed2 == placed1:
+                res.warnings.append(
+                    "CP-SAT bu kurallarla daha fazlasının mümkün olmadığını kanıtladı.")
 
     # ── BİTİRME GEÇİŞİ ──
     #
@@ -294,7 +475,7 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
     # Bu geçiş yalnızca açıkta kalan kartları hedefler ve onlar için tüketici
     # arama yapar — alan küçük olduğu için hesaplı. Ana aramanın çizelgesini
     # bozmaz: dal tutmazsa her şey birebir eski hâline döner.
-    if any(i < 0 for i in res.positions):
+    if not cozuldu and any(i < 0 for i in res.positions):
         try:
             from .finish import Finisher
             fin = Finisher(w, rules, res.positions)
@@ -307,53 +488,4 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
         except Exception as exc:
             res.warnings.append(f"Bitirme geçişi çalışmadı: {exc}")
 
-    errors,soft,bent=validate(w,rules,res.positions,bend_rules=completion_first)
-    if errors:
-        raise RuntimeError('Çizelge son denetimden geçmedi; sonuç uygulanmadı:\n'+'\n'.join(errors[:12]))
-    res.warnings.extend(soft)
-    if res.status!='cancelled':
-        res.status='complete' if res.placed_hours==res.total_hours else 'timeout'
-    # Bu notlar KURAL İHLALİ DEĞİLDİR.
-    #
-    # "Aynı ders aynı gün tekrar etmesin" bir dersin kartlarını ayrı günlere
-    # dağıtmayı ister. Bir dersin kart sayısı, o dersi veren öğretmenin okulda
-    # olduğu gün sayısını aşıyorsa bu istek hiçbir çizelgede karşılanamaz:
-    # 9A Matematik beş saat, bloklar en fazla iki saat olabildiği için en az
-    # üç kart, öğretmen ise haftada iki gün okulda. Üç kartı iki güne koymak
-    # zorunludur; alternatifi dersin hiç yapılmamasıdır.
-    #
-    # Programın ilk motoru da bu kuralı hep böyle uygulamıştı: gün sayısı
-    # yetiyorsa günde bir, yetmiyorsa tavan ceil(kart/gün). Kuralın anlamı
-    # "gün sayısının elverdiği ölçüde en fazla bir kez"dir. Aritmetiğin
-    # dayattığı taban, kuralın ihlali değil uygulanabilir en sıkı hâlidir.
-    #
-    # Bu yüzden bu durumlar ihlal sayılmaz; nerede ve neden oluştuğu rapora
-    # bilgi notu olarak yazılır, kullanıcı isterse öğretmenin gününü açarak
-    # tabanı bire indirir.
-    res.forced_minimums=bent
-    res.bent_rules=[]
-    for b in bent:
-        res.warnings.append('ARİTMETİK TABAN — '+b+
-                            ' (bu ders için mümkün olan en az tekrar)')
-    for c,idx in zip(w.cards,res.positions):
-        if idx<0:
-            for cn in c.class_names:
-                res.unplaced.append(dict(card_id=c.cid,**{'class':cn},subject=c.subject_name,
-                                         teacher=c.teacher_name,duration=c.duration,hours=c.duration,
-                                         block_id=f'c{c.cid}'))
-            continue
-        d,p=divmod(idx,w.P)
-        res.placed_hours+=c.duration*len(c.classes)
-        original=data_store.get('atamalar',[])[c.origin]
-        for cn in c.class_names:
-            res.placements.append(dict(class_name=cn,**{'class':cn},subject_name=c.subject_name,
-                subject=c.subject_name,teacher_name=c.teacher_name,teacher=c.teacher_name,
-                day=d,day_idx=d,col=d,period=p,row=p,duration=c.duration,
-                is_combined=len(c.classes)>1,combined_classes=list(c.class_names) if len(c.classes)>1 else [],
-                block_id=f'c{c.cid}',card_id=c.cid,assignment_index=c.origin,
-                locked=c.locked_at is not None,is_manual=c.locked_at is not None,is_filler=False,
-                color=original.get('color') or original.get('renk')))
-    if res.complete: res.status='complete'
-    elif res.diagnostics and res.status!='cancelled': res.status='infeasible'
-    res.elapsed=time.monotonic()-start
-    return res
+    return _bitir(res,w,rules,data_store,completion_first,start)

@@ -2206,7 +2206,7 @@ class AutoSchedulerWorker(QThread):
     finished_successfully = Signal(dict)
     failed = Signal(str)
 
-    def __init__(self, data_store, target_class=None, parent=None, fill_empty=True, institution_slug=None, use_vds=False, infinite_mode=True, ignore_other_institutions=False, independent_classes=False):
+    def __init__(self, data_store, target_class=None, parent=None, fill_empty=True, institution_slug=None, use_vds=False, infinite_mode=True, ignore_other_institutions=False, independent_classes=False, optimal_mode=False, allow_split=True, azami_saniye=3600.0):
         super().__init__(parent)
         import copy
         self.data_store = copy.deepcopy(data_store)
@@ -2227,6 +2227,16 @@ class AutoSchedulerWorker(QThread):
         # is marked has_conflict so the result is honest about what it is rather than
         # looking finished when it cannot be run.
         self.independent_classes = independent_classes
+        # "Optimal kip": süre bir hedef değil emniyet sübabıdır. Motor CP-SAT'in
+        # OPTIMAL kanıtını bekler; kanıt gelince durur, gelmeden durmaz. İkinci
+        # aşamada aynı saat sayısına ulaşan çözümler arasından mevcut tablodan
+        # EN AZ TAKASLA ulaşılanı seçilir.
+        self.optimal_mode = optimal_mode
+        # Blokları 1 saatlik parçalara bölebilme: 2 saatlik ders 1+1, 2+2+1
+        # ise 1+1+1+1+1 olabilir. Bölme bedelli — motor ancak başka çaresi
+        # kalmadığında böler.
+        self.allow_split = allow_split
+        self.azami_saniye = azami_saniye
         self._is_running = True
 
     def run(self):
