@@ -3528,6 +3528,18 @@ class HomeDashboard(QWidget):
             return
         self._refresh_institutions()
 
+    def on_returned_to_dashboard(self):
+        """Called when returning from timetable editor to dashboard.
+        Instantly refreshes UI cards and pulls fresh updates/prunes from VDS.
+        """
+        self._refresh_institutions()
+        if hasattr(self, "_selected_slug") and self._selected_slug:
+            self._refresh_versions()
+        if hasattr(self, "cloud_worker") and self.cloud_worker:
+            self.cloud_worker.request_pull()
+        else:
+            self._start_initial_cloud_sync()
+
 
     def paintEvent(self, event):
         """The right-hand pane: one flat band, one texture, no ramp here.

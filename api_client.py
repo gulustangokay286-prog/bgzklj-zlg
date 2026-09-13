@@ -75,6 +75,7 @@ class APIClient:
         self.sync_generation = 0
         self._index_cache = {}
         self._known_cloud_slugs = set()
+        self.is_on_dashboard = True
 
     @property
     def last_error(self):
@@ -887,7 +888,51 @@ class APIClient:
                 version_store.merge_tombstones(slug, tombstones)
             changed += version_store.enforce_tombstones(slug)
             local_tombstones = version_store.list_tombstones(slug)
-            for entry in obj.get("index", []) or []:
+
+            # Reconcile local files that are not in VDS index
+            # Rules:
+            # 1. Newly saved or pending local version -> push to VDS immediately
+            # 2. Stale/orphan version not on VDS -> prune from local ONLY when on dashboard
+            vds_entries = obj.get("index", []) or []
+            vds_filenames = {e.get("filename") for e in vds_entries if e.get("filename")}
+            try:
+                from sync_coordinator import is_pending as _is_pending, _pending as _outbox_pending
+                local_roz_files = [f for f in os.listdir(ver_dir) if f.endswith(".roz") and not f.endswith(".tmp")]
+                now_ts = time.time()
+                for l_file in local_roz_files:
+                    if l_file not in vds_filenames and l_file not in local_tombstones:
+                        l_path = os.path.join(ver_dir, l_file)
+                        l_data = None
+                        l_pending = False
+                        try:
+                            with open(l_path, "r", encoding="utf-8") as lf:
+                                l_data = json.load(lf)
+                            l_pending = _is_pending(l_data)
+                        except Exception:
+                            pass
+
+                        l_mtime = os.path.getmtime(l_path) if os.path.exists(l_path) else 0
+                        l_recent = (now_ts - l_mtime < 600)  # saved within last 10 minutes
+                        l_in_outbox = (l_path in _outbox_pending)
+
+                        if l_pending or l_recent or l_in_outbox:
+                            if isinstance(l_data, dict):
+                                print(f"[api_client] Yerel sürüm VDS'e aktarılıyor: {slug}/{l_file}")
+                                push_ok = self.push_version_to_rtdb(slug, l_file, l_data)
+                                if push_ok:
+                                    changed += 1
+                        elif getattr(self, "is_on_dashboard", True):
+                            try:
+                                os.remove(l_path)
+                                version_store.invalidate_version_summary(slug, l_file)
+                                print(f"[api_client] VDS'te bulunmayan eski sürüm lokalden silindi: {slug}/{l_file}")
+                                changed += 1
+                            except OSError as rm_e:
+                                print(f"[api_client] Sürüm silme hatası ({l_file}): {rm_e}")
+            except Exception as rec_err:
+                print(f"[api_client] Sürüm uzlaştırma hatası: {rec_err}")
+
+            for entry in vds_entries:
                 filename, key = entry.get("filename"), entry.get("key")
                 if not filename or not key or filename in local_tombstones:
                     continue

@@ -170,6 +170,11 @@ class AppShell(QMainWindow):
         
         self._stack.addWidget(self._editor)
         self._stack.setCurrentWidget(self._editor)
+        try:
+            from api_client import api_client
+            api_client.is_on_dashboard = False
+        except Exception:
+            pass
         QApplication.processEvents()
         
         # Auto-set opened version as active and update timestamp
@@ -310,12 +315,23 @@ class AppShell(QMainWindow):
         from save_dialog import run_apple_save_sequence
         run_apple_save_sequence(self, duration_seconds=0.1, title="Kaydedildi", message="Anasayfaya dönülüyor...")
         
+        try:
+            from api_client import api_client
+            api_client.is_on_dashboard = True
+            from sync_coordinator import wait_for_pending
+            wait_for_pending(timeout=2.5)
+        except Exception:
+            pass
+
         self._stack.setCurrentWidget(self._dashboard)
         self.setWindowTitle("Chenkron — Ders Dağıtım ve Yönetim Sistemi")
         try:
-            self._dashboard._refresh_institutions()
-            if hasattr(self._dashboard, "_selected_slug") and self._dashboard._selected_slug:
-                self._dashboard._refresh_versions()
+            if hasattr(self._dashboard, "on_returned_to_dashboard"):
+                self._dashboard.on_returned_to_dashboard()
+            else:
+                self._dashboard._refresh_institutions()
+                if hasattr(self._dashboard, "_selected_slug") and self._dashboard._selected_slug:
+                    self._dashboard._refresh_versions()
         except Exception as re_err:
             print(f"[GO_HOME] Dashboard refresh error: {re_err}")
 
@@ -337,6 +353,12 @@ class AppShell(QMainWindow):
 
         from save_dialog import run_apple_save_sequence
         run_apple_save_sequence(self, duration_seconds=0.2, title="Kapatılıyor", message="Veriler kaydedildi.")
+
+        try:
+            from sync_coordinator import wait_for_pending
+            wait_for_pending(timeout=3.0)
+        except Exception:
+            pass
 
         super().closeEvent(event)
 
