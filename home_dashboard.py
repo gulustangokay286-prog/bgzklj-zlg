@@ -8,7 +8,7 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QFrame, QSplitter, QInputDialog, QMessageBox,
-    QLineEdit, QDialog, QCheckBox,
+    QLineEdit, QDialog, QCheckBox, QProgressBar,
     QMenu, QSizePolicy, QGraphicsDropShadowEffect, QGraphicsOpacityEffect
 )
 from PySide6.QtCore import (
@@ -2985,6 +2985,297 @@ class ListSheet(QFrame):
         p.end()
 
 
+class SyncBadgeIcon(QWidget):
+    """Apple-style 36x36 vector icon badge with 3 states: yellow (spinning), green (verified checkmark), red (alert)."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(36, 36)
+        self._state = "yellow"
+        self._angle = 0
+        self._timer = QTimer(self)
+        self._timer.setInterval(25)
+        self._timer.timeout.connect(self._on_tick)
+
+    def set_state(self, state: str):
+        self._state = state
+        if state == "yellow":
+            if not self._timer.isActive():
+                self._timer.start()
+        else:
+            self._timer.stop()
+        self.update()
+
+    def _on_tick(self):
+        self._angle = (self._angle + 12) % 360
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        rect = self.rect()
+        cx, cy = rect.width() / 2.0, rect.height() / 2.0
+        r = min(cx, cy) - 2
+
+        if self._state == "yellow":
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor("#FEF3C7"))
+            p.drawEllipse(QPointF(cx, cy), r, r)
+            p.save()
+            p.translate(cx, cy)
+            p.rotate(self._angle)
+            pen = QPen(QColor("#D97706"), 2.6, Qt.SolidLine, Qt.RoundCap)
+            p.setPen(pen)
+            p.setBrush(Qt.NoBrush)
+            arc_r = r - 5.5
+            p.drawArc(QRectF(-arc_r, -arc_r, arc_r * 2, arc_r * 2), 30 * 16, 120 * 16)
+            p.drawArc(QRectF(-arc_r, -arc_r, arc_r * 2, arc_r * 2), 210 * 16, 120 * 16)
+            p.restore()
+        elif self._state == "green":
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor("#DCFCE7"))
+            p.drawEllipse(QPointF(cx, cy), r, r)
+            pen = QPen(QColor("#16A34A"), 2.8, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+            p.setPen(pen)
+            p.setBrush(Qt.NoBrush)
+            path = QPainterPath()
+            path.moveTo(cx - 5.5, cy + 0.2)
+            path.lineTo(cx - 1.5, cy + 4.5)
+            path.lineTo(cx + 6.0, cy - 4.5)
+            p.drawPath(path)
+        else:
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor("#FEE2E2"))
+            p.drawEllipse(QPointF(cx, cy), r, r)
+            pen = QPen(QColor("#DC2626"), 2.5, Qt.SolidLine, Qt.RoundCap)
+            p.setPen(pen)
+            p.setBrush(Qt.NoBrush)
+            p.drawLine(QPointF(cx, cy - 5), QPointF(cx, cy + 1))
+            p.drawPoint(QPointF(cx, cy + 5))
+        p.end()
+
+
+class SyncCenterLoadingOverlay(QWidget):
+    """
+    Ekranın ortasında beliren, kırmızı-sarı-yeşil progress durumlarına ve
+    'Kurumlar birbirine senkronizedir' verified onayına sahip Apple-style loading bar paneli.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self._auto_hide_timer = QTimer(self)
+        self._auto_hide_timer.setSingleShot(True)
+        self._auto_hide_timer.timeout.connect(self.hide)
+        
+        # Floating Card
+        self.card = QFrame(self)
+        self.card.setObjectName("syncLoadingCard")
+        self.card.setFixedSize(430, 134)
+        self.card.setStyleSheet("""
+            QFrame#syncLoadingCard {
+                background: #FFFFFF;
+                border: 1px solid #CBD5E1;
+                border-radius: 16px;
+            }
+        """)
+        
+        card_layout = QVBoxLayout(self.card)
+        card_layout.setContentsMargins(20, 16, 20, 16)
+        card_layout.setSpacing(12)
+        
+        top_row = QHBoxLayout()
+        top_row.setSpacing(14)
+        
+        self.badge = SyncBadgeIcon(self.card)
+        top_row.addWidget(self.badge, 0, Qt.AlignVCenter)
+        
+        text_col = QVBoxLayout()
+        text_col.setSpacing(3)
+        self.title_lbl = QLabel("Senkronizasyon Yapılıyor...")
+        self.title_lbl.setFont(bk_ui.font(11.5, QFont.Bold, spacing=-0.2))
+        self.title_lbl.setStyleSheet("color: #0F172A; background: transparent;")
+        
+        self.subtitle_lbl = QLabel("Lokal veriler kontrol ediliyor...")
+        self.subtitle_lbl.setFont(bk_ui.font(9.5, QFont.Normal))
+        self.subtitle_lbl.setStyleSheet("color: #64748B; background: transparent;")
+        
+        text_col.addWidget(self.title_lbl)
+        text_col.addWidget(self.subtitle_lbl)
+        top_row.addLayout(text_col, 1)
+        
+        self.percent_lbl = QLabel("0%")
+        self.percent_lbl.setFont(bk_ui.font(9.5, QFont.DemiBold))
+        self.percent_lbl.setStyleSheet("color: #D97706; background: transparent;")
+        top_row.addWidget(self.percent_lbl, 0, Qt.AlignRight | Qt.AlignVCenter)
+        
+        card_layout.addLayout(top_row)
+        
+        self.pbar = QProgressBar()
+        self.pbar.setFixedHeight(7)
+        self.pbar.setTextVisible(False)
+        self.pbar.setRange(0, 100)
+        self.pbar.setValue(0)
+        self._set_bar_color("#F59E0B")
+        card_layout.addWidget(self.pbar)
+        
+        self.hide()
+
+    def _set_bar_color(self, color_hex: str):
+        self.pbar.setStyleSheet(f"""
+            QProgressBar {{
+                background: #F1F5F9;
+                border: none;
+                border-radius: 3.5px;
+            }}
+            QProgressBar::chunk {{
+                background: {color_hex};
+                border-radius: 3.5px;
+            }}
+        """)
+
+    def _reposition(self):
+        if self.parent():
+            self.setGeometry(self.parent().rect())
+            cx = (self.width() - self.card.width()) // 2
+            cy = (self.height() - self.card.height()) // 2
+            self.card.move(cx, max(40, cy))
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor(15, 23, 42, 35))
+        p.end()
+
+    def show_stage(self, pct: int, detail: str):
+        self._auto_hide_timer.stop()
+        self._reposition()
+        self.badge.set_state("yellow")
+        self._set_bar_color("#F59E0B")
+        self.title_lbl.setText("Senkronizasyon Yapılıyor...")
+        self.title_lbl.setStyleSheet("color: #0F172A; background: transparent;")
+        self.subtitle_lbl.setText(detail)
+        self.pbar.setValue(pct)
+        self.percent_lbl.setText(f"{pct}%")
+        self.percent_lbl.setStyleSheet("color: #D97706; background: transparent;")
+        self.show()
+        self.raise_()
+
+    def show_started(self, stage_msg="Lokal veriler kontrol ediliyor..."):
+        self.show_stage(20, stage_msg)
+
+    def show_progress(self, current: int, total: int, detail: str):
+        self._reposition()
+        self.badge.set_state("yellow")
+        self._set_bar_color("#F59E0B")
+        self.title_lbl.setText("Değişiklikler İndiriliyor...")
+        self.subtitle_lbl.setText(detail)
+        pct = 50 + int((current / max(1, total)) * 45)
+        pct = min(95, pct)
+        self.pbar.setValue(pct)
+        self.percent_lbl.setText(f"{pct}%")
+        self.percent_lbl.setStyleSheet("color: #D97706; background: transparent;")
+        self.show()
+        self.raise_()
+
+    def show_completed(self, changed_count: int = 0, msg: str = "Kurumlar birbirine senkronizedir"):
+        self._reposition()
+        self.badge.set_state("green")
+        self._set_bar_color("#10B981")
+        self.pbar.setValue(100)
+        self.percent_lbl.setText("100%")
+        self.percent_lbl.setStyleSheet("color: #10B981; background: transparent; font-weight: bold;")
+        self.title_lbl.setText("Kurumlar Birbirine Senkronizedir")
+        self.title_lbl.setStyleSheet("color: #065F46; background: transparent; font-weight: bold;")
+        
+        if changed_count > 0:
+            self.subtitle_lbl.setText(f"{changed_count} değişiklik başarıyla eşitlendi.")
+        else:
+            self.subtitle_lbl.setText("Tüm kurumlar ve versiyonlar güncel.")
+            
+        self.show()
+        self.raise_()
+        self._auto_hide_timer.start(1400)
+
+    def show_failed(self, error_msg: str):
+        self._reposition()
+        self.badge.set_state("red")
+        self._set_bar_color("#EF4444")
+        self.pbar.setValue(100)
+        self.percent_lbl.setText("Hata")
+        self.percent_lbl.setStyleSheet("color: #EF4444; background: transparent; font-weight: bold;")
+        self.title_lbl.setText("Senkronizasyon Hatası")
+        self.title_lbl.setStyleSheet("color: #991B1B; background: transparent; font-weight: bold;")
+        self.subtitle_lbl.setText(error_msg or "Sunucuya bağlanılamadı.")
+        self.show()
+        self.raise_()
+        self._auto_hide_timer.start(3500)
+
+    def hide_animated(self):
+        self.hide()
+
+
+class SyncStatusButton(QWidget):
+    """Zarif, çerçevesiz, noktasız Apple-style senkronizasyon durum butonu"""
+    clicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("syncStatusBtn")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedHeight(24)
+        
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(7, 2, 7, 2)
+        lay.setSpacing(0)
+        
+        self.lbl = QLabel("Senkronize")
+        self.lbl.setFont(bk_ui.font(9.0, QFont.Medium, spacing=0.15))
+        self.lbl.setStyleSheet("color: #059669; background: transparent; border: none; padding: 0;")
+        lay.addWidget(self.lbl, 0, Qt.AlignVCenter)
+
+        self.setStyleSheet("""
+            QWidget#syncStatusBtn {
+                background: transparent;
+                border: none;
+                border-radius: 5px;
+            }
+            QWidget#syncStatusBtn:hover {
+                background: rgba(0, 0, 0, 0.05);
+            }
+            QWidget#syncStatusBtn:pressed {
+                background: rgba(0, 0, 0, 0.09);
+            }
+            QLabel {
+                background: transparent;
+                border: none;
+                padding: 0;
+            }
+        """)
+
+    def set_syncing(self, text="Eşitleniyor..."):
+        self.lbl.setText(text)
+        self.lbl.setStyleSheet("color: #D97706; background: transparent; border: none; padding: 0;")
+        self.setToolTip("Bulut veritabanı eşitleniyor...")
+
+    def set_synced(self, text="Senkronize"):
+        self.lbl.setText(text)
+        self.lbl.setStyleSheet("color: #059669; background: transparent; border: none; padding: 0;")
+        self.setToolTip("Tüm kurumlar güncel • Yenilemek için tıklayın")
+
+    def set_offline(self, text="Çevrimdışı"):
+        self.lbl.setText(text)
+        self.lbl.setStyleSheet("color: #DC2626; background: transparent; border: none; padding: 0;")
+        self.setToolTip("Sunucuya ulaşılamıyor (Yerel Mod)")
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+
+# Geriye dönük uyumluluk takma adları
+SyncNudeIndicator = SyncStatusButton
+SyncStatusPill = SyncStatusButton
+
+
 class HomeDashboard(QWidget):
     open_timetable = Signal(str, str)  # slug, filename
     new_empty_timetable = Signal(str, str, str, object, object)  # slug, mode, sch_name, pool_id, pool_name
@@ -2992,9 +3283,13 @@ class HomeDashboard(QWidget):
     # Carries a background sync's outcome back onto the GUI thread:
     # (pull_ok, pull_msg, push_ok, push_msg)
     sync_finished = Signal(bool, str, bool, str)
+    manual_sync_progress = Signal(int, str)    # pct, detail
+    manual_sync_done = Signal(bool, str, int)  # ok, msg, changed
 
     def __init__(self, auth_data=None, parent=None):
         super().__init__(parent)
+        self.manual_sync_progress.connect(self._on_manual_sync_progress_gui)
+        self.manual_sync_done.connect(self._on_manual_sync_done_gui)
         self.auth_data = auth_data or {}
         self._selected_slug = None
         self._selected_version = None
@@ -3003,6 +3298,8 @@ class HomeDashboard(QWidget):
         self._search_debounce = None
         self._unlocked_slugs = set()
         self._sync_in_flight = False
+        self._show_center_overlay_on_sync = False
+        self._initial_sync_pending = True
         # Coalesces the refresh bursts that arrive when several cloud events land
         # together; see _on_cloud_synced.
         self._refresh_debounce = None
@@ -3036,6 +3333,10 @@ class HomeDashboard(QWidget):
                 self.cloud_worker.set_auth(self.auth_data)
             self.cloud_worker.institutions_list_changed.connect(self._on_cloud_synced)
             self.cloud_worker.remote_data_updated.connect(lambda slug, fn: self._on_cloud_synced())
+            self.cloud_worker.sync_started.connect(self._on_sync_started)
+            self.cloud_worker.sync_progress.connect(self._on_sync_progress)
+            self.cloud_worker.sync_completed.connect(self._on_sync_completed)
+            self.cloud_worker.sync_failed.connect(self._on_sync_failed)
             self.cloud_worker.start()
         except Exception as cwe:
             print(f"[HomeDashboard] Cloud worker init note: {cwe}")
@@ -3085,45 +3386,96 @@ class HomeDashboard(QWidget):
         else:
             self.version_status_lbl.setText("")
 
-    def _on_manual_refresh(self):
-        """Yenile düğmesi: buluttan çek, panelleri yeniden kur.
+    def _on_sync_started(self, stage_msg):
+        if hasattr(self, "sync_pill"):
+            self.sync_pill.set_syncing(stage_msg or "Güncelleniyor...")
+        if getattr(self, "_show_center_overlay_on_sync", False):
+            if hasattr(self, "sync_overlay"):
+                self.sync_overlay.show_started(stage_msg)
 
-        Açılışta zaten otomatik çekiliyor; bu, "başka bilgisayarda bir klasör ya da
-        çizelge oluşturuldu mu?" sorusunu beklemeden sormanın yolu. Ağ işi ayrı bir
-        iş parçacığında döner, pencere donmaz; düğme iş bitene kadar kapalı kalır.
-        """
+    def _on_sync_progress(self, current, total, detail):
+        if hasattr(self, "sync_pill"):
+            self.sync_pill.set_syncing(f"İndiriliyor ({current}/{total})")
+        if hasattr(self, "sync_overlay"):
+            self.sync_overlay.show_progress(current, total, detail)
+
+    def _on_sync_completed(self, changed_count, msg):
+        self._initial_sync_pending = False
+        self._show_center_overlay_on_sync = False
+        if hasattr(self, "sync_pill"):
+            self.sync_pill.set_synced("Senkronize")
+        if hasattr(self, "sync_overlay"):
+            self.sync_overlay.show_completed(changed_count, msg or "Kurumlar birbirine senkronizedir")
+
+    def _on_sync_failed(self, error_msg):
+        self._show_center_overlay_on_sync = False
+        if hasattr(self, "sync_pill"):
+            self.sync_pill.set_offline("Çevrimdışı")
+        if hasattr(self, "sync_overlay"):
+            self.sync_overlay.show_failed(error_msg)
+
+    def _on_manual_sync_progress_gui(self, pct: int, detail: str):
+        if hasattr(self, "sync_overlay"):
+            self.sync_overlay.show_stage(pct, detail)
+
+    def _on_manual_sync_done_gui(self, ok: bool, msg: str, changed: int):
+        self._sync_in_flight = False
+        if hasattr(self, "btn_refresh"):
+            self.btn_refresh.setEnabled(True)
+            self.btn_refresh.setToolTip("Yenile — buluttaki değişiklikleri getir")
+        if ok:
+            if hasattr(self, "sync_pill"):
+                self.sync_pill.set_synced("Senkronize")
+            if hasattr(self, "sync_overlay"):
+                self.sync_overlay.show_completed(changed, "Kurumlar birbirine senkronizedir")
+            self._refresh_institutions()
+        else:
+            if hasattr(self, "sync_pill"):
+                self.sync_pill.set_offline("Çevrimdışı")
+            if hasattr(self, "sync_overlay"):
+                self.sync_overlay.show_failed(msg or "Sunucuya bağlanılamadı.")
+
+    def _on_manual_refresh(self):
+        """Yenile düğmesi: buluttan çek, panelleri yeniden kur."""
         if getattr(self, "_sync_in_flight", False):
             return
         self._sync_in_flight = True
-        self.btn_refresh.setEnabled(False)
-        self.btn_refresh.setToolTip("Yenileniyor...")
+        self._show_center_overlay_on_sync = True
+        if hasattr(self, "sync_pill"):
+            self.sync_pill.set_syncing("Eşitleniyor...")
+        if hasattr(self, "sync_overlay"):
+            self.sync_overlay.show_stage(20, "Lokal ve VDS verileri kontrol ediliyor...")
+        if hasattr(self, "btn_refresh"):
+            self.btn_refresh.setEnabled(False)
+            self.btn_refresh.setToolTip("Yenileniyor...")
 
         import threading
-        from PySide6.QtCore import QTimer
-
-        def _done(ok, msg):
-            self._sync_in_flight = False
-            self.btn_refresh.setEnabled(True)
-            self.btn_refresh.setToolTip("Yenile — buluttaki değişiklikleri getir")
-            self._refresh_institutions()
-            if not ok and msg:
-                print(f"[HomeDashboard] yenileme notu: {msg}")
 
         def _worker():
-            ok, msg = True, ""
+            ok, msg, changed = True, "", 0
             try:
                 from cloud_sync import pull_all_from_rtdb
-                ok, msg, _ = pull_all_from_rtdb(self.auth_data)
+                def _on_manual_progress(stage, cur, tot, det):
+                    if stage == "local_check":
+                        self.manual_sync_progress.emit(25, det)
+                    elif stage == "vds_check":
+                        self.manual_sync_progress.emit(55, det)
+                    elif stage == "diff":
+                        self.manual_sync_progress.emit(85, det)
+                    elif stage in ("diff_found", "downloading"):
+                        pct = 85 + int((cur / max(1, tot)) * 12)
+                        self.manual_sync_progress.emit(pct, det)
+
+                ok, msg, changed = pull_all_from_rtdb(self.auth_data, progress_callback=_on_manual_progress)
             except Exception as exc:
                 ok, msg = False, str(exc)
-            # Alici olarak self veriliyor: geri cagri GUI is parcaciginda,
-            # pencere hala yasiyorsa calisir.
-            QTimer.singleShot(0, self, lambda: _done(ok, msg))
+            finally:
+                self.manual_sync_done.emit(ok, msg, changed)
 
         if self.auth_data and not self.auth_data.get("is_offline"):
             threading.Thread(target=_worker, daemon=True).start()
         else:
-            _done(True, "")
+            self.manual_sync_done.emit(True, "", 0)
 
     def _on_realtime_nudge(self, slug):
         worker = getattr(self, "cloud_worker", None)
@@ -3290,26 +3642,33 @@ class HomeDashboard(QWidget):
 
         # ── Zone 1: where you are (sidebar width 252px - 22px margin - 2px offset = 228px) ─────
         title_container = QWidget()
-        title_container.setFixedWidth(228)
+        title_container.setMinimumWidth(228)
         title_box = QHBoxLayout(title_container)
-        title_box.setSpacing(8)
+        title_box.setSpacing(7)
         title_box.setContentsMargins(0, 0, 0, 0)
 
-        brand_lbl = QLabel("Anasayfa")
-        brand_lbl.setFont(bk_ui.font(12.5, QFont.DemiBold, spacing=-0.2))
-        brand_lbl.setStyleSheet(f"color: {bk_ui.INK}; background: transparent;")
-        title_box.addWidget(brand_lbl)
+        # 1. Senkronize (solda, noktasız zarif durum butonu)
+        self.sync_nude = SyncStatusButton()
+        self.sync_pill = self.sync_nude
+        self.sync_nude.clicked.connect(self._on_manual_refresh)
+        self.sync_nude.setToolTip("Tüm kurumlar güncel • Yenilemek için tıklayın")
+        title_box.addWidget(self.sync_nude, 0, Qt.AlignVCenter)
 
-        # Version as plain quiet type, not a pill. A pill is a shape that
-        # says "this is interactive"; the build number is not.
+        # 2. Dikey divider (arada)
+        divider = QFrame()
+        divider.setFixedSize(1, 12)
+        divider.setStyleSheet(f"background: {bk_ui.HAIRLINE}; border: none;")
+        title_box.addWidget(divider, 0, Qt.AlignVCenter)
+
+        # 3. Sürüm (sağda)
         self.version_lbl = QLabel(f"v{APP_VERSION}")
-        self.version_lbl.setFont(bk_ui.font(8.6))
-        self.version_lbl.setStyleSheet(f"color: {bk_ui.INK_FAINT}; background: transparent;")
+        self.version_lbl.setFont(bk_ui.font(8.8, QFont.Normal))
+        self.version_lbl.setStyleSheet(f"color: {bk_ui.INK_FAINT}; background: transparent; border: none; padding: 0;")
         title_box.addWidget(self.version_lbl, 0, Qt.AlignVCenter)
 
         self.version_status_lbl = QLabel("")
         self.version_status_lbl.setFont(bk_ui.font(8.6, QFont.DemiBold))
-        self.version_status_lbl.setStyleSheet(f"color: {bk_ui.WARN}; background: transparent;")
+        self.version_status_lbl.setStyleSheet(f"color: {bk_ui.WARN}; background: transparent; border: none; padding: 0;")
         title_box.addWidget(self.version_status_lbl, 0, Qt.AlignVCenter)
         title_box.addStretch(1)
         self._start_version_check()
@@ -3414,6 +3773,7 @@ class HomeDashboard(QWidget):
         btn_bell = _tool("bell", "Bildirimler")
         btn_bell.clicked.connect(self._on_notifications_clicked)
         cl_lay.addWidget(btn_bell)
+
 
         top_layout.addWidget(cluster)
         top_layout.addSpacing(12)
@@ -3786,6 +4146,8 @@ class HomeDashboard(QWidget):
         main_hbox.addWidget(right_panel, 1)
         root.addLayout(main_hbox, 1)
 
+        self.sync_overlay = SyncCenterLoadingOverlay(self)
+
     def _refresh_avatar_button(self):
         prof = get_user_profile(self.user_email)
         avatar_url = prof.get("avatar_url", "")
@@ -4010,6 +4372,9 @@ class HomeDashboard(QWidget):
         if ov and ov.isVisible():
             ov.refresh_backdrop()
             ov._resize_panel()
+        so = getattr(self, "sync_overlay", None)
+        if so and so.isVisible():
+            so._reposition()
 
     def _sync_selection_card(self, animated=True):
         """Puts the raised card on whichever row is selected."""

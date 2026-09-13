@@ -742,15 +742,15 @@ class APIClient:
 
     # ── Pull ──────────────────────────────────────────────────────────────
 
-    def pull_all_from_rtdb(self, auth_data=None):
+    def pull_all_from_rtdb(self, auth_data=None, progress_callback=None):
         # Dashboard and editor share the same store and client. Serialize pulls;
         # a second worker must not replay a response fetched before another save.
-        if not self._pull_lock.acquire(blocking=False):
+        if not self._pull_lock.acquire(timeout=6.0):
             return True, "Senkronizasyon sürüyor.", 0
         try:
             result = None
             if self._supports_index is not False:
-                result = self._pull_index()
+                result = self._pull_index(progress_callback=progress_callback)
             if result is None and self._supports_delta is not False:
                 result = self._pull_delta()
             if result is None:
@@ -797,12 +797,19 @@ class APIClient:
             self.sync_generation += 1
         return True, "Sürüm güncel.", int(changed)
 
-    def _pull_index(self):
+    def _pull_index(self, progress_callback=None):
         """Download changed versions concurrently; unchanged polls only stat files."""
         import version_store
         from sync_coordinator import version_lock, file_signature, is_pending
         from concurrent.futures import ThreadPoolExecutor
         base_dir = version_store._ensure_base()
+        
+        if progress_callback:
+            try:
+                progress_callback("local_check", 0, 0, "Lokal veriler kontrol ediliyor...")
+            except Exception:
+                pass
+
         # Capture BEFORE the request. A save/ack during the request invalidates
         # its response even if the pending marker has already been cleared.
         signatures = {}
@@ -813,6 +820,13 @@ class APIClient:
                     if filename.endswith(".roz"):
                         path = os.path.join(directory, filename)
                         signatures[path] = file_signature(path)
+
+        if progress_callback:
+            try:
+                progress_callback("vds_check", 0, 0, "VDS sunucusundan güncel veriler alınıyor...")
+            except Exception:
+                pass
+
         resp = self._request_with_retry("GET", f"{self.base_url}/api/sync/index", timeout=15)
         if resp is None:
             return False, "Sunucuya ulaşılamadı.", 0
@@ -832,6 +846,13 @@ class APIClient:
         isolated = auth.get("tenant_type") == "isolated"
         allowed = set(auth.get("allowed_institutions") or [])
         changed = 0
+
+        if progress_callback:
+            try:
+                progress_callback("diff", 0, 0, "Farklar karşılaştırılıyor...")
+            except Exception:
+                pass
+
         # Absence only deletes an institution previously seen on this server.
         # A new local institution may still be waiting for its first upload.
         cloud_slugs = set(payload)
@@ -929,11 +950,42 @@ class APIClient:
             return 0
 
         if downloads:
+            total_dl = len(downloads)
+            completed_dl = 0
+            dl_lock = threading.Lock()
+            if progress_callback:
+                try:
+                    progress_callback("diff_found", 0, total_dl, f"{total_dl} yeni değişiklik indiriliyor...")
+                except Exception:
+                    pass
+
+            def fetch_tracked(job):
+                nonlocal completed_dl
+                res = fetch(job)
+                with dl_lock:
+                    completed_dl += 1
+                    cur = completed_dl
+                if progress_callback:
+                    try:
+                        slug_name = job[0].replace("_", " ").title()
+                        progress_callback("downloading", cur, total_dl, f"{slug_name}: {job[1]}")
+                    except Exception:
+                        pass
+                return res
+
             if not hasattr(self, "_download_pool"):
-                self._download_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="version-download")
-            changed += sum(self._download_pool.map(fetch, downloads))
+                self._download_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="version-download")
+            changed += sum(self._download_pool.map(fetch_tracked, downloads))
+            
         if changed:
             version_store.invalidate_cross_busy_cache()
+            
+        if progress_callback:
+            try:
+                progress_callback("completed", changed, changed, "Kurumlar birbirine senkronizedir")
+            except Exception:
+                pass
+
         return True, (f"Senkronizasyon tamamlandı ({changed} değişiklik)." if changed else "Her şey güncel."), changed
 
     def _pull_delta(self):

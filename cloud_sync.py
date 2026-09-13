@@ -24,8 +24,8 @@ except ImportError:
 def _sanitize_key(key: str) -> str:
     return re.sub(r'[\.\#\$\/\[\]]', '_', str(key))
 
-def pull_all_from_rtdb(auth_data: dict = None) -> tuple:
-    return api_client.pull_all_from_rtdb(auth_data)
+def pull_all_from_rtdb(auth_data: dict = None, progress_callback=None) -> tuple:
+    return api_client.pull_all_from_rtdb(auth_data, progress_callback=progress_callback)
 
 def push_version_to_rtdb(slug: str, filename: str, roz_data: dict, auth_data: dict = None) -> bool:
     with _push_lock:
@@ -117,6 +117,10 @@ class CloudSyncWorker(QObject):
     sync_status_changed = Signal(str)
     remote_data_updated = Signal(str, str) # slug, filename
     institutions_list_changed = Signal()
+    sync_started = Signal(str)            # e.g. "Lokal veriler kontrol ediliyor..."
+    sync_progress = Signal(int, int, str) # current, total, detail (e.g. 2, 5, "Birey Kurs Merkezi: v132...")
+    sync_completed = Signal(int, str)     # changed_count, message ("Kurumlar birbirine senkronizedir")
+    sync_failed = Signal(str)             # error message
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -258,11 +262,31 @@ class CloudSyncWorker(QObject):
                     # Session revocation check disabled per user setting
 
 
+                    had_diff = False
+                    def _on_api_progress(stage, current, total, detail):
+                        nonlocal had_diff
+                        if stage in ("local_check", "vds_check", "diff"):
+                            # Rutin arka plan kontrollerinde UI'ı meşgul etme, sadece diff gelirse veya manuelse bildir
+                            pass
+                        elif stage in ("diff_found", "downloading"):
+                            had_diff = True
+                            if stage == "diff_found":
+                                self._safe_emit(self.sync_started, f"{total} güncelleme indiriliyor..." if total else "Güncellemeler indiriliyor...")
+                            self._safe_emit(self.sync_progress, current, total, detail)
+                        elif stage == "completed":
+                            if had_diff:
+                                self._safe_emit(self.sync_completed, current, detail)
+
                     try:
-                        pull_ok, msg, new_count = api_client.pull_all_from_rtdb(self.auth_data)
+                        pull_ok, msg, new_count = api_client.pull_all_from_rtdb(self.auth_data, progress_callback=_on_api_progress)
                         if pull_ok:
+                            was_offline = (self._offline_streak > 0)
                             self._offline_streak = 0
                             self._safe_emit(self.sync_status_changed, "Veritabanı korunuyor")
+                            if had_diff or new_count > 0:
+                                self._safe_emit(self.sync_completed, new_count, "Kurumlar birbirine senkronizedir")
+                            elif was_offline:
+                                self._safe_emit(self.sync_completed, 0, "Kurumlar birbirine senkronizedir")
                             if new_count > 0:
                                 self._seen_generation = api_client.sync_generation
                                 self._safe_emit(self.institutions_list_changed)
@@ -270,9 +294,11 @@ class CloudSyncWorker(QObject):
                         else:
                             self._offline_streak += 1
                             self._safe_emit(self.sync_status_changed, "Veritabanı: Çevrimdışı (Yerel Mod)")
-                    except Exception:
+                            self._safe_emit(self.sync_failed, msg or "Sunucuya ulaşılamadı.")
+                    except Exception as e:
                         self._offline_streak += 1
                         self._safe_emit(self.sync_status_changed, "Veritabanı: Çevrimdışı (Yerel Mod)")
+                        self._safe_emit(self.sync_failed, str(e))
                     self._last_pull_time = now
                 if self._pull_requested:
                     continue
@@ -281,7 +307,7 @@ class CloudSyncWorker(QObject):
     def _poll_interval(self) -> float:
         """WebSocket events fetch immediately; polling recovers missed events."""
         if self._offline_streak:
-            return min(10.0 * (2 ** min(self._offline_streak, 5)), 300.0)
+            return min(3.0 * self._offline_streak, 15.0)
         # The index is hash-only and the WebSocket is the primary path. Keep a
         # one-second safety poll so a blocked corporate proxy still converges almost
         # immediately; the request is only a few KB and downloads changed versions.
