@@ -331,7 +331,7 @@ class AppShell(QMainWindow):
         """Save active editor (asking which folder to save into, if there's anything new
         to save) and flush database & cloud sync before closing the application."""
         if self._editor and hasattr(self._editor, "_save_new_version_with_folder_picker"):
-            if not self._editor._save_new_version_with_folder_picker("Kapanış kaydı", force=False):
+            if not self._editor._save_new_version_with_folder_picker("", force=False):
                 event.ignore()  # user cancelled the folder picker — don't close
                 return
 

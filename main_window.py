@@ -614,7 +614,7 @@ class MainWindow(QMainWindow):
 
         # Save before the process is replaced, or unsaved grid edits are lost.
         try:
-            self._save_new_version_with_folder_picker("Güncelleme öncesi kayıt", force=False)
+            self._save_new_version_with_folder_picker("", force=False)
         except Exception as exc:
             print(f"[update] pre-update save note: {exc}")
 
@@ -669,7 +669,7 @@ class MainWindow(QMainWindow):
         # 1. If there are unsaved changes, ask which folder to save the new version
         # into (same picker as "Kaydet" / "Ana Sayfa") — cancelling the picker aborts
         # the close instead of quietly discarding the choice.
-        if not self._save_new_version_with_folder_picker("Kapanırken kaydedildi", force=False):
+        if not self._save_new_version_with_folder_picker("", force=False):
             event.ignore()
             return
 
@@ -1063,6 +1063,7 @@ class MainWindow(QMainWindow):
             }
         """)
         top_header_lay.addWidget(self.ver_lbl)
+        self._update_header_title()
 
         self._tab_widget.setCornerWidget(top_header_bar, Qt.TopRightCorner)
         
@@ -3274,6 +3275,51 @@ class MainWindow(QMainWindow):
             msg += "  ⚠ Öğretmen çakışması var — düzenlemeyi unutmayın."
         self.statusBar().showMessage(msg, 8000)
 
+    def _update_header_title(self):
+        slug = getattr(self, "institution_slug", None)
+        ver_fn = getattr(self, "version_filename", None)
+        inst_name = getattr(self, "institution_name", None) or "Chenki Akademi 2026 - 2027 Pro"
+
+        v_num_str = ""
+        cname = ""
+        note = ""
+        if slug and ver_fn:
+            import re
+            import version_store
+            m = re.match(r"v(\d+)_", ver_fn)
+            if m:
+                v_num_str = f"v{int(m.group(1))}"
+            try:
+                v_meta = (self.data_store.get("_version_meta") or {})
+                if not v_meta and ver_fn:
+                    v_summary = version_store._version_summary(
+                        os.path.join(version_store._versions_dir(slug), ver_fn)
+                    )
+                    cname = (v_summary.get("custom_name") or "").strip()
+                    note = (v_summary.get("note") or "").strip()
+                else:
+                    cname = (v_meta.get("custom_name") or "").strip()
+                    note = (v_meta.get("note") or "").strip()
+            except Exception:
+                pass
+
+        combo = f"{v_num_str} {cname}".strip() if v_num_str else ""
+        header_text = inst_name
+        if combo:
+            header_text += f"  •  {combo}"
+
+        if hasattr(self, "ver_lbl") and self.ver_lbl:
+            self.ver_lbl.setText(header_text)
+            if note and note not in ("Kullanıcı kaydı", "Değişiklikler kaydedildi", "Kapanış kaydı", "Kapanırken kaydedildi", "Güncelleme öncesi kayıt", "Başlangıç çizelgesi", "manual", "auto"):
+                self.ver_lbl.setToolTip(f"Not: {note}")
+            else:
+                self.ver_lbl.setToolTip("")
+
+        title_parts = [inst_name]
+        if combo:
+            title_parts.append(combo)
+        self.setWindowTitle(f"Chenkron — {' — '.join(title_parts)}")
+
     # ── Actions ───────────────────────────────────────────────────────────────
     def _save_new_version_with_folder_picker(self, note, force=False):
         """Saves the current schedule, first asking (via a modal dialog) which folder the
@@ -3306,12 +3352,50 @@ class MainWindow(QMainWindow):
                 print(f"[SAVE] Auto-save error: {e}")
             return True
 
+        # Determine target version number preview and existing custom name / note
+        current_num = None
+        if ver_fn:
+            import re
+            m = re.match(r"v(\d+)_", ver_fn)
+            if m:
+                current_num = int(m.group(1))
+
+        next_num = version_store._next_version_number(slug)
+        preview_ver_num = next_num if (force or not ver_fn) else current_num
+
+        existing_cname = ""
+        existing_note = ""
+        if ver_fn:
+            meta = self.data_store.get("_version_meta") or {}
+            if not meta:
+                try:
+                    summary = version_store._version_summary(os.path.join(version_store._versions_dir(slug), ver_fn))
+                    existing_cname = summary.get("custom_name", "")
+                    existing_note = summary.get("note", "")
+                except Exception:
+                    pass
+            else:
+                existing_cname = meta.get("custom_name", "")
+                existing_note = meta.get("note", "")
+
+        # Filter out legacy generic notes from pre-filling
+        if existing_note in ("Kullanıcı kaydı", "Değişiklikler kaydedildi", "Kapanış kaydı", "Kapanırken kaydedildi", "Güncelleme öncesi kayıt", "Başlangıç çizelgesi", "manual", "auto"):
+            existing_note = ""
+
         from dialogs.save_location_dialog import SaveLocationDialog
-        folder_id, action, cancelled = SaveLocationDialog.choose(
-            self, slug, current_folder_id=current_folder_id, has_existing_version=has_existing_version
+        folder_id, action, custom_name, note_from_dlg, cancelled = SaveLocationDialog.choose(
+            self, slug,
+            current_folder_id=current_folder_id,
+            has_existing_version=has_existing_version,
+            version_num=preview_ver_num,
+            initial_custom_name=existing_cname,
+            initial_note=existing_note,
         )
         if cancelled:
             return False
+
+        # Only use custom note if explicitly entered; no dummy clutter text!
+        final_note = (note_from_dlg or "").strip()
 
         # Never let an empty schedule be written over a filled one without saying so.
         # This is how a full week's work disappeared: something cleared
@@ -3346,7 +3430,8 @@ class MainWindow(QMainWindow):
                 # 2) Önceki klasördeki çizelgeye asla dokunmaz, olduğu gibi korur
                 # 3) Yeni klasöre yeni versiyonu kaydeder
                 new_vf = version_store.save_version(
-                    slug, self.data_store, source="manual", note=note, folder_id=folder_id, allow_duplicate=True
+                    slug, self.data_store, source="manual", note=final_note, folder_id=folder_id,
+                    allow_duplicate=True, custom_name=custom_name
                 )
                 self.version_filename = new_vf
                 self.current_roz_path = os.path.join(version_store._base_dir(), slug, "versions", new_vf)
@@ -3354,6 +3439,7 @@ class MainWindow(QMainWindow):
                 version_store.set_active_version(slug, new_vf)
                 version_store.touch_institution_timestamp(slug)
                 self._is_dirty = False
+                self._update_header_title()
                 dst_name = version_store.get_folder_name(slug, folder_id)
                 self.statusBar().showMessage(f"📋 Çizelge '{dst_name}' klasörüne yeni bir versiyon olarak kopyalandı.", 4000)
 
@@ -3362,12 +3448,13 @@ class MainWindow(QMainWindow):
                 # 1) Varsa son değişiklikleri geçerli versiyona yazar
                 # 2) Çizelgeyi seçilen yeni klasöre taşır
                 if ver_fn:
-                    version_store.update_version_in_place(slug, ver_fn, self.data_store)
+                    version_store.update_version_in_place(slug, ver_fn, self.data_store, custom_name=custom_name, note=final_note)
                     version_store.assign_version_folder(slug, ver_fn, folder_id)
                     version_store.set_active_version(slug, ver_fn)
                 else:
                     new_vf = version_store.save_version(
-                        slug, self.data_store, source="manual", note=note, folder_id=folder_id
+                        slug, self.data_store, source="manual", note=final_note, folder_id=folder_id,
+                        custom_name=custom_name
                     )
                     self.version_filename = new_vf
                     self.current_roz_path = os.path.join(version_store._base_dir(), slug, "versions", new_vf)
@@ -3375,12 +3462,14 @@ class MainWindow(QMainWindow):
                     version_store.set_active_version(slug, new_vf)
                 version_store.touch_institution_timestamp(slug)
                 self._is_dirty = False
+                self._update_header_title()
                 dst_name = version_store.get_folder_name(slug, folder_id)
                 self.statusBar().showMessage(f"📁 Çizelge '{dst_name}' klasörüne taşındı.", 4000)
 
             else:  # "save" (aynı klasöre standart kayıt)
                 new_vf = version_store.save_version(
-                    slug, self.data_store, source="manual", note=note, folder_id=folder_id, allow_duplicate=force
+                    slug, self.data_store, source="manual", note=final_note, folder_id=folder_id,
+                    allow_duplicate=force, custom_name=custom_name
                 )
                 self.version_filename = new_vf
                 self.current_roz_path = os.path.join(version_store._base_dir(), slug, "versions", new_vf)
@@ -3388,13 +3477,14 @@ class MainWindow(QMainWindow):
                 version_store.set_active_version(slug, new_vf)
                 version_store.touch_institution_timestamp(slug)
                 self._is_dirty = False
+                self._update_header_title()
         except Exception as e:
             print(f"[SAVE] New version save error: {e}")
         return True
 
     def _go_home(self):
         """Return to the Home Dashboard."""
-        if not self._save_new_version_with_folder_picker("Değişiklikler kaydedildi", force=False):
+        if not self._save_new_version_with_folder_picker("", force=False):
             return  # user cancelled the folder picker — stay in the editor
         if callable(self.go_home_requested):
             from PySide6.QtCore import QTimer
@@ -3529,19 +3619,10 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Açıldı: {path}")
 
     def _act_save(self):
-        if not self._save_new_version_with_folder_picker("Kullanıcı kaydı", force=True):
+        if not self._save_new_version_with_folder_picker("", force=True):
             return  # user cancelled the folder picker
 
-        slug = getattr(self, "institution_slug", None)
-        new_vf = getattr(self, "version_filename", None)
-        if slug and new_vf:
-            # Update title
-            import re
-            m = re.match(r"v(\d+)_", new_vf)
-            v_num = f"v{int(m.group(1))}" if m else ""
-            inst_name = getattr(self, "institution_name", slug)
-            self.setWindowTitle(f"Chenkron — {inst_name} — {v_num}")
-
+        self._update_header_title()
         fname = os.path.basename(self.current_roz_path or self.db_path or "program.roz")
         from save_dialog import run_apple_save_sequence
         run_apple_save_sequence(self, duration_seconds=0.35, title="Kaydediliyor", message=f"'{fname}' başarıyla kaydedildi ve yeni versiyon yayına alındı.")

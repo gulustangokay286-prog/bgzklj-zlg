@@ -258,22 +258,26 @@ class FolderTransferChoiceDialog(QDialog):
 
 
 class SaveLocationDialog(QDialog):
-    """Modal: pick an existing folder, create a new one, or leave it unfoldered ("Genel")."""
+    """Modal: pick an existing folder, create a new one, or leave it unfoldered ("Genel").
+    Also allows defining a custom schedule name (e.g. 'v200 Oturmaya Yakın') and custom note.
+    """
 
-    def __init__(self, slug: str, current_folder_id=None, parent=None):
+    def __init__(self, slug: str, current_folder_id=None, parent=None,
+                 version_num: int = 1, initial_custom_name: str = "", initial_note: str = ""):
         super().__init__(parent)
         self.slug = slug
         self.current_folder_id = current_folder_id
         self.selected_folder_id = current_folder_id
+        self.version_num = version_num or 1
         self._rows = []
 
         self.setWindowTitle("Nereye Kaydedilsin?")
-        self.setFixedSize(500, 560)
+        self.setFixedSize(760, 620)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool | Qt.NoDropShadowWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(12, 12, 12, 12)
+        outer.setContentsMargins(14, 14, 14, 14)
 
         container = QWidget(self)
         container.setObjectName("saveLocCard")
@@ -281,24 +285,239 @@ class SaveLocationDialog(QDialog):
             #saveLocCard {
                 background: #FFFFFF;
                 border: 1px solid #CBD5E1;
-                border-radius: 16px;
+                border-radius: 18px;
             }
         """)
 
         c_lay = QVBoxLayout(container)
-        c_lay.setContentsMargins(24, 22, 24, 20)
+        c_lay.setContentsMargins(26, 24, 26, 22)
         c_lay.setSpacing(12)
 
+        # ── Header & Action Buttons Row ──────────────────────────────────────────
+        header_row = QHBoxLayout()
+        header_row.setSpacing(16)
+
+        title_col = QVBoxLayout()
+        title_col.setSpacing(4)
+
         t_lbl = QLabel("Nereye Kaydedilsin?")
-        t_lbl.setFont(QFont(FONT_FAMILY, 13, QFont.Bold))
+        t_lbl.setFont(QFont(FONT_FAMILY, 14, QFont.Bold))
         t_lbl.setStyleSheet("color: #0F172A; background: transparent; border: none;")
-        c_lay.addWidget(t_lbl)
+        title_col.addWidget(t_lbl)
 
         sub_lbl = QLabel("Bu versiyonu bir klasörde düzenleyebilir (örn. \"Yaz Çizelgesi\") ya da klasörsüz bırakabilirsiniz.")
         sub_lbl.setFont(QFont(FONT_FAMILY, 9.5))
         sub_lbl.setStyleSheet("color: #64748B; background: transparent; border: none;")
         sub_lbl.setWordWrap(True)
-        c_lay.addWidget(sub_lbl)
+        title_col.addWidget(sub_lbl)
+        header_row.addLayout(title_col, 1)
+
+        # Action buttons: "İsim Tanımla" and "Not Ekle"
+        btn_action_box = QHBoxLayout()
+        btn_action_box.setSpacing(8)
+
+        self.btn_add_name = QPushButton("🏷️  İsim Tanımla")
+        self.btn_add_name.setFixedHeight(34)
+        self.btn_add_name.setCursor(Qt.PointingHandCursor)
+        self.btn_add_name.setToolTip("Çizelgeye 'v200 Oturmaya Yakın' gibi özel bir isim tanımlayın")
+        btn_action_box.addWidget(self.btn_add_name)
+
+        self.btn_add_note = QPushButton("📝  Not Ekle")
+        self.btn_add_note.setFixedHeight(34)
+        self.btn_add_note.setCursor(Qt.PointingHandCursor)
+        self.btn_add_note.setToolTip("Versiyona ait özel bir not ekleyin")
+        btn_action_box.addWidget(self.btn_add_note)
+
+        header_row.addLayout(btn_action_box)
+        c_lay.addLayout(header_row)
+
+        # ── SCHEDULE NAME COMPONENT BOX (v200 otomatik + text input aynı kutuda) ──
+        self.name_box = QFrame()
+        self.name_box.setObjectName("scheduleNameBox")
+        self.name_box.setFixedHeight(44)
+        self.name_box.setStyleSheet("""
+            #scheduleNameBox {
+                background: #FFFFFF;
+                border: 1.5px solid #CBD5E1;
+                border-radius: 12px;
+            }
+            #scheduleNameBox:hover {
+                border-color: #94A3B8;
+            }
+        """)
+        name_lay = QHBoxLayout(self.name_box)
+        name_lay.setContentsMargins(8, 4, 10, 4)
+        name_lay.setSpacing(10)
+
+        # Automatic Version Prefix Badge (v200) inside the component box
+        self.prefix_badge = QLabel(f"v{self.version_num}")
+        self.prefix_badge.setFont(QFont(FONT_FAMILY, 9.5, QFont.Bold))
+        self.prefix_badge.setAlignment(Qt.AlignCenter)
+        self.prefix_badge.setStyleSheet("""
+            QLabel {
+                background: #EFF6FF;
+                color: #0071E3;
+                border: 1px solid #BFDBFE;
+                border-radius: 8px;
+                padding: 3px 12px;
+                min-height: 24px;
+                max-height: 24px;
+                font-weight: bold;
+            }
+        """)
+        name_lay.addWidget(self.prefix_badge)
+
+        # Editable Text Field for Custom Schedule Name
+        self.name_edit = QLineEdit()
+        self.name_edit.setFont(QFont(FONT_FAMILY, 10.5))
+        self.name_edit.setPlaceholderText("Çizelge ismi tanımlayın (örn: Oturan Program, Oturmaya Yakın, Salı Boş)...")
+        self.name_edit.setStyleSheet(f"""
+            QLineEdit {{
+                border: none;
+                background: transparent;
+                color: #0F172A;
+                font-family: {FONT_FAMILY};
+                font-size: 12.5px;
+                padding: 0;
+            }}
+        """)
+        if initial_custom_name:
+            self.name_edit.setText(initial_custom_name)
+        name_lay.addWidget(self.name_edit, 1)
+
+        btn_clear_name = QPushButton("✕")
+        btn_clear_name.setFixedSize(22, 22)
+        btn_clear_name.setCursor(Qt.PointingHandCursor)
+        btn_clear_name.setToolTip("İsmi temizle ve kutuyu kapat")
+        btn_clear_name.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: #94A3B8;
+                border: none;
+                border-radius: 11px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #F1F5F9;
+                color: #0F172A;
+            }
+        """)
+        name_lay.addWidget(btn_clear_name)
+        c_lay.addWidget(self.name_box)
+
+        # ── NOTE COMPONENT BOX ───────────────────────────────────────────────────
+        self.note_box = QFrame()
+        self.note_box.setObjectName("scheduleNoteBox")
+        self.note_box.setFixedHeight(44)
+        self.note_box.setStyleSheet("""
+            #scheduleNoteBox {
+                background: #FFFFFF;
+                border: 1.5px solid #CBD5E1;
+                border-radius: 12px;
+            }
+            #scheduleNoteBox:hover {
+                border-color: #94A3B8;
+            }
+        """)
+        note_lay = QHBoxLayout(self.note_box)
+        note_lay.setContentsMargins(8, 4, 10, 4)
+        note_lay.setSpacing(10)
+
+        note_badge = QLabel("📝 Not")
+        note_badge.setFont(QFont(FONT_FAMILY, 9.5, QFont.Bold))
+        note_badge.setAlignment(Qt.AlignCenter)
+        note_badge.setStyleSheet("""
+            QLabel {
+                background: #F1F5F9;
+                color: #475569;
+                border: 1px solid #E2E8F0;
+                border-radius: 8px;
+                padding: 3px 12px;
+                min-height: 24px;
+                max-height: 24px;
+                font-weight: bold;
+            }
+        """)
+        note_lay.addWidget(note_badge)
+
+        self.note_edit = QLineEdit()
+        self.note_edit.setFont(QFont(FONT_FAMILY, 10.5))
+        self.note_edit.setPlaceholderText("Çizelgeye özel not ekleyin (örn: Cuma öğleden sonra boşaltıldı)...")
+        self.note_edit.setStyleSheet(f"""
+            QLineEdit {{
+                border: none;
+                background: transparent;
+                color: #0F172A;
+                font-family: {FONT_FAMILY};
+                font-size: 12.5px;
+                padding: 0;
+            }}
+        """)
+        if initial_note:
+            self.note_edit.setText(initial_note)
+        note_lay.addWidget(self.note_edit, 1)
+
+        btn_clear_note = QPushButton("✕")
+        btn_clear_note.setFixedSize(22, 22)
+        btn_clear_note.setCursor(Qt.PointingHandCursor)
+        btn_clear_note.setToolTip("Notu temizle ve kutuyu kapat")
+        btn_clear_note.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: #94A3B8;
+                border: none;
+                border-radius: 11px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #F1F5F9;
+                color: #0F172A;
+            }
+        """)
+        note_lay.addWidget(btn_clear_note)
+        c_lay.addWidget(self.note_box)
+
+        # Wire up actions
+        def _toggle_name():
+            vis = not self.name_box.isVisible()
+            self.name_box.setVisible(vis)
+            self._update_btn_states()
+            if vis:
+                self.name_edit.setFocus()
+                self.name_edit.selectAll()
+
+        def _toggle_note():
+            vis = not self.note_box.isVisible()
+            self.note_box.setVisible(vis)
+            self._update_btn_states()
+            if vis:
+                self.note_edit.setFocus()
+                self.note_edit.selectAll()
+
+        def _clear_and_hide_name():
+            self.name_edit.clear()
+            self.name_box.setVisible(False)
+            self._update_btn_states()
+
+        def _clear_and_hide_note():
+            self.note_edit.clear()
+            self.note_box.setVisible(False)
+            self._update_btn_states()
+
+        self.btn_add_name.clicked.connect(_toggle_name)
+        self.btn_add_note.clicked.connect(_toggle_note)
+        btn_clear_name.clicked.connect(_clear_and_hide_name)
+        btn_clear_note.clicked.connect(_clear_and_hide_note)
+
+        self.name_edit.textChanged.connect(lambda _: self._update_btn_states())
+        self.note_edit.textChanged.connect(lambda _: self._update_btn_states())
+
+        # Initial visibility: if custom name or note is pre-filled, show respective box
+        self.name_box.setVisible(bool(initial_custom_name))
+        self.note_box.setVisible(bool(initial_note))
+        self._update_btn_states()
 
         div = QFrame()
         div.setFixedHeight(1)
@@ -325,16 +544,16 @@ class SaveLocationDialog(QDialog):
 
         # New-folder inline creator
         new_row = QHBoxLayout()
-        new_row.setSpacing(8)
+        new_row.setSpacing(10)
         self.new_folder_edit = QLineEdit()
         self.new_folder_edit.setPlaceholderText("Yeni klasör adı (Örn: Yaz Çizelgesi)...")
-        self.new_folder_edit.setFixedHeight(34)
+        self.new_folder_edit.setFixedHeight(36)
         self.new_folder_edit.setStyleSheet(f"""
             QLineEdit {{
                 background: #F8FAFC;
                 border: 1px solid #CBD5E1;
-                border-radius: 17px;
-                padding: 0 14px;
+                border-radius: 18px;
+                padding: 0 16px;
                 font-size: 12px;
                 font-family: {FONT_FAMILY};
                 color: #0F172A;
@@ -350,14 +569,14 @@ class SaveLocationDialog(QDialog):
         btn_new = QPushButton("  Yeni Klasör")
         btn_new.setIcon(make_save_vector_icon("plus", 12, "#0071E3"))
         btn_new.setCursor(Qt.PointingHandCursor)
-        btn_new.setFixedHeight(34)
+        btn_new.setFixedHeight(36)
         btn_new.setStyleSheet(f"""
             QPushButton {{
                 background: #EFF6FF;
                 color: #0071E3;
                 border: 1px solid #BFDBFE;
-                border-radius: 17px;
-                padding: 0 16px;
+                border-radius: 18px;
+                padding: 0 18px;
                 font-weight: 700;
                 font-size: 11.5px;
                 font-family: {FONT_FAMILY};
@@ -377,19 +596,19 @@ class SaveLocationDialog(QDialog):
 
         # Bottom buttons (Silindirik / Pill)
         btn_box = QHBoxLayout()
-        btn_box.setSpacing(10)
+        btn_box.setSpacing(12)
         btn_box.addStretch()
 
         btn_cancel = QPushButton("Vazgeç")
-        btn_cancel.setFixedHeight(34)
+        btn_cancel.setFixedHeight(36)
         btn_cancel.setCursor(Qt.PointingHandCursor)
         btn_cancel.setStyleSheet(f"""
             QPushButton {{
                 background: #FFFFFF;
                 color: #475569;
                 border: 1px solid #CBD5E1;
-                border-radius: 17px;
-                padding: 0 20px;
+                border-radius: 18px;
+                padding: 0 24px;
                 font-weight: 600;
                 font-size: 12px;
                 font-family: {FONT_FAMILY};
@@ -400,17 +619,17 @@ class SaveLocationDialog(QDialog):
         btn_box.addWidget(btn_cancel)
 
         btn_ok = QPushButton("Kaydet")
-        btn_ok.setFixedHeight(34)
+        btn_ok.setFixedHeight(36)
         btn_ok.setCursor(Qt.PointingHandCursor)
         btn_ok.setStyleSheet(f"""
             QPushButton {{
                 background: #0071E3;
                 color: #FFFFFF;
                 border: none;
-                border-radius: 17px;
-                padding: 0 26px;
+                border-radius: 18px;
+                padding: 0 32px;
                 font-weight: 700;
-                font-size: 12px;
+                font-size: 12.5px;
                 font-family: {FONT_FAMILY};
             }}
             QPushButton:hover {{ background: #0062C4; }}
@@ -422,6 +641,83 @@ class SaveLocationDialog(QDialog):
         outer.addWidget(container)
 
         self._reload_rows()
+
+    def _update_btn_states(self):
+        # Name button style
+        is_name_active = self.name_box.isVisible() or bool(self.name_edit.text().strip())
+        if is_name_active:
+            self.btn_add_name.setStyleSheet(f"""
+                QPushButton {{
+                    background: #EFF6FF;
+                    color: #0071E3;
+                    border: 1.5px solid #0071E3;
+                    border-radius: 17px;
+                    padding: 0 16px;
+                    font-weight: 700;
+                    font-size: 12px;
+                    font-family: {FONT_FAMILY};
+                }}
+            """)
+        else:
+            self.btn_add_name.setStyleSheet(f"""
+                QPushButton {{
+                    background: #F8FAFC;
+                    color: #334155;
+                    border: 1px solid #CBD5E1;
+                    border-radius: 17px;
+                    padding: 0 16px;
+                    font-weight: 600;
+                    font-size: 12px;
+                    font-family: {FONT_FAMILY};
+                }}
+                QPushButton:hover {{
+                    background: #EFF6FF;
+                    border-color: #93C5FD;
+                    color: #0071E3;
+                }}
+            """)
+
+        # Note button style
+        is_note_active = self.note_box.isVisible() or bool(self.note_edit.text().strip())
+        if is_note_active:
+            self.btn_add_note.setStyleSheet(f"""
+                QPushButton {{
+                    background: #EFF6FF;
+                    color: #0071E3;
+                    border: 1.5px solid #0071E3;
+                    border-radius: 17px;
+                    padding: 0 16px;
+                    font-weight: 700;
+                    font-size: 12px;
+                    font-family: {FONT_FAMILY};
+                }}
+            """)
+        else:
+            self.btn_add_note.setStyleSheet(f"""
+                QPushButton {{
+                    background: #F8FAFC;
+                    color: #334155;
+                    border: 1px solid #CBD5E1;
+                    border-radius: 17px;
+                    padding: 0 16px;
+                    font-weight: 600;
+                    font-size: 12px;
+                    font-family: {FONT_FAMILY};
+                }}
+                QPushButton:hover {{
+                    background: #EFF6FF;
+                    border-color: #93C5FD;
+                    color: #0071E3;
+                }}
+            """)
+
+    @property
+    def custom_name(self) -> str:
+        return self.name_edit.text().strip()
+
+    @property
+    def note(self) -> str:
+        return self.note_edit.text().strip()
 
     def _reload_rows(self):
         while self.list_layout.count():
@@ -478,19 +774,23 @@ class SaveLocationDialog(QDialog):
         self._pick_folder(folder.get("id"))
 
     @classmethod
-    def choose(cls, parent, slug: str, current_folder_id=None, has_existing_version=False):
-        """Shows the dialog. Returns (target_folder_id, action, cancelled: bool).
+    def choose(cls, parent, slug: str, current_folder_id=None, has_existing_version=False,
+               version_num: int = 1, initial_custom_name: str = "", initial_note: str = ""):
+        """Shows the dialog. Returns (target_folder_id, action, custom_name, note, cancelled: bool).
         action can be:
           - 'save': standard save in current/same folder
           - 'copy': copy to target folder as new version (+1 version number), keep previous version
           - 'move': move existing version to target folder
         """
-        dlg = cls(slug, current_folder_id=current_folder_id, parent=parent)
+        dlg = cls(slug, current_folder_id=current_folder_id, parent=parent,
+                  version_num=version_num, initial_custom_name=initial_custom_name, initial_note=initial_note)
         result = dlg.exec()
         if result != QDialog.Accepted:
-            return None, None, True
+            return None, None, "", "", True
 
         target_folder_id = dlg.selected_folder_id
+        custom_name = dlg.custom_name
+        note = dlg.note
 
         # If user selected a DIFFERENT folder and there is an existing version in the old folder:
         if has_existing_version and target_folder_id != current_folder_id:
@@ -500,8 +800,8 @@ class SaveLocationDialog(QDialog):
             transfer_dlg = FolderTransferChoiceDialog(src_name, dst_name, parent=parent)
             transfer_res = transfer_dlg.exec()
             if transfer_res != QDialog.Accepted or transfer_dlg.choice == "cancel":
-                return None, None, True
+                return None, None, "", "", True
 
-            return target_folder_id, transfer_dlg.choice, False
+            return target_folder_id, transfer_dlg.choice, custom_name, note, False
 
-        return target_folder_id, "save", False
+        return target_folder_id, "save", custom_name, note, False

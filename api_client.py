@@ -876,7 +876,7 @@ class APIClient:
                     if file_signature(target) != expected:
                         continue
                     stamp = (expected, entry.get("hash"), entry.get("folder_id"),
-                             entry.get("sync_revision"), entry.get("last_modified"), entry.get("note"))
+                             entry.get("sync_revision"), entry.get("last_modified"), entry.get("note"), entry.get("custom_name"))
                     if expected and self._index_cache.get(target) == stamp:
                         continue
                     try:
@@ -894,6 +894,8 @@ class APIClient:
                         # are acknowledged. Never push an old folder back on a poll.
                         if "note" in entry:
                             vm["note"] = entry["note"]
+                        if "custom_name" in entry:
+                            vm["custom_name"] = entry["custom_name"]
                         if "folder_id" in entry:
                             vm["folder_id"] = entry["folder_id"]
                         if entry.get("last_modified"):

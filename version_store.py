@@ -1333,6 +1333,76 @@ def assign_version_folder(slug: str, filename: str, folder_id: str):
         pass
     return True
 
+
+def assign_version_custom_name(slug: str, filename: str, custom_name: str) -> bool:
+    """Sets or updates the custom name (e.g. 'oturmaya yakın') for an existing version."""
+    if not slug or not filename:
+        return False
+    filepath = os.path.join(_versions_dir(slug), filename)
+    if not os.path.exists(filepath):
+        return False
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return False
+
+    meta = data.setdefault("_version_meta", {})
+    meta["custom_name"] = (custom_name or "").strip()
+    meta["last_modified"] = datetime.now().isoformat()
+
+    if not _atomic_write_json(filepath, data):
+        return False
+
+    invalidate_version_summary(slug, filename)
+    touch_institution_timestamp(slug)
+
+    try:
+        import threading
+        from cloud_sync import push_version_to_rtdb, push_institution_to_rtdb
+        def _sync_bg():
+            push_version_to_rtdb(slug, filename, data)
+            push_institution_to_rtdb(slug)
+        threading.Thread(target=_sync_bg, daemon=True).start()
+    except Exception:
+        pass
+    return True
+
+
+def assign_version_note(slug: str, filename: str, note: str) -> bool:
+    """Sets or updates the custom note for an existing version."""
+    if not slug or not filename:
+        return False
+    filepath = os.path.join(_versions_dir(slug), filename)
+    if not os.path.exists(filepath):
+        return False
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return False
+
+    meta = data.setdefault("_version_meta", {})
+    meta["note"] = (note or "").strip()
+    meta["last_modified"] = datetime.now().isoformat()
+
+    if not _atomic_write_json(filepath, data):
+        return False
+
+    invalidate_version_summary(slug, filename)
+    touch_institution_timestamp(slug)
+
+    try:
+        import threading
+        from cloud_sync import push_version_to_rtdb, push_institution_to_rtdb
+        def _sync_bg():
+            push_version_to_rtdb(slug, filename, data)
+            push_institution_to_rtdb(slug)
+        threading.Thread(target=_sync_bg, daemon=True).start()
+    except Exception:
+        pass
+    return True
+
 # ── Version CRUD ─────────────────────────────────────────────────────
 
 def _versions_dir(slug: str) -> str:
@@ -1376,7 +1446,8 @@ def find_version_by_content(slug: str, data_store: dict) -> str:
 
 def save_version(slug: str, data_store: dict, source: str = "manual", note: str = "",
                  folder_id: str = None, allow_duplicate: bool = False,
-                 data_pool_id: str = None, data_pool_name: str = None) -> str:
+                 data_pool_id: str = None, data_pool_name: str = None,
+                 custom_name: str = None) -> str:
     """Saves a new version and returns its filename.
 
     If an existing version already holds byte-identical content, that one is
@@ -1394,6 +1465,8 @@ def save_version(slug: str, data_store: dict, source: str = "manual", note: str 
         data_pool_id = orig_meta.get("data_pool_id")
     if data_pool_name is None and orig_meta.get("data_pool_name"):
         data_pool_name = orig_meta.get("data_pool_name")
+    if custom_name is None and orig_meta.get("custom_name"):
+        custom_name = orig_meta.get("custom_name")
 
     save_data = copy.deepcopy(data_store)
     save_data.pop("_sync_meta", None)
@@ -1405,7 +1478,7 @@ def save_version(slug: str, data_store: dict, source: str = "manual", note: str 
         twin = find_version_by_content(slug, save_data)
         if twin:
             # Refresh the note/folder on the existing version rather than cloning it.
-            if note or folder_id or data_pool_id or data_pool_name:
+            if note or folder_id or data_pool_id or data_pool_name or (custom_name is not None and custom_name != ""):
                 try:
                     twin_path = os.path.join(_versions_dir(slug), twin)
                     with open(twin_path, "r", encoding="utf-8") as f:
@@ -1419,6 +1492,8 @@ def save_version(slug: str, data_store: dict, source: str = "manual", note: str 
                         meta["data_pool_id"] = data_pool_id
                     if data_pool_name:
                         meta["data_pool_name"] = data_pool_name
+                    if custom_name is not None:
+                        meta["custom_name"] = custom_name
                     with open(twin_path, "w", encoding="utf-8") as f:
                         json.dump(existing, f, ensure_ascii=False, indent=2)
                     invalidate_version_summary(slug, twin)
@@ -1443,6 +1518,7 @@ def save_version(slug: str, data_store: dict, source: str = "manual", note: str 
         "last_modified": now.isoformat(),
         "source": src_tag,
         "note": note,
+        "custom_name": custom_name or "",
         "filename": filename,
         "folder_id": folder_id,
         "data_pool_id": data_pool_id,
@@ -1493,7 +1569,7 @@ def propagate_primary_timeoff_to_secondary(primary_slug: str, primary_data: dict
     return
 
 
-def update_version_in_place(slug: str, filename: str, data_store: dict) -> bool:
+def update_version_in_place(slug: str, filename: str, data_store: dict, custom_name: str = None, note: str = None) -> bool:
     """Commit locally, then let the shared durable outbox upload the latest edit."""
     if not slug or not filename or not data_store:
         return False
@@ -1510,13 +1586,19 @@ def update_version_in_place(slug: str, filename: str, data_store: dict) -> bool:
         except (OSError, ValueError):
             existing = {}
         new_hash = compute_data_hash(save_data)
-        if existing and compute_data_hash(existing) == new_hash:
+        disk_meta = existing.get("_version_meta", {})
+        name_changed = (custom_name is not None and disk_meta.get("custom_name") != custom_name)
+        note_changed = (note is not None and disk_meta.get("note") != note)
+        if existing and compute_data_hash(existing) == new_hash and not name_changed and not note_changed:
             return True
         meta = save_data.setdefault("_version_meta", {})
-        disk_meta = existing.get("_version_meta", {})
-        for key in ("folder_id", "note", "version_number"):
+        for key in ("folder_id", "note", "version_number", "custom_name"):
             if disk_meta.get(key) and not meta.get(key):
                 meta[key] = disk_meta[key]
+        if custom_name is not None:
+            meta["custom_name"] = custom_name
+        if note is not None:
+            meta["note"] = note
         meta.update(last_modified=datetime.now().isoformat(), data_hash=new_hash)
         meta.setdefault("filename", filename)
         # The open editor may still carry the revision from when it was opened.
@@ -1563,12 +1645,14 @@ def _version_summary(filepath: str) -> dict:
     summary = {"note": "", "folder_id": None, "total_hours": 0,
                "placed_hours": 0, "unplaced_hours": 0,
                "size_kb": round(stat.st_size / 1024, 1),
-               "last_modified": None}
+               "last_modified": None,
+               "custom_name": ""}
     try:
         with open(filepath, "r", encoding="utf-8") as fh:
             d = json.load(fh)
         v_meta = d.get("_version_meta", {}) or {}
         summary["note"] = v_meta.get("note", "") or ""
+        summary["custom_name"] = v_meta.get("custom_name", "") or ""
         summary["folder_id"] = v_meta.get("folder_id")
         summary["data_pool_id"] = v_meta.get("data_pool_id")
         summary["data_pool_name"] = v_meta.get("data_pool_name")
@@ -1742,6 +1826,7 @@ def list_versions(slug: str, source_filter: str = "all") -> list:
             "source": source,
             "size_kb": summary["size_kb"],
             "note": summary["note"],
+            "custom_name": summary.get("custom_name", ""),
             "total_hours": summary["total_hours"],
             "placed_hours": summary["placed_hours"],
             "unplaced_hours": summary["unplaced_hours"],
@@ -1777,14 +1862,16 @@ def _assign_display_labels(versions: list):
 
     for number, group in by_number.items():
         if len(group) == 1:
-            group[0]["label"] = f"Versiyon {number}"
+            cname = (group[0].get("custom_name") or "").strip()
+            group[0]["label"] = f"v{number}  {cname}" if cname else f"Versiyon {number}"
             group[0]["has_number_collision"] = False
             continue
         # Oldest first, so the version the user has known longest keeps the bare number.
         group.sort(key=lambda v: v["datetime"])
         for index, v in enumerate(group):
             suffix = "" if index == 0 else f"-{chr(ord('B') + index - 1)}"
-            v["label"] = f"Versiyon {number}{suffix}"
+            cname = (v.get("custom_name") or "").strip()
+            v["label"] = f"v{number}{suffix}  {cname}" if cname else f"Versiyon {number}{suffix}"
             v["has_number_collision"] = True
 
 def load_version(slug: str, version_filename: str) -> dict:

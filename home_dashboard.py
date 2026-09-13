@@ -1894,9 +1894,10 @@ class AppleVersionRow(QFrame):
         layout.setContentsMargins(44, 4, 16, 4)
         layout.setSpacing(12)
         
-        # Version Title Badge (e.g. v121)
+        # Version Title Badge (e.g. v121 or v121  oturan program)
         num = version_info.get("number", 0)
-        v_label_str = version_info.get("label") or f"v{num}"
+        cname = (version_info.get("custom_name") or "").strip()
+        v_label_str = version_info.get("label") or (f"v{num}  {cname}" if cname else f"Versiyon {num}")
         v_title = QLabel(v_label_str)
         v_title.setFont(bk_ui.font(8.8, QFont.DemiBold))
         v_title.setAlignment(Qt.AlignCenter)
@@ -1905,10 +1906,12 @@ class AppleVersionRow(QFrame):
             background: #F1F3F5;
             color: #1E293B;
             border-radius: 5px;
-            padding: 0 7px;
+            padding: 0 8px;
         """)
         v_title.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        if version_info.get("has_number_collision"):
+        if cname:
+            v_title.setToolTip(f"Çizelge: {v_label_str}")
+        elif version_info.get("has_number_collision"):
             v_title.setToolTip("Bu numara başka bir cihazda da kullanılmış.")
         layout.addWidget(v_title)
 
@@ -1983,17 +1986,21 @@ class AppleVersionRow(QFrame):
         stats_badge.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         layout.addWidget(stats_badge)
         
-        # Note snippet
-        note_text = version_info.get("note", "")
-        if note_text:
+        # Note snippet: Only display real custom notes from user, hide generic system messages
+        note_text = (version_info.get("note") or "").strip()
+        _generic_notes = {
+            "kullanıcı kaydı", "değişiklikler kaydedildi", "kapanırken kaydedildi",
+            "kapanış kaydı", "güncelleme öncesi kayıt", "başlangıç çizelgesi", "manual", "auto"
+        }
+        if note_text and note_text.lower() not in _generic_notes:
             from PySide6.QtGui import QFontMetrics
             fm = QFontMetrics(bk_ui.font(8.2))
-            elided_note = fm.elidedText(note_text, Qt.ElideRight, 160)
-            note_lbl = QLabel(elided_note)
-            note_lbl.setToolTip(note_text)
+            elided_note = fm.elidedText(note_text, Qt.ElideRight, 260)
+            note_lbl = QLabel(f"📝 {elided_note}")
+            note_lbl.setToolTip(f"Not: {note_text}")
             note_lbl.setFont(bk_ui.font(8.2))
-            note_lbl.setStyleSheet(f"color: {bk_ui.INK_FAINT}; background: transparent; border: none;")
-            note_lbl.setMaximumWidth(160)
+            note_lbl.setStyleSheet("color: #475569; background: transparent; border: none;")
+            note_lbl.setMaximumWidth(260)
             note_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
             layout.addWidget(note_lbl)
             
@@ -2056,6 +2063,9 @@ class AppleVersionRow(QFrame):
                             on_click=lambda f=fid: self.move_to_folder_requested.emit(self.slug, self.filename, f))
 
         menu.add_separator()
+        menu.add_action("Çizelge İsmi Tanımla...", None, on_click=self._edit_custom_name)
+        menu.add_action("Not Düzenle...", None, on_click=self._edit_note)
+        menu.add_separator()
         menu.add_action("Versiyonu Sil", bk_ui.trash_glyph(bk_ui.DANGER, 16), is_danger=True,
                         on_click=lambda: self.action_requested.emit("delete", self.slug, self.filename))
 
@@ -2067,6 +2077,38 @@ class AppleVersionRow(QFrame):
             global_pos = pos
 
         menu.popup_at(global_pos)
+
+    def _edit_custom_name(self):
+        from PySide6.QtWidgets import QInputDialog
+        curr = (self.version_info.get("custom_name") or "").strip()
+        num = self.version_info.get("number", 0)
+        new_name, ok = QInputDialog.getText(
+            self, f"v{num} Çizelge İsmi",
+            f"<b>v{num}</b> için özel çizelge ismi tanımlayın:<br><small style='color: #64748B;'>Örn: Oturan Program, Oturmaya Yakın, Taslak 2</small>",
+            text=curr
+        )
+        if ok:
+            import version_store
+            version_store.assign_version_custom_name(self.slug, self.filename, new_name.strip())
+            self._notify_parent_refresh_versions()
+
+    def _edit_note(self):
+        from PySide6.QtWidgets import QInputDialog
+        curr = (self.version_info.get("note") or "").strip()
+        _generic = {"kullanıcı kaydı", "değişiklikler kaydedildi", "kapanırken kaydedildi", "kapanış kaydı", "güncelleme öncesi kayıt", "başlangıç çizelgesi", "manual", "auto"}
+        if curr.lower() in _generic:
+            curr = ""
+        num = self.version_info.get("number", 0)
+        new_note, ok = QInputDialog.getText(
+            self, f"v{num} Versiyon Notu",
+            f"<b>v{num}</b> için özel not girin:<br><small style='color: #64748B;'>Örn: Cuma öğleden sonra boşaltıldı</small>",
+            text=curr
+        )
+        if ok:
+            import version_store
+            version_store.assign_version_note(self.slug, self.filename, new_note.strip())
+            self._notify_parent_refresh_versions()
+
     def _notify_parent_refresh_versions(self):
         p = self.parent()
         while p:
@@ -2646,16 +2688,18 @@ class SearchOverlay(bk_ui.MorphOverlay):
                 for v in vers_raw:
                     num_str = str(v.get("number", ""))
                     note_str = (v.get("note") or "").strip()
+                    cname_str = (v.get("custom_name") or "").strip()
                     fname_str = (v.get("folder_name") or "").strip()
                     file_str = v.get("filename", "")
                     is_active = bool(v.get("is_active"))
                     dt_str = f"{v.get('date_str', '')} {v.get('time_str', '')[:5]}".strip()
 
-                    v_hay = f"versiyon {num_str} {num_str} {name} {fname_str} {note_str} {file_str}".lower()
+                    v_hay = f"versiyon {num_str} {num_str} {cname_str} {name} {fname_str} {note_str} {file_str}".lower()
                     versions_list.append({
                         "slug": slug,
                         "filename": file_str,
                         "number": num_str,
+                        "custom_name": cname_str,
                         "note": note_str,
                         "folder_name": fname_str,
                         "inst_name": name,

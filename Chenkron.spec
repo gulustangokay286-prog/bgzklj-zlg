@@ -26,8 +26,13 @@ hidden_modules = [
     'advisor', 'api_client', 'auto_scheduler', 'cloud_sync', 'constraint_sync', 'database',
     'exporters', 'home_dashboard', 'lesson_hours', 'login_dialog', 'main_window',
     'bk_branding', 'bk_ui', 'bk_update', 'update_notifications', 'ribbon_widget', 'save_dialog',
-    'splash_screen', 'state_manager', 'timetable_grid', 'version', 'version_store',
+    'splash_screen', 'state_manager', 'timetable_grid', 'version', 'version_store', 'sync_coordinator',
     'core.timetable_data', 'openpyxl', 'openpyxl.styles', 'openpyxl.cell', 'openpyxl.utils',
+    'scheduler', 'scheduler.build', 'scheduler.cpsat', 'scheduler.dayassign', 'scheduler.dayrules',
+    'scheduler.daysolve', 'scheduler.diagnostics', 'scheduler.engine', 'scheduler.fast',
+    'scheduler.finish', 'scheduler.model', 'scheduler.native_bridge', 'scheduler.occupancy',
+    'scheduler.placer', 'scheduler.polish', 'scheduler.problem', 'scheduler.rules',
+    'scheduler.verify', 'scheduler.worker',
 ]
 if os.path.isdir(RELEASE_SYSTEM):
     hidden_modules += [
