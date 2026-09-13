@@ -714,6 +714,8 @@ class MasterDataDialog(QDialog):
             self._redo_stack = []
         
         self._build_ui()
+        self.stack.setCurrentIndex(start_idx)
+        self._loaded_tabs = set()
         self._load_existing_data()
         self._select_tab(start_idx)
         self._update_undo_redo_ui()
@@ -774,11 +776,23 @@ class MasterDataDialog(QDialog):
                 icons[i].setToolTip(full_tip)
 
     def _load_existing_data(self):
+        self._loaded_tabs = set()
+        self._populate_tab(self.stack.currentIndex())
+
+    def _populate_tab(self, tab_idx):
+        tables = [self.table_ders, self.table_sinif, self.table_derslik, self.table_ogretmen]
+        table = tables[tab_idx]
+        table.setUpdatesEnabled(False)
+        try:
+            self._populate_tab_rows(tab_idx)
+        finally:
+            table.setUpdatesEnabled(True)
+        self._loaded_tabs.add(tab_idx)
+
+    def _populate_tab_rows(self, tab_idx):
         # Reset row counts to avoid duplicate row stacking
-        self.table_ders.setRowCount(0)
-        self.table_sinif.setRowCount(0)
-        self.table_derslik.setRowCount(0)
-        self.table_ogretmen.setRowCount(0)
+        tables = [self.table_ders, self.table_sinif, self.table_derslik, self.table_ogretmen]
+        tables[tab_idx].setRowCount(0)
         
         # Clean & Format all subject and teacher names to Turkish title case
         from dialogs.edit_forms import format_tr_name
@@ -808,11 +822,11 @@ class MasterDataDialog(QDialog):
         periods = int(settings.get("periods", self.data_store.get("ders_saati", 8)))
         total_default = len(days) * periods
 
-        for data in self.data_store.get("dersler", []):
+        for data in (self.data_store.get("dersler", []) if tab_idx == 0 else []):
             toplam = str(totals["dersler"].get(data.get("ad", ""), 0))
             self._add_row(self.table_ders, [data.get("ad",""), data.get("kisa",""), toplam, "Mevcut", "İdeal", str(data.get("max_gunluk", periods))], timeoff=self._timeoff_matrix(data), days_cnt=len(days), periods_cnt=periods)
         
-        for data in self.data_store.get("siniflar", []):
+        for data in (self.data_store.get("siniflar", []) if tab_idx == 1 else []):
             toplam = str(totals["siniflar"].get(data.get("ad", ""), 0))
             timeoff = data.get("timeoff", [])
             if not timeoff:
@@ -822,7 +836,7 @@ class MasterDataDialog(QDialog):
                 zaman_str = f"{open_cells} Ders"
                 
             self._add_row(self.table_sinif, [data.get("ad",""), data.get("kisa",""), toplam, zaman_str, data.get("ders_bitimi","15:30"), data.get("sinif_ogretmeni",""), data.get("kapasite","30")], timeoff=self._timeoff_matrix(data), days_cnt=len(days), periods_cnt=periods)
-        for data in self.data_store.get("derslikler", []):
+        for data in (self.data_store.get("derslikler", []) if tab_idx == 2 else []):
             self._add_row(self.table_derslik, [data.get("ad",""), data.get("kisa",""), "0", "Mevcut", data.get("kapasite",""), "Merkez"], timeoff=self._timeoff_matrix(data), days_cnt=len(days), periods_cnt=periods)
         # Build Class Teacher mapping strictly from siniflar
         class_teacher_map = {}
@@ -831,17 +845,19 @@ class MasterDataDialog(QDialog):
             if so and str(so).strip():
                 class_teacher_map[format_tr_name(str(so))] = s.get("ad", "")
 
+        teacher_assignments = {}
         totals = {"dersler": {}, "siniflar": {}, "ogretmenler": {}}
         for a in self.data_store.get("atamalar", []):
             dur = int(a.get("duration", 1))
             t = format_tr_name(a.get("teacher", ""))
+            teacher_assignments.setdefault(t, []).append(a)
             s = format_tr_name(a.get("subject", ""))
             c = (a.get("class") or "").strip()
             if t: totals["ogretmenler"][t] = totals["ogretmenler"].get(t, 0) + dur
             if s: totals["dersler"][s] = totals["dersler"].get(s, 0) + dur
             if c: totals["siniflar"][c] = totals["siniflar"].get(c, 0) + dur
 
-        for data in self.data_store.get("ogretmenler", []):
+        for data in (self.data_store.get("ogretmenler", []) if tab_idx == 3 else []):
             t_name = data.get("ad", "")
             t_fmt = format_tr_name(t_name)
             toplam = str(totals["ogretmenler"].get(t_fmt, totals["ogretmenler"].get(t_name, 0)))
@@ -853,7 +869,7 @@ class MasterDataDialog(QDialog):
             brans = data.get("brans", "")
             
             # Assigned subjects & classes computed in real time from atamalar
-            teacher_atamalar = [a for a in self.data_store.get("atamalar", []) if format_tr_name(a.get("teacher", "")) == t_fmt]
+            teacher_atamalar = teacher_assignments.get(t_fmt, [])
             assignments_summary_list = []
             for a in teacher_atamalar:
                 subj = a.get("subject", "")
@@ -1485,6 +1501,8 @@ class MasterDataDialog(QDialog):
         return w
 
     def _select_tab(self, idx):
+        if idx not in getattr(self, "_loaded_tabs", set()):
+            self._populate_tab(idx)
         # Update left buttons
         for i, btn in enumerate(self.left_btns):
             btn.setChecked(i == idx)

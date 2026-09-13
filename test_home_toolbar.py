@@ -28,6 +28,7 @@ import version_store  # noqa: E402
 version_store._base_dir = lambda: os.path.join(SANDBOX, "institutions")
 
 PULLS = []
+WORKER_STARTS = []
 
 
 class _NullCloud:
@@ -40,7 +41,14 @@ class _NullCloud:
         if name in ("CloudSyncWorker", "RealtimeSyncClient"):
             class _W:
                 def __init__(self, *a, **k):
-                    pass
+                    signal = types.SimpleNamespace(connect=lambda *a, **k: None)
+                    self.institutions_list_changed = signal
+                    self.remote_data_updated = signal
+                    self.sync_notified = signal
+                    self.version_notified = signal
+
+                def start(self):
+                    WORKER_STARTS.append(name)
 
                 def __getattr__(self, _n):
                     return lambda *a, **k: True
@@ -113,7 +121,8 @@ def run():
     dash = HomeDashboard(auth_data=auth)
 
     print("\n[açılışta buluttan kontrol]")
-    check("açılışta pull_all_from_rtdb çağrıldı", len(PULLS) >= 1, f"{len(PULLS)} çağrı")
+    check("açılışta tek arka plan senkronu başladı", WORKER_STARTS == ["CloudSyncWorker"], str(WORKER_STARTS))
+    check("açılış için ikinci bir indirme başlatılmadı", not PULLS, str(PULLS))
 
     print("\n[Yenile düğmesi]")
     check("Yenile düğmesi var", hasattr(dash, "btn_refresh"))

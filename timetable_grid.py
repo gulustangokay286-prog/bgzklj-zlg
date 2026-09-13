@@ -100,15 +100,8 @@ class StickyGhostWidget(QLabel):
             QApplication.instance().installEventFilter(self)
 
     def _anchor_global(self, cursor_global):
-        """Global point used for hit-testing: a little way inside the ghost's FIRST cell.
-
-        Reading the cell from the ghost's exact corner is fragile — that pixel sits on
-        the grid line, so rounding decides whether the row/column comes back as the
-        intended one or its neighbour. Nudging a few pixels inward makes the answer the
-        cell the user actually sees the ghost covering.
-        """
-        top_left = cursor_global - self._grab_offset
-        return top_left + QPoint(4, 4)
+        """Click-to-carry and QDrag both target the cell under the cursor."""
+        return cursor_global
 
     def _update_pos(self):
         cur = QCursor.pos()
@@ -116,17 +109,9 @@ class StickyGhostWidget(QLabel):
         top_left = cur - self._grab_offset
         self.move(top_left.x(), top_left.y())
 
-        # The hit-testing + preview computation below (QApplication.widgetAt is a global
-        # window hit-test) is the expensive part. Running it on every 12ms tick was the
-        # main cause of the freeze/lag feeling while dragging. Skip it when the cursor
-        # hasn't actually moved, and otherwise only run it every 3rd tick (~36ms, still
-        # well under human perception for a hover highlight) instead of every tick.
-        self._tick_count += 1
         if cur == self._last_cursor_pos:
             return
         self._last_cursor_pos = cur
-        if self._tick_count % 3 != 0:
-            return
 
         # Live preview on table under cursor
         target_widget = QApplication.widgetAt(cur)
@@ -141,6 +126,7 @@ class StickyGhostWidget(QLabel):
         if StickyGhostWidget._hovered_table and StickyGhostWidget._hovered_table != table:
             try:
                 StickyGhostWidget._hovered_table.clear_drag_preview()
+                StickyGhostWidget._hovered_table.end_placement_analysis()
             except Exception:
                 pass
             StickyGhostWidget._hovered_table = None
@@ -148,8 +134,9 @@ class StickyGhostWidget(QLabel):
         if table:
             StickyGhostWidget._hovered_table = table
             local_pos = table.viewport().mapFromGlobal(self._anchor_global(cur))
-            r = table.rowAt(local_pos.y())
-            c = table.columnAt(local_pos.x())
+            if StickyGhostWidget._hovered_table != table or not table._placement_lesson:
+                table.begin_placement_analysis(self.drag_data)
+            r, c = table._cell_at(local_pos)
             if r >= 0 and c >= 0:
                 table.set_drag_preview(r, c, self.drag_data)
             else:
@@ -163,6 +150,7 @@ class StickyGhostWidget(QLabel):
         if StickyGhostWidget._hovered_table:
             try:
                 StickyGhostWidget._hovered_table.clear_drag_preview()
+                StickyGhostWidget._hovered_table.end_placement_analysis()
             except Exception:
                 pass
             StickyGhostWidget._hovered_table = None
@@ -2456,15 +2444,7 @@ class DropTableWidget(QTableWidget):
         return QPoint(x, y)
 
     def _cell_at(self, point):
-        """(row, col) under a viewport point, or (-1, -1).
-
-        itemAt() returns None for a cell with no QTableWidgetItem, and for the
-        non-anchor half of a merged (spanned) block, so rowAt/columnAt are the
-        reliable fallback.
-        """
-        item = self.itemAt(point)
-        if item is not None:
-            return item.row(), item.column()
+        """Geometric cell under the cursor, including covered span columns."""
         return self.rowAt(point.y()), self.columnAt(point.x())
 
     def dragMoveEvent(self, event):
@@ -4492,29 +4472,38 @@ class TimetableGrid(QWidget):
             self.table.setVerticalHeaderLabels([f"{i+1}" for i in range(self._periods)])
 
     def set_cell(self, row, col, subject_name, color, teacher_name="", duration=1, class_name="", display_mode="classes", locked=False, is_manual=False, is_combined=False, combined_classes=None):
-        # Bu satırın saklanan görünümleri artık geçersiz: hücrenin kendisi de
-        # değişmiş olabilir, span kökü de kaymış olabilir.
-        self.table.invalidate_visuals(row)
-        if display_mode == "teachers":
-            fmt_c = _CLASS_FMT_CACHE.get(class_name)
-            if fmt_c is None:
-                c_clean = str(class_name).replace("(ea)", "(EA)").replace("(say)", "(SAY)").replace("(soz)", "(SÖZ)").replace("(dil)", "(DİL)")
-                if "," in c_clean or "&" in c_clean or "+" in c_clean:
-                    fmt_c = "+".join([c.strip().split("(")[0].strip() for c in c_clean.replace("&", ",").replace("+", ",").split(",") if c.strip()])
-                else:
-                    fmt_c = c_clean.strip().split("(")[0].strip()
-                _CLASS_FMT_CACHE[class_name] = fmt_c
-            display_text = fmt_c
-        else:
-            display_text = get_subject_abbr(subject_name)
+        signature = (subject_name, color, teacher_name, duration, class_name,
+                     display_mode, locked, is_manual, is_combined, tuple(combined_classes or []))
+        cache = getattr(self, "_rendered_cells", {})
+        unchanged = cache.get((row, col)) == signature and self.table.item(row, col) is not None
+        cache[(row, col)] = signature
+        self._rendered_cells = cache
+        if getattr(self, "_reconcile_seen", None) is not None:
+            self._reconcile_seen.add((row, col))
+        if not unchanged:
+            # Bu satırın saklanan görünümleri artık geçersiz: hücrenin kendisi de
+            # değişmiş olabilir, span kökü de kaymış olabilir.
+            self.table.invalidate_visuals(row)
+            if display_mode == "teachers":
+                fmt_c = _CLASS_FMT_CACHE.get(class_name)
+                if fmt_c is None:
+                    c_clean = str(class_name).replace("(ea)", "(EA)").replace("(say)", "(SAY)").replace("(soz)", "(SÖZ)").replace("(dil)", "(DİL)")
+                    if "," in c_clean or "&" in c_clean or "+" in c_clean:
+                        fmt_c = "+".join([c.strip().split("(")[0].strip() for c in c_clean.replace("&", ",").replace("+", ",").split(",") if c.strip()])
+                    else:
+                        fmt_c = c_clean.strip().split("(")[0].strip()
+                    _CLASS_FMT_CACHE[class_name] = fmt_c
+                display_text = fmt_c
+            else:
+                display_text = get_subject_abbr(subject_name)
             
-        item = QTableWidgetItem(display_text)
-        item.setTextAlignment(Qt.AlignCenter)
-        item.setBackground(_fast_cell_brush(color))
-        item.setForeground(_fast_text_brush(color))
-        item.setFont(_CELL_FONT)
+            item = QTableWidgetItem(display_text)
+            item.setTextAlignment(Qt.AlignCenter)
+            item.setBackground(_fast_cell_brush(color))
+            item.setForeground(_fast_text_brush(color))
+            item.setFont(_CELL_FONT)
         
-        self.table.setItem(row, col, item)
+            self.table.setItem(row, col, item)
         
         if duration > 1:
             self.table.setSpan(row, col, 1, duration)
@@ -4544,8 +4533,27 @@ class TimetableGrid(QWidget):
         """Return dict of placed lessons for printing"""
         return self._placed_lessons
         
+    def begin_cell_refresh(self):
+        self._reconcile_seen = set()
+
+    def end_cell_refresh(self):
+        seen = getattr(self, "_reconcile_seen", None)
+        if seen is None:
+            return
+        cache = getattr(self, "_rendered_cells", {})
+        for row, col in list(cache):
+            if (row, col) not in seen:
+                self.table.takeItem(row, col)
+                cache.pop((row, col), None)
+                self.table.invalidate_visuals(row)
+        self._reconcile_seen = None
+
     def clear_grid(self):
-        self.table.clearContents()
+        # A same-layout refresh reuses existing Qt items; changing one lesson
+        # should not allocate thousands of widgets/items again on an older PC.
+        if getattr(self, "_reconcile_seen", None) is None:
+            self.table.clearContents()
+            self._rendered_cells = {}
         self.table.clearSpans()
         self._placed_lessons.clear()
         self.table.invalidate_visuals()

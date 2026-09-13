@@ -1170,6 +1170,19 @@ class AppleInstitutionCard(QFrame):
     def set_selected(self, selected):
         self._selected = selected
         self._update_style()
+
+    def update_data(self, inst_data, is_selected=False):
+        self.inst_data = inst_data
+        self.inst_name = inst_data["name"]
+        self.inst_color = inst_data.get("color", "#0071E3")
+        self.has_password = inst_data.get("has_password", False)
+        self.is_primary = bool(inst_data.get("is_primary", False))
+        self._selected = is_selected
+        self.name_lbl.setText(self.inst_name)
+        v_count = inst_data.get("version_count", 0)
+        upd = inst_data.get("last_updated_str", "")
+        self.sub_lbl.setText(f"{v_count} versiyon" + (f" · {upd}" if upd else ""))
+        self._update_style()
         
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -2972,8 +2985,6 @@ class HomeDashboard(QWidget):
         self._refresh_institutions()
         
         # Cross-PC Realtime Database Sync on startup
-        if self.auth_data and not self.auth_data.get("is_offline"):
-            self._start_initial_cloud_sync()
         try:
             from cloud_sync import CloudSyncWorker
             self.cloud_worker = CloudSyncWorker(self)
@@ -2997,8 +3008,8 @@ class HomeDashboard(QWidget):
             # the socket cheap and means a dropped message costs a little latency
             # rather than losing a change.
             self._realtime.sync_notified.connect(self._on_realtime_nudge)
-            if self._selected_slug:
-                self._realtime.watch(self._selected_slug)
+            self._realtime.version_notified.connect(self.cloud_worker.request_version)
+            self._realtime.watch_many(i[0] for i in self._institution_signature)
         except Exception as rte:
             print(f"[HomeDashboard] Realtime sync init note: {rte}")
 
@@ -3051,8 +3062,6 @@ class HomeDashboard(QWidget):
             self.btn_refresh.setEnabled(True)
             self.btn_refresh.setToolTip("Yenile — buluttaki değişiklikleri getir")
             self._refresh_institutions()
-            if self._selected_slug:
-                self._refresh_versions()
             if not ok and msg:
                 print(f"[HomeDashboard] yenileme notu: {msg}")
 
@@ -3110,7 +3119,8 @@ class HomeDashboard(QWidget):
             timer.setSingleShot(True)
             timer.timeout.connect(self._do_refresh_all)
             self._refresh_debounce = timer
-        self._refresh_debounce.start(140)
+        if not self._refresh_debounce.isActive():
+            self._refresh_debounce.start(0)
 
     def _do_refresh_all(self):
         # Dragging while the panel is rebuilt under the cursor destroys the widget
@@ -3119,8 +3129,6 @@ class HomeDashboard(QWidget):
             self._refresh_debounce.start(300)
             return
         self._refresh_institutions()
-        if self._selected_slug:
-            self._refresh_versions()
 
 
     def paintEvent(self, event):
@@ -3972,14 +3980,7 @@ class HomeDashboard(QWidget):
         card.hide()
 
     def _refresh_institutions(self):
-        while self.inst_list_layout.count() > 1:
-            item = self.inst_list_layout.takeAt(0)
-            if item.widget():
-                item.widget().hide()
-                item.widget().deleteLater()
-                
         institutions = version_store.list_institutions()
-        
         tenant_type = (self.auth_data.get("tenant_type") if self.auth_data else None) or "internal"
         allowed_slugs = set((self.auth_data.get("allowed_institutions") if self.auth_data else None) or [])
 
@@ -3996,11 +3997,37 @@ class HomeDashboard(QWidget):
             # meant dismissing the panel left a sidebar missing half its rows.
             filtered.append(inst)
             
-        for inst in filtered:
-            is_sel = (inst["slug"] == self._selected_slug)
-            card = AppleInstitutionCard(inst, is_selected=is_sel, is_master_admin=self.is_master_admin)
-            card.clicked.connect(self._on_institution_selected)
-            self.inst_list_layout.insertWidget(self.inst_list_layout.count() - 1, card)
+        signature = [(i.get("slug"), i.get("name"), i.get("color"),
+                      i.get("is_primary"), i.get("has_password"),
+                      i.get("version_count"), i.get("last_updated_str")) for i in filtered]
+        if getattr(self, "_institution_signature", None) == signature:
+            self._refresh_versions()
+            return
+        self._institution_signature = signature
+        if getattr(self, "_realtime", None):
+            self._realtime.watch_many(i[0] for i in signature)
+
+        existing_cards = []
+        for i in range(self.inst_list_layout.count() - 1):
+            w = self.inst_list_layout.itemAt(i).widget()
+            if isinstance(w, AppleInstitutionCard):
+                existing_cards.append(w)
+
+        if len(existing_cards) == len(filtered) and [c.slug for c in existing_cards] == [i["slug"] for i in filtered]:
+            for card, inst in zip(existing_cards, filtered):
+                card.update_data(inst, is_selected=(inst["slug"] == self._selected_slug))
+        else:
+            while self.inst_list_layout.count() > 1:
+                item = self.inst_list_layout.takeAt(0)
+                if item.widget():
+                    item.widget().hide()
+                    item.widget().deleteLater()
+
+            for inst in filtered:
+                is_sel = (inst["slug"] == self._selected_slug)
+                card = AppleInstitutionCard(inst, is_selected=is_sel, is_master_admin=self.is_master_admin)
+                card.clicked.connect(self._on_institution_selected)
+                self.inst_list_layout.insertWidget(self.inst_list_layout.count() - 1, card)
 
         if hasattr(self, "inst_count_lbl"):
             self.inst_count_lbl.setText(str(len(filtered)) if filtered else "")
@@ -4022,6 +4049,8 @@ class HomeDashboard(QWidget):
             self._refresh_versions()
             
     def _on_institution_selected(self, slug):
+        if slug == self._selected_slug:
+            return
         self._selected_slug = slug
         version_store.set_last_active_institution_slug(slug)
         self._selected_version = None
@@ -4039,9 +4068,6 @@ class HomeDashboard(QWidget):
             if isinstance(w, AppleInstitutionCard):
                 w.set_selected(w.slug == slug)
         self._sync_selection_card(animated=True)
-
-        if hasattr(self, "_realtime"):
-            self._realtime.watch(slug)
 
         self._refresh_versions()
         
@@ -4287,16 +4313,36 @@ class HomeDashboard(QWidget):
             self._selected_slug = None
             return
 
+        from sync_coordinator import file_signature
+        ver_dir = os.path.join(inst_dir, "versions")
+        signature = (
+            self._selected_slug, file_signature(os.path.join(inst_dir, "meta.json")),
+            getattr(self, "_current_filter", "Tümü"),
+            self._selected_slug in self._unlocked_slugs,
+            tuple((entry.name, entry.stat().st_mtime_ns, entry.stat().st_size)
+                  for entry in sorted(os.scandir(ver_dir), key=lambda e: e.name)
+                  if entry.name.endswith(".roz")) if os.path.isdir(ver_dir) else (),
+        )
+        if getattr(self, "_version_list_signature", None) == signature:
+            return
+        self._version_list_signature = signature
+
         # The whole list is rebuilt below, which resets the viewport to the top and
         # collapses every folder. That is jarring on its own and actively disruptive
         # when the rebuild was triggered by a background cloud sync the user did not
         # ask for, so scroll offset and which folders were open are restored after.
         scroll_bar = self.scroll_ver.verticalScrollBar() if hasattr(self, "scroll_ver") else None
         prev_scroll = scroll_bar.value() if scroll_bar is not None else 0
-        prev_open_folders = {
-            g.folder_id for g in self.findChildren(CollapsibleVersionGroup)
-            if not g.is_collapsed
-        }
+        if not hasattr(self, "_open_folders_by_slug"):
+            self._open_folders_by_slug = {}
+        prev_slug = getattr(self, "_rendered_slug", None)
+        if prev_slug and prev_slug != self._selected_slug:
+            self._open_folders_by_slug[prev_slug] = {
+                g.folder_id for g in self.findChildren(CollapsibleVersionGroup)
+                if not g.is_collapsed
+            }
+        self._rendered_slug = self._selected_slug
+        prev_open_folders = self._open_folders_by_slug.get(self._selected_slug, {"active"})
         self._rebuild_version_list(inst_dir, prev_open_folders)
         
         self.ver_list_widget.show()

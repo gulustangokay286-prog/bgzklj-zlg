@@ -6,7 +6,7 @@ import os
 import sys
 from functools import lru_cache
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QLabel,
+    QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QLabel,
     QSplitter, QTreeWidget, QTreeWidgetItem, QStatusBar,
     QMessageBox, QTabWidget, QFrame, QSizePolicy, QMenu, QToolButton, QFileDialog, QDialog,
     QTableWidgetItem, QGraphicsBlurEffect, QGraphicsOpacityEffect, QGraphicsDropShadowEffect
@@ -412,9 +412,6 @@ class MainWindow(QMainWindow):
             self.cloud_worker = CloudSyncWorker(self)
             self.cloud_worker.set_auth(auth)
             self.cloud_worker.remote_data_updated.connect(self._on_remote_data_updated)
-            self.cloud_worker.institutions_list_changed.connect(
-                lambda: self._on_remote_data_updated(getattr(self, "institution_slug", ""), "")
-            )
             self.cloud_worker.start()
         except Exception as e:
             print(f"[MainWindow] cloud worker init note: {e}")
@@ -425,6 +422,7 @@ class MainWindow(QMainWindow):
             from cloud_sync import RealtimeSyncClient
             self._realtime = RealtimeSyncClient(self)
             self._realtime.sync_notified.connect(self._on_realtime_notice)
+            self._realtime.version_notified.connect(self.cloud_worker.request_version)
             if getattr(self, "institution_slug", None):
                 self._realtime.watch(self.institution_slug)
         except Exception as e:
@@ -441,38 +439,43 @@ class MainWindow(QMainWindow):
             self.cloud_worker.request_pull()
 
     def _on_remote_data_updated(self, slug, filename):
-        inst_slug = getattr(self, "institution_slug", None)
-        if not inst_slug:
-            return
-        # Never fall back to a hardcoded institution here: doing so would pull
-        # another institution's schedule into this window.
-        if slug and slug != inst_slug:
-            return
-
-        # We allow incoming remote changes to overwrite local unsaved changes
-        # to ensure a live, real-time collaborative experience as requested by the user.
-
         try:
+            inst_slug = getattr(self, "institution_slug", None)
+            if not inst_slug:
+                return
+            # Never fall back to a hardcoded institution here: doing so would pull
+            # another institution's schedule into this window.
+            if slug and slug != inst_slug:
+                return
+
+            from timetable_grid import StickyGhostWidget
+            if (QApplication.activeModalWidget() is not None
+                    or QApplication.mouseButtons() & Qt.LeftButton
+                    or StickyGhostWidget._active_instance is not None):
+                if not hasattr(self, "_remote_reload_timer"):
+                    self._remote_reload_timer = QTimer(self)
+                    self._remote_reload_timer.setSingleShot(True)
+                    self._remote_reload_timer.timeout.connect(lambda: self._on_remote_data_updated("", ""))
+                self._remote_reload_timer.start(100)
+                return
+
             import version_store
             ver_fn = getattr(self, "version_filename", None)
             # Reload the version this window actually has open. Loading "the latest"
             # instead would silently swap the user onto a different schedule the moment
             # anyone created a new version anywhere.
             remote = version_store.load_version(inst_slug, ver_fn) if ver_fn else None
-            if not remote:
-                # No version open, or its file is gone (deleted on another machine).
-                # Fall back to whatever the institution now marks active. The previous
-                # code called version_store.load_latest_version here — a function that
-                # does not exist, so this path raised AttributeError every time.
+            if not remote and not ver_fn:
+                # Only choose the active version when no file is open.
                 active = version_store.get_active_version(inst_slug)
                 remote = version_store.load_version(inst_slug, active) if active else None
             if not remote:
                 return
 
-            if (remote.get("grid_placements") == self.data_store.get("grid_placements")
-                    and remote.get("atamalar") == self.data_store.get("atamalar")
-                    and remote.get("siniflar") == self.data_store.get("siniflar")
-                    and remote.get("ogretmenler") == self.data_store.get("ogretmenler")):
+            from sync_coordinator import is_pending
+            if is_pending(remote):
+                return
+            if version_store.compute_data_hash(remote) == version_store.compute_data_hash(self.data_store):
                 return
 
             self._is_loading = True
@@ -482,9 +485,8 @@ class MainWindow(QMainWindow):
             finally:
                 self._is_loading = False
 
-            self._refresh_grid()
+            self._refresh_grid(skip_unplaced=True)
             self._refresh_tree()
-            self._refresh_unplaced_lessons()
             self._initial_hash = self._calc_data_hash()
             self._is_dirty = False
             self.statusBar().showMessage("☁️ Diğer bilgisayardaki değişiklik alındı", 4000)
@@ -774,7 +776,6 @@ class MainWindow(QMainWindow):
         p1.add_button("Otomatik\nPlanlamayı Başlat","otomatik",self._act_auto_schedule)
         p1.add_button("Bulut Tabanlı\nPlanlama","bulut_olustur",self._act_cloud_timetable)
         p1.add_button("Planlama Sonrası\nKontrol","kontrol",self._act_verify_timetable)
-        p1.add_button("Gelişmiş\nKısıtlamalar","sartlar",lambda: self._open_extracted(126))
         p1.add_button("Çizelgeyi\nSıfırla","temizle",self._act_clear_schedule)
         p1.add_divider()
         p1.add_button("Temel\nBilgiler",  "okul",    self._open_school_info)
@@ -1389,6 +1390,7 @@ class MainWindow(QMainWindow):
         if hasattr(self._grid, "table"):
             self._grid.table.setUpdatesEnabled(False)
             self._grid.table.blockSignals(True)
+            self._grid.begin_cell_refresh()
             
         # Pre-cache color maps for O(1) instantaneous access
         teacher_color_cache = {}
@@ -1650,6 +1652,7 @@ class MainWindow(QMainWindow):
                             p += span
         finally:
             if hasattr(self._grid, "table"):
+                self._grid.end_cell_refresh()
                 self._grid.table.blockSignals(False)
                 self._grid.table.setUpdatesEnabled(True)
                 self._grid.table.viewport().update()
@@ -1684,8 +1687,8 @@ class MainWindow(QMainWindow):
             # If opened from an institution version, update version directly and touch timestamp
             if slug and ver_fn:
                 import version_store
-                version_store.update_version_in_place(slug, ver_fn, self.data_store)
-                version_store.touch_institution_timestamp(slug)
+                if not version_store.update_version_in_place(slug, ver_fn, self.data_store):
+                    raise OSError("Çizelge dosyası yazılamadı")
             else:
                 with open(self.current_roz_path, "w", encoding="utf-8") as f:
                     json.dump(self.data_store, f, ensure_ascii=False, indent=2)
@@ -1693,35 +1696,6 @@ class MainWindow(QMainWindow):
             fname = os.path.basename(self.current_roz_path)
             self.statusBar().showMessage(f"💾 Tüm değişiklikler '{fname}' dosyasına anlık kaydedildi.", 2000)
             
-            # Offload VDS Cloud sync & background tasks asynchronously without UI stutter
-            import threading
-            def _async_bg_sync(store_copy, s_slug, v_fn, auth_copy):
-                try:
-                    from cloud_sync import push_version_to_rtdb, push_institution_to_rtdb
-                    if s_slug and v_fn:
-                        push_version_to_rtdb(s_slug, v_fn, store_copy, auth_copy)
-                    elif s_slug:
-                        push_institution_to_rtdb(s_slug, auth_copy)
-                except Exception:
-                    pass
-                # Republish this institution's teacher availability so the OTHER
-                # institutions' schedulers see it. Doing it on every save (not only
-                # when a constraints dialog happens to be used) is what makes the
-                # sharing work for institutions that were set up before this existed.
-                try:
-                    import constraint_sync
-                    if s_slug:
-                        constraint_sync.publish(s_slug, store_copy)
-                except Exception:
-                    pass
-
-            threading.Thread(
-                target=_async_bg_sync,
-                args=(dict(self.data_store), slug, ver_fn, getattr(self, "auth_data", None)),
-                daemon=True
-            ).start()
-        except Exception as e:
-            print("[SAVE_DB] Error:", e)
         except Exception as e:
             self.statusBar().showMessage(f"Kaydetme hatası: {e}")
 
@@ -3278,9 +3252,6 @@ class MainWindow(QMainWindow):
         self.save_db(sync_from_grid=False)
         self._refresh_unplaced_lessons(target_entity=cls_name if display_mode == "classes" else teacher)
         
-        # Debounce tree refresh to ensure 0ms instant UI drop response
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(250, self._refresh_tree)
 
         if swap_payload is not None:
             other = swap_payload.get("subject_name") or swap_payload.get("subject") or "ders"
@@ -3329,8 +3300,8 @@ class MainWindow(QMainWindow):
         if not force and not getattr(self, "_is_dirty", False):
             try:
                 if ver_fn:
-                    version_store.update_version_in_place(slug, ver_fn, self.data_store)
-                version_store.touch_institution_timestamp(slug)
+                    if not version_store.update_version_in_place(slug, ver_fn, self.data_store):
+                        raise OSError("Çizelge dosyası yazılamadı")
             except Exception as e:
                 print(f"[SAVE] Auto-save error: {e}")
             return True
@@ -3975,9 +3946,7 @@ class MainWindow(QMainWindow):
         d.exec()
         self.save_db(sync_from_grid=False)
         self._refresh_tree()
-        self._restore_grid_placements()
-        self._refresh_unplaced_lessons()
-        self._refresh_grid()
+        self._refresh_grid(skip_unplaced=True)
 
     def _open_school_info(self):
         self._push_undo_state()
@@ -4021,9 +3990,7 @@ class MainWindow(QMainWindow):
         d.exec()
         self.save_db(sync_from_grid=False)
         self._refresh_tree()
-        self._restore_grid_placements()
-        self._refresh_unplaced_lessons()
-        self._refresh_grid()
+        self._refresh_grid(skip_unplaced=True)
 
     def _open_class_assignments(self, target_class=None):
         from dialogs.edit_forms import ClassComprehensiveAssignmentDialog
@@ -4098,18 +4065,14 @@ class MainWindow(QMainWindow):
         d.exec()
         self.save_db(sync_from_grid=False)
         self._refresh_tree()
-        self._restore_grid_placements()
-        self._refresh_unplaced_lessons()
-        self._refresh_grid()
+        self._refresh_grid(skip_unplaced=True)
 
     def _open_teachers(self):
         d = MasterDataDialog(3, self)
         d.exec()
         self.save_db(sync_from_grid=False)
         self._refresh_tree()
-        self._restore_grid_placements()
-        self._refresh_unplaced_lessons()
-        self._refresh_grid()
+        self._refresh_grid(skip_unplaced=True)
 
     def _open_electives(self):
         self._push_undo_state()
@@ -4332,16 +4295,9 @@ class MainWindow(QMainWindow):
             self.data_store["manual_unplaced_cards"] = []
             if hasattr(self, "_grid"):
                 self._grid.clear_grid()
-            slug = getattr(self, "institution_slug", None)
-            ver_fn = getattr(self, "version_filename", None)
-            if slug and ver_fn:
-                import version_store
-                version_store.update_version_in_place(slug, ver_fn, self.data_store)
-                version_store.touch_institution_timestamp(slug)
             self.mark_dirty()
             self.save_db(sync_from_grid=False)
             self._refresh_grid()
-            self._refresh_tree()
             self.statusBar().showMessage("🧹 Tüm çizelge dersleri başarıyla sıfırlandı.")
 
     def _open_extracted(self, dialog_id):

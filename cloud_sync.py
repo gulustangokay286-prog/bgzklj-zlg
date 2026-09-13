@@ -122,12 +122,14 @@ class CloudSyncWorker(QObject):
         super().__init__(parent)
         self._is_running = True
         self._queue = deque()
+        self._targeted_pulls = {}
         self._lock = threading.Lock()
         self.auth_data = None
         self._last_pull_time = 0
         self._thread = None
         self._pull_requested = False
         self._offline_streak = 0
+        self._seen_generation = 0
         # Set to break the idle sleep the moment there is something to do.
         self._wake = threading.Event()
         
@@ -173,7 +175,26 @@ class CloudSyncWorker(QObject):
             pass
 
     def run(self):
+        from sync_coordinator import resume_pending
+        resume_pending()
         while self._is_running:
+            generation = api_client.sync_generation
+            if generation != self._seen_generation:
+                self._seen_generation = generation
+                self._safe_emit(self.institutions_list_changed)
+                self._safe_emit(self.remote_data_updated, "", "")
+            with self._lock:
+                notified = next(iter(self._targeted_pulls), None)
+                if notified:
+                    self._targeted_pulls.pop(notified, None)
+            if notified:
+                try:
+                    ok, _, count = api_client.pull_notified_version(*notified)
+                    if not ok:
+                        self._pull_requested = True
+                except Exception:
+                    self._pull_requested = True
+                continue
             item = None
             with self._lock:
                 if len(self._queue) > 0:
@@ -243,6 +264,7 @@ class CloudSyncWorker(QObject):
                             self._offline_streak = 0
                             self._safe_emit(self.sync_status_changed, "Veritabanı korunuyor")
                             if new_count > 0:
+                                self._seen_generation = api_client.sync_generation
                                 self._safe_emit(self.institutions_list_changed)
                                 self._safe_emit(self.remote_data_updated, "", "")
                         else:
@@ -252,30 +274,23 @@ class CloudSyncWorker(QObject):
                         self._offline_streak += 1
                         self._safe_emit(self.sync_status_changed, "Veritabanı: Çevrimdışı (Yerel Mod)")
                     self._last_pull_time = now
-                self._sleep_interruptible(0.5)
+                if self._pull_requested:
+                    continue
+                self._sleep_interruptible(0.1)
 
     def _poll_interval(self) -> float:
-        """Seconds between polls.
-
-        Was 60s, and had to be: each poll pulled the entire cloud (11.59 MB, ~7s),
-        so anything faster kept the app permanently busy downloading. That is what
-        made changes take a minute to cross between devices — or appear only after a
-        logout/login, which forces a fresh pull.
-
-        With /api/sync/index a poll is ~27 KB and ~0.5s, so 3 seconds is affordable
-        and the app feels live even if the WebSocket is blocked by a firewall. When
-        the socket IS connected its nudge triggers an immediate pull, so this is just
-        the safety net.
-
-        The backoff on failure stays: a laptop that is simply offline should not
-        hammer a dead connection every three seconds.
-        """
+        """WebSocket events fetch immediately; polling recovers missed events."""
         if self._offline_streak:
             return min(10.0 * (2 ** min(self._offline_streak, 5)), 300.0)
         # The index is hash-only and the WebSocket is the primary path. Keep a
         # one-second safety poll so a blocked corporate proxy still converges almost
         # immediately; the request is only a few KB and downloads changed versions.
         return 1.0
+
+    def request_version(self, slug, key):
+        with self._lock:
+            self._targeted_pulls[(slug, key)] = True
+        self._wake.set()
 
     def request_pull(self):
         """Asks the worker to sync now — called when a realtime nudge arrives."""
@@ -296,6 +311,7 @@ class RealtimeSyncClient(QObject):
     it yet, this simply stays quiet and the existing poll loop remains the safety net either
     way, so it degrades gracefully.
     """
+    version_notified = Signal(str, str)  # slug, version key
     sync_notified = Signal(str)          # slug that changed
     connection_state_changed = Signal(bool)  # True once connected, False on drop
 
@@ -310,6 +326,23 @@ class RealtimeSyncClient(QObject):
         # the auth token not being written yet, which resolves in well under a second.
         self._reconnect_delay_ms = 1000
 
+    def watch_many(self, slugs):
+        """Keep dashboard subscriptions alive across institution switches."""
+        if not hasattr(self, "_watches"):
+            self._watches = {}
+        wanted = set(slugs)
+        for slug in list(self._watches):
+            if slug not in wanted:
+                watcher = self._watches.pop(slug)
+                watcher.stop()
+                watcher.deleteLater()
+        for slug in wanted - self._watches.keys():
+            watcher = RealtimeSyncClient(self)
+            watcher.sync_notified.connect(self.sync_notified.emit)
+            watcher.version_notified.connect(self.version_notified.emit)
+            watcher.watch(slug)
+            self._watches[slug] = watcher
+
     def watch(self, slug: str):
         """Start (or switch to) watching this institution's slug for live changes."""
         if not _HAS_WEBSOCKETS or not slug:
@@ -322,7 +355,7 @@ class RealtimeSyncClient(QObject):
             self._watch_debounce = QTimer(self)
             self._watch_debounce.setSingleShot(True)
             self._watch_debounce.timeout.connect(self._do_watch)
-        self._watch_debounce.start(150)
+        self._watch_debounce.start(0)
 
     def _do_watch(self):
         if not self._slug:
@@ -376,6 +409,7 @@ class RealtimeSyncClient(QObject):
 
     def _reconnect(self):
         if self._slug:
+            self._close_socket()
             self._open()
 
     def _on_message(self, text):
@@ -384,12 +418,19 @@ class RealtimeSyncClient(QObject):
         except Exception:
             return
         if msg.get("type") == "sync" and msg.get("slug"):
-            self.sync_notified.emit(msg["slug"])
+            if msg.get("reason") == "version" and msg.get("version_key"):
+                self.version_notified.emit(msg["slug"], msg["version_key"])
+            else:
+                self.sync_notified.emit(msg["slug"])
 
     def stop(self):
         """Stop watching entirely (e.g. the dashboard is closing)."""
         self._reconnect_timer.stop()
+        if hasattr(self, "_watch_debounce"):
+            self._watch_debounce.stop()
         self._slug = None
+        for watcher in getattr(self, "_watches", {}).values():
+            watcher.stop()
         self._close_socket()
 
     def _close_socket(self):

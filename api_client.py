@@ -71,6 +71,18 @@ class APIClient:
         self._supports_index = None  # probed once, then remembered
         self._supports_delta = None  # probed once, then remembered
         self.last_error = None
+        self._pull_lock = threading.Lock()
+        self.sync_generation = 0
+        self._index_cache = {}
+        self._known_cloud_slugs = set()
+
+    @property
+    def last_error(self):
+        return getattr(self._local, "last_error", None)
+
+    @last_error.setter
+    def last_error(self, value):
+        self._local.last_error = value
 
     # ── Session ───────────────────────────────────────────────────────────
 
@@ -731,183 +743,196 @@ class APIClient:
     # ── Pull ──────────────────────────────────────────────────────────────
 
     def pull_all_from_rtdb(self, auth_data=None):
-        """Brings local storage in line with the VDS.
+        # Dashboard and editor share the same store and client. Serialize pulls;
+        # a second worker must not replay a response fetched before another save.
+        if not self._pull_lock.acquire(blocking=False):
+            return True, "Senkronizasyon sürüyor.", 0
+        try:
+            result = None
+            if self._supports_index is not False:
+                result = self._pull_index()
+            if result is None and self._supports_delta is not False:
+                result = self._pull_delta()
+            if result is None:
+                result = self._pull_full()
+            if result[0] and result[2]:
+                self.sync_generation += 1
+            return result
+        finally:
+            self._pull_lock.release()
 
-        Order of preference:
-          1. /api/sync/index  — a hash-only listing, ~27 KB. Only versions whose
-             hash differs are downloaded.
-          2. /api/sync/delta  — the v3 rewrite's cursor-based endpoint.
-          3. /api/institutions — the full 11.59 MB dump, for an old server.
-
-        The first is what makes live sync possible at all: polling the third took
-        6.8 seconds and 11.59 MB per cycle, so the poll had to be spaced a minute
-        apart, and a change on one device took up to a minute to reach another.
-        """
-        if self._supports_index is not False:
-            result = self._pull_index()
-            if result is not None:
-                return result
-        if self._supports_delta is not False:
-            result = self._pull_delta()
-            if result is not None:
-                return result
-        return self._pull_full()
+    def pull_notified_version(self, slug, key):
+        """Fetch exactly the version named by an authenticated WebSocket event."""
+        import version_store
+        from sync_coordinator import version_lock, file_signature, is_pending
+        filename = _key_to_filename(key)
+        if (not slug or os.path.basename(slug) != slug or slug in (".", "..")
+                or os.path.basename(filename) != filename):
+            return False, "Geçersiz sürüm yolu.", 0
+        auth = self.get_stored_auth_data() or {}
+        if auth.get("tenant_type") == "isolated" and slug not in (auth.get("allowed_institutions") or []):
+            return False, "Kurum bu hesaba ait değil.", 0
+        if version_store.is_tombstoned(slug, filename):
+            return True, "Sürüm silinmiş.", 0
+        target = os.path.join(version_store._versions_dir(slug), filename)
+        with version_lock:
+            expected = file_signature(target)
+            try:
+                with open(target, encoding="utf-8") as f:
+                    if is_pending(json.load(f)):
+                        return True, "Yerel kayıt gönderiliyor.", 0
+            except (OSError, ValueError):
+                pass
+        response = self._request_with_retry("GET", f"{self.base_url}/api/sync/{slug}/{key}", timeout=15)
+        if response is None or response.status_code != 200:
+            return False, "Sürüm indirilemedi.", 0
+        try:
+            data = response.json()
+        except Exception:
+            return False, "Sürüm okunamadı.", 0
+        changed = isinstance(data, dict) and self._write_if_different(target, data, expected)
+        if changed:
+            version_store.invalidate_version_summary(slug, filename)
+            version_store.invalidate_cross_busy_cache(slug)
+            self.sync_generation += 1
+        return True, "Sürüm güncel.", int(changed)
 
     def _pull_index(self):
-        """Hash-based incremental sync. Returns None if the server has no index."""
-        resp = self._request_with_retry(
-            "GET", f"{self.base_url}/api/sync/index", timeout=30
-        )
+        """Download changed versions concurrently; unchanged polls only stat files."""
+        import version_store
+        from sync_coordinator import version_lock, file_signature, is_pending
+        from concurrent.futures import ThreadPoolExecutor
+        base_dir = version_store._ensure_base()
+        # Capture BEFORE the request. A save/ack during the request invalidates
+        # its response even if the pending marker has already been cleared.
+        signatures = {}
+        for slug in os.listdir(base_dir):
+            directory = os.path.join(base_dir, slug, "versions")
+            if os.path.isdir(directory):
+                for filename in os.listdir(directory):
+                    if filename.endswith(".roz"):
+                        path = os.path.join(directory, filename)
+                        signatures[path] = file_signature(path)
+        resp = self._request_with_retry("GET", f"{self.base_url}/api/sync/index", timeout=15)
         if resp is None:
             return False, "Sunucuya ulaşılamadı.", 0
         if resp.status_code == 404:
             self._supports_index = False
-            return None  # older server — fall through to the next strategy
+            return None
         if resp.status_code != 200:
             return False, f"Buluttan veri çekilemedi (HTTP {resp.status_code})", 0
-
         try:
             payload = resp.json()
-        except Exception as exc:
-            return False, f"Sunucu yanıtı okunamadı ({exc})", 0
+        except Exception:
+            return False, "Sunucu yanıtı okunamadı.", 0
         if not isinstance(payload, dict):
-            return True, "Bulutta kayıtlı kurum bulunamadı.", 0
-
+            return False, "Geçersiz senkronizasyon indeksi.", 0
         self._supports_index = True
-
-        import version_store
-
-        base_dir = version_store._ensure_base()
+        auth = self.get_stored_auth_data() or {}
+        isolated = auth.get("tenant_type") == "isolated"
+        allowed = set(auth.get("allowed_institutions") or [])
         changed = 0
-        cloud_slugs = set(payload.keys())
-
-        # Institutions the server no longer has.
-        try:
-            for item in os.listdir(base_dir):
-                path = os.path.join(base_dir, item)
-                if (os.path.isdir(path) and item not in cloud_slugs
-                        and item not in ("backups", "temp", "cache")):
-                    shutil.rmtree(path, ignore_errors=True)
+        # Absence only deletes an institution previously seen on this server.
+        # A new local institution may still be waiting for its first upload.
+        cloud_slugs = set(payload)
+        for removed in self._known_cloud_slugs - cloud_slugs:
+            directory = os.path.join(base_dir, removed)
+            with version_lock:
+                pending = False
+                for path in signatures:
+                    if os.path.dirname(os.path.dirname(path)) == directory:
+                        try:
+                            with open(path, encoding="utf-8") as f:
+                                pending |= is_pending(json.load(f))
+                        except (OSError, ValueError):
+                            pass
+                if not pending and os.path.isdir(directory):
+                    shutil.rmtree(directory)
+                    version_store._invalidate_meta_cache(removed)
+                    version_store.invalidate_version_summary(removed)
                     changed += 1
-        except Exception as exc:
-            print(f"[APIClient] cleanup notice: {exc}")
-
-        auth_data = self.get_stored_auth_data() or {}
-        tenant_type = auth_data.get("tenant_type", "internal")
-        allowed_slugs = set(auth_data.get("allowed_institutions", []))
-
+        self._known_cloud_slugs.update(cloud_slugs)
+        downloads = []
         for slug, obj in payload.items():
-            if not isinstance(obj, dict):
-                continue
-            if slug.startswith("_system_") or slug.startswith("_auth_"):
-                continue
-            if tenant_type == "isolated" and slug not in allowed_slugs:
-                # Isolated external customer account: DO NOT pull internal group institutions
+            if (not isinstance(obj, dict) or slug.startswith(("_system_", "_auth_"))
+                    or (isolated and slug not in allowed)):
                 continue
             inst_dir = os.path.join(base_dir, slug)
             ver_dir = os.path.join(inst_dir, "versions")
             os.makedirs(ver_dir, exist_ok=True)
-
-            self._merge_meta(inst_dir, _strip_versions(obj.get("meta") or {}))
-
-            # The server records a tombstone under the URL-escaped version KEY
-            # ("v002_x_manual_roz"), while everything local is keyed by FILENAME
-            # ("v002_x_manual.roz"). Merging the raw keys stored entries that matched
-            # no file, so enforce_tombstones found nothing to delete and a version
-            # removed on one device never disappeared on the others.
-            # _key_to_filename is idempotent, so already-correct names pass through.
-            server_tombstones = [
-                _key_to_filename(t) for t in (obj.get("tombstones", []) or []) if t
-            ]
-            if server_tombstones:
-                version_store.merge_tombstones(slug, server_tombstones)
+            changed += bool(self._merge_meta(inst_dir, _strip_versions(obj.get("meta") or {})))
+            tombstones = [_key_to_filename(t) for t in (obj.get("tombstones") or []) if t]
+            if tombstones:
+                version_store.merge_tombstones(slug, tombstones)
             changed += version_store.enforce_tombstones(slug)
-
             local_tombstones = version_store.list_tombstones(slug)
-
             for entry in obj.get("index", []) or []:
-                filename = entry.get("filename")
-                key = entry.get("key")
-                if not (filename and key):
+                filename, key = entry.get("filename"), entry.get("key")
+                if not filename or not key or filename in local_tombstones:
                     continue
-                if filename in local_tombstones:
-                    # Deleted here. Re-assert it rather than downloading it back.
-                    version_store.queue_cloud_delete(slug, filename)
-                    continue
-
                 target = os.path.join(ver_dir, filename)
-                remote_hash = entry.get("hash") or ""
-
-                if os.path.exists(target) and remote_hash:
+                expected = signatures.get(target)
+                with version_lock:
+                    if file_signature(target) != expected:
+                        continue
+                    stamp = (expected, entry.get("hash"), entry.get("folder_id"),
+                             entry.get("sync_revision"), entry.get("last_modified"), entry.get("note"))
+                    if expected and self._index_cache.get(target) == stamp:
+                        continue
                     try:
-                        with open(target, "r", encoding="utf-8") as f:
+                        with open(target, encoding="utf-8") as f:
                             local = json.load(f)
-                        if version_store.compute_data_hash(local) == remote_hash:
-                            # Content equality does not mean metadata equality. A
-                            # folder move or a server revision must still land locally;
-                            # the old early continue is why a correct version appeared
-                            # in the wrong week or stayed absent from a folder.
-                            local_vm = local.setdefault("_version_meta", {})
-                            changed_meta = False
-                            if local_vm.get("filename") != filename:
-                                local_vm["filename"] = filename
-                                changed_meta = True
-                            # KLASÖR TAŞIMA İKİ YÖNLÜ.
-                            #
-                            # Burada yalnızca sunucudan gelen klasör yerele
-                            # yazılıyordu. Ters yön yoktu: kullanıcı bir sürümü
-                            # başka klasöre taşıdığında içerik hash'i DEĞİŞMEDİĞİ
-                            # için (folder_id, hash'in dışladığı _version_meta
-                            # içinde durur) istemci "değişiklik yok" deyip taşımayı
-                            # hiç yüklemiyordu — üstelik bir sonraki senkronda
-                            # sunucudaki eski klasörü yerele geri yazıp kullanıcının
-                            # taşımasını siliyordu. Taşıma yapıldığı makinede kalıyordu.
-                            #
-                            # Artık ayrışma varsa YEREL kazanır ve sunucuya gönderilir:
-                            # taşımayı yapan kullanıcıdır, sunucunun elindeki değer
-                            # yalnızca daha önce yüklenmiş olandır.
-                            remote_fid = entry.get("folder_id")
-                            local_fid = local_vm.get("folder_id")
-                            if remote_fid is not None and local_fid != remote_fid:
-                                if local_fid:
-                                    version_store.queue_cloud_push(slug, filename, local)
-                                else:
-                                    local_vm["folder_id"] = remote_fid
-                                    changed_meta = True
-                            remote_revision = entry.get("sync_revision")
-                            if remote_revision and (local.get("_sync_meta") or {}).get("revision") != remote_revision:
-                                local["_sync_meta"] = {
-                                    "revision": remote_revision,
-                                    "slug": slug,
-                                    "key": key,
-                                    "server_modified": entry.get("last_modified"),
-                                }
-                                changed_meta = True
-                            if changed_meta:
-                                version_store._atomic_write_json(target, local)
-                                version_store.invalidate_version_summary(slug, filename)
-                                changed += 1
-                            continue
-                    except Exception:
-                        pass
+                    except (OSError, ValueError):
+                        local = None
+                    if local and is_pending(local):
+                        continue
+                    if local and entry.get("hash") == version_store.compute_data_hash(local):
+                        before = json.dumps(local.get("_version_meta", {}), sort_keys=True)
+                        vm = local.setdefault("_version_meta", {})
+                        vm["filename"] = filename
+                        # Folder changes flow from the server once local uploads
+                        # are acknowledged. Never push an old folder back on a poll.
+                        if "note" in entry:
+                            vm["note"] = entry["note"]
+                        if "folder_id" in entry:
+                            vm["folder_id"] = entry["folder_id"]
+                        if entry.get("last_modified"):
+                            vm["last_modified"] = entry["last_modified"]
+                        sync_meta = local.get("_sync_meta") or {}
+                        revision = entry.get("sync_revision")
+                        meta_changed = before != json.dumps(vm, sort_keys=True)
+                        if revision and revision != sync_meta.get("revision"):
+                            local["_sync_meta"] = dict(sync_meta, revision=revision, slug=slug, key=key)
+                            meta_changed = True
+                        if meta_changed:
+                            version_store._atomic_write_json(target, local)
+                            version_store.invalidate_version_summary(slug, filename)
+                            changed += 1
+                        self._index_cache[target] = (file_signature(target), *stamp[1:])
+                        continue
+                downloads.append((slug, filename, key, target, expected))
 
-                body = self._request_with_retry(
-                    "GET", f"{self.base_url}/api/sync/{slug}/{key}", timeout=40
-                )
-                if body is None or body.status_code != 200:
-                    continue
-                try:
-                    roz = body.json()
-                except Exception:
-                    continue
-                if isinstance(roz, dict) and self._write_if_different(target, roz):
-                    version_store.invalidate_version_summary(slug, filename)
-                    changed += 1
+        def fetch(job):
+            slug, filename, key, target, expected = job
+            body = self._request_with_retry("GET", f"{self.base_url}/api/sync/{slug}/{key}", timeout=20)
+            if body is None or body.status_code != 200:
+                return 0
+            try:
+                data = body.json()
+            except Exception:
+                return 0
+            if isinstance(data, dict) and self._write_if_different(target, data, expected_signature=expected):
+                version_store.invalidate_version_summary(slug, filename)
+                return 1
+            return 0
 
-        version_store.invalidate_cross_busy_cache()
+        if downloads:
+            if not hasattr(self, "_download_pool"):
+                self._download_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="version-download")
+            changed += sum(self._download_pool.map(fetch, downloads))
         if changed:
-            return True, f"Senkronizasyon tamamlandı ({changed} değişiklik).", changed
-        return True, "Her şey güncel.", 0
+            version_store.invalidate_cross_busy_cache()
+        return True, (f"Senkronizasyon tamamlandı ({changed} değişiklik)." if changed else "Her şey güncel."), changed
 
     def _pull_delta(self):
         """Incremental sync. Returns None if the server has no delta endpoint."""
@@ -1211,38 +1236,28 @@ class APIClient:
         return synced
 
     @staticmethod
-    def _write_if_different(path: str, payload: dict) -> bool:
-        """Writes only when remote content is actually newer or different, never reverts newer local changes."""
+    def _write_if_different(path: str, payload: dict, expected_signature=... ) -> bool:
         import version_store
-
-        try:
-            if os.path.exists(path):
-                with open(path, "r", encoding="utf-8") as f:
+        from sync_coordinator import version_lock, file_signature, is_pending
+        with version_lock:
+            if expected_signature is not ... and file_signature(path) != expected_signature:
+                return False
+            try:
+                with open(path, encoding="utf-8") as f:
                     existing = json.load(f)
-
-                local_meta = existing.get("_version_meta", {}) if isinstance(existing, dict) else {}
-                remote_meta = payload.get("_version_meta", {}) if isinstance(payload, dict) else {}
-
-                # Only a real last_modified on BOTH sides can decide this. The old code
-                # fell back to "timestamp", which is the version's CREATION time and
-                # never changes — so a local file that had merely been opened could
-                # out-rank a genuinely newer edit from another computer and block it
-                # forever. Mixing the two fields compared a modification time against
-                # a creation time, which is not a comparison at all.
-                # If content hash and folder_id are identical, nothing to rewrite
-                if (version_store.compute_data_hash(existing) == version_store.compute_data_hash(payload)
-                        and local_meta.get("folder_id") == remote_meta.get("folder_id")):
-                    return False
-                # Wall-clock timestamps are not a conflict protocol. Preserve an
-                # unsent local edit before the server snapshot replaces it.
-                conflict = f"{path}.conflict-{int(__import__('time').time() * 1000)}"
-                try:
-                    version_store._atomic_write_json(conflict, existing)
-                except Exception:
-                    pass
-        except Exception:
-            pass
-        return version_store._atomic_write_json(path, payload)
+            except (OSError, ValueError):
+                existing = {}
+            if is_pending(existing):
+                return False
+            local_rev = (existing.get("_sync_meta") or {}).get("revision")
+            remote_rev = (payload.get("_sync_meta") or {}).get("revision")
+            if local_rev and remote_rev and int(remote_rev) < int(local_rev):
+                return False
+            if existing == payload:
+                return False
+            # Only unsent local edits need conflict copies; those are guarded
+            # above. Ordinary remote updates must not duplicate the whole file.
+            return version_store._atomic_write_json(path, payload)
 
     @staticmethod
     def _merge_meta(inst_dir: str, remote_meta: dict, name: str = None):
@@ -1318,8 +1333,12 @@ class APIClient:
             if str(local_block.get("updated") or "") > str(remote_block.get("updated") or ""):
                 merged[block_key] = local_block
 
-        version_store._atomic_write_json(meta_path, merged)
-        version_store._invalidate_meta_cache(os.path.basename(inst_dir.rstrip(os.sep)))
+        if merged == local_meta:
+            return False
+        written = version_store._atomic_write_json(meta_path, merged)
+        if written:
+            version_store._invalidate_meta_cache(os.path.basename(inst_dir.rstrip(os.sep)))
+        return written
 
     # ── Push ──────────────────────────────────────────────────────────────
 
@@ -1367,24 +1386,31 @@ class APIClient:
         except Exception:
             return True
 
+        if info.get("stored") is False and not info.get("deleted") and not info.get("deduplicated"):
+            self.last_error = info.get("refused") or "refused"
+            return False
+
         if info.get("deleted"):
             self._drop_local_version(slug, filename)
         elif info.get("deduplicated") and info.get("filename") and info["filename"] != filename:
             self._drop_local_version(slug, filename)
         elif isinstance(info.get("sync_meta"), dict):
-            # Bind the new server revision to the same content that was submitted.
-            # Do this only when the disk hash still matches; a newer local save may
-            # already have followed on another worker.
-            try:
-                import version_store
-                path = os.path.join(version_store._versions_dir(slug), filename)
-                with open(path, "r", encoding="utf-8") as f:
-                    current = json.load(f)
-                if version_store.compute_data_hash(current) == version_store.compute_data_hash(roz_data):
-                    current["_sync_meta"] = info["sync_meta"]
-                    version_store._atomic_write_json(path, current)
-            except Exception:
-                pass
+            from sync_coordinator import version_lock
+            with version_lock:
+                try:
+                    path = os.path.join(version_store._versions_dir(slug), filename)
+                    with open(path, encoding="utf-8") as f:
+                        current = json.load(f)
+                    # Carry the acknowledgement forward without replacing newer
+                    # local content or clearing its durable pending generation.
+                    sync_meta = dict(current.get("_sync_meta") or {})
+                    if int(info["sync_meta"].get("revision") or 0) >= int(sync_meta.get("revision") or 0):
+                        sync_meta.update(info["sync_meta"])
+                        current["_sync_meta"] = sync_meta
+                        version_store._atomic_write_json(path, current)
+                        version_store.invalidate_version_summary(slug, filename)
+                except (OSError, ValueError):
+                    pass
         return True
 
     @staticmethod

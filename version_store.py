@@ -27,7 +27,8 @@ def _atomic_write_json(path: str, payload) -> bool:
     directory = os.path.dirname(os.path.abspath(path))
     os.makedirs(directory, exist_ok=True)
     import time
-    tmp_path = f"{path}.{os.getpid()}_{int(time.time()*1000)}.tmp"
+    import uuid
+    tmp_path = f"{path}.{uuid.uuid4().hex}.tmp"
     try:
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
@@ -264,9 +265,14 @@ def sanitize_atamalar(atamalar: list) -> list:
 _cross_busy_cache = {}  # exclude_slug -> (monotonic_timestamp, result_dict)
 _CROSS_BUSY_CACHE_TTL = 4.0  # seconds
 
-def invalidate_cross_busy_cache():
-    """Drops the cross-institution conflict map. Called whenever a schedule is saved."""
-    _cross_busy_cache.clear()
+def invalidate_cross_busy_cache(changed_slug=None):
+    """An edit here does not invalidate the cached schedules of OTHER schools."""
+    if changed_slug is None:
+        _cross_busy_cache.clear()
+    else:
+        for excluded in list(_cross_busy_cache):
+            if excluded != changed_slug:
+                _cross_busy_cache.pop(excluded, None)
 
 def get_cross_institution_teacher_busy_slots(exclude_slug: str = None) -> dict:
     """Busy slots for every teacher across all OTHER institutions.
@@ -1389,7 +1395,8 @@ def save_version(slug: str, data_store: dict, source: str = "manual", note: str 
     if data_pool_name is None and orig_meta.get("data_pool_name"):
         data_pool_name = orig_meta.get("data_pool_name")
 
-    save_data = dict(data_store)
+    save_data = copy.deepcopy(data_store)
+    save_data.pop("_sync_meta", None)
     if "atamalar" in save_data:
         save_data["atamalar"] = sanitize_atamalar(save_data["atamalar"])
     save_data.pop("_version_meta", None)
@@ -1415,6 +1422,7 @@ def save_version(slug: str, data_store: dict, source: str = "manual", note: str 
                     with open(twin_path, "w", encoding="utf-8") as f:
                         json.dump(existing, f, ensure_ascii=False, indent=2)
                     invalidate_version_summary(slug, twin)
+                    queue_cloud_push(slug, twin, existing)
                 except Exception:
                     pass
             set_active_version(slug, twin)
@@ -1442,23 +1450,18 @@ def save_version(slug: str, data_store: dict, source: str = "manual", note: str 
         "data_hash": compute_data_hash(save_data),
     }
 
-    _atomic_write_json(filepath, save_data)
+    from sync_coordinator import version_lock, mark_pending, enqueue
+    with version_lock:
+        mark_pending(save_data)
+        if not _atomic_write_json(filepath, save_data):
+            raise OSError("Çizelge dosyası yazılamadı")
+        enqueue(slug, filename)
     invalidate_version_summary(slug, filename)
     _last_written_hash[(slug, filename)] = save_data["_version_meta"]["data_hash"]
-    invalidate_cross_busy_cache()
+    invalidate_cross_busy_cache(slug)
 
     set_active_version(slug, filename)
     touch_institution_timestamp(slug)
-
-    try:
-        import threading
-        from cloud_sync import push_version_to_rtdb
-        import database
-        threading.Thread(target=push_version_to_rtdb, args=(slug, filename, save_data), daemon=True).start()
-        threading.Thread(target=database.create_database_backup, args=(slug, "auto_save"), daemon=True).start()
-        threading.Thread(target=propagate_primary_timeoff_to_secondary, args=(slug, save_data), daemon=True).start()
-    except Exception:
-        pass
 
     return filename
 
@@ -1491,72 +1494,41 @@ def propagate_primary_timeoff_to_secondary(primary_slug: str, primary_data: dict
 
 
 def update_version_in_place(slug: str, filename: str, data_store: dict) -> bool:
-    """Overwrites an existing version file with updated data and pushes to cloud with conflict backup.
-    Uses hash-based change detection to avoid unnecessary writes and pushes."""
+    """Commit locally, then let the shared durable outbox upload the latest edit."""
     if not slug or not filename or not data_store:
         return False
-    ver_dir = _versions_dir(slug)
-    filepath = os.path.join(ver_dir, filename)
-    os.makedirs(ver_dir, exist_ok=True)
-            
-    save_data = dict(data_store)
-    if "atamalar" in save_data:
-        save_data["atamalar"] = sanitize_atamalar(save_data["atamalar"])
-
-    new_hash = compute_data_hash(save_data)
-
-    cache_key = (slug, filename)
-    if new_hash:
-        remembered = _last_written_hash.get(cache_key)
-        if remembered is not None:
-            if remembered == new_hash:
-                return True
-        elif os.path.exists(filepath):
-            try:
-                with open(filepath, "r", encoding="utf-8") as f:
-                    existing_data = json.load(f)
-                if compute_data_hash(existing_data) == new_hash:
-                    _last_written_hash[cache_key] = new_hash
-                    return True
-            except Exception:
-                pass
-
-    now = datetime.now()
-    meta = save_data.setdefault("_version_meta", {})
-    if os.path.exists(filepath):
+    import copy
+    from sync_coordinator import version_lock, mark_pending, enqueue
+    filepath = os.path.join(_versions_dir(slug), filename)
+    with version_lock:
+        save_data = copy.deepcopy(data_store)
+        if "atamalar" in save_data:
+            save_data["atamalar"] = sanitize_atamalar(save_data["atamalar"])
         try:
-            with open(filepath, "r", encoding="utf-8") as f:
-                disk_meta = json.load(f).get("_version_meta", {})
-            if disk_meta.get("folder_id") and not meta.get("folder_id"):
-                meta["folder_id"] = disk_meta["folder_id"]
-            if disk_meta.get("note") and not meta.get("note"):
-                meta["note"] = disk_meta["note"]
-            if disk_meta.get("version_number") and not meta.get("version_number"):
-                meta["version_number"] = disk_meta["version_number"]
-        except Exception:
-            pass
-    meta["last_modified"] = now.isoformat()
-    meta["data_hash"] = new_hash
-    meta.setdefault("filename", filename)
-
-    if not _atomic_write_json(filepath, save_data):
-        _last_written_hash.pop(cache_key, None)
-        return False
-
-    invalidate_version_summary(slug, filename)
-    _last_written_hash[cache_key] = new_hash
-    invalidate_cross_busy_cache()
+            with open(filepath, encoding="utf-8") as f:
+                existing = json.load(f)
+        except (OSError, ValueError):
+            existing = {}
+        new_hash = compute_data_hash(save_data)
+        if existing and compute_data_hash(existing) == new_hash:
+            return True
+        meta = save_data.setdefault("_version_meta", {})
+        disk_meta = existing.get("_version_meta", {})
+        for key in ("folder_id", "note", "version_number"):
+            if disk_meta.get(key) and not meta.get(key):
+                meta[key] = disk_meta[key]
+        meta.update(last_modified=datetime.now().isoformat(), data_hash=new_hash)
+        meta.setdefault("filename", filename)
+        # The open editor may still carry the revision from when it was opened.
+        # Chain every save to the newest acknowledged revision on disk.
+        save_data["_sync_meta"] = dict(existing.get("_sync_meta") or {})
+        mark_pending(save_data)
+        if not _atomic_write_json(filepath, save_data):
+            return False
+        invalidate_version_summary(slug, filename)
+        invalidate_cross_busy_cache(slug)
+        enqueue(slug, filename)
     touch_institution_timestamp(slug)
-
-    try:
-        import threading
-        from cloud_sync import push_version_to_rtdb
-        import database
-        threading.Thread(target=push_version_to_rtdb, args=(slug, filename, save_data), daemon=True).start()
-        threading.Thread(target=database.create_database_backup, args=(slug, "in_place_update"), daemon=True).start()
-        threading.Thread(target=propagate_primary_timeoff_to_secondary, args=(slug, save_data), daemon=True).start()
-    except Exception:
-        pass
     return True
 
 # filepath -> (mtime, size, parsed_summary_dict)
@@ -1628,6 +1600,45 @@ def _version_summary(filepath: str) -> dict:
 _last_written_hash = {}
 
 
+def _load_persistent_summary_cache(slug: str):
+    inst_dir = _institution_dir(slug)
+    cache_path = os.path.join(inst_dir, ".summary_cache.json")
+    if not os.path.exists(cache_path):
+        return
+    try:
+        with open(cache_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        ver_dir = os.path.join(inst_dir, "versions")
+        for fn, entry in data.items():
+            filepath = os.path.join(ver_dir, fn)
+            if filepath not in _version_summary_cache and isinstance(entry, (list, tuple)) and len(entry) >= 3:
+                sig = (entry[0], entry[1])
+                _version_summary_cache[filepath] = (sig, entry[2])
+    except Exception:
+        pass
+
+
+def _save_persistent_summary_cache(slug: str):
+    inst_dir = _institution_dir(slug)
+    cache_path = os.path.join(inst_dir, ".summary_cache.json")
+    ver_dir = os.path.join(inst_dir, "versions")
+    if not os.path.isdir(ver_dir):
+        return
+    try:
+        data = {}
+        for fn in os.listdir(ver_dir):
+            if fn.endswith(".roz"):
+                filepath = os.path.join(ver_dir, fn)
+                cached = _version_summary_cache.get(filepath)
+                if cached:
+                    sig, summary = cached
+                    data[fn] = [sig[0], sig[1], summary]
+        if data:
+            _atomic_write_json(cache_path, data)
+    except Exception:
+        pass
+
+
 def invalidate_version_summary(slug: str = None, filename: str = None):
     """Forgets cached data for a version file. Call after ANY write to it.
 
@@ -1639,12 +1650,14 @@ def invalidate_version_summary(slug: str = None, filename: str = None):
     if slug and filename:
         _version_summary_cache.pop(os.path.join(_versions_dir(slug), filename), None)
         _last_written_hash.pop((slug, filename), None)
+        _save_persistent_summary_cache(slug)
     elif slug:
         prefix = _versions_dir(slug)
         for key in [k for k in _version_summary_cache if k.startswith(prefix)]:
             _version_summary_cache.pop(key, None)
         for key in [k for k in _last_written_hash if k[0] == slug]:
             _last_written_hash.pop(key, None)
+        _save_persistent_summary_cache(slug)
     else:
         _version_summary_cache.clear()
         _last_written_hash.clear()
@@ -1661,6 +1674,7 @@ def list_versions(slug: str, source_filter: str = "all") -> list:
     if not os.path.exists(ver_dir):
         return []
 
+    _load_persistent_summary_cache(slug)
     folders_by_id = {f.get("id"): f.get("name", "") for f in list_folders(slug)}
     # Last line of defence: a deleted version is never listed, even if some sync
     # path managed to put the file back on disk. Whatever else goes wrong, the user
@@ -1738,6 +1752,7 @@ def list_versions(slug: str, source_filter: str = "all") -> list:
         })
 
     _assign_display_labels(versions)
+    _save_persistent_summary_cache(slug)
     return versions
 
 
@@ -1979,24 +1994,19 @@ def _save_pending_deletes(items: list):
 
 
 def queue_cloud_push(slug: str, filename: str, data: dict):
-    """Bir sürümü buluta gönderir — içerik aynı olsa bile.
-
-    Klasör taşıma gibi değişiklikler yalnızca _version_meta'yı değiştirir ve
-    içerik hash'ine girmez; bu yüzden normal senkron yolu onları "değişmemiş"
-    sayıp hiç yüklemiyordu. Kullanıcının taşıması yaptığı makinede kalıyordu.
-    Burası o değişikliği açıkça yukarı iter.
-
-    Ağ yoksa sessizce geçilir: bir sonraki senkronda ayrışma yine görülür ve
-    yeniden denenir, yani kaybolmaz.
-    """
+    """Journal explicit metadata changes and coalesce their upload as well."""
     if not slug or not filename or not isinstance(data, dict):
         return False
-    try:
-        import cloud_sync
-        return bool(cloud_sync.push_version_to_rtdb(slug, filename, data))
-    except Exception as exc:
-        print(f"[queue_cloud_push] {filename}: {exc}")
-        return False
+    from sync_coordinator import version_lock, mark_pending, enqueue
+    with version_lock:
+        payload = copy.deepcopy(data)
+        mark_pending(payload)
+        path = os.path.join(_versions_dir(slug), filename)
+        if not _atomic_write_json(path, payload):
+            return False
+        invalidate_version_summary(slug, filename)
+        enqueue(slug, filename)
+    return True
 
 
 def queue_cloud_delete(slug: str, filename: str):

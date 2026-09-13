@@ -89,7 +89,23 @@ def solve_cpsat(world, rule_list, seconds=60.0, seed=0, workers=8,
     # saniyede 280 yerine 230 çıkıyor.
     #
     # Bu yüzden bölme, çağıran açıkça istediğinde devreye girer.
-    split_pen = 40          # bir bölmenin bedeli (saat kazancından küçük)
+    # Bölmenin bedeli SAAT KAZANCINDAN KÜÇÜK olmak zorunda: amaç "mümkünse
+    # bütün bırak, ama bir saat daha yerleşecekse böl".
+    #
+    # Eskiden ceza 40, bir sınıf-saatinin değeri ise 2 idi (süre × sınıf
+    # sayısı). Yani bölmek her zaman zararlı görünüyor ve motor kartı
+    # bölmektense HİÇ YERLEŞTİRMEMEYİ seçiyordu — bölme açıkken bile sonuç
+    # değişmiyordu. Boğaziçi v200'de ölçülen fark buydu: bu modelle 281,
+    # bölmeyi gerçekten kullanan modelle 285.
+    #
+    # Saatler büyük bir katsayıyla ağırlıklandırılır, bölme cezası küçük
+    # kalır: tek bir sınıf-saati bile bütün bölmelerden ağır basar.
+    SAAT = 1000
+    # Bir kesimin bedeli bir saatin binde biri. Ceza yükseltmek denendi ve
+    # ölçüm kötüleşti: v207'de 1 ile 60 saniyede 4 bölmeyle 285/285 çıkarken,
+    # 100 ile 210 saniye ve 12 bölme. Amaç fonksiyonundaki aralık büyüdükçe
+    # çözücünün dal budaması zorlaşıyor.
+    split_pen = 1
     splits = []             # (kart, u1_vars, u2_vars)
 
     xs = []                      # xs[i] = [(slot_idx, var), ...]
@@ -207,11 +223,11 @@ def solve_cpsat(world, rule_list, seconds=60.0, seed=0, workers=8,
     # denen şey budur ve kanıtlanabilir bir optimumu vardır.
     saat_terms = []
     for i, c in enumerate(w.cards):
-        agirlik = c.duration * len(c.classes)
+        agirlik = SAAT * c.duration * len(c.classes)
         for _, v in xs[i]:
             saat_terms.append(agirlik * v)
     for i, us_list in su_kayit.items():
-        agirlik = len(w.cards[i].classes)
+        agirlik = SAAT * len(w.cards[i].classes)
         for us in us_list:
             for _, v in us:
                 saat_terms.append(agirlik * v)
@@ -225,10 +241,18 @@ def solve_cpsat(world, rule_list, seconds=60.0, seed=0, workers=8,
             terms.append(-split_pen * kesim * bol)
         model.Maximize(sum(terms))
     else:
-        model.Add(yerlesen == int(hedef_saat))
+        model.Add(yerlesen == int(hedef_saat) * SAAT)
+        # Saat sayısı kilitlendi; artık aynı sonucu veren çözümler arasından
+        # EN AZ BÖLÜNMÜŞ olanı seçilir, eşitlikte de referans çizelgeden en az
+        # sapan. Bölme birinci sırada: bir saat daha yerleştirmek uğruna blok
+        # bölmek doğru, ama saat kazancı yokken bölmek sadece zarar.
+        #
+        # Birinci aşamada bölme cezası tek başına yetmiyor: ceza küçükken motor
+        # gereksiz yere bölüyor (v207'de 52 blok), büyükken çözücü yavaşlıyor
+        # (210 saniye). Ayrı aşama ikisini de çözer.
         sapma = []
         for i, bol, kesim in splits:
-            sapma.append(kesim * bol)          # bölme hâlâ istenmeyen
+            sapma.append(1000 * kesim * bol)
         ref = referans or {}
         for i, row in enumerate(xs):
             eski_idx = ref.get(i)
@@ -358,6 +382,16 @@ def solve_optimal(world, rule_list, referans=None, allow_split=True,
             progress(dict(asama=1, tur=tur, saat=en_iyi_saat,
                           toplam=w.total_hours(), durum=st,
                           gecen=_t.monotonic() - baslangic))
+        # TAM ÇİZELGE = OPTİMUM. Kanıt beklemeye gerek yok: bütün saatler
+        # yerleştiyse daha iyisi tanım gereği yok.
+        #
+        # Eskiden burada yalnızca CP-SAT'in OPTIMAL damgası aranıyordu.
+        # Çözücü 285/285'i FEASIBLE olarak döndürdüğünde döngü kırılmıyor,
+        # ilerleme çubuğu 285/285 gösterirken motor bir saat boyunca kanıt
+        # aramaya devam ediyor ve çizelge ekrana hiç düşmüyordu.
+        if en_iyi_saat >= w.total_hours():
+            durum = "OPTIMAL"
+            break
         if st == "OPTIMAL" or st in ("INFEASIBLE", "MODEL_INVALID"):
             break
         # Tur süresi katlanarak büyür: kolay örnek erken biter, zor örnekte
@@ -370,20 +404,25 @@ def solve_optimal(world, rule_list, referans=None, allow_split=True,
     # ── 2. AŞAMA: saati kilitle, takası en küçükle ──
     ref = {i: idx for i, idx in enumerate(referans or []) if idx is not None and idx >= 0} \
         if isinstance(referans, (list, tuple)) else dict(referans or {})
-    if not ref:
-        return en_iyi_pos, en_iyi_parca, en_iyi_saat, "OPTIMAL", tur
-
+    # Referans olmasa bile bu aşama çalışır: gereksiz bölmeleri temizler.
     kalan = azami_saniye - (_t.monotonic() - baslangic)
     if kalan <= 1:
         return en_iyi_pos, en_iyi_parca, en_iyi_saat, "OPTIMAL", tur
 
+    # Takas aşaması çizelgeyi İYİLEŞTİRİR, bulmaz: saat sayısı zaten
+    # kesinleşmiştir, burada yalnızca kullanıcının tablosuna daha yakın bir
+    # düzen aranır. Bu yüzden kalan bütçenin tamamını yemesine izin verilmez —
+    # aksi hâlde sonuç hazırken uygulama dakikalarca bekliyor gibi görünür.
+    takas_butcesi = min(kalan * 0.25, 90.0)
+    takas_bitis = _t.monotonic() + takas_butcesi
     tur2 = 0
-    takas_sure = max(30.0, tur_saniye)
+    takas_sure = max(15.0, min(30.0, takas_butcesi))
     while True:
         tur2 += 1
         if callable(cancelled) and cancelled():
             break
-        kalan = azami_saniye - (_t.monotonic() - baslangic)
+        kalan = min(azami_saniye - (_t.monotonic() - baslangic),
+                    takas_bitis - _t.monotonic())
         if kalan <= 1:
             break
         pieces = []
@@ -392,7 +431,8 @@ def solve_optimal(world, rule_list, referans=None, allow_split=True,
             w, rule_list, seconds=min(takas_sure, kalan), workers=workers,
             warm_start=en_iyi_pos, allow_split=allow_split, pieces_out=pieces,
             hedef_saat=en_iyi_saat, referans=ref, takas_out=takas, log=log)
-        if placed2 == en_iyi_saat and st2 in ("OPTIMAL", "FEASIBLE"):
+        if placed2 == en_iyi_saat and st2 in ("OPTIMAL", "FEASIBLE") \
+                and len(pieces) <= len(en_iyi_parca):
             en_iyi_pos = pos2
             en_iyi_parca = dict(pieces)
         if callable(progress):
@@ -402,6 +442,6 @@ def solve_optimal(world, rule_list, referans=None, allow_split=True,
                           gecen=_t.monotonic() - baslangic))
         if st2 in ("OPTIMAL", "INFEASIBLE", "MODEL_INVALID"):
             break
-        takas_sure = min(takas_sure * 2, max(60.0, azami_saniye / 4))
+        takas_sure = min(takas_sure * 2, takas_butcesi)
 
     return en_iyi_pos, en_iyi_parca, en_iyi_saat, "OPTIMAL", tur + tur2

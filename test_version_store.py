@@ -187,6 +187,9 @@ def run():
     check("the edit is on disk", len(reread.get("grid_placements", [])) == 2,
           str(len(reread.get("grid_placements", []))))
 
+    from sync_coordinator import wait_for_pending
+    wait_for_pending()
+
     # Unchanged data must skip the write, which is what stops every idle save from
     # rewriting (and re-uploading) the whole schedule.
     stat_before = os.stat(os.path.join(version_store._versions_dir(slug), target)).st_mtime_ns

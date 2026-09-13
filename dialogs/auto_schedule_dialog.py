@@ -196,9 +196,7 @@ class AppleSwitch(QWidget):
         track_path = QPainterPath()
         track_path.addRoundedRect(track_rect, h / 2, h / 2)
         
-        if not self.isEnabled():
-            bg_color = QColor("#E5E5EA")
-        elif self._checked:
+        if self._checked:
             bg_color = QColor("#34C759")  # Apple Green
         else:
             bg_color = QColor("#E5E5EA")  # Apple Light Grey
@@ -824,7 +822,7 @@ class AutoScheduleDialog(QDialog):
         row_ignore, self.sw_ignore_cross = make_switch_row(
             "Diğer Kurumları Yoksay",
             "Aynı öğretmen başka kurumda derste olsa bile bu kuruma yerleştir",
-            True
+            True, is_disabled=True
         )
 
         # Off by default, and deliberately worded so the cost is visible before it is
@@ -846,7 +844,7 @@ class AutoScheduleDialog(QDialog):
         row_optimal, self.sw_optimal = make_switch_row(
             "Optimale Kadar Çalış",
             "Kanıt gelene kadar durmaz, takas yapa yapa ilerler — uzun sürebilir",
-            False
+            True, is_disabled=True
         )
         # 2 saatlik ders 1+1, 2+2+1 ise 1+1+1+1+1 olabilir. Sınıfın gününde
         # tek saatlik bir açıklık kaldığında bütün blok oraya sığmaz ve o saat
@@ -855,7 +853,7 @@ class AutoScheduleDialog(QDialog):
         row_split, self.sw_split = make_switch_row(
             "Blokları Bölebilsin",
             "2 saatlik dersi 1+1, 2+2+1'i 1+1+1+1+1 yapabilir — yalnızca gerekirse",
-            True
+            True, is_disabled=True
         )
 
         p_lay.addLayout(row_vds)
@@ -1016,10 +1014,10 @@ class AutoScheduleDialog(QDialog):
             self.data_store, target_class=chosen_target, parent=self,
             fill_empty=fill_empty, institution_slug=inst_slug, use_vds=use_vds,
             infinite_mode=True,
-            ignore_other_institutions=self.sw_ignore_cross.isChecked(),
+            ignore_other_institutions=True,
             independent_classes=False,
-            optimal_mode=self.sw_optimal.isChecked(),
-            allow_split=self.sw_split.isChecked(),
+            optimal_mode=True,
+            allow_split=True,
         )
         self.worker.progress_updated.connect(self._on_progress)
         self.worker.iteration_updated.connect(self._on_iteration)
