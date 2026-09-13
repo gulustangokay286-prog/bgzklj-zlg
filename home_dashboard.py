@@ -3396,22 +3396,24 @@ class HomeDashboard(QWidget):
     def _on_sync_progress(self, current, total, detail):
         if hasattr(self, "sync_pill"):
             self.sync_pill.set_syncing(f"İndiriliyor ({current}/{total})")
-        if hasattr(self, "sync_overlay"):
+        if getattr(self, "_show_center_overlay_on_sync", False) or (hasattr(self, "sync_overlay") and self.sync_overlay.isVisible()):
             self.sync_overlay.show_progress(current, total, detail)
 
     def _on_sync_completed(self, changed_count, msg):
         self._initial_sync_pending = False
+        was_overlay_active = getattr(self, "_show_center_overlay_on_sync", False) or (hasattr(self, "sync_overlay") and self.sync_overlay.isVisible())
         self._show_center_overlay_on_sync = False
         if hasattr(self, "sync_pill"):
             self.sync_pill.set_synced("Senkronize")
-        if hasattr(self, "sync_overlay"):
+        if was_overlay_active and hasattr(self, "sync_overlay"):
             self.sync_overlay.show_completed(changed_count, msg or "Kurumlar birbirine senkronizedir")
 
     def _on_sync_failed(self, error_msg):
+        was_overlay_active = getattr(self, "_show_center_overlay_on_sync", False) or (hasattr(self, "sync_overlay") and self.sync_overlay.isVisible())
         self._show_center_overlay_on_sync = False
         if hasattr(self, "sync_pill"):
             self.sync_pill.set_offline("Çevrimdışı")
-        if hasattr(self, "sync_overlay"):
+        if was_overlay_active and hasattr(self, "sync_overlay"):
             self.sync_overlay.show_failed(error_msg)
 
     def _on_manual_sync_progress_gui(self, pct: int, detail: str):
@@ -3472,7 +3474,7 @@ class HomeDashboard(QWidget):
             finally:
                 self.manual_sync_done.emit(ok, msg, changed)
 
-        if self.auth_data and not self.auth_data.get("is_offline"):
+        if not (self.auth_data or {}).get("is_offline", False):
             threading.Thread(target=_worker, daemon=True).start()
         else:
             self.manual_sync_done.emit(True, "", 0)

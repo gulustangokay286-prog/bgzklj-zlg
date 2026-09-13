@@ -1349,26 +1349,32 @@ class APIClient:
         if combined_tombstones:
             merged["tombstones"] = combined_tombstones[-2000:]
 
+        combined_del = list(local_meta.get("deleted_folders", []) or [])
+        for df in (remote_meta.get("deleted_folders", []) or []):
+            if df not in combined_del:
+                combined_del.append(df)
+        if combined_del:
+            merged["deleted_folders"] = combined_del
+        elif "deleted_folders" in merged:
+            merged.pop("deleted_folders", None)
+
+        deleted_folders_set = set(combined_del)
         local_folders = {f.get("id"): f for f in local_meta.get("folders", []) if isinstance(f, dict) and f.get("id")}
         remote_folders = {f.get("id"): f for f in remote_meta.get("folders", []) if isinstance(f, dict) and f.get("id")}
-        deleted_folders = set(local_meta.get("deleted_folders", []))
         
         combined = {}
         for fid, folder in remote_folders.items():
-            if fid not in deleted_folders:
+            if fid not in deleted_folders_set:
                 combined[fid] = folder
                 
         for fid, folder in local_folders.items():
-            if fid not in deleted_folders:
+            if fid not in deleted_folders_set:
                 combined.setdefault(fid, folder)
                 
         if combined:
             merged["folders"] = list(combined.values())
         else:
             merged["folders"] = []
-            
-        if deleted_folders:
-            merged["deleted_folders"] = list(deleted_folders)
 
         # Teacher hour reservations and published availability are stamped with the
         # time they were last edited. merged.update() above would hand the win to the
