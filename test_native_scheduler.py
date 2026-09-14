@@ -31,8 +31,15 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(data,before,'solver mutated input')
         self.assertTrue(r.valid)
         self.assertEqual(r.placed_hours+sum(c['hours'] for c in r.unplaced),r.total_hours)
-        self.assertEqual(validate(r.world,r.rules,r.positions)[0],[])
+        # Aritmetik taban dışında hiçbir sert kural esnemez.
+        bend=kw.get('completion_first',True)
+        self.assertEqual(validate(r.world,r.rules,r.positions,bend_rules=bend,
+                                  pieces=r.split_pieces)[0],[])
         return r
+
+    def run_strict(self,data,**kw):
+        """Tamamlanma önceliği KAPALI: kural aritmetik taban için bile esnemez."""
+        return self.run_valid(data,completion_first=False,**kw)
 
     def test_inactive_rule_is_not_reintroduced(self):
         d=store('1+1',D=1);d['planlama_iliskileri']=[dict(kural='Aynı ders aynı gün tekrar etmesin',aktif=False)]
@@ -41,9 +48,22 @@ class NativeTests(unittest.TestCase):
 
     def test_repeat_is_forbidden_even_when_adjacent(self):
         d=store('1+1',D=1);d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin')]
-        r=self.run_valid(d);self.assertFalse(r.complete);self.assertEqual(r.placed_hours,1)
+        r=self.run_strict(d);self.assertFalse(r.complete);self.assertEqual(r.placed_hours,1)
         self.assertEqual(r.upper_bound,1)
         self.assertTrue(validate(r.world,r.rules,[0,1])[0])
+
+    def test_arithmetic_floor_bends_only_the_impossible_group(self):
+        # 9A Matematik iki kart, tek gün: kural bu grupta esner ve rapora yazılır.
+        # 9B Matematik iki kart, iki günü var: kural orada ESNEMEZ.
+        d=store('1+1',D=1);d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin')]
+        r=self.run_valid(d);self.assertTrue(r.complete)
+        self.assertTrue(r.forced_minimums)
+        d2=store('1+1',D=2)
+        d2['atamalar'].append(dict(**{'class':'9B'},subject='Matematik',teacher='Öğretmen B',type='1+1'))
+        d2['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin')]
+        r2=self.run_valid(d2);self.assertTrue(r2.complete);self.assertEqual(r2.forced_minimums,[])
+        for cn in ('9A','9B'):
+            self.assertEqual(len({x['day'] for x in r2.placements if x['class']==cn}),2)
 
     def test_double_block_counts_as_one_session(self):
         d=store('2+1');d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin')]
@@ -61,8 +81,109 @@ class NativeTests(unittest.TestCase):
         d=store('1+1',D=1)
         d['atamalar'].append(dict(**{'class':'9B'},subject='Matematik',teacher='Öğretmen B',type='1+1'))
         d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin',siniflar=['9A'])]
-        r=self.run_valid(d);self.assertEqual(r.placed_hours,3)
+        r=self.run_strict(d);self.assertEqual(r.placed_hours,3)
         self.assertEqual(sum(x['duration'] for x in r.placements if x['class']=='9B'),2)
+
+    # ── Ders grupları: "Seçilen dersler aynı ders sayılsın" ──
+    def _group_store(self,D=3,P=4):
+        d=store('1',D=D,P=P)
+        d['dersler']=[{'ad':'Mat1'},{'ad':'Mat2'},{'ad':'Geometri'}]
+        d['atamalar']=[dict(**{'class':'9A'},subject='Mat1',teacher='Öğretmen A',type='1'),
+                       dict(**{'class':'9A'},subject='Mat2',teacher='Öğretmen B',type='1')]
+        return d
+
+    def test_group_makes_two_names_one_subject_for_once_day(self):
+        d=self._group_store(D=2)
+        d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin'),
+                                  rule('Seçilen dersler aynı ders sayılsın',dersler=['Mat1','Mat2'])]
+        r=self.run_valid(d);self.assertTrue(r.complete)
+        self.assertEqual(len({x['day'] for x in r.placements}),2)
+        self.assertEqual(r.world.families[r.world.subject_family[0]],'Mat1 / Mat2')
+
+    def test_without_group_two_names_may_share_a_day(self):
+        d=self._group_store(D=1)
+        d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin')]
+        r=self.run_strict(d);self.assertTrue(r.complete)
+
+    def test_group_expands_rule_subject_filter(self):
+        # Kuralda yalnızca Mat1 seçili; grup Mat2'yi de kapsama alır.
+        d=self._group_store(D=1)
+        d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin',dersler=['Mat1']),
+                                  rule('Seçilen dersler aynı ders sayılsın',dersler=['Mat1','Mat2'])]
+        r=self.run_strict(d);self.assertEqual(r.placed_hours,1)
+
+    def test_group_with_single_subject_is_skipped_with_reason(self):
+        d=self._group_store(D=1)
+        d['planlama_iliskileri']=[rule('Seçilen dersler aynı ders sayılsın',dersler=['Mat1'])]
+        r=self.run_valid(d);self.assertTrue(r.complete)
+        self.assertTrue(any('UYGULANMADI' in x for x in r.warnings))
+
+    def test_inactive_group_has_no_effect(self):
+        d=self._group_store(D=1)
+        d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin'),
+                                  dict(kural='Seçilen dersler aynı ders sayılsın',aktif=False,dersler=['Mat1','Mat2'])]
+        r=self.run_strict(d);self.assertTrue(r.complete)
+
+    def test_same_subject_not_adjacent(self):
+        d=self._group_store(D=1,P=3)
+        d['planlama_iliskileri']=[rule('Aynı ders art arda gelmesin'),
+                                  rule('Seçilen dersler aynı ders sayılsın',dersler=['Mat1','Mat2'])]
+        r=self.run_valid(d);self.assertTrue(r.complete)
+        ps=sorted(x['period'] for x in r.placements);self.assertEqual(ps,[0,2])
+        self.assertTrue(validate(r.world,r.rules,[0,1])[0])
+
+    def test_hard_not_adjacent_treats_group_as_one_lesson(self):
+        d=self._group_store(D=1,P=2)
+        d['planlama_iliskileri']=[rule('İki zor ders art arda gelmesin',dersler=['Mat1','Mat2']),
+                                  rule('Seçilen dersler aynı ders sayılsın',dersler=['Mat1','Mat2'])]
+        r=self.run_strict(d);self.assertTrue(r.complete)
+
+    def test_daily_hours_count_the_whole_family(self):
+        d=self._group_store(D=1,P=4)
+        d['atamalar'][0]['type']='2';d['atamalar'][1]['type']='1'
+        d['planlama_iliskileri']=[rule('Günde maksimum ders sayısı',parametre=2),
+                                  rule('Seçilen dersler aynı ders sayılsın',dersler=['Mat1','Mat2'])]
+        r=self.run_strict(d);self.assertEqual(r.placed_hours,2)
+
+    # ── CP-SAT bütün kuralları modeller (optimal kip yalnızca onu kullanır) ──
+    def test_optimal_mode_respects_pair_not_same_day(self):
+        d=self._group_store(D=2)
+        d['planlama_iliskileri']=[rule('İki ders aynı güne gelmesin',dersler=['Mat1','Mat2'])]
+        r=self.run_valid(d,optimal_mode=True,azami_saniye=20)
+        self.assertTrue(r.complete);self.assertEqual(len({x['day'] for x in r.placements}),2)
+
+    def test_optimal_mode_respects_daily_limit_and_min_days(self):
+        d=store('1+1+1',D=3);d['planlama_iliskileri']=[rule('Günde maksimum ders sayısı',parametre=1)]
+        r=self.run_valid(d,optimal_mode=True,azami_saniye=20)
+        self.assertTrue(r.complete);self.assertEqual(len({x['day'] for x in r.placements}),3)
+        d=store('1+1',D=3);d['planlama_iliskileri']=[rule('Aynı ders kartları arasında en az N gün olsun',parametre=2)]
+        r=self.run_valid(d,optimal_mode=True,azami_saniye=20)
+        self.assertTrue(r.complete);self.assertEqual(sorted(x['day'] for x in r.placements),[0,2])
+
+    def test_optimal_mode_respects_teacher_max_days(self):
+        d=store('1+1+1',D=3);d['planlama_iliskileri']=[rule('Öğretmen haftada en fazla N gün',parametre=2)]
+        r=self.run_valid(d,optimal_mode=True,azami_saniye=20)
+        self.assertTrue(r.complete);self.assertLessEqual(len({x['day'] for x in r.placements}),2)
+
+    def test_optimal_mode_split_pieces_respect_windows(self):
+        d=store('2',D=1,P=4);d['siniflar'][0]['timeoff']=[[2,0,2,2]]
+        d['planlama_iliskileri']=[rule('X dersi belirli saatlerde kalmalı',period_start=1,period_end=3)]
+        r=self.run_valid(d,optimal_mode=True,azami_saniye=20)
+        self.assertTrue(r.complete)
+        self.assertEqual(sorted(x['period'] for x in r.placements),[0,2])
+
+    def test_validator_rejects_unforced_violation_even_when_bending(self):
+        d=store('1+1',D=2);d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin')]
+        w=build_world(d);rules,_=compile_rules(d['planlama_iliskileri'],w);attach_slots(w,rules)
+        errs,_,bent=validate(w,rules,[0,1],bend_rules=True)
+        self.assertTrue(errs);self.assertEqual(bent,[])
+
+    def test_validator_checks_split_pieces(self):
+        d=store('2',D=1,P=4);d['siniflar'][0]['timeoff']=[[2,2,0,2]]
+        w=build_world(d);rules,_=compile_rules([],w);attach_slots(w,rules)
+        errs,_,_=validate(w,rules,[-1],pieces={0:[1,2]})
+        self.assertTrue(any('Kapalı' in e for e in errs))
+        self.assertEqual(validate(w,rules,[-1],pieces={0:[0,3]})[0],[])
 
     def test_unknown_filter_is_error_not_all_classes(self):
         d=store();d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin',siniflar=['Yok'])]

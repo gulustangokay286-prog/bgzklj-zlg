@@ -11,7 +11,24 @@ saat kararlarını aynı aramada değiştirir. Sonuç ayrı bir Python denetimin
 - Eski kayıtlarda ders seçimi boş olan “İki ders aynı güne gelmesin”, mevcut
   uygulamanın elle yerleştirme davranışıyla aynı şekilde, aynı sınıfta aynı
   öğretmenin günlük tekrarını engeller. Yeni ekranda bunun açık adı da bulunur.
+- **Ders grupları.** "Seçilen dersler aynı ders sayılsın" satırı bir kısıt değil
+  bir tanımdır: Mat1 + Mat2, Edebiyat + Türkçe, Biyoloji 9 + Biyoloji 11 motor
+  için tek ders olur. "Aynı ders" diyen her kural (aynı gün tekrar etmesin, art
+  arda gelmesin, günde en fazla N saat/seans, kartlar arası N gün, eşit dağılım,
+  aynı saatte en fazla N sınıf) ders AİLESİNİ ölçer; kuralın ders süzgeci de
+  aileye genişler (Türkçe seçildiyse Edebiyat da kapsamdadır). Kesişen gruplar
+  birleşir. Motor sondaki rakamları atarak kendiliğinden birleştirme yapmaz.
+- **"Aynı ders art arda gelmesin"**: aynı sınıfta aynı aileden iki ayrı kart
+  uç uca gelemez (bölünmüş bir kartın kendi parçaları hariç).
 - Öğretmen/sınıf çakışması, kapalı hücre ve kilitler sert kısıtlardır.
+- **Optimal kip** (uygulamanın kullandığı kip) yalnızca CP-SAT'i çalıştırır ve
+  CP-SAT ekrandaki HER kuralı modeller: sıkı kural kısıt, diğer önem seviyeleri
+  ceza terimi. Bölünmüş parçalar da pencere kurallarından ve bütün sayımlardan
+  geçer.
+- **Aritmetik taban** yalnızca "aynı ders/öğretmen aynı gün tekrar etmesin" ve
+  "kartlar arası N gün" için, yalnızca kart sayısının gün sayısını aştığı
+  grupta esner ve rapora yazılır. Bağımsız denetim (`verify.validate`) başka
+  hiçbir sert ihlali kabul etmez; ihlal eden sonuç uygulanmaz.
 - Sıkı ilişkiler ihlal edilmez. Diğer önem seviyeleri tercih olarak puanlanır;
   karşılanamayan tercihler rapora yazılır. Tercih optimumu garanti edilmez.
 - Süre dolması, tek başına çözümsüzlük kanıtı değildir. Gün/saat kapasitesi

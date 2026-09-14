@@ -13,7 +13,7 @@ def diagnose(world, rules):
         groups = defaultdict(list)
         for c in world.cards:
             if not r.applies_card(c): continue
-            resource = c.subject if r.kind == R.X_SUBJECT_ONCE_DAY else c.teacher
+            resource = c.family if r.kind == R.X_SUBJECT_ONCE_DAY else c.teacher
             if resource < 0: continue
             for ci in c.classes:
                 if r.applies_class(ci): groups[ci, resource].append(c)
@@ -38,7 +38,7 @@ def diagnose(world, rules):
             if missing <= 0 or ids in seen: continue
             seen.add(ids)
             days = sorted(set().union(*(set(x) for x in allowed.values())))
-            name = world.subjects[resource] if r.kind == R.X_SUBJECT_ONCE_DAY else world.teachers[resource]
+            name = world.family_name(resource) if r.kind == R.X_SUBJECT_ONCE_DAY else world.teachers[resource]
             message = (f"{world.classes[ci]} · {name}: {len(cards)} ayrı kart "
                        f"({'+'.join(str(c.duration) for c in cards)}) için "
                        f"{len(days)} uygun gün var. ‘{r.label}’ kuralıyla "

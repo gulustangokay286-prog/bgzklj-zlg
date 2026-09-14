@@ -2,9 +2,9 @@
 import time
 import copy
 import os
-from .build import build_world, attach_slots
+from .build import build_world, attach_slots, apply_subject_groups
 from .rules import compile_rules
-from .problem import Problem
+from .problem import Problem, impossible_groups
 from .diagnostics import diagnose
 from .native_bridge import search, search_portfolio
 from .verify import validate
@@ -97,7 +97,9 @@ def _kayitli_yer(data_store, world, card):
 
 def _bitir(res, w, rules, data_store, completion_first, start):
     """Doğrulama + çizelgenin kurulması. Bütün kipler buradan çıkar."""
-    errors,soft,bent=validate(w,rules,res.positions,bend_rules=completion_first)
+    forced=impossible_groups(w) if completion_first else set()
+    errors,soft,bent=validate(w,rules,res.positions,bend_rules=completion_first,
+                              forced=forced,pieces=getattr(res,'split_pieces',None))
     if errors:
         raise RuntimeError('Çizelge son denetimden geçmedi; sonuç uygulanmadı:\n'+'\n'.join(errors[:12]))
     res.warnings.extend(soft)
@@ -188,6 +190,10 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
     rules,report=compile_rules(raw,w)
     if report.errors:
         raise ValueError('Planlama ilişkileri uygulanamadı:\n'+'\n'.join(report.errors))
+    # "Seçilen dersler aynı ders sayılsın": aileler burada kurulur, kural
+    # kapsamları aileye genişler. Bundan sonra "aynı ders" her katmanda aynı
+    # şeyi ifade eder — arama, CP-SAT, bitirme geçişi ve bağımsız denetim.
+    apply_subject_groups(w,rules)
     if only_classes:
         active={norm_class(cn) for c in w.cards for cn in c.class_names}
         teachers={norm_key(n):i for i,n in enumerate(w.teachers)}
@@ -207,6 +213,9 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
     res.world=w;res.rules=rules;res.warnings=list(report.warnings)
     res.total_hours=w.total_hours();res.positions=[-1]*len(w.cards)
     res.diagnostics,res.upper_bound=diagnose(w,rules)
+    # Aritmetiğin dayattığı gruplar bir kez hesaplanır; her denetim aynı kümeyi
+    # kullanır. Tamamlanma öncelikli kip kapalıysa hiçbir grup esnemez.
+    forced=impossible_groups(w) if completion_first else set()
     # diagnose(), kuralların DELİNEMEZ olduğunu varsayarak bir üst sınır
     # hesaplar: v188'de 9A Matematik'in üç kartı iki güne sığmadığı için bu
     # sınır 284 çıkar. Bu sayı tanı olarak doğrudur ama ARAMA HEDEFİ olarak
@@ -279,19 +288,26 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
                 # aç bırakıyor ve Boğaziçi 279'dan 275'e düşüyordu.
                 # Kolay örnekleri CP-SAT 2 işçiyle de saniyenin yarısında
                 # çözüyor; zor örneklerde zaten kazanan tabu.
-                cp_sonuc['r']=_c(w,rules,seconds=max(1.0,time_budget*0.9),
-                                 allow_split=True,workers=2)
+                # Bölünmüş kartlar da sonuçtur: parçalar alınmazsa CP-SAT'in
+                # 1+1 diye yerleştirdiği kart "yerleşmedi" sayılır ve tam
+                # çizelge iki saat eksik görünür.
+                parca=[]
+                pos,placed,durum=_c(w,rules,seconds=max(1.0,time_budget*0.9),
+                                    allow_split=True,workers=2,forced=forced,
+                                    pieces_out=parca)
+                cp_sonuc['r']=(pos,placed,durum,dict(parca))
             except Exception as exc:
                 cp_sonuc['hata']=exc
         cp_is=threading.Thread(target=_cp_kosu,daemon=True); cp_is.start()
         cp_is.join(min(0.6,max(0.2,time_budget*0.25)))
         if 'r' in cp_sonuc:
-            pos0,placed0,durum0=cp_sonuc['r']
-            if all(i>=0 for i in pos0):
-                hata0,_,_=validate(w,rules,pos0,bend_rules=completion_first)
+            pos0,placed0,durum0,parca0=cp_sonuc['r']
+            if placed0>=res.total_hours:
+                hata0,_,_=validate(w,rules,pos0,bend_rules=completion_first,forced=forced,pieces=parca0)
                 if not hata0:
-                    res.positions=pos0; cozuldu=True
-                    res.warnings.append(f"CP-SAT tam çizelgeyi buldu ({durum0}).")
+                    res.positions=pos0; res.split_pieces=parca0; cozuldu=True
+                    res.warnings.append(f"CP-SAT tam çizelgeyi buldu ({durum0})."
+                                        + (f" {len(parca0)} blok parçalara bölündü." if parca0 else ""))
         # Yoklamada harcanan süre ana aramadan düşülmez.
         start=time.monotonic()
 
@@ -422,7 +438,7 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
                     placed2=sum(c.duration*len(c.classes)
                                 for c,i in zip(w.cards,rec2['positions']) if i>=0)
                     if placed2>placed1:
-                        errs2,_,_=validate(w,rules,rec2['positions'],bend_rules=True)
+                        errs2,_,_=validate(w,rules,rec2['positions'],bend_rules=True,forced=forced)
                         if not errs2:
                             res.positions=rec2['positions']
                             res.steps+=rec2['steps']
@@ -451,15 +467,18 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
         if 'hata' in cp_sonuc:
             res.warnings.append(f"CP-SAT çalışmadı: {cp_sonuc['hata']}")
         elif 'r' in cp_sonuc:
-            pos2, placed2, durum = cp_sonuc['r']
+            pos2, placed2, durum, parca2 = cp_sonuc['r']
             placed1 = sum(c.duration * len(c.classes)
                           for c, i in zip(w.cards, res.positions) if i >= 0)
             if placed2 > placed1:
-                hata, _, _ = validate(w, rules, pos2, bend_rules=completion_first)
+                hata, _, _ = validate(w, rules, pos2, bend_rules=completion_first,
+                                      forced=forced, pieces=parca2)
                 if not hata:
                     res.positions = pos2
+                    res.split_pieces = parca2
                     res.warnings.append(
-                        f"CP-SAT {placed2 - placed1} saat daha yerleştirdi ({durum}).")
+                        f"CP-SAT {placed2 - placed1} saat daha yerleştirdi ({durum})."
+                        + (f" {len(parca2)} blok parçalara bölündü." if parca2 else ""))
             elif durum == "OPTIMAL" and placed2 == placed1:
                 res.warnings.append(
                     "CP-SAT bu kurallarla daha fazlasının mümkün olmadığını kanıtladı.")
@@ -478,10 +497,12 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
     if not cozuldu and any(i < 0 for i in res.positions):
         try:
             from .finish import Finisher
-            fin = Finisher(w, rules, res.positions)
+            fin = Finisher(w, rules, res.positions, forced=forced,
+                           pieces=getattr(res, 'split_pieces', None))
             yeni, kazanc = fin.run()
             if kazanc > 0:
-                hata, _, _ = validate(w, rules, yeni, bend_rules=completion_first)
+                hata, _, _ = validate(w, rules, yeni, bend_rules=completion_first,
+                                      forced=forced, pieces=getattr(res, 'split_pieces', None))
                 if not hata:
                     res.positions = yeni
                     res.warnings.append(f"Bitirme geçişi {kazanc} saat daha yerleştirdi.")

@@ -354,9 +354,11 @@ class EditRelationDialog(QDialog):
 
         self.cb_rule = QComboBox()
         self.rules = [
+            "Seçilen dersler aynı ders sayılsın",
             "Günde maksimum ders sayısı",
             "Beden Eğitimi / Uygulamalı dersler günde en fazla 2 saat olsun",
             "Aynı ders aynı gün tekrar etmesin",
+            "Aynı ders art arda gelmesin",
             "Aynı öğretmen aynı gün tekrar etmesin",
             "Dersler haftanın günlerine eşit dağıtılsın",
             "Seçilen dersler aynı gün peş peşe gelsin",
@@ -426,6 +428,7 @@ class EditRelationDialog(QDialog):
         lay_teach.addWidget(self.cb_teach)
         lay_teach.addWidget(self.btn_teach)
         filter_layout.addLayout(lay_teach)
+        self._teach_row = (lbl_t, self.cb_teach, self.btn_teach)
 
         # Sınıflar
         lay_class = QHBoxLayout()
@@ -439,6 +442,22 @@ class EditRelationDialog(QDialog):
         lay_class.addWidget(self.cb_class)
         lay_class.addWidget(self.btn_class)
         filter_layout.addLayout(lay_class)
+        self._class_row = (lbl_c, self.cb_class, self.btn_class)
+
+        # Ders grubu açıklaması — yalnızca "Seçilen dersler aynı ders sayılsın"
+        # seçiliyken görünür. Bu satır bir kısıt değil, bir TANIMDIR.
+        self.lbl_group_hint = QLabel(
+            "Bu satır bir kısıt değil, bir tanımdır: seçtiğiniz dersler motor için TEK ders olur "
+            "(örn. Mat1 + Mat2, Edebiyat + Türkçe, Biyoloji 9 + Biyoloji 11). "
+            "“Aynı ders aynı gün tekrar etmesin”, “Aynı ders art arda gelmesin”, "
+            "“Günde maksimum ders sayısı” gibi bütün kurallar bu dersleri birlikte sayar. "
+            "En az iki ders seçin.")
+        self.lbl_group_hint.setWordWrap(True)
+        self.lbl_group_hint.setStyleSheet("color: #475569; font-size: 11.5px; font-weight: 500; "
+                                          "background: #EFF6FF; border: 1px solid #BFDBFE; "
+                                          "border-radius: 8px; padding: 8px 10px;")
+        self.lbl_group_hint.setVisible(False)
+        filter_layout.addWidget(self.lbl_group_hint)
         main_layout.addWidget(grp_filters)
 
         # 3. Parametreler
@@ -474,6 +493,7 @@ class EditRelationDialog(QDialog):
         self.cb_imp.addItems(["Sıkı (Kesinlikle uygulanmalı)", "Yüksek", "Normal", "Düşük (Mümkünse)"])
         self.cb_imp.setCurrentIndex(0)
         imp_lay.addWidget(self.cb_imp)
+        self.imp_group = grp_imp
         main_layout.addWidget(grp_imp)
 
         main_layout.addStretch(1)
@@ -515,7 +535,7 @@ class EditRelationDialog(QDialog):
             QPushButton:hover { background: #0062C4; }
         """)
         
-        self.btn_ok.clicked.connect(self.accept)
+        self.btn_ok.clicked.connect(self._try_accept)
         self.btn_cancel.clicked.connect(self.reject)
 
         btn_layout.addStretch()
@@ -524,6 +544,32 @@ class EditRelationDialog(QDialog):
         main_layout.addLayout(btn_layout)
 
         self._refresh_combos_ui()
+
+    def _is_group_rule(self):
+        return self.cb_rule.currentText() == "Seçilen dersler aynı ders sayılsın"
+
+    def _try_accept(self):
+        """Kaydetmeden önce kuralın anlamlı olduğunu doğrular.
+
+        Eksik seçim sessizce kaydedilirse motor kuralı 'uygulanmadı' diye
+        atlar ve kullanıcı ekranda açık gördüğü kuralın çizelgede neden
+        çalışmadığını anlayamaz. Sorun burada, kaydetmeden önce söylenir.
+        """
+        rule = self.cb_rule.currentText()
+        n_subj = len(self.selected_subjects) if self.cb_subj.currentIndex() == 1 else 0
+        if self._is_group_rule() and n_subj < 2:
+            QMessageBox.warning(self, "Ders Grubu",
+                                "Bu kural için en az iki ders seçmelisiniz.\n\n"
+                                "Örnek: Mat1 + Mat2, Edebiyat + Türkçe, Biyoloji 9 + Biyoloji 11.")
+            self._change_subjects()
+            return
+        if rule == "İki ders aynı güne gelmesin" and n_subj < 2:
+            QMessageBox.warning(self, "Ders Seçimi",
+                                "“İki ders aynı güne gelmesin” için hangi derslerin "
+                                "aynı güne gelmeyeceğini seçmelisiniz (en az iki ders).")
+            self._change_subjects()
+            return
+        self.accept()
 
     def _refresh_combos_ui(self):
         # 1. Dersler
@@ -617,6 +663,14 @@ class EditRelationDialog(QDialog):
 
         self.param_group.setVisible(show_max or show_period)
 
+        # Ders grubu: yalnızca ders seçimi anlamlıdır. Öğretmen/sınıf süzgeci
+        # ve önem derecesi gizlenir; kaydedilirken de boş yazılır.
+        is_group = self._is_group_rule()
+        for w in self._teach_row + self._class_row:
+            w.setVisible(not is_group)
+        self.imp_group.setVisible(not is_group)
+        self.lbl_group_hint.setVisible(is_group)
+
     def _change_subjects(self):
         items_set = set()
         for d in self.data_store.get("dersler", []):
@@ -687,18 +741,30 @@ class EditRelationDialog(QDialog):
         has_period = rule == "X dersi belirli saatlerde kalmalı"
         from scheduler.rules import _match_rule_name
         from scheduler.model import norm_key
+        is_group = self._is_group_rule()
         return {
             "kind": _match_rule_name(norm_key(rule)),
             "aktif": self.relation_data.get("aktif", True),
             "kural": rule,
             "dersler": self.selected_subjects if self.cb_subj.currentIndex() == 1 else [],
-            "ogretmenler": self.selected_teachers if self.cb_teach.currentIndex() == 1 else [],
-            "siniflar": self.selected_classes if self.cb_class.currentIndex() == 1 else [],
+            "ogretmenler": [] if is_group else (self.selected_teachers if self.cb_teach.currentIndex() == 1 else []),
+            "siniflar": [] if is_group else (self.selected_classes if self.cb_class.currentIndex() == 1 else []),
             "parametre": self.spin_param.value() if has_param else None,
             "period_start": self.cb_period_start.value() if has_period else None,
             "period_end": self.cb_period_end.value() if has_period else None,
-            "onem": self.cb_imp.currentText()
+            "onem": "Sıkı (Kesinlikle uygulanmalı)" if is_group else self.cb_imp.currentText()
         }
+
+
+def _is_group_relation(item) -> bool:
+    """Kayıt bir ders grubu tanımı mı? (kind ya da kural adından)"""
+    try:
+        from scheduler.rules import X_SUBJECT_GROUP, _match_rule_name
+        from scheduler.model import norm_key
+        kind = item.get("kind") or _match_rule_name(norm_key(item.get("kural") or ""))
+        return kind == X_SUBJECT_GROUP
+    except Exception:
+        return False
 
 
 # ─── Ana Planlama İlişkileri Yöneticisi ──────────────────────────
@@ -973,9 +1039,11 @@ class PlanningRelationsDialog(QDialog):
                 kural_item.setFont(QFont(FONT_FAMILY, 9.5, QFont.Bold))
             self.table.setItem(idx, 1, kural_item)
 
+            is_group = _is_group_relation(item)
+
             # Dersler
             subj = item.get("dersler", [])
-            subj_item = QTableWidgetItem(", ".join(subj) if subj else "Tüm dersler")
+            subj_item = QTableWidgetItem((" + " if is_group else ", ").join(subj) if subj else "Tüm dersler")
             if not subj:
                 subj_item.setForeground(QBrush(QColor("#94A3B8")))
             else:
@@ -984,7 +1052,7 @@ class PlanningRelationsDialog(QDialog):
 
             # Sınıflar
             cls = item.get("siniflar", [])
-            cls_item = QTableWidgetItem(", ".join(cls) if cls else "Tüm sınıflar")
+            cls_item = QTableWidgetItem("—" if is_group else (", ".join(cls) if cls else "Tüm sınıflar"))
             if not cls:
                 cls_item.setForeground(QBrush(QColor("#94A3B8")))
             else:
@@ -993,7 +1061,7 @@ class PlanningRelationsDialog(QDialog):
 
             # Öğretmenler
             teach = item.get("ogretmenler", [])
-            teach_item = QTableWidgetItem(", ".join(teach) if teach else "Tüm öğretmenler")
+            teach_item = QTableWidgetItem("—" if is_group else (", ".join(teach) if teach else "Tüm öğretmenler"))
             if not teach:
                 teach_item.setForeground(QBrush(QColor("#94A3B8")))
             else:
@@ -1003,6 +1071,8 @@ class PlanningRelationsDialog(QDialog):
             # Önem (Sleek Modern Capsule Badge)
             onem = item.get("onem", "Sıkı")
             onem_short = onem.split("(")[0].strip() if "(" in onem else onem
+            if is_group:
+                onem_short = "Tanım"
             
             badge_widget = QWidget()
             b_lay = QHBoxLayout(badge_widget)
@@ -1012,7 +1082,9 @@ class PlanningRelationsDialog(QDialog):
             lbl_badge = QLabel(f" {onem_short} ")
             lbl_badge.setFont(QFont(FONT_FAMILY, 8, QFont.Bold))
             
-            if "Sıkı" in onem_short:
+            if onem_short == "Tanım":
+                lbl_badge.setStyleSheet("background: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 9px; padding: 2px 8px;")
+            elif "Sıkı" in onem_short:
                 lbl_badge.setStyleSheet("background: #FEF2F2; color: #DC2626; border: 1px solid #FECACA; border-radius: 9px; padding: 2px 8px;")
             elif "Yüksek" in onem_short:
                 lbl_badge.setStyleSheet("background: #FFFBEB; color: #D97706; border: 1px solid #FDE68A; border-radius: 9px; padding: 2px 8px;")

@@ -2416,13 +2416,23 @@ class MainWindow(QMainWindow):
                 continue
             if c == day:
                 current_day_lessons.append((r, data))
-                
-        # Existing hours of THIS specific subject on this day
+
+        # "Aynı ders" motorla aynı sözlükten okunur: Planlama İlişkileri'nde
+        # "Seçilen dersler aynı ders sayılsın" ile Mat1 + Mat2 tek dersse burada
+        # da tek derstir. Elle yerleştirme ile otomatik planlama aynı kuralı
+        # farklı yorumlarsa kullanıcı ekranda izin verilen şeyi motorda yasak
+        # bulur.
+        from scheduler.rules import (_hardness_from, HARD, family_lookup, same_subject,
+                                     _match_rule_name, X_SUBJECT_GROUP, X_SUBJECT_NOT_ADJACENT)
+        from scheduler.model import norm_key
+        fam = family_lookup(self.data_store.get("planlama_iliskileri", []))
+
+        # Existing hours of THIS subject (family) on this day
         existing_subj_daily_hours = 0
         for r, data in current_day_lessons:
             d_subj = data.get("subject_name", data.get("subject", ""))
             d_cls = data.get("class_name", data.get("class", ""))
-            if d_subj.strip().upper() == subject.strip().upper() and (not class_name or d_cls == class_name):
+            if same_subject(d_subj, subject, fam) and (not class_name or d_cls == class_name):
                 existing_subj_daily_hours += data.get("duration", 1)
 
         new_total_daily_hours = existing_subj_daily_hours + duration
@@ -2436,11 +2446,13 @@ class MainWindow(QMainWindow):
                 if not class_name or matches_class(d_cls, class_name) or matches_class(class_name, d_cls):
                     existing_teacher_day_lessons.append((r, data))
 
-        from scheduler.rules import _hardness_from, HARD
         for rel in relations:
+            r_type = rel.get("kural", "")
+            kind = rel.get("kind") or _match_rule_name(norm_key(r_type))
+            if kind == X_SUBJECT_GROUP:
+                continue   # tanım satırı; kısıt değil
             if _hardness_from(rel.get("onem")) < HARD:
                 continue
-            r_type = rel.get("kural", "")
             val = rel.get("parametre", 2)
             f_subjs = rel.get("dersler", [])
             f_teach = rel.get("ogretmenler", [])
@@ -2451,9 +2463,23 @@ class MainWindow(QMainWindow):
                 continue
             if f_teach and teacher and not any(norm_teacher(teacher) == norm_teacher(ft) for ft in f_teach):
                 continue
-            if f_subjs and not any(normalize_clean(subject) == normalize_clean(fs) or normalize_clean(fs) in normalize_clean(subject) for fs in f_subjs):
+            if f_subjs and not any(same_subject(subject, fs, fam) or normalize_clean(fs) in normalize_clean(subject) for fs in f_subjs):
                 continue
-                
+
+            # Rule 0: Aynı ders art arda gelmesin (aile üzerinden, komşu hücre)
+            if kind == X_SUBJECT_NOT_ADJACENT:
+                for nb_row in (period - 1, period + duration):
+                    nb = placed.get((nb_row, day))
+                    if is_move and nb_row == orig_r and day == orig_c:
+                        continue
+                    if not nb:
+                        continue
+                    nb_subj = nb.get("subject_name", nb.get("subject", ""))
+                    nb_cls = nb.get("class_name", nb.get("class", ""))
+                    if same_subject(nb_subj, subject, fam) and (not class_name or nb_cls == class_name):
+                        return False, f"⚠️ <b>'Aynı ders art arda gelmesin'</b> kuralına göre <b>{subject}</b> dersi bitişiğindeki <b>{nb_subj}</b> dersiyle art arda gelemez!"
+                continue
+
             # Rule 1: Günde maksimum ders sayısı
             if "Günde maksimum ders sayısı" in r_type or "Günlük maksimum" in r_type:
                 max_h = int(val) if str(val).isdigit() else 2

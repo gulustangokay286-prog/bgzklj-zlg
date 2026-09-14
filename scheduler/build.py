@@ -21,7 +21,7 @@ parça 3 saatlik tek karttır ve bitişik oturur.
 import constraint_sync
 import lesson_hours
 
-from .model import World, Card, norm_key, norm_class, subject_family
+from .model import World, Card, norm_key, norm_class
 from . import rules as R
 
 
@@ -197,20 +197,19 @@ def build_world(data_store, D=None, P=None, cross_busy=None,
                 class_names=tuple(class_names[i] for i in idxs),
             ))
 
-    # Her karta ders AİLESİ indeksi: "Matematik9" ile "Matematik11" aynı aile.
-    fam_ix, fam_names = {}, []
+    # Ders AİLESİ: varsayılan olarak her ders kendi ailesidir (aile indeksi =
+    # ders indeksi). "Seçilen dersler aynı ders sayılsın" kuralı derlendikten
+    # sonra apply_subject_groups() aileleri birleştirir.
+    subject_family_ix = list(range(len(subject_names)))
     for c in cards:
-        key = subject_family(c.subject_name)
-        if key not in fam_ix:
-            fam_ix[key] = len(fam_names)
-            fam_names.append(key)
-        c.family = fam_ix[key]
+        c.family = c.subject if c.subject >= 0 else -1
 
     world = World(D=D, P=P, classes=class_names, teachers=teacher_names,
                   subjects=subject_names, cards=cards,
                   class_closed=class_closed, teacher_closed=teacher_closed,
                   class_avoid=class_avoid, teacher_avoid=teacher_avoid,
-                  class_capacity=[], class_demand=[])
+                  class_capacity=[], class_demand=[],
+                  families=list(subject_names), subject_family=subject_family_ix)
 
     full = (1 << (D * P)) - 1
     world.class_capacity = [bin(full & ~m).count("1") for m in class_closed]
@@ -219,6 +218,78 @@ def build_world(data_store, D=None, P=None, cross_busy=None,
         for ci in c.classes:
             demand[ci] += c.duration
     world.class_demand = demand
+    return world
+
+
+def apply_subject_groups(world, rule_list):
+    """"Seçilen dersler aynı ders sayılsın" kurallarını dünyaya işler.
+
+    Üç şey yapar ve üçü de gereklidir:
+
+      1. Aileleri birleştirir. Kesişen gruplar tek aile olur (Mat1+Mat2 ve
+         Mat2+Mat 11 -> {Mat1, Mat2, Mat 11}). world.families görünen adı,
+         world.subject_family[ders] aile indeksini, card.family kartın
+         ailesini taşır.
+
+      2. Kural kapsamlarını aileye genişletir. Kullanıcı "Aynı ders aynı gün
+         tekrar etmesin" kuralında yalnızca Türkçe'yi seçtiyse ve Türkçe ile
+         Edebiyat aynı dersse, Edebiyat kartları da kuralın kapsamındadır —
+         aksi hâlde "aynı ders" tanımı ekranda bir şey, motorda başka bir şey
+         anlamına gelir.
+
+      3. Grubun kendisi kural listesinde kalır (raporda görünsün diye) ama
+         hiçbir yerleştirme kararında okunmaz.
+
+    Ders adı kartlarda geçip dersler listesinde olmayan adlar build_world
+    tarafından zaten dizine alınmıştır; burada bilinmeyen ad kalmaz.
+    """
+    groups = [r for r in rule_list if r.kind == R.X_SUBJECT_GROUP]
+    n = len(world.subjects)
+    parent = list(range(n))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for r in groups:
+        members = sorted(r.subjects)
+        for s in members[1:]:
+            a, b = find(members[0]), find(s)
+            if a != b:
+                parent[max(a, b)] = min(a, b)
+
+    root_ix, fam_names, members_of = {}, [], {}
+    subject_family = [0] * n
+    for s in range(n):
+        root = find(s)
+        if root not in root_ix:
+            root_ix[root] = len(fam_names)
+            fam_names.append(None)
+            members_of[root] = []
+        subject_family[s] = root_ix[root]
+        members_of[root].append(s)
+    for root, fi in root_ix.items():
+        fam_names[fi] = " / ".join(world.subjects[s] for s in members_of[root])
+
+    world.families = fam_names
+    world.subject_family = subject_family
+    for c in world.cards:
+        c.family = subject_family[c.subject] if c.subject >= 0 else -1
+
+    # Kural kapsamını aileye genişlet.
+    if groups:
+        by_family = {}
+        for s in range(n):
+            by_family.setdefault(subject_family[s], set()).add(s)
+        for r in rule_list:
+            if r.kind == R.X_SUBJECT_GROUP or not r.subjects:
+                continue
+            wide = set()
+            for s in r.subjects:
+                wide |= by_family.get(subject_family[s], {s})
+            r.subjects = frozenset(wide)
     return world
 
 
@@ -232,7 +303,6 @@ def attach_slots(world, rule_list):
     """
     windows = [r for r in rule_list if r.kind in R.WINDOW_RULES and r.is_hard()]
     D, P = world.D, world.P
-    noon = 4 if P >= 6 else (P + 1) // 2
 
     for card in world.cards:
         allowed = []
@@ -249,24 +319,43 @@ def attach_slots(world, rule_list):
                     continue
                 if fp == 0 or (fp & base_block):
                     continue
-                ok = True
-                for r in windows:
-                    if not r.applies_card(card):
-                        continue
-                    if r.kind == R.X_MORNING_ONLY and p + card.duration > noon:
-                        ok = False
-                    elif r.kind == R.X_AFTERNOON_ONLY and p < noon:
-                        ok = False
-                    elif r.kind == R.X_NOT_LAST_PERIOD and p + card.duration > P - 1:
-                        ok = False
-                    elif r.kind == R.X_NOT_FIRST_PERIOD and p == 0:
-                        ok = False
-                    elif r.kind == R.X_TIME_WINDOW:
-                        if p < r.param or (p + card.duration - 1) > r.param2:
-                            ok = False
-                    if not ok:
-                        break
-                if ok:
+                if window_ok(world, windows, card, p, card.duration):
                     allowed.append((world.idx(d, p), fp))
         card.slots = tuple(allowed)
     return world
+
+
+def noon_of(P):
+    """Öğle sınırı: bu saatten önce başlayıp bitenler "öğleden önce"dir."""
+    return 4 if P >= 6 else (P + 1) // 2
+
+
+def window_breaks(rule, p, dur, P):
+    """Pencere kuralı bu başlangıç/süre için bozuluyor mu?"""
+    noon = noon_of(P)
+    k = rule.kind
+    if k == R.X_MORNING_ONLY:
+        return p + dur > noon
+    if k == R.X_AFTERNOON_ONLY:
+        return p < noon
+    if k == R.X_NOT_LAST_PERIOD:
+        return p + dur > P - 1
+    if k == R.X_NOT_FIRST_PERIOD:
+        return p == 0
+    if k == R.X_TIME_WINDOW:
+        return p < rule.param or (p + dur - 1) > rule.param2
+    return False
+
+
+def window_ok(world, windows, card, p, dur):
+    """Karta uygulanan bütün (sert) pencere kuralları bu yerleşime izin veriyor mu?
+
+    Hem 2 saatlik bütün blok hem de bölünmüş 1 saatlik parça için aynı işlev
+    kullanılır; CP-SAT'in parçaları da bu süzgeçten geçer. Eskiden parçalar
+    yalnızca kapalı hücreye bakıyordu ve "öğleden önce" kuralı açık bir dersin
+    parçası öğleden sonraya düşebiliyordu.
+    """
+    for r in windows:
+        if r.applies_card(card) and window_breaks(r, p, dur, world.P):
+            return False
+    return True

@@ -21,24 +21,35 @@ eski hâline döner, başarılıysa yalnızca gereken kartlar yer değiştirmiş
 
 from collections import defaultdict
 from . import rules as R
-from .model import subject_family
+from .verify import validate
 
 
 class Finisher:
-    def __init__(self, world, rule_list, positions):
+    def __init__(self, world, rule_list, positions, forced=None, pieces=None):
         self.w = world
         self.P = world.P
         self.D = world.D
         self.pos = list(positions)
+        self.rules = rule_list
+        self.forced = forced
+        # Bölünmüş kartlar (1+1 yerleşmiş) taşınmaz ve yeniden aranmaz;
+        # parçalarının hücreleri dolu sayılır. Sahip olarak negatif bir
+        # işaret yazılır: tahliye zinciri bu hücreleri asla sökmez.
+        self.pieces = dict(pieces or {})
 
         self.subject_once = any(r.kind == R.X_SUBJECT_ONCE_DAY and r.is_hard()
                                 for r in rule_list)
         self.teacher_once = any(r.kind == R.X_TEACHER_ONCE_DAY and r.is_hard()
                                 for r in rule_list)
+        self.subject_adj = any(r.kind == R.X_SUBJECT_NOT_ADJACENT and r.is_hard()
+                               for r in rule_list)
+        # "Zor ders" kümesi ders AİLESİ üzerinden tutulur: Mat1 ile Mat2 aynı
+        # aileyse art arda gelmeleri "iki zor ders" değil, tek dersin
+        # devamıdır.
         self.hard_adj = set()
         for r in rule_list:
             if r.kind == R.X_HARD_NOT_ADJACENT and r.is_hard():
-                self.hard_adj |= set(r.subjects)
+                self.hard_adj |= {world.subject_family[s] for s in r.subjects}
 
         n = len(world.cards)
         self.cls_cell = {}      # (sınıf, hücre) -> kart
@@ -48,6 +59,16 @@ class Finisher:
         for i, idx in enumerate(self.pos):
             if idx >= 0:
                 self._occupy(i, idx, True)
+        for i, cells in self.pieces.items():
+            c = self.w.cards[i]
+            for cell in cells:
+                for ci in c.classes:
+                    self.cls_cell[(ci, cell)] = -1 - i
+                    self.fam_day[(ci, cell // self.P)].add(c.family)
+                    if c.teacher >= 0:
+                        self.tch_day[(ci, cell // self.P)].add(c.teacher)
+                if c.teacher >= 0:
+                    self.tch_cell[(c.teacher, cell)] = -1 - i
 
     def _occupy(self, i, idx, on):
         c = self.w.cards[i]
@@ -66,16 +87,16 @@ class Finisher:
                 self.fam_day[key].add(c.family)
                 if c.teacher >= 0: self.tch_day[key].add(c.teacher)
             else:
-                # sayım gerektiği için yeniden kur
-                self.fam_day[key] = {self.w.cards[j].family
-                                     for (cj, cell), j in self.cls_cell.items()
-                                     if cj == ci and cell // self.P == d}
-                self.tch_day[key] = {self.w.cards[j].teacher
-                                     for (cj, cell), j in self.cls_cell.items()
-                                     if cj == ci and cell // self.P == d
-                                     and self.w.cards[j].teacher >= 0}
+                # sayım gerektiği için yeniden kur (negatif sahip = parça)
+                owners = [(-1 - j) if j < 0 else j
+                          for (cj, cell), j in self.cls_cell.items()
+                          if cj == ci and cell // self.P == d]
+                self.fam_day[key] = {self.w.cards[j].family for j in owners}
+                self.tch_day[key] = {self.w.cards[j].teacher for j in owners
+                                     if self.w.cards[j].teacher >= 0}
 
     def _rules_ok(self, i, idx):
+        """Hızlı ön eleme. Kesin karar validate() ile verilir (bkz. run)."""
         c = self.w.cards[i]
         d, p = divmod(idx, self.P)
         for ci in c.classes:
@@ -83,11 +104,17 @@ class Finisher:
                 return False
             if self.teacher_once and c.teacher >= 0 and c.teacher in self.tch_day[(ci, d)]:
                 return False
-            if c.subject in self.hard_adj:
+            if c.family in self.hard_adj or self.subject_adj:
                 for nb in (p - 1, p + c.duration):
                     if 0 <= nb < self.P:
                         j = self.cls_cell.get((ci, d * self.P + nb))
-                        if j is not None and self.w.cards[j].subject in self.hard_adj:
+                        if j is None:
+                            continue
+                        o = self.w.cards[(-1 - j) if j < 0 else j]
+                        if c.family in self.hard_adj and o.family in self.hard_adj \
+                                and o.family != c.family:
+                            return False
+                        if self.subject_adj and o.family == c.family:
                             return False
         return True
 
@@ -122,7 +149,7 @@ class Finisher:
             if not self._rules_ok(i, idx):
                 continue
             blk = self._blockers(i, idx)
-            if not blk or len(blk) > 2 or (blk & banned):
+            if not blk or len(blk) > 2 or (blk & banned) or any(j < 0 for j in blk):
                 continue
             snap = list(self.pos)
             moved = []
@@ -156,12 +183,28 @@ class Finisher:
                 self.pos[i] = idx; self._occupy(i, idx, True)
 
     def run(self, max_depth=4):
+        """Açıkta kalan her kart için dener; kabul ölçütü bağımsız denetimdir.
+
+        _rules_ok yalnızca en sık kuralları bilir (aynı gün tekrar, art arda).
+        Günlük saat tavanı, iki ders aynı güne gelmesin, kartlar arası N gün
+        gibi kurallar orada yoktur. Bu yüzden her başarılı dal, çizelgenin
+        tamamı üzerinde validate() ile denetlenir; kural çiğneyen dal geri
+        alınır. Eskiden geri alınmıyordu — bitirme geçişi son saati "buluyor",
+        yerleştirdiği kart bir kuralı çiğniyor, sonuç ekrana gidiyordu.
+        """
         eksik = [i for i, idx in enumerate(self.pos)
-                 if idx < 0 and self.w.cards[i].slots]
+                 if idx < 0 and self.w.cards[i].slots and i not in self.pieces]
         kazanc = 0
         for i in sorted(eksik, key=lambda k: len(self.w.cards[k].slots)):
             if self.pos[i] >= 0:
                 continue
+            snap = list(self.pos)
             if self.place(i, 0, max_depth, frozenset()):
+                errs, _, _ = validate(self.w, self.rules, self.pos,
+                                      bend_rules=True, forced=self.forced,
+                                      pieces=self.pieces)
+                if errs:
+                    self._restore(snap)
+                    continue
                 kazanc += self.w.cards[i].duration * len(self.w.cards[i].classes)
         return self.pos, kazanc

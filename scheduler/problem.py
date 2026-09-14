@@ -8,7 +8,8 @@ from dataclasses import dataclass
 from . import rules as R
 
 PAIR_KINDS = {R.X_SUBJECT_ONCE_DAY, R.X_TEACHER_ONCE_DAY,
-              R.X_PAIR_NOT_SAME_DAY, R.X_HARD_NOT_ADJACENT, R.X_MIN_DAYS_BETWEEN}
+              R.X_PAIR_NOT_SAME_DAY, R.X_HARD_NOT_ADJACENT, R.X_MIN_DAYS_BETWEEN,
+              R.X_SUBJECT_NOT_ADJACENT}
 FACTOR_KINDS = {R.X_SUBJECT_MAX_HOURS, R.X_PRACTICAL_MAX_HOURS,
                 R.X_SUBJECT_MAX_SESSIONS, R.X_CLASS_MAX_HOURS,
                 R.X_TEACHER_MAX_HOURS, R.X_TEACHER_MAX_DAYS,
@@ -25,6 +26,58 @@ class Factor:
     weight: int
     cards: list
     label: str
+
+def impossible_groups(world):
+    """Kart sayısı, ulaşılabilir gün sayısını aşan gruplar.
+
+    İki tür grup vardır ve İKİSİ DE gereklidir:
+
+      ('s', sınıf, aile)     "Aynı ders aynı gün tekrar etmesin" bunu sayar.
+      ('t', sınıf, öğretmen) "Aynı öğretmen aynı gün tekrar etmesin" bunu sayar.
+
+    İkincisi başta atlanmıştı ve bedeli doğrudan ölçüldü: Yasemin Özkaya
+    üç ayrı on birinci sınıfın her birine dört kart veriyor ama haftada üç
+    gün okulda. Öğretmen kuralı açıldığında bu kartların bir kısmı hiçbir
+    güne sığmıyor; grup imkânsız diye işaretlenmediği için de motor onları
+    yerleştiremeden bırakıyor ve çizelge dört saat eksik kalıyordu.
+
+    Bu küme yalnızca aritmetiğin dayattığı tabanı tanımlar. Doğrulama
+    (verify.validate) "esneyen kural" olarak YALNIZCA bu gruplardaki
+    tekrarları kabul eder; başka her kural ihlali hatadır.
+    """
+    w = world
+    subj_groups = defaultdict(list)
+    tch_groups = defaultdict(list)
+    for c in w.cards:
+        for ci in c.classes:
+            if c.family >= 0:
+                subj_groups[(ci, c.family)].append(c)
+            if c.teacher >= 0:
+                tch_groups[(ci, c.teacher)].append(c)
+
+    def impossible(items):
+        if len(items) < 2:
+            return False
+        days = set()
+        for c in items:
+            for idx, _ in c.slots:
+                days.add(idx // w.P)
+        return len(items) > len(days)
+
+    out = set()
+    for key, items in subj_groups.items():
+        if impossible(items):
+            out.add(('s',) + key)
+    for key, items in tch_groups.items():
+        if impossible(items):
+            out.add(('t',) + key)
+    return out
+
+
+# Aritmetik taban yalnızca bu kurallarda esner: hepsi "bir dersin/öğretmenin
+# kartları ayrı günlere dağılsın" der ve kart sayısı gün sayısını aşınca hiçbir
+# çizelgede sağlanamaz. Başka hiçbir kural, hiçbir grup için esnemez.
+BENDABLE_KINDS = {R.X_SUBJECT_ONCE_DAY, R.X_TEACHER_ONCE_DAY, R.X_MIN_DAYS_BETWEEN}
 
 # Tamamlanma öncelikli kipte sert X kuralları bu ağırlıkla cezaya çevrilir.
 # Tek bir kural ihlali, yerleşemeyen tek bir saatten çok daha pahalıdır; bu
@@ -63,14 +116,15 @@ class Problem:
         # Bu yüzden yalnızca o grubun kart çiftleri cezaya çevrilir; kuralın
         # geri kalan bütün uygulamaları sert kalır. Esneyen grup rapora yazılır,
         # kullanıcı isterse öğretmenin gününü açarak sorunu kaynağında çözer.
-        self.forced_groups = self._impossible_groups() if completion_first else set()
+        self.forced_groups = impossible_groups(world) if completion_first else set()
         self.edges = []
         self.factors = []
         self.soft_unary = []
         self.domains = [[p for p, _ in c.slots] for c in world.cards]
         self.errors = []
         for r in rules:
-            if r.kind not in PAIR_KINDS | FACTOR_KINDS | CORE_KINDS | R.WINDOW_RULES:
+            if r.kind not in (PAIR_KINDS | FACTOR_KINDS | CORE_KINDS
+                              | R.WINDOW_RULES | R.DEFINITION_RULES):
                 self.errors.append(f"Desteklenmeyen kural: {r.label}")
         self._compile_unary()
         self._compile_pairs()
@@ -99,47 +153,6 @@ class Problem:
             self.soft_unary.append(costs)
 
 
-    def _impossible_groups(self):
-        """Kart sayısı, ulaşılabilir gün sayısını aşan gruplar.
-
-        İki tür grup vardır ve İKİSİ DE gereklidir:
-
-          (sınıf, ders)     "Aynı ders aynı gün tekrar etmesin" bunu sayar.
-          (sınıf, öğretmen) "Aynı öğretmen aynı gün tekrar etmesin" bunu sayar.
-
-        İkincisi başta atlanmıştı ve bedeli doğrudan ölçüldü: Yasemin Özkaya
-        üç ayrı on birinci sınıfın her birine dört kart veriyor ama haftada üç
-        gün okulda. Öğretmen kuralı açıldığında bu kartların bir kısmı hiçbir
-        güne sığmıyor; grup imkânsız diye işaretlenmediği için de motor onları
-        yerleştiremeden bırakıyor ve çizelge dört saat eksik kalıyordu.
-        """
-        w = self.world
-        subj_groups = defaultdict(list)
-        tch_groups = defaultdict(list)
-        for c in w.cards:
-            for ci in c.classes:
-                subj_groups[(ci, c.family)].append(c)
-                if c.teacher >= 0:
-                    tch_groups[(ci, c.teacher)].append(c)
-
-        def impossible(items):
-            if len(items) < 2:
-                return False
-            days = set()
-            for c in items:
-                for idx, _ in c.slots:
-                    days.add(idx // w.P)
-            return len(items) > len(days)
-
-        out = set()
-        for key, items in subj_groups.items():
-            if impossible(items):
-                out.add(('s',) + key)
-        for key, items in tch_groups.items():
-            if impossible(items):
-                out.add(('t',) + key)
-        return out
-
     def _compile_pairs(self):
         w = self.world
         for i, a in enumerate(w.cards):
@@ -152,20 +165,27 @@ class Problem:
                 relevant = [r for r in self.rules if r.kind in PAIR_KINDS
                             and r.applies_card(a) and r.applies_card(b)
                             and any(r.applies_class(ci) for ci in shared)]
+                # Ders kimliği AİLE üzerinden ölçülür: "Mat1" ile "Mat2" bir
+                # grupta birleştirildiyse ikisi tek derstir. "İki ders aynı güne
+                # gelmesin" ise ada bakar — kullanıcı o kuralda iki ayrı ad
+                # seçmiştir ve ikisinin aynı güne gelmemesini ister.
+                same_family = a.family >= 0 and a.family == b.family
                 checks = []
                 for r in relevant:
-                    if r.kind == R.X_SUBJECT_ONCE_DAY and a.family == b.family:
+                    if r.kind == R.X_SUBJECT_ONCE_DAY and same_family:
                         checks.append((0, r))
                     elif r.kind == R.X_TEACHER_ONCE_DAY and teacher:
                         checks.append((0, r))
                     elif r.kind == R.X_PAIR_NOT_SAME_DAY and a.subject != b.subject:
                         checks.append((0, r))
-                    elif r.kind == R.X_HARD_NOT_ADJACENT and a.subject != b.subject:
+                    elif r.kind == R.X_HARD_NOT_ADJACENT and not same_family:
                         checks.append((1, r))
-                    elif r.kind == R.X_MIN_DAYS_BETWEEN and a.subject == b.subject:
+                    elif r.kind == R.X_SUBJECT_NOT_ADJACENT and same_family:
+                        checks.append((1, r))
+                    elif r.kind == R.X_MIN_DAYS_BETWEEN and same_family:
                         checks.append((2, r))
                 shared = set(a.classes) & set(b.classes)
-                forced_subject = (a.family == b.family and
+                forced_subject = (same_family and
                                   any(('s', ci, a.family) in self.forced_groups
                                       for ci in shared))
                 forced_teacher = (a.teacher >= 0 and a.teacher == b.teacher and
@@ -187,7 +207,7 @@ class Problem:
                             if hit:
                                 if not r.is_hard():
                                     s += r.penalty()
-                                elif forced_pair:
+                                elif forced_pair and r.kind in BENDABLE_KINDS:
                                     # Bu grup aritmetik olarak sağlanamıyor:
                                     # kartlardan bir kısmı AYNI GÜNE düşmek
                                     # zorunda. O zaman tek makul biçim, aynı
@@ -224,11 +244,11 @@ class Problem:
                                R.X_NO_TEACHER_GAP, R.X_TEACHER_MAX_RUN):
                     if c.teacher >= 0: groups[c.teacher].append(c.cid)
                 elif r.kind in (R.Y_SUBJECT_MAX_PARALLEL, R.Y_TEACHER_MAX_PARALLEL):
-                    groups[c.subject if r.kind == R.Y_SUBJECT_MAX_PARALLEL else c.teacher].append(c.cid)
+                    groups[c.family if r.kind == R.Y_SUBJECT_MAX_PARALLEL else c.teacher].append(c.cid)
                 else:
                     for ci in c.classes:
                         if not r.applies_class(ci): continue
-                        key = (ci, c.subject) if r.kind in (R.X_SUBJECT_MAX_HOURS,
+                        key = (ci, c.family) if r.kind in (R.X_SUBJECT_MAX_HOURS,
                             R.X_PRACTICAL_MAX_HOURS, R.X_SUBJECT_MAX_SESSIONS,
                             R.X_EVEN_SPREAD) else ci
                         groups[key].append(c.cid)

@@ -56,20 +56,18 @@ def norm_key(s: str) -> str:
 
 
 def subject_family(name: str) -> str:
-    """Ders adının kimlik anahtarı: ADIN TAMAMI.
+    """Ders adının VARSAYILAN kimlik anahtarı: ADIN TAMAMI.
 
         "Matematik1", "Matematik2"  ->  ayrı dersler
         "Matematik",  "Geometri"    ->  ayrı dersler
 
-    "Aynı ders aynı gün tekrar etmesin" kuralı bu anahtar üzerinden ölçülür.
-
-    Bir ara bu işlev sondaki rakamları atıp "Matematik1" ile "Matematik2"yi tek
-    aile sayıyordu. Kullanıcının kastı bu değil: numaralı adlar Birey'de ayrı
-    ders saatleridir ve aynı güne gelmeleri sorun değil ("mat1 mat2 yan yana
-    gelebilir sıkıntı yok"). Birleştirme, kuralı olduğundan sert yapıyordu ve
-    ölçülen bedeli tam 2 saatti: Birey v111'de aile birleştirmesi açıkken tavan
-    235/237, kapalıyken 237/237 (ikisi de CP-SAT OPTIMAL). Kural artık ekranda
-    yazdığı gibi çalışıyor — aynı ders, yani aynı ad.
+    Motor sondaki rakamları atarak "Mat1" ile "Mat2"yi kendiliğinden
+    birleştirmez; bir ara öyle yapıyordu ve bedeli ölçüldü (Birey v111'de
+    235/237'ye karşı 237/237). Hangi adların tek ders olduğunu kullanıcı
+    söyler: Planlama İlişkileri ekranındaki "Seçilen dersler aynı ders
+    sayılsın" satırı. O satır ders AİLESİNİ kurar (bkz. build.apply_subject_groups)
+    ve "aynı ders" diyen her kural — aynı gün tekrar etmesin, art arda
+    gelmesin, günde en fazla N saat, kartlar arası N gün — aileyi ölçer.
     """
     return norm_key(name)
 
@@ -97,7 +95,7 @@ class Card:
     origin: int               # kaynak atamanın indeksi (rapor için)
     group: int                # aynı atamadan gelen kartlar aynı grup
     locked_at: Optional[int] = None   # kilitli kart: sabit idx
-    family: int = -1                  # ders ailesi (Matematik9/10/11 -> aynı)
+    family: int = -1                  # ders ailesi (grup tanımıyla Mat1/Mat2 -> aynı)
 
     # Ön hesaplanan aday yerler; World.build() doldurur.
     slots: tuple = field(default_factory=tuple)      # (idx, footprint) çiftleri
@@ -128,6 +126,18 @@ class World:
 
     class_capacity: list      # sınıf -> açık hücre sayısı
     class_demand: list        # sınıf -> gereken saat
+
+    # Ders aileleri. Varsayılan: her ders kendi ailesi. "Seçilen dersler aynı
+    # ders sayılsın" kuralı aileleri birleştirir; kartın family alanı ve
+    # subject_family[ders] buradan okunur. families[f] görünen ad
+    # ("Edebiyat / Türkçe") — rapor ve tanı metinleri için.
+    families: list = field(default_factory=list)
+    subject_family: list = field(default_factory=list)
+
+    def family_name(self, f: int) -> str:
+        if 0 <= f < len(self.families):
+            return self.families[f]
+        return "?"
 
     def cells(self) -> int:
         return self.D * self.P

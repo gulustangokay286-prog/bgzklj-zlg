@@ -55,6 +55,7 @@ X_CLASS_MAX_HOURS       = "X_CLASS_MAX_HOURS"        # sınıf günde en fazla N
 X_TEACHER_MAX_HOURS     = "X_TEACHER_MAX_HOURS"      # öğretmen günde en fazla N saat
 X_TEACHER_MAX_DAYS      = "X_TEACHER_MAX_DAYS"       # öğretmen haftada en fazla N gün
 X_MIN_DAYS_BETWEEN      = "X_MIN_DAYS_BETWEEN"       # aynı dersin kartları arası N gün
+X_SUBJECT_NOT_ADJACENT  = "X_SUBJECT_NOT_ADJACENT"   # aynı ders art arda gelmesin
 # X ekseni — SIRALAMA kuralları (gün içi konum)
 X_EVEN_SPREAD           = "X_EVEN_SPREAD"            # günlere eşit yay
 X_SAME_DAY_ADJACENT     = "X_SAME_DAY_ADJACENT"      # aynı güne düşerse bitişik olsun
@@ -68,6 +69,8 @@ X_MORNING_ONLY          = "X_MORNING_ONLY"           # öğleden önce
 X_AFTERNOON_ONLY        = "X_AFTERNOON_ONLY"         # öğleden sonra
 X_NOT_LAST_PERIOD       = "X_NOT_LAST_PERIOD"        # son saate konmasın
 X_NOT_FIRST_PERIOD      = "X_NOT_FIRST_PERIOD"       # ilk saate konmasın
+# X ekseni — TANIM kuralları (kısıt değil, motorun sözlüğünü değiştirir)
+X_SUBJECT_GROUP         = "X_SUBJECT_GROUP"          # seçilen dersler aynı ders sayılsın
 
 # Y ekseni — ÇAKIŞMA kuralları (her zaman HARD, kapatılamaz)
 Y_TEACHER_CLASH         = "Y_TEACHER_CLASH"          # öğretmen aynı anda tek yerde
@@ -90,7 +93,19 @@ COUNT_RULES = {X_SUBJECT_ONCE_DAY, X_TEACHER_ONCE_DAY, X_SUBJECT_MAX_HOURS,
 
 # Sıralama kuralları: yerleşim şekline bakar, sayaçla ölçülemez.
 SHAPE_RULES = {X_EVEN_SPREAD, X_SAME_DAY_ADJACENT, X_HARD_NOT_ADJACENT,
+               X_SUBJECT_NOT_ADJACENT,
                X_NO_CLASS_GAP, X_NO_TEACHER_GAP, X_TEACHER_MAX_RUN}
+
+# Tanım kuralları: hiçbir hücreyi yasaklamaz, yalnızca "aynı ders" sözcüğünün
+# anlamını değiştirir. Yerleştirmede bakılmaz; derlemede ders ailelerini kurar.
+DEFINITION_RULES = {X_SUBJECT_GROUP}
+
+# Ders KİMLİĞİ üzerinden ölçülen kurallar. Bunların hepsi kartın ders indeksini
+# değil ders AİLESİNİ karşılaştırır: "Mat1" ile "Mat2" bir ders grubunda
+# birleştirildiyse bu kuralların hepsi ikisini tek ders sayar.
+FAMILY_RULES = {X_SUBJECT_ONCE_DAY, X_SUBJECT_MAX_HOURS, X_SUBJECT_MAX_SESSIONS,
+                X_PRACTICAL_MAX_HOURS, X_MIN_DAYS_BETWEEN, X_EVEN_SPREAD,
+                X_SUBJECT_NOT_ADJACENT, X_HARD_NOT_ADJACENT, Y_SUBJECT_MAX_PARALLEL}
 
 
 @dataclass
@@ -152,6 +167,11 @@ _UI_MAP = [
     ("sonderssaatinezorderskonulmasin",         X_NOT_LAST_PERIOD),
     ("xdersibelirlisaatlerdekalmali",           X_TIME_WINDOW),
     ("ikizordersartardagelmesin",               X_HARD_NOT_ADJACENT),
+    ("aynidersartardagelmesin",                 X_SUBJECT_NOT_ADJACENT),
+    ("aynidersartardatekraretmesin",            X_SUBJECT_NOT_ADJACENT),
+    ("secilenderslerayniderssayilsin",          X_SUBJECT_GROUP),
+    ("ayniderssayilsin",                        X_SUBJECT_GROUP),
+    ("dersgrubu",                               X_SUBJECT_GROUP),
     # ── genişletilmiş katalog (yeni kurallar) ──
     ("ayniogretmenayniguntekraretmesin",        X_TEACHER_ONCE_DAY),
     ("ayniogretmenaynigunegelmesin",            X_TEACHER_ONCE_DAY),
@@ -317,6 +337,21 @@ def compile_rules(raw_relations, world, defaults=True) -> tuple:
                  label=label)
 
         # ── kurala özgü doğrulama ──
+        if kind == X_SUBJECT_GROUP:
+            # "Seçilen dersler aynı ders sayılsın" bir kısıt değil, bir TANIM:
+            # Mat1 ile Mat2'nin, Edebiyat ile Türkçe'nin tek ders olduğunu
+            # söyler. Tek dersle grup kurulmaz; kural yalnızca ders seçer,
+            # öğretmen/sınıf filtresi ve önem derecesi burada anlamsızdır.
+            if len(subs) < 2:
+                rep.skip(label, "en az iki ders seçilmeli; tek dersle grup kurulamaz")
+                continue
+            r.hardness = HARD
+            r.teachers = frozenset()
+            r.klasses = frozenset()
+            rules.append(r)
+            rep.ok(label, r)
+            continue
+
         if kind == X_PAIR_NOT_SAME_DAY and len(subs) < 2:
             # "İki ders aynı güne gelmesin" ancak HANGİ iki ders olduğu
             # seçildiğinde bir anlam taşır. Ekran da bunu böyle kurar: ders
@@ -393,3 +428,99 @@ def compile_rules(raw_relations, world, defaults=True) -> tuple:
         # çizelgeyi değiştirmesi, kullanıcının neyi neden alamadığını
         # göremediği bir motor demektir.
     return rules, rep
+
+
+# ── Ders aileleri ───────────────────────────────────────────────────────────
+#
+# "Aynı ders" sözcüğünün anlamı kullanıcı tarafından genişletilebilir: Mat1 ile
+# Mat2, Edebiyat ile Türkçe, Biyoloji 9 ile Biyoloji 11 çoğu kurumda TEK dersin
+# farklı adlarıdır. Bu birleştirme motorun içine gömülü bir sezgi olarak değil,
+# Planlama İlişkileri ekranında görünen ve kapatılabilen bir satır olarak
+# tanımlanır ("Seçilen dersler aynı ders sayılsın"). Aşağıdaki yardımcılar hem
+# motor hem de elle yerleştirme denetimi tarafından paylaşılır; iki ayrı
+# yorum olursa ekranda izin verilen şey motorda yasak (ya da tersi) olur.
+
+def subject_groups(raw_relations):
+    """Ham planlama ilişkilerinden ders gruplarını çıkarır.
+
+    Döner: liste; her öğe normalize edilmiş ders anahtarlarından oluşan bir
+    küme. Kesişen gruplar birleştirilir (Mat1+Mat2 ve Mat2+Mat 11 -> tek grup).
+    Yalnızca AKTİF satırlar sayılır.
+    """
+    groups = []
+    for raw in (raw_relations or []):
+        if not isinstance(raw, dict) or not raw.get("aktif", True):
+            continue
+        kind = raw.get("kind") or _match_rule_name(norm_key(raw.get("kural") or ""))
+        if kind != X_SUBJECT_GROUP:
+            continue
+        keys = {norm_key(x) for x in (raw.get("dersler") or []) if norm_key(x)}
+        if len(keys) < 2:
+            continue
+        merged = set(keys)
+        rest = []
+        for g in groups:
+            if g & merged:
+                merged |= g
+            else:
+                rest.append(g)
+        rest.append(merged)
+        groups = rest
+    return groups
+
+
+def family_lookup(raw_relations):
+    """norm_key(ders adı) -> aile anahtarı.
+
+    Grupta olmayan dersin ailesi kendi anahtarıdır; gruptaki dersin ailesi
+    grubun sıralı ilk üyesidir. İki adın aynı ders olup olmadığı yalnızca bu
+    anahtarların eşitliğiyle ölçülür.
+    """
+    out = {}
+    for g in subject_groups(raw_relations):
+        head = min(g)
+        for k in g:
+            out[k] = head
+    return out
+
+
+def same_subject(a, b, lookup=None):
+    """İki ders adı aynı dersi mi anlatıyor? (grup tanımları dâhil)"""
+    ka, kb = norm_key(a), norm_key(b)
+    if not ka or not kb:
+        return False
+    if ka == kb:
+        return True
+    lookup = lookup or {}
+    return lookup.get(ka, ka) == lookup.get(kb, kb)
+
+
+def subject_rule_scopes(raw_relations, kinds=None):
+    """Aktif SIKI kuralların kapsamları, kural tipine göre.
+
+    Elle yerleştirme / sürükleme geri bildirimi için: ekranda hangi kuralın
+    hangi ders, öğretmen ve sınıfa uygulandığını motorla aynı sözlükten okur.
+
+    Döner: {kind: [dict(label, subjects, teachers, classes)]} — kümeler
+    normalize edilmiş anahtarlar; boş küme "hepsi" demektir. Ders kümesi ham
+    ad olarak bırakılır, karşılaştırma same_subject() ile yapılır (grup tanımı
+    kapsamı genişletir).
+    """
+    out = {}
+    for raw in (raw_relations or []):
+        if not isinstance(raw, dict) or not raw.get("aktif", True):
+            continue
+        kind = raw.get("kind") or _match_rule_name(norm_key(raw.get("kural") or ""))
+        if not kind or kind in DEFINITION_RULES:
+            continue
+        if kinds and kind not in kinds:
+            continue
+        if _hardness_from(raw.get("onem")) < HARD:
+            continue
+        out.setdefault(kind, []).append(dict(
+            label=str(raw.get("kural") or kind),
+            subjects=[x for x in (raw.get("dersler") or []) if x],
+            teachers={norm_key(x) for x in (raw.get("ogretmenler") or []) if x},
+            classes={norm_class(x) for x in (raw.get("siniflar") or []) if x},
+        ))
+    return out

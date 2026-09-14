@@ -507,6 +507,40 @@ class TimetableSnapshot:
             _upper(k): v for k, v in (c.get("subject_windows") or {}).items()}
         self.pref_max_daily_same_subject = int(c.get("max_daily_same_subject", 4) or 4)
         self.pref_no_consecutive_hard = bool(c.get("no_consecutive_hard"))
+        # Planlama İlişkileri: "aynı ders" sözlüğü ve aktif sıkı kurallar.
+        # Sürükleme geri bildirimi motorla aynı tanımı kullanır — Mat1 + Mat2
+        # bir grupsa burada da tek derstir.
+        try:
+            from scheduler.rules import (family_lookup, subject_rule_scopes,
+                                         X_SUBJECT_ONCE_DAY, X_SUBJECT_NOT_ADJACENT)
+            rels = self.data_store.get("planlama_iliskileri", []) or []
+            self.family = family_lookup(rels)
+            scopes = subject_rule_scopes(rels)
+            self.rule_once_day = scopes.get(X_SUBJECT_ONCE_DAY, [])
+            self.rule_not_adjacent = scopes.get(X_SUBJECT_NOT_ADJACENT, [])
+        except Exception:
+            self.family = {}
+            self.rule_once_day = []
+            self.rule_not_adjacent = []
+
+    def same_subject(self, a, b):
+        try:
+            from scheduler.rules import same_subject
+            return same_subject(a, b, self.family)
+        except Exception:
+            return _upper(a) == _upper(b)
+
+    def rule_applies(self, scopes, subject, teachers, class_name):
+        """Aktif sıkı kural bu derse/öğretmene/sınıfa uygulanıyor mu?"""
+        for sc in scopes:
+            if sc["subjects"] and not any(self.same_subject(subject, x) for x in sc["subjects"]):
+                continue
+            if sc["teachers"] and not any(teacher_key(t) in sc["teachers"] for t in teachers):
+                continue
+            if sc["classes"] and class_key(class_name) not in sc["classes"]:
+                continue
+            return sc["label"]
+        return ""
 
     # -- sorgular -------------------------------------------------------
     def class_lessons_on_day(self, class_name, day):
@@ -682,21 +716,41 @@ def _check_occupancy(snapshot, candidate, conflicts):
 
 def _check_relationships(snapshot, candidate, conflicts):
     """Yumuşak kurallar: aynı gün aynı ders, ders için tercih edilen zaman dilimi."""
+    teachers = lesson_teachers(candidate.lesson)
     for cn in candidate.classes:
         same_day = [e for e in snapshot.class_lessons_on_day(cn, candidate.day)
-                    if _upper(e["subject"]) == _upper(candidate.subject)
+                    if snapshot.same_subject(e["subject"], candidate.subject)
                     and not _same_block(e["raw"], candidate)]
         if same_day:
+            # Planlama İlişkileri'nde sıkı "Aynı ders aynı gün tekrar etmesin"
+            # bu derse uygulanıyorsa bu bir tercih değil, kural ihlalidir.
+            label = snapshot.rule_applies(snapshot.rule_once_day, candidate.subject, teachers, cn)
             conflicts.append(Conflict(
                 SAME_SUBJECT_SAME_DAY, "ders", candidate.subject,
-                candidate.periods, SEV_PREFERENCE,
-                f"{cn} sınıfı {candidate.subject} dersini bugün zaten görüyor."))
+                candidate.periods, SEV_SOFT if label else SEV_PREFERENCE,
+                (f"{label}: {cn} sınıfı {candidate.subject} dersini bugün zaten görüyor "
+                 f"({same_day[0]['subject']})." if label else
+                 f"{cn} sınıfı {candidate.subject} dersini bugün zaten görüyor.")))
         if len(same_day) + 1 > snapshot.pref_max_daily_same_subject:
             conflicts.append(Conflict(
                 SAME_SUBJECT_SAME_DAY, "ders", candidate.subject,
                 candidate.periods, SEV_SOFT,
                 f"{candidate.subject} bir günde en fazla "
                 f"{snapshot.pref_max_daily_same_subject} saat olmalı."))
+        # "Aynı ders art arda gelmesin": bitişik saatte aynı aileden ders.
+        label = snapshot.rule_applies(snapshot.rule_not_adjacent, candidate.subject, teachers, cn)
+        if label:
+            edges = (candidate.start_period - 1, candidate.start_period + candidate.duration)
+            for p in edges:
+                for e in snapshot.by_class.get((class_key(cn), (candidate.day, p)), []):
+                    if _same_block(e["raw"], candidate):
+                        continue
+                    if snapshot.same_subject(e["subject"], candidate.subject):
+                        conflicts.append(Conflict(
+                            CONSECUTIVE_RULE, "ders", candidate.subject,
+                            candidate.periods, SEV_SOFT,
+                            f"{label}: {candidate.subject} ile {e['subject']} art arda geliyor."))
+                        break
 
     window = snapshot.pref_subject_windows.get(_upper(candidate.subject))
     if window:
