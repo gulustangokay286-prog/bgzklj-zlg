@@ -1023,7 +1023,36 @@ class AutoScheduleDialog(QDialog):
         self.worker.iteration_updated.connect(self._on_iteration)
         self.worker.finished_successfully.connect(self._on_finished)
         self.worker.failed.connect(self._on_failed)
+        self.worker.ask_continue_requested.connect(self._on_ask_continue)
         self.worker.start()
+
+    def _on_ask_continue(self, info):
+        """Motor tam çizelgeye ulaşamadı; beklemeye devam edilsin mi?"""
+        if getattr(self, "_closing", False) or self.worker is None or not self.worker.isRunning():
+            if self.worker is not None:
+                self.worker.answer_continue(False)
+            return
+        saat, toplam = info.get("saat", 0), info.get("toplam", 0)
+        gecen = int(info.get("gecen", 0))
+        eksik = max(0, toplam - saat)
+        self.lbl_info.setText(f"{saat}/{toplam} saat — karar bekleniyor")
+        self.lbl_info.setStyleSheet("color: #B45309; font-weight: 600;")
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Question)
+        box.setWindowTitle("Beklemeye devam edilsin mi?")
+        box.setText(f"{saat}/{toplam} saat yerleşti ({eksik} saat açıkta), {gecen} sn geçti.")
+        box.setInformativeText("Motor son turda ilerleme kaydedemedi. Bir tur daha arayabilirim "
+                               "(en fazla 1 dk) ya da bu hâliyle bitirip açıkta kalanları "
+                               "yerleştirilemeyen dersler listesine koyabilirim.")
+        b_wait = box.addButton("Bir tur daha bekle", QMessageBox.AcceptRole)
+        b_stop = box.addButton("Bu hâliyle bitir", QMessageBox.RejectRole)
+        box.setDefaultButton(b_stop)
+        box.exec()
+        devam = box.clickedButton() is b_wait
+        if devam:
+            self.lbl_info.setText("Aramaya devam ediliyor…")
+            self.lbl_info.setStyleSheet("color: #0071E3; font-weight: 500;")
+        self.worker.answer_continue(devam)
 
     def _confirm_feasibility(self):
         """Başlamadan önce kuralları derler; uygulanamayacak olanları SÖYLER.

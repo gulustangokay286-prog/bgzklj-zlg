@@ -74,7 +74,8 @@ def run_worker(worker):
                  optimal_mode=optimal,
                  allow_split=bool(getattr(worker,'allow_split',True)),
                  azami_saniye=float(getattr(worker,'azami_saniye',3600.0)),
-                 progress=progress,cancelled=lambda:not worker._is_running)
+                 progress=progress,cancelled=lambda:not worker._is_running,
+                 ask_continue=getattr(worker,'ask_continue',None))
     per_key=defaultdict(int)
     for x in result.unplaced: per_key[x['class'],x['subject'],x['teacher']]+=x['hours']
     unplaced=[dict(**{'class':cn},subject=subj,teacher=tch,hours=h)

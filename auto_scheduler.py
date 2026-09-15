@@ -2205,6 +2205,10 @@ class AutoSchedulerWorker(QThread):
     iteration_updated = Signal(int, int, int)
     finished_successfully = Signal(dict)
     failed = Signal(str)
+    # Motor tam çizelgeye ulaşamadan bir turu bitirdiğinde arayüze sorar:
+    # "279/285'te kaldı, beklemek ister misin?" Cevap gelene kadar motor
+    # bekler (boşta durur, işlemci yakmaz).
+    ask_continue_requested = Signal(dict)
 
     def __init__(self, data_store, target_class=None, parent=None, fill_empty=True, institution_slug=None, use_vds=False, infinite_mode=True, ignore_other_institutions=False, independent_classes=False, optimal_mode=False, allow_split=True, azami_saniye=3600.0):
         super().__init__(parent)
@@ -2248,3 +2252,24 @@ class AutoSchedulerWorker(QThread):
 
     def stop(self):
         self._is_running = False
+        self.answer_continue(False)
+
+    def ask_continue(self, info):
+        """Motor iş parçacığından çağrılır; arayüzün cevabını bekler."""
+        import threading
+        if not self._is_running:
+            return False
+        self._continue_event = threading.Event()
+        self._continue_answer = False
+        self.ask_continue_requested.emit(dict(info))
+        # Cevap gelene kadar bekle; pencere kapanırsa stop() bayrağı bırakır.
+        while not self._continue_event.wait(0.25):
+            if not self._is_running:
+                return False
+        return bool(self._continue_answer) and self._is_running
+
+    def answer_continue(self, devam: bool):
+        ev = getattr(self, "_continue_event", None)
+        self._continue_answer = bool(devam)
+        if ev is not None:
+            ev.set()

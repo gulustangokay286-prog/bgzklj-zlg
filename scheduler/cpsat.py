@@ -648,8 +648,8 @@ def solve_cpsat(world, rule_list, seconds=60.0, seed=0, workers=8,
 
 
 def solve_optimal(world, rule_list, referans=None, allow_split=True,
-                  tur_saniye=30.0, azami_saniye=3600.0, workers=8,
-                  progress=None, cancelled=None, log=False):
+                  tur_saniye=20.0, azami_saniye=3600.0, workers=8,
+                  progress=None, cancelled=None, log=False, ask_continue=None):
     """OPTİMAL KİP — kanıt gelene kadar durmaz.
 
     Kullanıcının isteği: "optimale çıkana kadar durmasın, optimale ulaşınca
@@ -669,6 +669,12 @@ def solve_optimal(world, rule_list, referans=None, allow_split=True,
     Bloklar gerekirse 1 saatlik parçalara bölünür (2 saatlik ders 1+1,
     2+2+1 ise 1+1+1+1+1). Bölme bedava değildir, ancak başka çare yoksa
     yapılır ve sonuçta kaç kartın bölündüğü raporlanır.
+
+    ask_continue: çağrılabilir; bir tur tam çizelge getirmeden bittiğinde
+      dict(saat, toplam, tur, gecen) ile çağrılır ve True (bekle, bir tur
+      daha) ya da False (bu hâliyle bitir) döner. Arayüz bunu "279/285'te
+      kaldı, beklemek ister misin?" sorusuna bağlar. Verilmezse iki durgun
+      turdan sonra kendiliğinden durur.
 
     Dönüş: (positions, parcalar, placed_hours, status, tur_sayisi)
       parcalar = {kart indeksi: [saat indeksleri]} — bölünerek yerleşenler
@@ -741,10 +747,22 @@ def solve_optimal(world, rule_list, referans=None, allow_split=True,
         if ust_sinir is not None and en_iyi_saat >= ust_sinir:
             durum = "OPTIMAL"       # sınır kanıtı: bu kurallarla daha fazlası yok
             break
-        if durgun >= 2 and en_iyi_saat > 0:
+        # Tam çizelge gelmedi. İkinci turdan itibaren karar kullanıcının:
+        # beklemek istiyorsa bir tur daha, istemiyorsa eldeki en iyi sonuç.
+        if callable(ask_continue) and tur >= 2 and en_iyi_saat > 0:
+            try:
+                devam = bool(ask_continue(dict(saat=en_iyi_saat, toplam=w.total_hours(),
+                                               tur=tur, gecen=_t.monotonic() - baslangic,
+                                               durgun=durgun)))
+            except Exception:
+                devam = False
+            if not devam:
+                durum = "STALLED"
+                break
+        elif durgun >= 2 and en_iyi_saat > 0:
             durum = "STALLED"
             break
-        tur_saniye = min(tur_saniye * 2, 240.0)
+        tur_saniye = min(tur_saniye * 2, 60.0)
 
     if durum != "OPTIMAL" or en_iyi_saat <= 0:
         return en_iyi_pos, en_iyi_parca, max(en_iyi_saat, 0), durum, tur
@@ -761,10 +779,13 @@ def solve_optimal(world, rule_list, referans=None, allow_split=True,
     # kesinleşmiştir, burada yalnızca kullanıcının tablosuna daha yakın bir
     # düzen aranır. Bu yüzden kalan bütçenin tamamını yemesine izin verilmez —
     # aksi hâlde sonuç hazırken uygulama dakikalarca bekliyor gibi görünür.
-    takas_butcesi = min(kalan * 0.25, 45.0)
+    # Tam çizelge bulundu; kullanıcı bekletilmez. Takas aşamasına en fazla
+    # 6 saniye: bu sürede gereksiz bölmeler temizlenir ve eldeki tabloya
+    # yakınlaşılır, bulamazsa 1. aşamanın çizelgesi olduğu gibi kalır.
+    takas_butcesi = min(kalan * 0.25, 6.0)
     takas_bitis = _t.monotonic() + takas_butcesi
     tur2 = 0
-    takas_sure = max(10.0, min(20.0, takas_butcesi))
+    takas_sure = takas_butcesi
     while True:
         tur2 += 1
         if iptal():

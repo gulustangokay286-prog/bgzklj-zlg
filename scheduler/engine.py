@@ -170,7 +170,8 @@ def _bitir(res, w, rules, data_store, completion_first, start):
 def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
           only_classes=None, seed=None, max_attempts=6, progress=None,
           relations=None, cancelled=None, completion_first=True, use_cpsat=True,
-          optimal_mode=False, allow_split=True, azami_saniye=3600.0):
+          optimal_mode=False, allow_split=True, azami_saniye=3600.0,
+          ask_continue=None):
     """Çizelgeyi kurar.
 
     completion_first VARSAYILAN OLARAK AÇIKTIR: çizelgenin tamamlanması
@@ -254,7 +255,8 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
                 progress(rec.get('saat', 0), res.total_hours, rec.get('tur', 1))
         pos, parcalar, placed, durum, tur = solve_optimal(
             w, rules, referans=mevcut, allow_split=allow_split,
-            azami_saniye=azami_saniye, progress=_ilerle, cancelled=cancelled)
+            azami_saniye=azami_saniye, progress=_ilerle, cancelled=cancelled,
+            ask_continue=ask_continue)
         res.positions = pos
         res.split_pieces = parcalar
         res.status = 'optimal' if durum == 'OPTIMAL' else durum.lower()
