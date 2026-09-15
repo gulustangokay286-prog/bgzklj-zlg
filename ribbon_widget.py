@@ -942,12 +942,12 @@ class RibbonButton(QToolButton):
     def __init__(self, label: str, icon_key: str, callback=None, parent=None):
         super().__init__(parent)
         self.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-        self.setIcon(make_icon(icon_key, 32))
-        self.setIconSize(QSize(32, 32))
+        self.setIcon(make_icon(icon_key, 36))
+        self.setIconSize(QSize(36, 36))
         self.setText(label)
         self.setMinimumWidth(56)
         self.setMaximumWidth(76)
-        self.setFixedHeight(62)
+        self.setFixedHeight(66)
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.setCheckable(False)
         self.setCursor(Qt.PointingHandCursor)
@@ -1043,7 +1043,7 @@ class RibbonWideButton(QToolButton):
         self.setIcon(make_icon("geri", 32))
         self.setIconSize(QSize(32, 32))
         self.setText("Geri")
-        self.setFixedSize(50, 62)
+        self.setFixedSize(50, 66)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.setCursor(Qt.PointingHandCursor)
         font = QFont(FONT_FAMILY, 7.5, QFont.Bold)
@@ -1094,10 +1094,10 @@ class _Divider(QWidget):
 
     def paintEvent(self, event):
         p = QPainter(self)
-        h = 30
+        h = 40
         y = (self.height() - h) // 2
         x = self.width() // 2
-        p.fillRect(x, y, 1, h, QColor("#E5E7EB"))
+        p.fillRect(x, y, 1, h, QColor("#CBD5E1"))
         p.end()
 
 
@@ -1109,7 +1109,7 @@ def _divider(parent=None):
 class RibbonPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(109)
+        self.setFixedHeight(96)
         
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
@@ -1117,12 +1117,12 @@ class RibbonPage(QWidget):
         
         self.scroll_area = RibbonScrollArea(self)
         self.content_widget = QWidget(self.scroll_area)
-        self.content_widget.setFixedHeight(107)
+        self.content_widget.setFixedHeight(96)
         self.content_widget.setStyleSheet(f"background: {RIBBON_BG};")
         
         self.main_layout = QHBoxLayout(self.content_widget)
-        # Üstte 24 px'lik başlık şeridi var; düğmeler onun 36 px altında başlar.
-        self.main_layout.setContentsMargins(4, 36, 4, 9)
+        # Düğme 66 px, bant 96 px: üstte ve altta 15'er px — düşeyde tam ortalı.
+        self.main_layout.setContentsMargins(4, 15, 4, 15)
         self.main_layout.setSpacing(2)
         self.main_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         
@@ -1263,7 +1263,7 @@ class RibbonWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(143)
+        self.setFixedHeight(130)
         self._pages = []
         self._tab_buttons = []
         self._active = 0
@@ -1289,14 +1289,14 @@ class RibbonWidget(QWidget):
         # (geri dönüşte tersi), bu arada ikisi de kısa süre görünürdür. Bir
         # QVBoxLayout iki sayfayı üst üste koyamaz ve konumu animasyona vermez.
         self._page_area = QWidget(self)
-        self._page_area.setFixedHeight(109)
+        self._page_area.setFixedHeight(96)
         self._page_area.setStyleSheet(f"background: {RIBBON_BG};")
         outer.addWidget(self._page_area)
         self._anim = None
 
     def _apply_height(self):
         tabs = 34 if self._tab_bar.isVisibleTo(self) else 0
-        page = 0 if getattr(self, "_collapsed", False) else 109
+        page = 0 if getattr(self, "_collapsed", False) else 96
         self.setFixedHeight(max(tabs + page, 1))
 
     def set_collapsed(self, collapsed: bool):

@@ -689,9 +689,10 @@ class MainWindow(QMainWindow):
         # En üst: ortalı başlık şeridi ("Chenkron 2026 — Kurum • v141 Ad")
         self.top_title_lbl = QLabel("", root)
         self.top_title_lbl.setAlignment(Qt.AlignCenter)
-        self.top_title_lbl.setFixedHeight(24)
-        self.top_title_lbl.setFont(QFont(FONT_FAMILY, 10, QFont.DemiBold))
-        self.top_title_lbl.setStyleSheet("color: #334155; background: #FFFFFF; border: none; padding-top: 4px;")
+        self.top_title_lbl.setFixedHeight(32)
+        self.top_title_lbl.setFont(QFont(FONT_FAMILY, 11, QFont.DemiBold))
+        self.top_title_lbl.setStyleSheet("color: #1E293B; background: #F8FAFC; border: none; "
+                                         "border-bottom: 1px solid #E5E7EB;")
         root_layout.addWidget(self.top_title_lbl)
 
         # Ribbon
@@ -773,20 +774,20 @@ class MainWindow(QMainWindow):
         p1.add_button("Dersler",        "ders",     self._open_subjects)
         p1.add_button("Sınıflar",       "sinif",    self._open_classes)
         p1.add_button("Derslikler",     "derslik",  self._open_rooms)
-        p1.add_button("Öğretmenler",    "ogretmen", self._open_teachers)
-        p1.add_button("Seçmeli\nDersler","secim",   self._open_electives)
+        p1.add_button("Öğretmen",       "ogretmen", self._open_teachers)
+        p1.add_button("Seçmeli","secim",   self._open_electives)
         p1.add_button("Planlama\nİlişkileri","iliskiler",self._open_relations)
         p1.add_divider()
-        p1.add_button("Planlama\nÖncesi Kontrol","kontrol",self._act_test_timetable)
-        p1.add_button("Otomatik\nPlanlamayı Başlat","otomatik",self._act_auto_schedule)
-        p1.add_button("Bulut Tabanlı\nPlanlama","bulut_olustur",self._act_cloud_timetable)
-        p1.add_button("Planlama Sonrası\nKontrol","kontrol",self._act_verify_timetable)
-        p1.add_button("Çizelgeyi\nSıfırla","temizle",self._act_clear_schedule)
+        p1.add_button("Ön\nKontrol","kontrol",self._act_test_timetable)
+        p1.add_button("Otomatik\nPlanla","otomatik",self._act_auto_schedule)
+        p1.add_button("Bulut\nPlanlama","bulut_olustur",self._act_cloud_timetable)
+        p1.add_button("Son\nKontrol","kontrol",self._act_verify_timetable)
+        p1.add_button("Sıfırla","temizle",self._act_clear_schedule)
         p1.add_divider()
         p1.add_button("Temel\nBilgiler",  "okul",    self._open_school_info)
-        p1.add_button("Evden Kod\nGüncelle", "bulut", self._act_check_updates)
-        p1.add_button("İnternet\nHesabı","internet", lambda: __import__('webbrowser').open("https://chenki.net/"))
-        p1.add_button("Sorular?\nYorumlar?","yardim",lambda: __import__('dialogs.faq_dialog', fromlist=['FAQDialog']).FAQDialog(self).exec())
+        p1.add_button("Güncelle", "bulut", self._act_check_updates)
+        p1.add_button("Hesabım","internet", lambda: __import__('webbrowser').open("https://chenki.net/"))
+        p1.add_button("Yardım","yardim",lambda: __import__('dialogs.faq_dialog', fromlist=['FAQDialog']).FAQDialog(self).exec())
         p1.add_divider()
         # Sekme şeridi kaldırıldı: Ana Menü diğer sekmelerin neredeyse tamamını
         # taşıyor. Kalan düğmeler "Diğer" sayfasında; düğme şeridi o sayfaya
@@ -1107,7 +1108,8 @@ class MainWindow(QMainWindow):
                 border: none;
             }
         """)
-        top_header_lay.addWidget(self.ver_lbl)
+        # Kurum • sürüm metni artık en üstteki ortalı başlıkta; burada tekrar yazılmaz.
+        self.ver_lbl.hide()
         self._update_header_title()
 
         self._tab_widget.setCornerWidget(top_header_bar, Qt.TopRightCorner)
