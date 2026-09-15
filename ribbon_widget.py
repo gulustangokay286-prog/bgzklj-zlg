@@ -1169,7 +1169,8 @@ class RibbonPage(QWidget):
         for i in range(self.main_layout.count()):
             w = self.main_layout.itemAt(i).widget()
             if w is not None and not isinstance(w, RibbonButton):
-                fixed += w.sizeHint().width()
+                # Sabit genişlikli ayraçta gerçek genişlik (2) sizeHint'ten (3) küçük.
+                fixed += w.width() if w.maximumWidth() == w.minimumWidth() else w.sizeHint().width()
         # Bütün düğmeler EŞİT genişlikte ve satırı DOLDURUR: dar pencerede
         # daralır (en az 50 px), geniş pencerede genişler (en fazla 118 px).
         # Tam ekranda sola yığılıp sağda boşluk bırakmak yerine şerit boydan
@@ -1193,19 +1194,17 @@ class RibbonPage(QWidget):
                 b.setFont(f)
         # Artan boşluk iki kenara eşit dağıtılır; şerit sola yapışık, sağda
         # boşluklu durmaz.
-        leftover = max(0, width - fixed - cap * len(btns)) if not self.scroll_area._scroll_enabled else 0
-        self.main_layout.setContentsMargins(base_lr + leftover // 2, m.top(),
-                                            base_lr + leftover - leftover // 2, m.bottom())
-        if not self.scroll_area._scroll_enabled:
-            # İkinci geçiş: gerçek geometriyi ölçüp kalan dengesizliği kapat.
-            self.main_layout.activate()
-            left_gap = btns[0].geometry().left()
-            right_gap = self.content_widget.width() - btns[-1].geometry().right() - 1
-            diff = right_gap - left_gap
-            if diff:
-                mm = self.main_layout.contentsMargins()
-                self.main_layout.setContentsMargins(max(0, mm.left() + diff // 2), mm.top(),
-                                                    max(0, mm.right() - (diff - diff // 2)), mm.bottom())
+        if self.scroll_area._scroll_enabled:
+            self.main_layout.setContentsMargins(base_lr, m.top(), base_lr, m.bottom())
+            return
+        # Sondaki esnek boşluk (stretch) bir öğe sayılır ve önüne bir aralık
+        # (spacing) girer; sağ kenar payı o kadar düşülür ki iki kenar eşit olsun.
+        last = self.main_layout.itemAt(self.main_layout.count() - 1)
+        trailing = self.main_layout.spacing() if (last is not None and last.widget() is None) else 0
+        leftover = max(0, width - fixed - cap * len(btns) + trailing)
+        left = base_lr + leftover // 2
+        right = max(0, base_lr + (leftover - leftover // 2) - trailing)
+        self.main_layout.setContentsMargins(left, m.top(), right, m.bottom())
 
 
 def make_menu_icon(symbol: str, color1: str, color2: str) -> QIcon:
