@@ -235,9 +235,11 @@ def selection_is_group(raw, n_subjects=None) -> bool:
     """
     if not isinstance(raw, dict):
         return False
-    kind = raw.get("kind") or _match_rule_name(norm_key(raw.get("kural") or ""))
+    kind = raw.get("kind") or _match_rule_name(norm_key(_strip_group_no(raw.get("kural") or "")))
     if kind not in SELECTION_GROUP_KINDS:
         return False
+    if len(rule_groups(raw)) > 1:
+        return True     # gruplara ayrılmış seçim: her grup tek derstir
     keys = {norm_key(x) for x in (raw.get("dersler") or []) if norm_key(x)}
     if len(keys) < 2:
         return False
@@ -247,6 +249,12 @@ def selection_is_group(raw, n_subjects=None) -> bool:
     if n_subjects is None:
         return len(keys) <= 8
     return len(keys) * 2 < int(n_subjects)
+
+
+def _strip_group_no(label: str) -> str:
+    """'Kural (2/3)' -> 'Kural' (grup numarası ad eşleşmesini bozmasın)."""
+    import re as _re
+    return _re.sub(r"\s*\(\d+/\d+\)\s*$", "", str(label or ""))
 
 
 def _match_rule_name(key: str):
@@ -296,6 +304,68 @@ def _resolve(names, lookup, kind, label, report):
     return frozenset(out)
 
 
+def rule_groups(raw):
+    """Kaydın ders grupları: [[ad, ad, ...], ...].
+
+    Bir kural satırı birden çok ders grubu taşıyabilir ("gruplar" alanı):
+    "İki ders aynı güne gelmesin: Mat1 + Mat2 | Türkçe + Edebiyat" demek,
+    Mat1 ile Mat2 aynı güne gelmesin VE Türkçe ile Edebiyat aynı güne
+    gelmesin demektir — Mat1 ile Türkçe arasında bir bağ yoktur. Eskiden
+    bunun için iki ayrı satır gerekiyordu; dört ders tek satırda seçilince
+    dördü birden "günde en fazla biri" oluyordu.
+
+    "gruplar" yoksa "dersler" tek gruptur.
+    """
+    if not isinstance(raw, dict):
+        return []
+    groups = raw.get("gruplar")
+    out = []
+    if isinstance(groups, list):
+        for g in groups:
+            if isinstance(g, (list, tuple)):
+                names = [str(x) for x in g if x and str(x).strip()]
+                if names:
+                    out.append(names)
+    if not out:
+        names = [str(x) for x in (raw.get("dersler") or []) if x and str(x).strip()]
+        out = [names] if names else []
+    return out
+
+
+# Grupların ayrı ayrı anlam taşıdığı kurallar. Diğer kurallarda (günde en
+# fazla N saat gibi) gruplama bir şey değiştirmez, seçim birleşik okunur.
+GROUPED_KINDS = {X_PAIR_NOT_SAME_DAY, X_SUBJECT_ONCE_DAY, X_SUBJECT_NOT_ADJACENT,
+                 X_SUBJECT_GROUP}
+
+
+def expand_groups(raw_relations):
+    """Çok gruplu satırları grup başına bir kayda açar.
+
+    Motor ve arayüz yardımcıları hep bu açılmış listeyi görür; "gruplar"
+    alanını yalnızca burası bilir. Açılan kayıtlarda dersler = grup, gruplar
+    alanı yoktur; etiket "(2/3)" ile numaralanır ki rapor hangi grubun
+    uygulanmadığını söyleyebilsin.
+    """
+    out = []
+    for raw in (raw_relations or []):
+        if not isinstance(raw, dict):
+            out.append(raw)
+            continue
+        kind = raw.get("kind") or _match_rule_name(norm_key(raw.get("kural") or ""))
+        groups = rule_groups(raw)
+        if kind not in GROUPED_KINDS or len(groups) < 2:
+            out.append(raw)
+            continue
+        for k, g in enumerate(groups, 1):
+            piece = dict(raw)
+            piece.pop("gruplar", None)
+            piece["dersler"] = list(g)
+            piece["kural"] = f"{raw.get('kural') or kind} ({k}/{len(groups)})"
+            piece["_grup_no"] = k
+            out.append(piece)
+    return out
+
+
 class RuleReport:
     """Derleme sırasında biriken uyarılar. Sessiz kayıp burada biter."""
 
@@ -334,14 +404,14 @@ def compile_rules(raw_relations, world, defaults=True) -> tuple:
     cls_lookup = {"norm": norm_class,
                   "map": {norm_class(n): i for i, n in enumerate(world.classes)}}
 
-    for raw in (raw_relations or []):
+    for raw in expand_groups(raw_relations):
         if not isinstance(raw, dict):
             continue
         label = str(raw.get("kural") or "?")
         if not raw.get("aktif", True):
             continue
 
-        key = norm_key(label)
+        key = norm_key(_strip_group_no(label))
         kind = raw.get("kind") or _match_rule_name(key)
         if kind not in set(_AXIS):
             kind = None
@@ -492,10 +562,10 @@ def subject_groups(raw_relations, n_subjects=None):
     Yalnızca AKTİF satırlar sayılır.
     """
     groups = []
-    for raw in (raw_relations or []):
+    for raw in expand_groups(raw_relations):
         if not isinstance(raw, dict) or not raw.get("aktif", True):
             continue
-        kind = raw.get("kind") or _match_rule_name(norm_key(raw.get("kural") or ""))
+        kind = raw.get("kind") or _match_rule_name(norm_key(_strip_group_no(raw.get("kural") or "")))
         if kind != X_SUBJECT_GROUP and not selection_is_group(raw, n_subjects):
             continue
         keys = {norm_key(x) for x in (raw.get("dersler") or []) if norm_key(x)}
@@ -551,10 +621,10 @@ def subject_rule_scopes(raw_relations, kinds=None):
     kapsamı genişletir).
     """
     out = {}
-    for raw in (raw_relations or []):
+    for raw in expand_groups(raw_relations):
         if not isinstance(raw, dict) or not raw.get("aktif", True):
             continue
-        kind = raw.get("kind") or _match_rule_name(norm_key(raw.get("kural") or ""))
+        kind = raw.get("kind") or _match_rule_name(norm_key(_strip_group_no(raw.get("kural") or "")))
         if not kind or kind in DEFINITION_RULES:
             continue
         if kinds and kind not in kinds:

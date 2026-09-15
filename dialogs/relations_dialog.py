@@ -93,10 +93,19 @@ def make_vector_icon(name: str, size: int = 16, color_hex: str = "#0F172A") -> Q
 
 # ─── Gelişmiş Arama & Çoklu Seçim Popup ──────────────────────────
 class MultiSelectDialog(QDialog):
-    def __init__(self, items, selected_items, title, parent=None):
+    """Çoklu seçim; groups verilirse GRUP kipi.
+
+    Grup kipinde seçilen dersler "Seçilenleri Grup Yap" ile bir gruba
+    dönüşür (Mat1 + Mat2), sonra başka dersler seçilip ikinci grup yapılır
+    (Türkçe + Edebiyat). Her grup kuralda ayrı ayrı uygulanır; gruplar
+    arasında bağ yoktur. Eskiden bunun için satır satır kural gerekiyordu.
+    """
+    def __init__(self, items, selected_items, title, parent=None, groups=None):
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.resize(380, 500)
+        self.groups_mode = groups is not None
+        self.groups = [list(g) for g in (groups or []) if g]
+        self.resize(380, 620 if self.groups_mode else 500)
         self.setStyleSheet(f"""
             QDialog {{ background: #F8FAFC; font-family: {FONT_FAMILY}; }}
             QLineEdit {{
@@ -199,7 +208,46 @@ class MultiSelectDialog(QDialog):
         self.list_widget.setSelectionMode(QAbstractItemView.MultiSelection)
         layout.addWidget(self.list_widget, 1)
 
+        if self.groups_mode:
+            lbl_g = QLabel("Gruplar — her grup ayrı ayrı uygulanır (Mat1 + Mat2 | Türkçe + Edebiyat)")
+            lbl_g.setStyleSheet("color: #1E3A8A; font-size: 11.5px; font-weight: 600; background: transparent; border: none;")
+            lbl_g.setWordWrap(True)
+            layout.addWidget(lbl_g)
+            self.group_list = QListWidget()
+            self.group_list.setFixedHeight(96)
+            layout.addWidget(self.group_list)
+            g_btns = QHBoxLayout()
+            g_btns.setSpacing(8)
+            btn_make = QPushButton(" Seçilenleri Grup Yap")
+            btn_make.setIcon(make_vector_icon("plus", 12, "#0071E3"))
+            btn_drop = QPushButton(" Grubu Kaldır")
+            btn_drop.setIcon(make_vector_icon("trash", 12, "#DC2626"))
+            for b in (btn_make, btn_drop):
+                b.setFixedHeight(28)
+                b.setCursor(Qt.PointingHandCursor)
+                b.setStyleSheet("""
+                    QPushButton { background: #FFFFFF; color: #0F172A; border: 1px solid #CBD5E1;
+                                  border-radius: 14px; font-size: 11px; font-weight: 600; padding: 0 12px; }
+                    QPushButton:hover { background: #F8FAFC; border-color: #0071E3; color: #0071E3; }
+                """)
+            btn_make.clicked.connect(self._make_group)
+            btn_drop.clicked.connect(self._drop_group)
+            g_btns.addWidget(btn_make)
+            g_btns.addWidget(btn_drop)
+            g_btns.addStretch()
+            layout.addLayout(g_btns)
+            self.lbl_group_note = QLabel("")
+            self.lbl_group_note.setStyleSheet("color: #64748B; font-size: 11px; background: transparent; border: none;")
+            self.lbl_group_note.setWordWrap(True)
+            layout.addWidget(self.lbl_group_note)
+            # Gruplu dersler seçili sayılmaz; listede yalnızca gruplanmamış seçim kalır.
+            grouped = {x for g in self.groups for x in g}
+            self.selected -= grouped
+
         self._populate_list()
+        if self.groups_mode:
+            self._refresh_groups()
+            self.list_widget.itemSelectionChanged.connect(self._refresh_groups)
 
         # Alt Butonlar (Silindirik / Pill)
         btn_layout = QHBoxLayout()
@@ -246,44 +294,117 @@ class MultiSelectDialog(QDialog):
         btn_layout.addWidget(btn_ok)
         layout.addLayout(btn_layout)
 
+    def _name(self, item):
+        return item.data(Qt.UserRole) or item.text()
+
+    def _group_of(self, name):
+        for k, g in enumerate(self.groups, 1):
+            if name in g:
+                return k
+        return 0
+
     def _populate_list(self, filter_text=""):
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
             if item.isSelected():
-                self.selected.add(item.text())
+                self.selected.add(self._name(item))
             else:
-                self.selected.discard(item.text())
+                self.selected.discard(self._name(item))
 
         self.list_widget.clear()
         filter_lower = filter_text.strip().lower()
 
         for item_text in sorted(self.all_items):
             if not filter_lower or filter_lower in item_text.lower():
-                list_item = QListWidgetItem(item_text)
+                k = self._group_of(item_text) if self.groups_mode else 0
+                list_item = QListWidgetItem(f"{item_text}   — Grup {k}" if k else item_text)
+                list_item.setData(Qt.UserRole, item_text)
+                if k:
+                    list_item.setForeground(QBrush(QColor("#1D4ED8")))
                 self.list_widget.addItem(list_item)
-                if item_text in self.selected:
+                if item_text in self.selected and not k:
                     list_item.setSelected(True)
+
+    # ── grup kipi ──
+    def _make_group(self):
+        names = [self._name(self.list_widget.item(i)) for i in range(self.list_widget.count())
+                 if self.list_widget.item(i).isSelected()]
+        names = [n for n in names if not self._group_of(n)]
+        if len(names) < 2:
+            QMessageBox.information(self, "Grup", "Grup yapmak için listeden en az iki ders seçin.")
+            return
+        self.groups.append(sorted(names))
+        for n in names:
+            self.selected.discard(n)
+        self._populate_list(self.search_input.text())
+        self._refresh_groups()
+
+    def _drop_group(self):
+        row = self.group_list.currentRow()
+        if row < 0 or row >= len(self.groups):
+            return
+        self.groups.pop(row)
+        self._populate_list(self.search_input.text())
+        self._refresh_groups()
+
+    def _refresh_groups(self):
+        self.group_list.clear()
+        for k, g in enumerate(self.groups, 1):
+            self.group_list.addItem(f"Grup {k}:  " + " + ".join(g))
+        loose = len(self._loose_selected())
+        if self.groups and loose:
+            self.lbl_group_note.setText(f"Gruba alınmamış {loose} seçili ders "
+                                        + ("kendi başına bir grup olur." if loose >= 2 else "tek başına anlamsızdır, yok sayılır."))
+        elif self.groups:
+            self.lbl_group_note.setText("")
+        else:
+            self.lbl_group_note.setText("Grup yapmazsanız seçilen bütün dersler tek grup sayılır.")
+
+    def _loose_selected(self):
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            n = self._name(item)
+            if not self._group_of(n):
+                if item.isSelected():
+                    self.selected.add(n)
+                else:
+                    self.selected.discard(n)
+        return sorted(n for n in self.selected if not self._group_of(n))
+
+    def get_groups(self):
+        """Gruplar + gruba alınmamış seçim (≥2 ise tek grup olarak)."""
+        out = [list(g) for g in self.groups]
+        loose = self._loose_selected() if self.groups_mode else sorted(self.selected)
+        if len(loose) >= 2 or not out:
+            if loose:
+                out.append(loose)
+        return out
 
     def _filter_list(self, text):
         self._populate_list(text)
 
     def _select_all(self):
         for i in range(self.list_widget.count()):
-            self.list_widget.item(i).setSelected(True)
-            self.selected.add(self.list_widget.item(i).text())
+            item = self.list_widget.item(i)
+            if self.groups_mode and self._group_of(self._name(item)):
+                continue
+            item.setSelected(True)
+            self.selected.add(self._name(item))
 
     def _select_none(self):
         for i in range(self.list_widget.count()):
             self.list_widget.item(i).setSelected(False)
-            self.selected.discard(self.list_widget.item(i).text())
+            self.selected.discard(self._name(self.list_widget.item(i)))
 
     def get_selected(self):
+        if self.groups_mode:
+            return sorted({x for g in self.get_groups() for x in g})
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
             if item.isSelected():
-                self.selected.add(item.text())
+                self.selected.add(self._name(item))
             else:
-                self.selected.discard(item.text())
+                self.selected.discard(self._name(item))
         return sorted(list(self.selected))
 
 
@@ -337,11 +458,25 @@ class EditRelationDialog(QDialog):
         """)
 
         self.selected_subjects = []
+        self.selected_groups = []      # [[ders, ...], ...] — çok gruplu seçim
         self.selected_teachers = []
         self.selected_classes = []
 
         self._build_ui()
         self._load_data()
+
+    def _grouped_kind(self):
+        try:
+            from scheduler.rules import _match_rule_name, GROUPED_KINDS
+            from scheduler.model import norm_key
+            return _match_rule_name(norm_key(self.cb_rule.currentText())) in GROUPED_KINDS
+        except Exception:
+            return False
+
+    def _subjects_text(self):
+        if len(self.selected_groups) > 1:
+            return " | ".join(" + ".join(g) for g in self.selected_groups)
+        return ", ".join(self.selected_subjects[:3]) + ("..." if len(self.selected_subjects) > 3 else "")
 
     def _build_ui(self):
         main_layout = QVBoxLayout(self)
@@ -587,6 +722,12 @@ class EditRelationDialog(QDialog):
         # demektir ve çizelge oturmaz. Aynı uyarı "tek ders" sayılan seçim için de.
         many = (rule == "İki ders aynı güne gelmesin"
                 or (self._selection_group_kind() and self.chk_tek_ders.isChecked()))
+        if many and self.selected_groups and any(len(g) < 2 for g in self.selected_groups):
+            QMessageBox.warning(self, "Grup", "Her grupta en az iki ders olmalı.")
+            self._change_subjects()
+            return
+        if self.selected_groups:
+            n_subj = max(len(g) for g in self.selected_groups)   # uyarı en büyük gruba bakar
         if many and n_subj >= 2:
             total = max(1, len(self._all_subject_names()))
             if n_subj >= total or n_subj > 6 or n_subj * 2 >= total:
@@ -623,7 +764,9 @@ class EditRelationDialog(QDialog):
         self.cb_subj.clear()
         self.cb_subj.addItem("Tüm dersler")
         if self.selected_subjects:
-            txt = f"Seçili ({len(self.selected_subjects)} ders): {', '.join(self.selected_subjects[:3])}{'...' if len(self.selected_subjects) > 3 else ''}"
+            txt = (f"Seçili ({len(self.selected_groups)} grup): {self._subjects_text()}"
+                   if len(self.selected_groups) > 1 else
+                   f"Seçili ({len(self.selected_subjects)} ders): {self._subjects_text()}")
             self.cb_subj.addItem(txt)
             self.cb_subj.setCurrentIndex(1)
         else:
@@ -787,9 +930,14 @@ class EditRelationDialog(QDialog):
         if not items:
             items = ["Matematik", "Türkçe", "Fizik", "Kimya", "Biyoloji", "Beden Eğitimi", "İngilizce", "Görsel Sanatlar", "Müzik"]
 
-        d = MultiSelectDialog(items, self.selected_subjects, "Dersleri Seç", self)
+        grouped = self._grouped_kind()
+        d = MultiSelectDialog(items, self.selected_subjects,
+                              "Dersleri Seç" + (" (gruplayabilirsiniz)" if grouped else ""), self,
+                              groups=(self.selected_groups if grouped else None))
         if d.exec():
             self.selected_subjects = d.get_selected()
+            groups = d.get_groups() if grouped else []
+            self.selected_groups = groups if len(groups) > 1 else []
             self._auto_select_scope_for_subjects()
             self._refresh_combos_ui()
             self._refresh_tek_ders_visibility()
@@ -828,6 +976,14 @@ class EditRelationDialog(QDialog):
                 self.cb_rule.setCurrentIndex(idx)
 
             self.selected_subjects = list(self.relation_data.get("dersler", []))
+            try:
+                from scheduler.rules import rule_groups
+                g = rule_groups(self.relation_data)
+                self.selected_groups = [list(x) for x in g] if len(g) > 1 else []
+                if self.selected_groups:
+                    self.selected_subjects = sorted({x for grp in self.selected_groups for x in grp})
+            except Exception:
+                self.selected_groups = []
             self.selected_teachers = list(self.relation_data.get("ogretmenler", []))
             self.selected_classes = list(self.relation_data.get("siniflar", []))
 
@@ -874,6 +1030,8 @@ class EditRelationDialog(QDialog):
             "tek_ders": (bool(self.chk_tek_ders.isChecked())
                          if (self._selection_group_kind() and self.cb_subj.currentIndex() == 1
                              and len(self.selected_subjects) >= 2) else None),
+            "gruplar": ([list(g) for g in self.selected_groups]
+                        if (self.cb_subj.currentIndex() == 1 and len(self.selected_groups) > 1) else None),
         }
 
 
@@ -1169,9 +1327,16 @@ class PlanningRelationsDialog(QDialog):
                 tek = selection_is_group(item, subject_count(self.data_store))
             except Exception:
                 tek = False
+            try:
+                from scheduler.rules import rule_groups
+                grps = rule_groups(item)
+            except Exception:
+                grps = [subj] if subj else []
             unusable = (item.get("kural") == "İki ders aynı güne gelmesin" or is_group) and len(subj) < 2
             if unusable:
                 subj_text = "⚠ Ders seçilmedi — kural uygulanmaz"
+            elif len(grps) > 1:
+                subj_text = "  |  ".join(" + ".join(g) for g in grps) + ("  (her grup tek ders)" if tek else "")
             elif is_group or tek:
                 subj_text = " + ".join(subj) + ("  (tek ders)" if tek else "")
             else:

@@ -146,6 +146,32 @@ class NativeTests(unittest.TestCase):
         r=self.run_strict(d);self.assertTrue(r.complete)
         self.assertFalse(any(x.kind==R.X_SUBJECT_GROUP for x in r.rules))
 
+    def test_grouped_pair_rule_keeps_groups_independent(self):
+        # Mat1+Mat2 | Fizik+Kimya: Mat1 ile Fizik aynı güne gelebilir, Mat1 ile Mat2 gelemez.
+        d=self._group_store(D=2)
+        d['dersler']=[{'ad':'Mat1'},{'ad':'Mat2'},{'ad':'Fizik'},{'ad':'Kimya'},{'ad':'Tarih'}]
+        d['atamalar']=[dict(**{'class':'9A'},subject=sb,teacher=t,type='1') for sb,t in
+                       [('Mat1','Öğretmen A'),('Mat2','Öğretmen A'),('Fizik','Öğretmen B'),('Kimya','Öğretmen B')]]
+        d['planlama_iliskileri']=[rule('İki ders aynı güne gelmesin',dersler=['Mat1','Mat2','Fizik','Kimya'],
+                                       gruplar=[['Mat1','Mat2'],['Fizik','Kimya']])]
+        r=self.run_strict(d);self.assertTrue(r.complete)
+        day={x['subject']:x['day'] for x in r.placements}
+        self.assertNotEqual(day['Mat1'],day['Mat2']);self.assertNotEqual(day['Fizik'],day['Kimya'])
+        # Aynı dört ders TEK grup olsaydı iki güne sığmazdı.
+        d['planlama_iliskileri']=[rule('İki ders aynı güne gelmesin',dersler=['Mat1','Mat2','Fizik','Kimya'])]
+        self.assertFalse(self.run_strict(d).complete)
+
+    def test_grouped_once_day_makes_each_group_one_lesson(self):
+        d=self._group_store(D=2)
+        d['dersler']=[{'ad':'Mat1'},{'ad':'Mat2'},{'ad':'Türkçe'},{'ad':'Edebiyat'},{'ad':'Tarih'}]
+        d['atamalar']=[dict(**{'class':'9A'},subject=sb,teacher=t,type='1') for sb,t in
+                       [('Mat1','Öğretmen A'),('Mat2','Öğretmen A'),('Türkçe','Öğretmen B'),('Edebiyat','Öğretmen B')]]
+        d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin',dersler=['Mat1','Mat2','Türkçe','Edebiyat'],
+                                       gruplar=[['Mat1','Mat2'],['Türkçe','Edebiyat']])]
+        r=self.run_strict(d);self.assertTrue(r.complete)
+        fams={r.world.family_name(r.world.subject_family[r.world.subjects.index(x)]) for x in ('Mat1','Türkçe')}
+        self.assertEqual(fams,{'Mat1 / Mat2','Türkçe / Edebiyat'})
+
     def test_same_subject_not_adjacent(self):
         d=self._group_store(D=1,P=3)
         d['planlama_iliskileri']=[rule('Aynı ders art arda gelmesin'),
