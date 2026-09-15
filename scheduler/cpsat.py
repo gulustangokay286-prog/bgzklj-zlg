@@ -780,9 +780,9 @@ def solve_optimal(world, rule_list, referans=None, allow_split=True,
     # düzen aranır. Bu yüzden kalan bütçenin tamamını yemesine izin verilmez —
     # aksi hâlde sonuç hazırken uygulama dakikalarca bekliyor gibi görünür.
     # Tam çizelge bulundu; kullanıcı bekletilmez. Takas aşamasına en fazla
-    # 6 saniye: bu sürede gereksiz bölmeler temizlenir ve eldeki tabloya
+    # 3 saniye: bu sürede gereksiz bölmeler temizlenir ve eldeki tabloya
     # yakınlaşılır, bulamazsa 1. aşamanın çizelgesi olduğu gibi kalır.
-    takas_butcesi = min(kalan * 0.25, 6.0)
+    takas_butcesi = min(kalan * 0.25, 3.0)
     takas_bitis = _t.monotonic() + takas_butcesi
     tur2 = 0
     takas_sure = takas_butcesi

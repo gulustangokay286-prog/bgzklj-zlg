@@ -161,7 +161,15 @@ def _bitir(res, w, rules, data_store, completion_first, start):
                 block_id=f'c{c.cid}',card_id=c.cid,assignment_index=c.origin,
                 locked=c.locked_at is not None,is_manual=c.locked_at is not None,is_filler=False,
                 color=original.get('color') or original.get('renk')))
-    if res.complete: res.status='complete'
+    if res.complete:
+        res.status='complete'
+        # Tanı, kuralların DELİNEMEZ olduğu varsayımıyla bir üst sınır
+        # hesaplar ("en az 1 sınıf-saati yerleşemez"). Çizelge tamamlandıysa
+        # bu tahmin boşa çıkmıştır; 285/285'in yanında "1 saat oturmaz"
+        # yazması kullanıcıyı çizelgenin eksik olduğuna inandırıyordu.
+        eski=[x['message'] for x in res.diagnostics]
+        res.diagnostics=[]
+        res.warnings=[w for w in res.warnings if w not in eski]
     elif res.diagnostics and res.status!='cancelled': res.status='infeasible'
     res.elapsed=time.monotonic()-start
     return res

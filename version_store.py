@@ -1431,17 +1431,44 @@ def find_version_by_content(slug: str, data_store: dict) -> str:
     ver_dir = _versions_dir(slug)
     if not os.path.isdir(ver_dir):
         return ""
+    # Her sürüm dosyasını baştan okuyup özetlemek yerine (134 sürüm × 280 KB
+    # = her kayıtta yarım saniye, arayüz iş parçacığında) dosyanın
+    # _version_meta.data_hash'i kullanılır; o alan her yazımda aynı
+    # compute_data_hash ile üretilir. Alanı olmayan (eski/bulut) dosya bir
+    # kez hesaplanır ve (mtime, boyut) imzasıyla önbelleğe alınır.
     for fn in sorted(os.listdir(ver_dir)):
         if not fn.endswith(".roz"):
             continue
-        try:
-            with open(os.path.join(ver_dir, fn), "r", encoding="utf-8") as f:
-                existing = json.load(f)
-        except Exception:
-            continue
-        if compute_data_hash(existing) == target:
+        if _content_hash_of(os.path.join(ver_dir, fn)) == target:
             return fn
     return ""
+
+
+_content_hash_cache = {}     # filepath -> ((mtime_ns, size), hash)
+
+
+def _content_hash_of(filepath: str) -> str:
+    try:
+        st = os.stat(filepath)
+        sig = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return ""
+    cached = _content_hash_cache.get(filepath)
+    if cached is not None and cached[0] == sig:
+        return cached[1]
+    h = ""
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            existing = json.load(f)
+        h = (existing.get("_version_meta") or {}).get("data_hash") or ""
+        if not h:
+            h = compute_data_hash(existing)
+    except Exception:
+        h = ""
+    if len(_content_hash_cache) > 4000:
+        _content_hash_cache.clear()
+    _content_hash_cache[filepath] = (sig, h)
+    return h
 
 
 def save_version(slug: str, data_store: dict, source: str = "manual", note: str = "",

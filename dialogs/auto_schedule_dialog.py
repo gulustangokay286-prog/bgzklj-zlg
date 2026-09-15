@@ -1294,7 +1294,8 @@ class AutoScheduleDialog(QDialog):
         
         super().accept()
 
-        if parent and summary.get("diagnostics"):
+        complete = target_hrs > 0 and total_hrs >= target_hrs
+        if parent and summary.get("diagnostics") and not complete:
             message = f"{total_hrs}/{target_hrs} saat yerleşti. Aktif kurallar korundu.\n\n" + "\n\n".join(
                 x["message"] for x in summary["diagnostics"])
             QMessageBox.warning(parent, "Planlama kısıtları", message)
