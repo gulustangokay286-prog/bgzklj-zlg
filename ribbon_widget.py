@@ -1157,13 +1157,14 @@ class RibbonPage(QWidget):
             w = self.main_layout.itemAt(i).widget()
             if w is not None and not isinstance(w, RibbonButton):
                 fixed += w.sizeHint().width()
-        natural = fixed + sum(min(76, b.sizeHint().width()) for b in btns)
-        if natural <= width:
-            cap, small = 76, False
-        else:
-            cap = max(50, (width - fixed) // len(btns))
-            small = cap < 62
+        # Bütün düğmeler EŞİT genişlikte ve satırı DOLDURUR: dar pencerede
+        # daralır (en az 50 px), geniş pencerede genişler (en fazla 118 px).
+        # Tam ekranda sola yığılıp sağda boşluk bırakmak yerine şerit boydan
+        # boya yayılır; pencere küçülünce de kaymadan sığar.
+        cap = max(50, min(118, (width - fixed) // len(btns)))
+        small = cap < 62
         for b in btns:
+            b.setMinimumWidth(cap)
             b.setMaximumWidth(cap)
             f = b.font()
             size = 6.5 if small else 7
