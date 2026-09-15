@@ -578,10 +578,44 @@ class EditRelationDialog(QDialog):
         if rule == "İki ders aynı güne gelmesin" and n_subj < 2:
             QMessageBox.warning(self, "Ders Seçimi",
                                 "“İki ders aynı güne gelmesin” için hangi derslerin "
-                                "aynı güne gelmeyeceğini seçmelisiniz (en az iki ders).")
+                                "aynı güne gelmeyeceğini seçmelisiniz (en az iki ders).\n\n"
+                                "Ders seçilmeden bu kural kaydedilemez; motor onu uygulayamaz.")
             self._change_subjects()
             return
+        # Çok ders seçilmişse uyar: "İki ders aynı güne gelmesin" seçilen derslerden
+        # günde en fazla BİRİNE izin verir; hepsi seçilirse sınıfta günde tek ders
+        # demektir ve çizelge oturmaz. Aynı uyarı "tek ders" sayılan seçim için de.
+        many = (rule == "İki ders aynı güne gelmesin"
+                or (self._selection_group_kind() and self.chk_tek_ders.isChecked()))
+        if many and n_subj >= 2:
+            total = max(1, len(self._all_subject_names()))
+            if n_subj >= total or n_subj > 6 or n_subj * 2 >= total:
+                if rule == "İki ders aynı güne gelmesin":
+                    body = (f"{n_subj} ders seçtiniz (kurumda {total} ders var). Bu kural seçilen "
+                            f"derslerden aynı sınıfta günde EN FAZLA BİRİNE izin verir: "
+                            f"{n_subj} dersin {n_subj-1}'i her gün dışarıda kalır.\n\n"
+                            "Bu kadar çok dersle çizelge büyük ihtimalle oturmaz; "
+                            "kural yalnızca birbirine denk gelmemesi gereken birkaç ders için düşünülmüştür.")
+                else:
+                    body = (f"{n_subj} ders tek ders sayılacak (kurumda {total} ders var): hepsi birlikte "
+                            "aynı sınıfta günde en fazla bir kez gelebilir.\n\n"
+                            "Bu kadar çok dersle çizelge büyük ihtimalle oturmaz. Her dersin kendi içinde "
+                            "tekrar etmemesini istiyorsanız kutuyu kaldırın ya da hiç ders seçmeyin (tüm dersler).")
+                reply = QMessageBox.warning(self, "Çok fazla ders seçildi", body + "\n\nYine de kaydedilsin mi?",
+                                            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                if reply != QMessageBox.Yes:
+                    return
         self.accept()
+
+    def _all_subject_names(self):
+        items = set()
+        for d in self.data_store.get("dersler", []) or []:
+            if d.get("ad"):
+                items.add(d.get("ad"))
+        for a in self.data_store.get("atamalar", []) or []:
+            if a.get("subject"):
+                items.add(a.get("subject"))
+        return sorted(items)
 
     def _refresh_combos_ui(self):
         # 1. Dersler
@@ -684,6 +718,18 @@ class EditRelationDialog(QDialog):
         self.imp_group.setVisible(not is_group)
         self.lbl_group_hint.setVisible(is_group)
         self._refresh_tek_ders_visibility()
+
+        # "İki ders aynı güne gelmesin" ders seçilmeden anlamsızdır: "Tüm dersler"
+        # burada bir seçenek değildir. Kural seçilir seçilmez ders listesi açılır.
+        needs_pick = rule in ("İki ders aynı güne gelmesin", "Seçilen dersler aynı ders sayılsın")
+        self.cb_subj.setItemText(0, "Ders seçin…" if needs_pick else "Tüm dersler")
+        if needs_pick and not self.selected_subjects and self.isVisible() \
+                and not getattr(self, "_picking", False):
+            self._picking = True
+            try:
+                self._change_subjects()
+            finally:
+                self._picking = False
 
     def _selection_group_kind(self):
         try:
@@ -1123,12 +1169,21 @@ class PlanningRelationsDialog(QDialog):
                 tek = selection_is_group(item, subject_count(self.data_store))
             except Exception:
                 tek = False
-            if is_group or tek:
+            unusable = (item.get("kural") == "İki ders aynı güne gelmesin" or is_group) and len(subj) < 2
+            if unusable:
+                subj_text = "⚠ Ders seçilmedi — kural uygulanmaz"
+            elif is_group or tek:
                 subj_text = " + ".join(subj) + ("  (tek ders)" if tek else "")
             else:
                 subj_text = ", ".join(subj) if subj else "Tüm dersler"
             subj_item = QTableWidgetItem(subj_text)
-            if not subj:
+            if unusable:
+                subj_item.setForeground(QBrush(QColor("#DC2626")))
+                subj_item.setToolTip("Bu kural en az iki ders seçilmeden motor tarafından uygulanmaz. "
+                                     "Çift tıklayıp dersleri seçin.")
+            if unusable:
+                pass
+            elif not subj:
                 subj_item.setForeground(QBrush(QColor("#94A3B8")))
             else:
                 subj_item.setForeground(QBrush(QColor("#334155")))

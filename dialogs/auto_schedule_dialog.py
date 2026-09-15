@@ -1026,7 +1026,43 @@ class AutoScheduleDialog(QDialog):
         self.worker.start()
 
     def _confirm_feasibility(self):
-        """Plan baslamadan once doğrudan devam eder; çözücü tüm dersleri yerleştirmek üzere çalışır."""
+        """Başlamadan önce kuralları derler; uygulanamayacak olanları SÖYLER.
+
+        "İki ders aynı güne gelmesin" ders seçilmeden kaydedilmişse motor onu
+        atlar. Eskiden bu yalnızca raporun içinde bir satırdı; kullanıcı kuralı
+        ekranda açık görüyor, çizelgede uygulanmadığını sanıyor ve motorun
+        kuralı görmediğini düşünüyordu. Şimdi planlama başlamadan önce hangi
+        kuralın neden uygulanamayacağı yüzüne söylenir, karar ona kalır.
+        """
+        try:
+            from scheduler.build import build_world
+            from scheduler.rules import compile_rules
+            w = build_world(self.data_store)
+            _rules, rep = compile_rules(self.data_store.get("planlama_iliskileri", []), w)
+        except Exception as exc:
+            QMessageBox.critical(self, "Planlama İlişkileri", f"Kurallar derlenemedi:\n{exc}")
+            return False
+        if rep.errors:
+            QMessageBox.critical(self, "Planlama İlişkileri",
+                                 "Şu kurallar hatalı; düzeltmeden planlama başlatılamaz:\n\n"
+                                 + "\n".join(f"• {e}" for e in rep.errors[:10]))
+            return False
+        if rep.skipped:
+            body = ("Aşağıdaki kurallar ekranda açık ama bu hâliyle UYGULANAMAZ, "
+                    "motor bunları atlayacak:\n\n"
+                    + "\n".join(f"• {label}: {why}" for label, why in rep.skipped[:10])
+                    + "\n\nPlanlama İlişkileri ekranında kuralı çift tıklayıp dersleri seçerseniz uygulanır."
+                    "\n\nBu kurallar olmadan devam edilsin mi?")
+            reply = QMessageBox.warning(self, "Uygulanamayan kurallar", body,
+                                        QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply != QMessageBox.Yes:
+                self.btn_start.setEnabled(True)
+                self.btn_cancel.setText("Kapat")
+                self.lbl_info.setText("Planlama başlatılmadı; kuralları düzenleyin.")
+                self.lbl_info.setStyleSheet("color: #B45309; font-weight: 500;")
+                self.icon_3d.stop_pulse()
+                self.skeleton.set_active(False)
+                return False
         return True
 
     def _on_cancel_or_stop(self):
