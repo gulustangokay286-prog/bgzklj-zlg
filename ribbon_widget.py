@@ -34,14 +34,19 @@ FONT_FAMILY = ".AppleSystemUIFont, SF Pro Text, Helvetica Neue, Segoe UI, sans-s
 
 # ── Retina 2x Icon Painter Helper ──────────────────────────────────────────────
 def _make_pixmap(size: int, draw_fn) -> QPixmap:
+    """İkon çizimleri 32×32'lik sabit koordinatlarla yazılmıştır; istenen
+    boyuta ÖLÇEKLENEREK çizilir. Eskiden 40 px istenince çizim 40'lık tuvalin
+    sol üst 32×32'sine oturuyor, ikon kutunun içinde sola/yukarı kayık
+    görünüyordu."""
     scale = 2
     px = QPixmap(size * scale, size * scale)
     px.fill(Qt.transparent)
     p = QPainter(px)
     p.setRenderHint(QPainter.Antialiasing)
     p.setRenderHint(QPainter.SmoothPixmapTransform)
-    p.scale(scale, scale)
-    draw_fn(p, size)
+    k = size / 32.0
+    p.scale(scale * k, scale * k)
+    draw_fn(p, 32)
     p.end()
     px.setDevicePixelRatio(scale)
     return px
