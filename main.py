@@ -315,11 +315,14 @@ class AppShell(QMainWindow):
         from save_dialog import run_apple_save_sequence
         run_apple_save_sequence(self, duration_seconds=0.1, title="Kaydedildi", message="Anasayfaya dönülüyor...")
         
+        # Bulut yüklemesi ARKA PLANDA sürer; burada beklenmez. Eskiden 2,5 sn'ye
+        # kadar wait_for_pending çağrılıyordu: 280 KB'lık sürüm düşük güçlü
+        # sunucuya gidene kadar arayüz donuyordu — "anasayfaya dönerken
+        # kasıyor" tam olarak buydu. Kuyruk kalıcıdır (dosyada local_pending
+        # işareti), uygulama kapanıp açılsa bile yükleme kaldığı yerden sürer.
         try:
             from api_client import api_client
             api_client.is_on_dashboard = True
-            from sync_coordinator import wait_for_pending
-            wait_for_pending(timeout=2.5)
         except Exception:
             pass
 
@@ -354,9 +357,11 @@ class AppShell(QMainWindow):
         from save_dialog import run_apple_save_sequence
         run_apple_save_sequence(self, duration_seconds=0.2, title="Kapatılıyor", message="Veriler kaydedildi.")
 
+        # Kapanışta yüklemeye kısa bir şans: tamamlanmazsa sonraki açılışta
+        # resume_pending() kaldığı yerden gönderir; kullanıcı 3 sn bekletilmez.
         try:
             from sync_coordinator import wait_for_pending
-            wait_for_pending(timeout=3.0)
+            wait_for_pending(timeout=1.0)
         except Exception:
             pass
 
