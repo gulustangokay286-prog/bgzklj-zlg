@@ -878,8 +878,19 @@ class RibbonScrollArea(QScrollArea):
             }
         """)
 
+    def set_scroll_enabled(self, enabled: bool):
+        """Dar pencerede kaydırma açılır; sığıyorsa şerit hiç oynamaz."""
+        self._scroll_enabled = bool(enabled)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded if enabled else Qt.ScrollBarAlwaysOff)
+        if not enabled:
+            self.horizontalScrollBar().setValue(0)
+
     def wheelEvent(self, event):
-        # Tekerlek şeridi kaydırmaz; olay yutulur ki alttaki tabloya da gitmesin.
+        if getattr(self, "_scroll_enabled", False):
+            delta = event.angleDelta().x() or event.angleDelta().y()
+            if delta:
+                self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta)
+        # Sığan şeritte olay yutulur; alttaki tabloya da gitmez.
         event.accept()
 
 
@@ -1066,7 +1077,7 @@ def _divider(parent=None):
 class RibbonPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(74)
+        self.setFixedHeight(84)
         
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
@@ -1074,12 +1085,13 @@ class RibbonPage(QWidget):
         
         self.scroll_area = RibbonScrollArea(self)
         self.content_widget = QWidget(self.scroll_area)
-        self.content_widget.setFixedHeight(72)
+        self.content_widget.setFixedHeight(82)
         self.content_widget.setStyleSheet(f"background: {RIBBON_BG};")
         
         self.main_layout = QHBoxLayout(self.content_widget)
-        self.main_layout.setContentsMargins(6, 1, 6, 1)
-        self.main_layout.setSpacing(3)
+        # Düğmeler üst kenara yapışmasın: 12 px üst boşluk.
+        self.main_layout.setContentsMargins(4, 12, 4, 6)
+        self.main_layout.setSpacing(2)
         self.main_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         
         self.scroll_area.setWidget(self.content_widget)
@@ -1161,8 +1173,15 @@ class RibbonPage(QWidget):
         # daralır (en az 50 px), geniş pencerede genişler (en fazla 118 px).
         # Tam ekranda sola yığılıp sağda boşluk bırakmak yerine şerit boydan
         # boya yayılır; pencere küçülünce de kaymadan sığar.
-        cap = max(50, min(118, (width - fixed) // len(btns)))
-        small = cap < 62
+        cap = (width - fixed) // len(btns)
+        if cap < 48:
+            # Küçük pencere: düğmeleri ezmek yerine rahat boyda bırak, kaydır.
+            cap, small = 60, False
+            self.scroll_area.set_scroll_enabled(True)
+        else:
+            cap = min(118, cap)
+            small = cap < 58
+            self.scroll_area.set_scroll_enabled(False)
         for b in btns:
             b.setMinimumWidth(cap)
             b.setMaximumWidth(cap)
@@ -1224,7 +1243,7 @@ class RibbonWidget(QWidget):
         # QVBoxLayout iki sayfayı üst üste koyamaz ve konumu animasyona vermez.
         self._page_area = QWidget(self)
         self._page_area.setFixedHeight(84)
-        self._page_area.setStyleSheet(f"background: {RIBBON_BG}; border-bottom: 1px solid {RIBBON_BORDER};")
+        self._page_area.setStyleSheet(f"background: {RIBBON_BG};")
         outer.addWidget(self._page_area)
         self._anim = None
 
