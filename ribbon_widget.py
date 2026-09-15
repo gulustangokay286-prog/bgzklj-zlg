@@ -18,7 +18,7 @@ from PySide6.QtGui import (
 
 # ── Colours from screenshots ──────────────────────────────────────────────────
 RIBBON_BG        = "#FFFFFF"
-RIBBON_BORDER    = "#D0D0D0"
+RIBBON_BORDER    = "#E5E7EB"
 TAB_ACTIVE_BG    = "#FFFFFF"
 TAB_INACTIVE_BG  = "#F0F0F0"
 TAB_ACTIVE_LINE  = "#1E6DB5"
@@ -1064,13 +1064,31 @@ class RibbonCheckItem(QWidget):
         layout.addWidget(self.cb)
 
 
+class _Divider(QWidget):
+    """Grup ayracı: ince, kısa, soluk.
+
+    Eskisi QFrame.VLine + Sunken idi: iki tonlu (açık + koyu) 2 px'lik oyuk
+    çizgi, üstelik düğmelerden uzun — şeridin tepesinden dibine kadar iniyor
+    ve her grubu kutuya alıyordu. Şimdi tek piksel, düğme boyunun yarısı
+    kadar, düşeyde ortalı ve iki yanında nefes payı var; gruplar ayrılır ama
+    çizgi göze batmaz.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedWidth(15)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        h = 30
+        y = (self.height() - h) // 2
+        x = self.width() // 2
+        p.fillRect(x, y, 1, h, QColor("#E5E7EB"))
+        p.end()
+
+
 def _divider(parent=None):
-    f = QFrame(parent)
-    f.setFrameShape(QFrame.VLine)
-    f.setFrameShadow(QFrame.Sunken)
-    f.setStyleSheet("color: #E2E8F0;")
-    f.setFixedWidth(2)
-    return f
+    return _Divider(parent)
 
 
 # ── Ribbon Tab Page ───────────────────────────────────────────────────────────
