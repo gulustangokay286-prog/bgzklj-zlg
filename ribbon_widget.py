@@ -5,7 +5,7 @@ Retina 2x Vektörel Çizim Motoru ile kristal netliğinde 3D ikonlar.
 """
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton,
-    QSizePolicy, QFrame, QCheckBox, QToolButton, QScrollArea
+    QSizePolicy, QFrame, QCheckBox, QToolButton, QScrollArea, QMenu
 )
 from PySide6.QtCore import Qt, QSize, Signal, QPoint, QPointF, QRectF
 from PySide6.QtGui import (
@@ -1098,6 +1098,37 @@ class RibbonPage(QWidget):
         self.main_layout.addWidget(btn)
         return btn
 
+    def add_menu_button(self, label, icon_key, sections):
+        """Açılır menülü düğme: sections = [(başlık, [(etiket, callback), ...]), ...].
+
+        Sekme şeridi kaldırıldığında diğer sekmelerde kalan az sayıdaki
+        düğme buraya taşınır; hiçbir işlev kaybolmaz, üstte yer kazanılır.
+        """
+        btn = RibbonButton(label, icon_key, None, self.content_widget)
+        menu = QMenu(btn)
+        menu.setStyleSheet(f"""
+            QMenu {{ background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 8px;
+                     padding: 6px; font-family: {FONT_FAMILY}; font-size: 12.5px; color: #0F172A; }}
+            QMenu::item {{ padding: 6px 22px 6px 12px; border-radius: 6px; }}
+            QMenu::item:selected {{ background: #EFF6FF; color: #0071E3; }}
+            QMenu::separator {{ height: 1px; background: #E2E8F0; margin: 6px 4px; }}
+        """)
+        btn._submenus = []       # PySide sahipliği: alt menüler toplanmasın
+        for title, items in sections:
+            sub = QMenu(title, menu)
+            sub.setStyleSheet(menu.styleSheet())
+            for text, cb in items:
+                act = sub.addAction(text)
+                if callable(cb):
+                    act.triggered.connect(lambda _=False, f=cb: f())
+            menu.addMenu(sub)
+            btn._submenus.append(sub)
+        btn._menu = menu
+        btn.setMenu(menu)
+        btn.setPopupMode(QToolButton.InstantPopup)
+        self.main_layout.addWidget(btn)
+        return btn
+
     def add_back(self, callback=None):
         btn = RibbonWideButton(callback, self.content_widget)
         self.main_layout.addWidget(btn)
@@ -1167,18 +1198,33 @@ class RibbonWidget(QWidget):
         self._page_layout.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(self._page_area)
 
-    def set_collapsed(self, collapsed: bool):
-        """Hides the button area, leaving only the tab strip.
+    def _apply_height(self):
+        tabs = 34 if self._tab_bar.isVisibleTo(self) else 0
+        page = 0 if getattr(self, "_collapsed", False) else 84
+        self.setFixedHeight(max(tabs + page, 1))
 
-        The widget has a fixed height, so hiding the page area alone would leave an
-        82 px empty band; the height has to shrink with it.
-        """
+    def set_collapsed(self, collapsed: bool):
+        """Hides the button area, leaving only the tab strip (if it is shown)."""
         self._collapsed = bool(collapsed)
         self._page_area.setVisible(not self._collapsed)
-        self.setFixedHeight(34 if self._collapsed else 116)
+        if self._collapsed and not self._tab_bar.isVisibleTo(self):
+            # Şerit de sekme de gizliyse geri dönüş yolu kalmaz; sekmeleri aç.
+            self._tab_bar.setVisible(True)
+        self._apply_height()
 
     def is_collapsed(self) -> bool:
         return bool(getattr(self, "_collapsed", False))
+
+    def set_tab_bar_visible(self, visible: bool):
+        """Sekme şeridini gösterir/gizler. Gizliyken yalnızca ilk sayfa (Ana Menü)
+        görünür; diğer sayfaların düğmeleri "Diğer ▾" menüsünden ulaşılır."""
+        self._tab_bar.setVisible(bool(visible))
+        if not visible and self._active != 0 and self._pages:
+            self._select(0)
+        self._apply_height()
+
+    def is_tab_bar_visible(self) -> bool:
+        return self._tab_bar.isVisibleTo(self)
 
     def add_tab(self, name: str) -> RibbonPage:
         idx = len(self._pages)

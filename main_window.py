@@ -782,6 +782,44 @@ class MainWindow(QMainWindow):
         p1.add_button("Evden Kod\nGüncelle", "bulut", self._act_check_updates)
         p1.add_button("İnternet\nHesabı","internet", lambda: __import__('webbrowser').open("https://chenki.net/"))
         p1.add_button("Sorular?\nYorumlar?","yardim",lambda: __import__('dialogs.faq_dialog', fromlist=['FAQDialog']).FAQDialog(self).exec())
+        p1.add_divider()
+        # Sekme şeridi kaldırıldı: Ana Menü zaten diğer sekmelerin neredeyse
+        # tamamını taşıyor. Yalnızca oralarda kalan düğmeler bu menüde.
+        p1.add_menu_button("Diğer ▾", "sartlar", [
+            ("Dosya", [
+                ("Kapat", self._act_close),
+                ("Demo Dosyaları", self._act_demo_files),
+                ("Aktar", self._act_export),
+                ("Karşılaştırma", self._act_compare),
+                ("E-Mail Gönder", self._act_email),
+            ]),
+            ("Tanımlama", [
+                ("Sihirbaz", self._open_wizard),
+                ("Toplu Atama Listesi", self._act_assignment_list),
+                ("Tanımlanan Kısıtlamalar", self._act_constraints_overview),
+                ("Değiştir", lambda: self._open_extracted(135)),
+            ]),
+            ("Planlama", [
+                ("İyileştirme Uygula", self._act_improve),
+                ("Analiz / İstatistik", self._act_statistics),
+                ("Danışman", self._act_advisor),
+                ("Dersliklere Atama", self._act_rooms_assign),
+            ]),
+            ("Görünüm", [
+                ("Görünüm", self._act_view_mode),
+                ("Yakınlaştır", self._act_zoom),
+                ("Hafta", self._act_week),
+                ("Sekmeleri Göster / Gizle", self._act_toggle_tabs),
+            ]),
+            ("Yardım", [
+                ("Tanıtım ve Öğrenme", self._act_help),
+                ("Günlük İpucu", self._act_tip_of_day),
+                ("Teknik Destek", self._act_support),
+                ("Yeni Versiyon Kontrolü", self._act_check_updates),
+                ("Hizmet Yenileme", self._act_account),
+                ("Online Yardım", lambda: __import__('webbrowser').open("https://chenki.net/")),
+            ]),
+        ])
         p1.add_stretch()
 
         # ── 2. Dosya İşlemleri ───────────────────────────────────────────────
@@ -876,6 +914,9 @@ class MainWindow(QMainWindow):
         p7.add_button("Online\nYardım","yardim",lambda: __import__('webbrowser').open("https://chenki.net/"))
         p7.add_button("Sorular?\nYorumlar?","yardim",lambda: __import__('dialogs.faq_dialog', fromlist=['FAQDialog']).FAQDialog(self).exec())
         p7.add_stretch()
+        # Varsayılan: sekme şeridi gizli, tek şerit. "Diğer ▾ / Görünüm /
+        # Sekmeleri Göster" ile geri açılabilir.
+        r.set_tab_bar_visible(False)
         self._update_ribbon_new_btn_state()
 
     def _update_ribbon_new_btn_state(self):
@@ -4467,15 +4508,11 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Yakınlaştırma: %{int(nxt * 100)}", 3000)
 
     def _act_toggle_tabs(self):
-        """Collapses the ribbon to give the grid the full window."""
+        """Sekme şeridini (Dosya / Tanımlama / Görünüm / ...) gösterir veya gizler."""
         ribbon = getattr(self, "_ribbon", None)
-        if ribbon is None or not hasattr(ribbon, "set_collapsed"):
+        if ribbon is None or not hasattr(ribbon, "set_tab_bar_visible"):
             return
-        collapsed = not ribbon.is_collapsed()
-        ribbon.set_collapsed(collapsed)
-        self.statusBar().showMessage(
-            "Şerit gizlendi — tekrar göstermek için aynı düğmeye basın."
-            if collapsed else "Şerit gösteriliyor.", 4000)
+        ribbon.set_tab_bar_visible(not ribbon.is_tab_bar_visible())
 
     def _act_week(self):
         """Switches between A and B weeks for schools running alternating weeks."""
