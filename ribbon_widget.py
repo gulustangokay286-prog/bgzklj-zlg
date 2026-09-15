@@ -1164,7 +1164,8 @@ class RibbonPage(QWidget):
         if not btns or width <= 0:
             return
         m = self.main_layout.contentsMargins()
-        fixed = m.left() + m.right() + self.main_layout.spacing() * max(0, self.main_layout.count() - 1)
+        base_lr = 4
+        fixed = 2 * base_lr + self.main_layout.spacing() * max(0, self.main_layout.count() - 1)
         for i in range(self.main_layout.count()):
             w = self.main_layout.itemAt(i).widget()
             if w is not None and not isinstance(w, RibbonButton):
@@ -1190,6 +1191,21 @@ class RibbonPage(QWidget):
             if abs(f.pointSizeF() - size) > 0.1:
                 f.setPointSizeF(size)
                 b.setFont(f)
+        # Artan boşluk iki kenara eşit dağıtılır; şerit sola yapışık, sağda
+        # boşluklu durmaz.
+        leftover = max(0, width - fixed - cap * len(btns)) if not self.scroll_area._scroll_enabled else 0
+        self.main_layout.setContentsMargins(base_lr + leftover // 2, m.top(),
+                                            base_lr + leftover - leftover // 2, m.bottom())
+        if not self.scroll_area._scroll_enabled:
+            # İkinci geçiş: gerçek geometriyi ölçüp kalan dengesizliği kapat.
+            self.main_layout.activate()
+            left_gap = btns[0].geometry().left()
+            right_gap = self.content_widget.width() - btns[-1].geometry().right() - 1
+            diff = right_gap - left_gap
+            if diff:
+                mm = self.main_layout.contentsMargins()
+                self.main_layout.setContentsMargins(max(0, mm.left() + diff // 2), mm.top(),
+                                                    max(0, mm.right() - (diff - diff // 2)), mm.bottom())
 
 
 def make_menu_icon(symbol: str, color1: str, color2: str) -> QIcon:
@@ -1243,7 +1259,7 @@ class RibbonWidget(QWidget):
         # QVBoxLayout iki sayfayı üst üste koyamaz ve konumu animasyona vermez.
         self._page_area = QWidget(self)
         self._page_area.setFixedHeight(84)
-        self._page_area.setStyleSheet(f"background: {RIBBON_BG};")
+        self._page_area.setStyleSheet(f"background: {RIBBON_BG}; border-bottom: 1px solid {RIBBON_BORDER};")
         outer.addWidget(self._page_area)
         self._anim = None
 
