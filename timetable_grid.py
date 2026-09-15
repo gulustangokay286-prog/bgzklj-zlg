@@ -4095,17 +4095,20 @@ class TimetableGrid(QWidget):
         
         # Color swatch
         self.info_color_box = QLabel()
-        self.info_color_box.setFixedSize(20, 20)
+        self.info_color_box.setFixedSize(24, 24)
         self.info_color_box.setCursor(Qt.PointingHandCursor)
         self.info_color_box.setToolTip("Ders Rengini Değiştirmek İçin Tıklayın")
         self.info_color_box.setStyleSheet("background: transparent; border: 1px dashed #94A3B8; border-radius: 5px;")
         self.info_color_box.mousePressEvent = self._on_color_box_clicked
         info_lay.addWidget(self.info_color_box, 0, Qt.AlignVCenter)
         
-        # Text details
+        # Text details — iki satır sıkı ve düşeyde ORTALI. Eskiden satırlar
+        # kartın tüm yüksekliğine yayılıyor, "Mat1" ile "21" arasında boşluk
+        # açılıyordu.
         info_inner = QVBoxLayout()
         info_inner.setContentsMargins(0, 0, 0, 0)
-        info_inner.setSpacing(2)
+        info_inner.setSpacing(1)
+        info_inner.addStretch(1)
         
         # Top line: Subject Name + Duration (Apple minimal text format)
         top_row = QHBoxLayout()
@@ -4113,12 +4116,12 @@ class TimetableGrid(QWidget):
         top_row.setSpacing(6)
         
         self.info_subject_lbl = QLabel("Ders Seçilmedi")
-        self.info_subject_lbl.setFont(QFont(FONT_FAMILY, 9.5, QFont.Bold))
+        self.info_subject_lbl.setFont(QFont(FONT_FAMILY, 11, QFont.Bold))
         self.info_subject_lbl.setStyleSheet("color: #0F172A; background: transparent; border: none;")
         top_row.addWidget(self.info_subject_lbl)
         
         self.info_duration_lbl = QLabel("")
-        self.info_duration_lbl.setFont(QFont(FONT_FAMILY, 8.5))
+        self.info_duration_lbl.setFont(QFont(FONT_FAMILY, 10))
         self.info_duration_lbl.setStyleSheet("color: #64748B; background: transparent; border: none;")
         top_row.addWidget(self.info_duration_lbl)
         top_row.addStretch()
@@ -4136,22 +4139,24 @@ class TimetableGrid(QWidget):
         bot_row.setSpacing(5)
         
         self.info_class_lbl = QLabel("")
-        self.info_class_lbl.setFont(QFont(FONT_FAMILY, 8.5, QFont.Bold))
+        self.info_class_lbl.setFont(QFont(FONT_FAMILY, 10, QFont.Bold))
         self.info_class_lbl.setStyleSheet("color: #2563EB; background: transparent; border: none;")
         self.info_class_badge = self.info_class_lbl
         bot_row.addWidget(self.info_class_lbl)
         
         self.info_dot_lbl = QLabel("•")
-        self.info_dot_lbl.setStyleSheet("color: #CBD5E1; background: transparent; border: none;")
+        self.info_dot_lbl.setFont(QFont(FONT_FAMILY, 10))
+        self.info_dot_lbl.setStyleSheet("color: #94A3B8; background: transparent; border: none;")
         self.info_dot_lbl.hide()
         bot_row.addWidget(self.info_dot_lbl)
         
         self.info_teacher_lbl = QLabel("Detaylar için bir derse tıklayın")
-        self.info_teacher_lbl.setFont(QFont(FONT_FAMILY, 8.5))
+        self.info_teacher_lbl.setFont(QFont(FONT_FAMILY, 10))
         self.info_teacher_lbl.setStyleSheet("color: #94A3B8; font-style: italic; background: transparent; border: none;")
         bot_row.addWidget(self.info_teacher_lbl)
         bot_row.addStretch()
         info_inner.addLayout(bot_row)
+        info_inner.addStretch(1)
         
         info_lay.addLayout(info_inner, 1)
         bottom_layout.addWidget(self.info_panel)
@@ -4428,7 +4433,7 @@ class TimetableGrid(QWidget):
             else:
                 dist_str = f"{{{dur}}}"
                 
-        self.info_duration_lbl.setText(f"•  {dur} Saat  {dist_str}")
+        self.info_duration_lbl.setText(f"•  {dur} Saat  {dist_str}".replace("  ", " "))
             
         # Class Label
         is_comb = bool(info.get("is_combined") or (cls and ("," in cls or "&" in cls or "+" in cls)))
