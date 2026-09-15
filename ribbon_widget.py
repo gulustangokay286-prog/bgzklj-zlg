@@ -7,7 +7,9 @@ from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton,
     QSizePolicy, QFrame, QCheckBox, QToolButton, QScrollArea, QMenu
 )
-from PySide6.QtCore import Qt, QSize, Signal, QPoint, QPointF, QRectF
+from PySide6.QtCore import (Qt, QSize, Signal, QPoint, QPointF, QRectF, QPropertyAnimation,
+                            QParallelAnimationGroup, QEasingCurve, QAbstractAnimation)
+from PySide6.QtWidgets import QGraphicsOpacityEffect
 from PySide6.QtGui import (
     QIcon, QPixmap, QColor, QPainter, QPen, QFont, QBrush,
     QPolygon, QPolygonF, QLinearGradient, QRadialGradient, QPainterPath
@@ -1191,12 +1193,16 @@ class RibbonWidget(QWidget):
         outer.addWidget(self._tab_bar)
 
         # ── Page area ──
+        #
+        # Sayfalar bir yerleşim yöneticisinde DEĞİL, elle konumlanır: geçiş
+        # animasyonu eski sayfayı sola kaydırıp yeni sayfayı sağdan getirir
+        # (geri dönüşte tersi), bu arada ikisi de kısa süre görünürdür. Bir
+        # QVBoxLayout iki sayfayı üst üste koyamaz ve konumu animasyona vermez.
         self._page_area = QWidget(self)
         self._page_area.setFixedHeight(84)
         self._page_area.setStyleSheet(f"background: {RIBBON_BG}; border-bottom: 1px solid {RIBBON_BORDER};")
-        self._page_layout = QVBoxLayout(self._page_area)
-        self._page_layout.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(self._page_area)
+        self._anim = None
 
     def _apply_height(self):
         tabs = 34 if self._tab_bar.isVisibleTo(self) else 0
@@ -1242,24 +1248,87 @@ class RibbonWidget(QWidget):
         self._tab_buttons.append(btn)
         self._pages.append(page)
 
-        if idx == 0:
-            self._page_layout.addWidget(page)
-        else:
-            page.setVisible(False)
-            self._page_layout.addWidget(page)
+        page.setGeometry(0, 0, max(1, self._page_area.width()), self._page_area.height())
+        page.setVisible(idx == 0)
 
         self._update_tab_styles()
         return page
 
-    def _select(self, idx: int):
-        if self._active == idx:
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        w, h = self._page_area.width(), self._page_area.height()
+        for i, page in enumerate(self._pages):
+            if i == self._active and (self._anim is None or self._anim.state() != QAbstractAnimation.Running):
+                page.setGeometry(0, 0, w, h)
+            else:
+                page.resize(w, h)
+
+    def select_page(self, page, animate=True):
+        """Belirli bir sayfaya geç (Ana Menü'deki "Diğer" düğmesi için)."""
+        if page in self._pages:
+            self._select(self._pages.index(page), animate=animate)
+
+    def _select(self, idx: int, animate: bool = True):
+        if self._active == idx or not (0 <= idx < len(self._pages)):
             return
-        old_page = self._pages[self._active]
-        old_page.setVisible(False)
-        self._active = idx
-        self._pages[idx].setVisible(True)
+        old_idx, self._active = self._active, idx
+        old_page, new_page = self._pages[old_idx], self._pages[idx]
+        w, h = max(1, self._page_area.width()), self._page_area.height()
         self._update_tab_styles()
-        self.tab_changed.emit(idx)
+
+        if self._anim is not None and self._anim.state() == QAbstractAnimation.Running:
+            self._anim.stop()
+            for p in self._pages:
+                p.setGraphicsEffect(None)
+                if p is not new_page:
+                    p.setVisible(False)
+
+        if not animate or not self.isVisible():
+            old_page.setVisible(False)
+            new_page.setGeometry(0, 0, w, h)
+            new_page.setVisible(True)
+            self.tab_changed.emit(idx)
+            return
+
+        # ── Apple tarzı geçiş: kaydırma + çapraz solma ──
+        # İleri (Ana Menü -> Diğer): yeni sayfa sağdan gelir, eski sola kayar.
+        # Geri: tersi. Eski sayfa yolun yalnızca yarısını alır (paralaks),
+        # yeni sayfa tam yol alır; ikisi de OutCubic ile yavaşlayarak durur.
+        direction = 1 if idx > old_idx else -1
+        new_page.setGeometry(direction * w, 0, w, h)
+        new_page.setVisible(True)
+        new_page.raise_()
+
+        fx_old = QGraphicsOpacityEffect(old_page); fx_old.setOpacity(1.0); old_page.setGraphicsEffect(fx_old)
+        fx_new = QGraphicsOpacityEffect(new_page); fx_new.setOpacity(0.0); new_page.setGraphicsEffect(fx_new)
+
+        group = QParallelAnimationGroup(self)
+        dur = 320
+        a1 = QPropertyAnimation(old_page, b"pos", group)
+        a1.setDuration(dur); a1.setStartValue(QPoint(0, 0)); a1.setEndValue(QPoint(-direction * (w // 2), 0))
+        a1.setEasingCurve(QEasingCurve.OutCubic)
+        a2 = QPropertyAnimation(new_page, b"pos", group)
+        a2.setDuration(dur); a2.setStartValue(QPoint(direction * w, 0)); a2.setEndValue(QPoint(0, 0))
+        a2.setEasingCurve(QEasingCurve.OutCubic)
+        a3 = QPropertyAnimation(fx_old, b"opacity", group)
+        a3.setDuration(int(dur * 0.6)); a3.setStartValue(1.0); a3.setEndValue(0.0)
+        a3.setEasingCurve(QEasingCurve.OutQuad)
+        a4 = QPropertyAnimation(fx_new, b"opacity", group)
+        a4.setDuration(dur); a4.setStartValue(0.0); a4.setEndValue(1.0)
+        a4.setEasingCurve(QEasingCurve.OutCubic)
+        for a in (a1, a2, a3, a4):
+            group.addAnimation(a)
+
+        def _done():
+            old_page.setVisible(False)
+            old_page.setGraphicsEffect(None)
+            new_page.setGraphicsEffect(None)
+            new_page.setGeometry(0, 0, self._page_area.width(), self._page_area.height())
+            self._anim = None
+            self.tab_changed.emit(idx)
+        group.finished.connect(_done)
+        self._anim = group
+        group.start()
 
     def _update_tab_styles(self):
         for i, btn in enumerate(self._tab_buttons):

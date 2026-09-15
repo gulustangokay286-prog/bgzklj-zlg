@@ -783,43 +783,10 @@ class MainWindow(QMainWindow):
         p1.add_button("İnternet\nHesabı","internet", lambda: __import__('webbrowser').open("https://chenki.net/"))
         p1.add_button("Sorular?\nYorumlar?","yardim",lambda: __import__('dialogs.faq_dialog', fromlist=['FAQDialog']).FAQDialog(self).exec())
         p1.add_divider()
-        # Sekme şeridi kaldırıldı: Ana Menü zaten diğer sekmelerin neredeyse
-        # tamamını taşıyor. Yalnızca oralarda kalan düğmeler bu menüde.
-        p1.add_menu_button("Diğer ▾", "sartlar", [
-            ("Dosya", [
-                ("Kapat", self._act_close),
-                ("Demo Dosyaları", self._act_demo_files),
-                ("Aktar", self._act_export),
-                ("Karşılaştırma", self._act_compare),
-                ("E-Mail Gönder", self._act_email),
-            ]),
-            ("Tanımlama", [
-                ("Sihirbaz", self._open_wizard),
-                ("Toplu Atama Listesi", self._act_assignment_list),
-                ("Tanımlanan Kısıtlamalar", self._act_constraints_overview),
-                ("Değiştir", lambda: self._open_extracted(135)),
-            ]),
-            ("Planlama", [
-                ("İyileştirme Uygula", self._act_improve),
-                ("Analiz / İstatistik", self._act_statistics),
-                ("Danışman", self._act_advisor),
-                ("Dersliklere Atama", self._act_rooms_assign),
-            ]),
-            ("Görünüm", [
-                ("Görünüm", self._act_view_mode),
-                ("Yakınlaştır", self._act_zoom),
-                ("Hafta", self._act_week),
-                ("Sekmeleri Göster / Gizle", self._act_toggle_tabs),
-            ]),
-            ("Yardım", [
-                ("Tanıtım ve Öğrenme", self._act_help),
-                ("Günlük İpucu", self._act_tip_of_day),
-                ("Teknik Destek", self._act_support),
-                ("Yeni Versiyon Kontrolü", self._act_check_updates),
-                ("Hizmet Yenileme", self._act_account),
-                ("Online Yardım", lambda: __import__('webbrowser').open("https://chenki.net/")),
-            ]),
-        ])
+        # Sekme şeridi kaldırıldı: Ana Menü diğer sekmelerin neredeyse tamamını
+        # taşıyor. Kalan düğmeler "Diğer" sayfasında; düğme şeridi o sayfaya
+        # kaydırarak geçirir (Apple tarzı geçiş), oradaki "Geri" döndürür.
+        p1.add_button("Diğer", "sartlar", lambda: r.select_page(self._page_other))
         p1.add_stretch()
 
         # ── 2. Dosya İşlemleri ───────────────────────────────────────────────
@@ -914,8 +881,40 @@ class MainWindow(QMainWindow):
         p7.add_button("Online\nYardım","yardim",lambda: __import__('webbrowser').open("https://chenki.net/"))
         p7.add_button("Sorular?\nYorumlar?","yardim",lambda: __import__('dialogs.faq_dialog', fromlist=['FAQDialog']).FAQDialog(self).exec())
         p7.add_stretch()
-        # Varsayılan: sekme şeridi gizli, tek şerit. "Diğer ▾ / Görünüm /
-        # Sekmeleri Göster" ile geri açılabilir.
+
+        # ── 8. Diğer (tek şerit kipinin ikinci sayfası) ─────────────────────
+        po = r.add_tab("Diğer")
+        self._page_other = po
+        po.add_back(self._go_main_tab)
+        po.add_button("Kapat",             "temizle",  self._act_close)
+        po.add_button("Demo\nDosyaları",   "okul",     self._act_demo_files)
+        po.add_button("Aktar",             "internet", self._act_export)
+        po.add_button("Karşılaştırma",     "kontrol",  self._act_compare)
+        po.add_button("E-Mail\nGönder",    "internet", self._act_email)
+        po.add_divider()
+        po.add_button("Sihirbaz",          "sihirbaz", self._open_wizard)
+        po.add_button("Toplu Atama\nListesi","iliskiler", self._act_assignment_list)
+        po.add_button("Tanımlanan\nKısıtlamalar","sartlar", self._act_constraints_overview)
+        po.add_button("Değiştir",          "okul",     lambda: self._open_extracted(135))
+        po.add_divider()
+        po.add_button("İyileştirme\nUygula","otomatik", self._act_improve)
+        po.add_button("Analiz /\nİstatistik","kontrol",  self._act_statistics)
+        po.add_button("Danışman",          "yardim",   self._act_advisor)
+        po.add_button("Dersliklere\nAtama","derslik",  self._act_rooms_assign)
+        po.add_divider()
+        po.add_button("Görünüm",           "iliskiler",self._act_view_mode)
+        po.add_button("Yakınlaştır",       "on_izleme",self._act_zoom)
+        po.add_button("Hafta",             "iliskiler",self._act_week)
+        po.add_button("Sekmeleri\nGöster/Gizle","okul", self._act_toggle_tabs)
+        po.add_divider()
+        po.add_button("Tanıtım ve\nÖğrenme","okul",    self._act_help)
+        po.add_button("Günlük\nİpucu",     "yardim",   self._act_tip_of_day)
+        po.add_button("Teknik\nDestek",    "yardim",   self._act_support)
+        po.add_button("Hizmet\nYenileme",  "internet", self._act_account)
+        po.add_button("Online\nYardım",    "yardim",   lambda: __import__('webbrowser').open("https://chenki.net/"))
+        po.add_stretch()
+
+        # Varsayılan: sekme şeridi gizli, tek şerit + "Diğer" sayfası.
         r.set_tab_bar_visible(False)
         self._update_ribbon_new_btn_state()
 
