@@ -1095,7 +1095,7 @@ def _divider(parent=None):
 class RibbonPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(84)
+        self.setFixedHeight(94)
         
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
@@ -1103,12 +1103,12 @@ class RibbonPage(QWidget):
         
         self.scroll_area = RibbonScrollArea(self)
         self.content_widget = QWidget(self.scroll_area)
-        self.content_widget.setFixedHeight(82)
+        self.content_widget.setFixedHeight(92)
         self.content_widget.setStyleSheet(f"background: {RIBBON_BG};")
         
         self.main_layout = QHBoxLayout(self.content_widget)
-        # Düğmeler üst kenara yapışmasın: 12 px üst boşluk.
-        self.main_layout.setContentsMargins(4, 12, 4, 6)
+        # Düğmeler üst kenara yapışmasın: 22 px üst boşluk.
+        self.main_layout.setContentsMargins(4, 22, 4, 8)
         self.main_layout.setSpacing(2)
         self.main_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         
@@ -1249,7 +1249,7 @@ class RibbonWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(116)
+        self.setFixedHeight(128)
         self._pages = []
         self._tab_buttons = []
         self._active = 0
@@ -1275,14 +1275,14 @@ class RibbonWidget(QWidget):
         # (geri dönüşte tersi), bu arada ikisi de kısa süre görünürdür. Bir
         # QVBoxLayout iki sayfayı üst üste koyamaz ve konumu animasyona vermez.
         self._page_area = QWidget(self)
-        self._page_area.setFixedHeight(84)
+        self._page_area.setFixedHeight(94)
         self._page_area.setStyleSheet(f"background: {RIBBON_BG}; border-bottom: 1px solid {RIBBON_BORDER};")
         outer.addWidget(self._page_area)
         self._anim = None
 
     def _apply_height(self):
         tabs = 34 if self._tab_bar.isVisibleTo(self) else 0
-        page = 0 if getattr(self, "_collapsed", False) else 84
+        page = 0 if getattr(self, "_collapsed", False) else 94
         self.setFixedHeight(max(tabs + page, 1))
 
     def set_collapsed(self, collapsed: bool):
