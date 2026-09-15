@@ -511,10 +511,10 @@ class TimetableSnapshot:
         # Sürükleme geri bildirimi motorla aynı tanımı kullanır — Mat1 + Mat2
         # bir grupsa burada da tek derstir.
         try:
-            from scheduler.rules import (family_lookup, subject_rule_scopes,
+            from scheduler.rules import (family_lookup, subject_rule_scopes, subject_count,
                                          X_SUBJECT_ONCE_DAY, X_SUBJECT_NOT_ADJACENT)
             rels = self.data_store.get("planlama_iliskileri", []) or []
-            self.family = family_lookup(rels)
+            self.family = family_lookup(rels, subject_count(self.data_store))
             scopes = subject_rule_scopes(rels)
             self.rule_once_day = scopes.get(X_SUBJECT_ONCE_DAY, [])
             self.rule_not_adjacent = scopes.get(X_SUBJECT_NOT_ADJACENT, [])

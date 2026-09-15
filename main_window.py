@@ -2423,9 +2423,11 @@ class MainWindow(QMainWindow):
         # farklı yorumlarsa kullanıcı ekranda izin verilen şeyi motorda yasak
         # bulur.
         from scheduler.rules import (_hardness_from, HARD, family_lookup, same_subject,
-                                     _match_rule_name, X_SUBJECT_GROUP, X_SUBJECT_NOT_ADJACENT)
+                                     _match_rule_name, X_SUBJECT_GROUP, X_SUBJECT_NOT_ADJACENT,
+                                     subject_count)
         from scheduler.model import norm_key
-        fam = family_lookup(self.data_store.get("planlama_iliskileri", []))
+        fam = family_lookup(self.data_store.get("planlama_iliskileri", []),
+                            subject_count(self.data_store))
 
         # Existing hours of THIS subject (family) on this day
         existing_subj_daily_hours = 0

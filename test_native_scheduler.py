@@ -124,6 +124,28 @@ class NativeTests(unittest.TestCase):
                                   dict(kural='Seçilen dersler aynı ders sayılsın',aktif=False,dersler=['Mat1','Mat2'])]
         r=self.run_strict(d);self.assertTrue(r.complete)
 
+    # ── Seçim = tek ders: "Aynı ders aynı gün tekrar etmesin: Mat1, Mat2" ──
+    def test_selected_subjects_in_once_day_rule_are_one_lesson(self):
+        d=self._group_store(D=1)
+        d['dersler']+= [{'ad':'Fizik'},{'ad':'Kimya'},{'ad':'Tarih'}]
+        d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin',dersler=['Mat1','Mat2'])]
+        r=self.run_strict(d);self.assertEqual(r.placed_hours,1)
+        self.assertTrue(any(x.kind==R.X_SUBJECT_GROUP for x in r.rules))
+
+    def test_explicit_tek_ders_false_keeps_each_subject_separate(self):
+        d=self._group_store(D=1)
+        d['dersler']+= [{'ad':'Fizik'},{'ad':'Kimya'},{'ad':'Tarih'}]
+        d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin',dersler=['Mat1','Mat2'],tek_ders=False)]
+        r=self.run_strict(d);self.assertTrue(r.complete)
+
+    def test_selecting_nearly_all_subjects_means_all_not_one_lesson(self):
+        # Boğaziçi kaydı: 33 dersin 32'si seçili — "tüm dersler" niyeti.
+        d=self._group_store(D=1)
+        d['dersler']=[{'ad':'Mat1'},{'ad':'Mat2'},{'ad':'Geometri'}]
+        d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin',dersler=['Mat1','Mat2'])]
+        r=self.run_strict(d);self.assertTrue(r.complete)
+        self.assertFalse(any(x.kind==R.X_SUBJECT_GROUP for x in r.rules))
+
     def test_same_subject_not_adjacent(self):
         d=self._group_store(D=1,P=3)
         d['planlama_iliskileri']=[rule('Aynı ders art arda gelmesin'),

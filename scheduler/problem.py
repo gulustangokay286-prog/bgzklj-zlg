@@ -74,11 +74,6 @@ def impossible_groups(world):
     return out
 
 
-# Aritmetik taban yalnızca bu kurallarda esner: hepsi "bir dersin/öğretmenin
-# kartları ayrı günlere dağılsın" der ve kart sayısı gün sayısını aşınca hiçbir
-# çizelgede sağlanamaz. Başka hiçbir kural, hiçbir grup için esnemez.
-BENDABLE_KINDS = {R.X_SUBJECT_ONCE_DAY, R.X_TEACHER_ONCE_DAY, R.X_MIN_DAYS_BETWEEN}
-
 # Tamamlanma öncelikli kipte sert X kuralları bu ağırlıkla cezaya çevrilir.
 # Tek bir kural ihlali, yerleşemeyen tek bir saatten çok daha pahalıdır; bu
 # yüzden arama kuralı ancak başka çaresi kalmadığında deler ve deldiği yerde
@@ -191,7 +186,6 @@ class Problem:
                 forced_teacher = (a.teacher >= 0 and a.teacher == b.teacher and
                                   any(('t', ci, a.teacher) in self.forced_groups
                                       for ci in shared))
-                forced_pair = forced_subject or forced_teacher
                 hard, soft = [], []
                 for ax, af in a.slots:
                     ad, ap = divmod(ax, w.P)
@@ -204,10 +198,22 @@ class Problem:
                                    or (kind == 1 and ad == bd and
                                        (ap+a.duration == bp or bp+b.duration == ap))
                                    or (kind == 2 and abs(ad-bd) < max(1, r.param)))
+                            # Kural yalnızca KENDİ grubu aritmetik olarak
+                            # imkânsızsa esner: ders kuralı için (sınıf, aile),
+                            # öğretmen kuralı için (sınıf, öğretmen). Eskiden
+                            # öğretmenin gün sayısı yetmiyor diye DERS kuralı da
+                            # esniyordu — Boğaziçi'nde Yasemin Özkaya'nın 11C'ye
+                            # dört kartı üç güne sığmadığı için Geometri'nin iki
+                            # kartı aynı güne konuyordu; oysa aynı güne düşmesi
+                            # gereken şey öğretmenin iki FARKLI dersiydi.
+                            bendable = (forced_subject if r.kind in (R.X_SUBJECT_ONCE_DAY,
+                                                                     R.X_MIN_DAYS_BETWEEN)
+                                        else forced_teacher if r.kind == R.X_TEACHER_ONCE_DAY
+                                        else False)
                             if hit:
                                 if not r.is_hard():
                                     s += r.penalty()
-                                elif forced_pair and r.kind in BENDABLE_KINDS:
+                                elif bendable:
                                     # Bu grup aritmetik olarak sağlanamıyor:
                                     # kartlardan bir kısmı AYNI GÜNE düşmek
                                     # zorunda. O zaman tek makul biçim, aynı

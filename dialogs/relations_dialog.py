@@ -416,6 +416,18 @@ class EditRelationDialog(QDialog):
         lay_subj.addWidget(self.btn_subj)
         filter_layout.addLayout(lay_subj)
 
+        # "Aynı ders aynı gün / art arda" kurallarında seçilen dersler TEK DERS
+        # sayılır: Mat1 + Mat2 + Geometri seçildiyse üçü birlikte günde bir kez.
+        # Kullanıcı bunu istemiyorsa (her biri kendi içinde) kutuyu kaldırır.
+        self.chk_tek_ders = QCheckBox("Seçilen dersler tek ders sayılsın "
+                                      "(örn. Mat1 + Mat2 + Geometri birlikte günde en fazla bir kez)")
+        self.chk_tek_ders.setChecked(True)
+        self.chk_tek_ders.setCursor(Qt.PointingHandCursor)
+        self.chk_tek_ders.setStyleSheet("color: #1E3A8A; font-size: 11.5px; font-weight: 600; "
+                                        "background: transparent; border: none; padding-left: 84px;")
+        self.chk_tek_ders.setVisible(False)
+        filter_layout.addWidget(self.chk_tek_ders)
+
         # Öğretmenler
         lay_teach = QHBoxLayout()
         lbl_t = QLabel("Öğretmenler:")
@@ -614,6 +626,7 @@ class EditRelationDialog(QDialog):
     def _on_subj_combo_changed(self, idx):
         if idx == 1 and not self.selected_subjects:
             self._change_subjects()
+        self._refresh_tek_ders_visibility()
 
     def _on_teach_combo_changed(self, idx):
         if idx == 1 and not self.selected_teachers:
@@ -670,6 +683,53 @@ class EditRelationDialog(QDialog):
             w.setVisible(not is_group)
         self.imp_group.setVisible(not is_group)
         self.lbl_group_hint.setVisible(is_group)
+        self._refresh_tek_ders_visibility()
+
+    def _selection_group_kind(self):
+        try:
+            from scheduler.rules import _match_rule_name, SELECTION_GROUP_KINDS
+            from scheduler.model import norm_key
+            return _match_rule_name(norm_key(self.cb_rule.currentText())) in SELECTION_GROUP_KINDS
+        except Exception:
+            return False
+
+    def _refresh_tek_ders_visibility(self):
+        n = len(self.selected_subjects) if self.cb_subj.currentIndex() == 1 else 0
+        self.chk_tek_ders.setVisible(self._selection_group_kind() and n >= 2)
+
+    def _auto_select_scope_for_subjects(self):
+        """Ders seçilince o dersleri veren öğretmenler ve okutulan sınıflar da seçilir.
+
+        Kullanıcı Mat1 + Mat2 + Geometri seçtiğinde öğretmen süzgecinde eski bir
+        seçim (tek bir hoca) kalırsa kural yalnızca o hocanın derslerine uygulanır
+        ve "motor görmüyor" sanılır. Süzgeçler seçime göre yeniden kurulur;
+        istenirse sonradan daraltılabilir.
+        """
+        if self._is_group_rule() or not self.selected_subjects:
+            return
+        try:
+            from scheduler.rules import same_subject, family_lookup, subject_count
+            fam = family_lookup(self.data_store.get("planlama_iliskileri", []),
+                                subject_count(self.data_store))
+        except Exception:
+            fam = {}
+            same_subject = lambda a, b, _f=None: str(a).strip().lower() == str(b).strip().lower()
+        teachers, classes = set(), set()
+        for a in self.data_store.get("atamalar", []) or []:
+            subj = a.get("subject") or a.get("ders") or ""
+            if not any(same_subject(subj, x, fam) for x in self.selected_subjects):
+                continue
+            t = a.get("teacher") or a.get("ogretmen") or ""
+            if t and t not in ("—", "Atanmadı"):
+                teachers.add(t)
+            c = a.get("class") or a.get("sinif") or ""
+            if c:
+                classes.add(c)
+            for extra in a.get("combined_classes") or []:
+                if extra:
+                    classes.add(extra)
+        self.selected_teachers = sorted(teachers)
+        self.selected_classes = sorted(classes)
 
     def _change_subjects(self):
         items_set = set()
@@ -684,7 +744,9 @@ class EditRelationDialog(QDialog):
         d = MultiSelectDialog(items, self.selected_subjects, "Dersleri Seç", self)
         if d.exec():
             self.selected_subjects = d.get_selected()
+            self._auto_select_scope_for_subjects()
             self._refresh_combos_ui()
+            self._refresh_tek_ders_visibility()
 
     def _change_teachers(self):
         items_set = set()
@@ -732,6 +794,16 @@ class EditRelationDialog(QDialog):
             if idx_imp >= 0:
                 self.cb_imp.setCurrentIndex(idx_imp)
 
+            try:
+                from scheduler.rules import selection_is_group, subject_count
+                if self.relation_data.get("tek_ders") is not None:
+                    self.chk_tek_ders.setChecked(bool(self.relation_data.get("tek_ders")))
+                elif len(self.selected_subjects) >= 2:
+                    self.chk_tek_ders.setChecked(
+                        selection_is_group(self.relation_data, subject_count(self.data_store)))
+            except Exception:
+                pass
+
         self._refresh_combos_ui()
         self._rule_changed()
 
@@ -752,7 +824,10 @@ class EditRelationDialog(QDialog):
             "parametre": self.spin_param.value() if has_param else None,
             "period_start": self.cb_period_start.value() if has_period else None,
             "period_end": self.cb_period_end.value() if has_period else None,
-            "onem": "Sıkı (Kesinlikle uygulanmalı)" if is_group else self.cb_imp.currentText()
+            "onem": "Sıkı (Kesinlikle uygulanmalı)" if is_group else self.cb_imp.currentText(),
+            "tek_ders": (bool(self.chk_tek_ders.isChecked())
+                         if (self._selection_group_kind() and self.cb_subj.currentIndex() == 1
+                             and len(self.selected_subjects) >= 2) else None),
         }
 
 
@@ -1043,7 +1118,16 @@ class PlanningRelationsDialog(QDialog):
 
             # Dersler
             subj = item.get("dersler", [])
-            subj_item = QTableWidgetItem((" + " if is_group else ", ").join(subj) if subj else "Tüm dersler")
+            try:
+                from scheduler.rules import selection_is_group, subject_count
+                tek = selection_is_group(item, subject_count(self.data_store))
+            except Exception:
+                tek = False
+            if is_group or tek:
+                subj_text = " + ".join(subj) + ("  (tek ders)" if tek else "")
+            else:
+                subj_text = ", ".join(subj) if subj else "Tüm dersler"
+            subj_item = QTableWidgetItem(subj_text)
             if not subj:
                 subj_item.setForeground(QBrush(QColor("#94A3B8")))
             else:

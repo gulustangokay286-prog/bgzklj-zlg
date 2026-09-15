@@ -53,10 +53,13 @@ SOFT_WEIGHT = {R.HIGH: 1_000, R.NORMAL: 100, R.LOW: 10}
 SPLIT_PEN = 1          # kesim başına (1. aşama)
 AVOID_PEN = 1          # "kaçınılacak" hücre başına
 # Aritmetik taban: kart sayısı gün sayısını aşan grupta aynı güne düşen iki
-# kart bitişik değilse ödenen bedel. Tabu FORCED_WEIGHT ile aynı fikir —
-# kural delinecekse öğrenci dersi tek kesintisiz blok görsün.
-FORCED_NONADJ_PEN = 50_000
-FORCED_CAP_PEN = 50_000
+# kart bitişik değilse (ya da bir güne tabandan fazlası yığılırsa) ödenen
+# bedel. Tabu FORCED_WEIGHT ile aynı fikir — kural delinecekse öğrenci dersi
+# tek kesintisiz blok görsün. Ama bir SAATİN çok altında kalır: bu bedel
+# yarım saat iken çözücü Birey'de iki saati boş bırakıp cezadan kaçıyordu.
+# Tamamlanma her zaman önce gelir; taban içindeki düzen ikinci sıradadır.
+FORCED_NONADJ_PEN = 2_000
+FORCED_CAP_PEN = 2_000
 
 
 def _noon(P):

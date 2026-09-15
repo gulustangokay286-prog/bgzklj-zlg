@@ -100,6 +100,13 @@ SHAPE_RULES = {X_EVEN_SPREAD, X_SAME_DAY_ADJACENT, X_HARD_NOT_ADJACENT,
 # anlamını değiştirir. Yerleştirmede bakılmaz; derlemede ders ailelerini kurar.
 DEFINITION_RULES = {X_SUBJECT_GROUP}
 
+# SEÇİM = TEK DERS. Bu kurallarda kullanıcı ders seçtiğinde ("Mat1, Mat2,
+# Geometri") kastı şudur: bunlar benim için aynı derstir, aynı güne gelmesin.
+# Ayrı ayrı "her biri kendi içinde tekrar etmesin" demek istiyorsa hiç ders
+# seçmez (tüm dersler). Kayıtta "tek_ders" alanı açıkça yazılır; eski
+# kayıtlarda alan yoksa selection_is_group() karar verir.
+SELECTION_GROUP_KINDS = {X_SUBJECT_ONCE_DAY, X_SUBJECT_NOT_ADJACENT}
+
 # Ders KİMLİĞİ üzerinden ölçülen kurallar. Bunların hepsi kartın ders indeksini
 # değil ders AİLESİNİ karşılaştırır: "Mat1" ile "Mat2" bir ders grubunda
 # birleştirildiyse bu kuralların hepsi ikisini tek ders sayar.
@@ -216,6 +223,30 @@ def is_practical(name: str) -> bool:
 def is_hard_subject(name: str) -> bool:
     n = norm_key(name)
     return any(k in n for k in HARD_KEYWORDS)
+
+
+def selection_is_group(raw, n_subjects=None) -> bool:
+    """Bu kuralın ders seçimi tek ders mi sayılacak?
+
+    Açık alan varsa o geçerlidir. Yoksa: en az iki ders seçilmiş ve seçim
+    kurumdaki derslerin azınlığıysa evet. Boğaziçi'nde 33 dersin 32'si seçili
+    bir kayıt var; onu tek ders saymak "günde bir ders" demek olurdu — o kayıt
+    "tüm dersler" niyetiyle yapılmış, öyle kalır.
+    """
+    if not isinstance(raw, dict):
+        return False
+    kind = raw.get("kind") or _match_rule_name(norm_key(raw.get("kural") or ""))
+    if kind not in SELECTION_GROUP_KINDS:
+        return False
+    keys = {norm_key(x) for x in (raw.get("dersler") or []) if norm_key(x)}
+    if len(keys) < 2:
+        return False
+    flag = raw.get("tek_ders")
+    if flag is not None:
+        return bool(flag)
+    if n_subjects is None:
+        return len(keys) <= 8
+    return len(keys) * 2 < int(n_subjects)
 
 
 def _match_rule_name(key: str):
@@ -409,6 +440,15 @@ def compile_rules(raw_relations, world, defaults=True) -> tuple:
         rules.append(r)
         rep.ok(label, r)
 
+        # Seçim = tek ders: "Aynı ders aynı gün tekrar etmesin: Mat1, Mat2,
+        # Geometri" kaydı bu üçünü tek ders yapar. Ayrı bir grup satırı
+        # gerekmez; kural eklendiği an böyle çalışır.
+        if kind in SELECTION_GROUP_KINDS and selection_is_group(raw, len(world.subjects)):
+            g = Rule(kind=X_SUBJECT_GROUP, axis=X, hardness=HARD, subjects=subs,
+                     label=f"[{label}] seçilen dersler tek ders sayıldı")
+            rules.append(g)
+            rep.ok(g.label, g)
+
     if defaults:
         have = {r.kind for r in rules}
         # Y ekseni: pazarlık yok, her zaman eklenir.
@@ -440,8 +480,12 @@ def compile_rules(raw_relations, world, defaults=True) -> tuple:
 # motor hem de elle yerleştirme denetimi tarafından paylaşılır; iki ayrı
 # yorum olursa ekranda izin verilen şey motorda yasak (ya da tersi) olur.
 
-def subject_groups(raw_relations):
+def subject_groups(raw_relations, n_subjects=None):
     """Ham planlama ilişkilerinden ders gruplarını çıkarır.
+
+    Hem "Seçilen dersler aynı ders sayılsın" satırları hem de seçimi tek ders
+    sayılan "aynı gün / art arda" kuralları grup üretir. n_subjects kurumdaki
+    ders sayısıdır (eski kayıtlar için karar ölçütü).
 
     Döner: liste; her öğe normalize edilmiş ders anahtarlarından oluşan bir
     küme. Kesişen gruplar birleştirilir (Mat1+Mat2 ve Mat2+Mat 11 -> tek grup).
@@ -452,7 +496,7 @@ def subject_groups(raw_relations):
         if not isinstance(raw, dict) or not raw.get("aktif", True):
             continue
         kind = raw.get("kind") or _match_rule_name(norm_key(raw.get("kural") or ""))
-        if kind != X_SUBJECT_GROUP:
+        if kind != X_SUBJECT_GROUP and not selection_is_group(raw, n_subjects):
             continue
         keys = {norm_key(x) for x in (raw.get("dersler") or []) if norm_key(x)}
         if len(keys) < 2:
@@ -469,7 +513,7 @@ def subject_groups(raw_relations):
     return groups
 
 
-def family_lookup(raw_relations):
+def family_lookup(raw_relations, n_subjects=None):
     """norm_key(ders adı) -> aile anahtarı.
 
     Grupta olmayan dersin ailesi kendi anahtarıdır; gruptaki dersin ailesi
@@ -477,7 +521,7 @@ def family_lookup(raw_relations):
     anahtarların eşitliğiyle ölçülür.
     """
     out = {}
-    for g in subject_groups(raw_relations):
+    for g in subject_groups(raw_relations, n_subjects):
         head = min(g)
         for k in g:
             out[k] = head
@@ -524,3 +568,20 @@ def subject_rule_scopes(raw_relations, kinds=None):
             classes={norm_class(x) for x in (raw.get("siniflar") or []) if x},
         ))
     return out
+
+
+def subject_count(data_store) -> int:
+    """Kurumdaki ayrı ders adı sayısı (dersler listesi ∪ atamalarda geçenler)."""
+    keys = set()
+    try:
+        for d in (data_store.get("dersler") or []):
+            k = norm_key(d.get("ad") or d.get("name") or "")
+            if k:
+                keys.add(k)
+        for a in (data_store.get("atamalar") or []):
+            k = norm_key(a.get("subject") or a.get("ders") or "")
+            if k:
+                keys.add(k)
+    except Exception:
+        pass
+    return len(keys)
