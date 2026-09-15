@@ -1276,7 +1276,7 @@ class RibbonWidget(QWidget):
         # QVBoxLayout iki sayfayı üst üste koyamaz ve konumu animasyona vermez.
         self._page_area = QWidget(self)
         self._page_area.setFixedHeight(94)
-        self._page_area.setStyleSheet(f"background: {RIBBON_BG}; border-bottom: 1px solid {RIBBON_BORDER};")
+        self._page_area.setStyleSheet(f"background: {RIBBON_BG};")
         outer.addWidget(self._page_area)
         self._anim = None
 
