@@ -947,8 +947,8 @@ class RibbonButton(QToolButton):
     def __init__(self, label: str, icon_key: str, callback=None, parent=None):
         super().__init__(parent)
         self.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-        self.setIcon(make_icon(icon_key, 40))
-        self.setIconSize(QSize(40, 40))
+        self.setIcon(make_icon(icon_key, 36))
+        self.setIconSize(QSize(36, 36))
         self.setText(label)
         self.setMinimumWidth(56)
         self.setMaximumWidth(76)
