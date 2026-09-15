@@ -1147,13 +1147,9 @@ class DraggableLessonCard(QWidget):
                 })
                 break
             w = w.parent()
-        win = self.window()
-        if win and hasattr(win, "statusBar") and win.statusBar():
-            cls_txt = self.class_name if self.class_name else "-"
-            tch_txt = self.teacher if self.teacher else "-"
-            cnt_txt = f"  |  Deste: {self.count} adet" if self.count > 1 else ""
-            dur_txt = f"{self.duration} Saatlik Blok" if self.duration > 1 else "1 Saatlik Ders"
-            win.statusBar().showMessage(f"{self.subject_name}  •  {cls_txt}  •  {tch_txt}  ({dur_txt}){cnt_txt}")
+        # Alt durum çubuğuna ders bilgisi YAZILMAZ: aynı bilgi alt paneldeki
+        # kartta ve bilgi kutusunda zaten var; en altta ikinci bir ince şerit
+        # açmak yalnızca yer yiyordu.
 
     def leaveEvent(self, event):
         super().leaveEvent(event)
@@ -4460,9 +4456,7 @@ class TimetableGrid(QWidget):
         self.info_teacher_lbl.setText(teacher if teacher else "Öğretmen Belirtilmedi")
         self.info_teacher_lbl.setStyleSheet("color: #475569; font-style: normal; background: transparent; border: none;")
         
-        if win and hasattr(win, "statusBar") and win.statusBar():
-            lock_text = " [Kilitli]" if is_locked else ""
-            win.statusBar().showMessage(f"{subj}  •  {cls}  •  {teacher}  ({dur} Saat){lock_text}")
+        # Durum çubuğu şeridi kaldırıldı; bilgi kutusu yeterli.
 
     def set_periods(self, periods: int):
         new_periods = max(1, min(16, int(periods)))

@@ -91,6 +91,11 @@ class AppShell(QMainWindow):
         self._stack = QStackedWidget()
         self._stack.setStyleSheet("background: #FFFFFF;")
         self.setCentralWidget(self._stack)
+        # Kabuk penceresinin durum çubuğu görünmez: çizelge ekranı kendi alt
+        # panelinde bilgi kutusu taşıyor; en altta ikinci bir ince şerit
+        # (ders adı • sınıf • öğretmen) yalnızca yer yiyordu. showMessage
+        # çağrıları zararsızca gizli çubuğa gider.
+        self.statusBar().hide()
         
         # Page 0: Home Dashboard
         self._dashboard = HomeDashboard(auth_data=auth_data)
