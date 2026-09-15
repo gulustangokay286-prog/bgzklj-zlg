@@ -1173,7 +1173,7 @@ def _divider(parent=None):
 class RibbonPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(83)
+        self.setFixedHeight(72)
         
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
@@ -1181,12 +1181,12 @@ class RibbonPage(QWidget):
         
         self.scroll_area = RibbonScrollArea(self)
         self.content_widget = QWidget(self.scroll_area)
-        self.content_widget.setFixedHeight(83)
+        self.content_widget.setFixedHeight(72)
         self.content_widget.setStyleSheet(f"background: {RIBBON_BG};")
         
         self.main_layout = QHBoxLayout(self.content_widget)
-        # Düğme 72 px, bant 83 px: üstte 11, altta 0 — sekme satırı hemen altında.
-        self.main_layout.setContentsMargins(4, 11, 4, 0)
+        # Üst 6 / alt 2 px; bant yüksekliği düğme boyuna göre fit() içinde kurulur.
+        self.main_layout.setContentsMargins(4, 6, 4, 2)
         self.main_layout.setSpacing(2)
         self.main_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         
@@ -1295,6 +1295,20 @@ class RibbonPage(QWidget):
             b.setMinimumWidth(cap)
             b.setMaximumWidth(cap)
             b.set_scale(icon, pt)
+        # Düğme yüksekliği ölçeğe göre: ikon + aralık + iki satır yazı + 4 px.
+        # Dar pencerede ikon küçülünce bant da küçülür; "otoban" boşluk kalmaz.
+        fm = btns[0].fontMetrics()
+        bh = icon + RibbonButton._GAP + 2 * fm.height() + 4
+        for i in range(self.main_layout.count()):
+            w = self.main_layout.itemAt(i).widget()
+            if isinstance(w, (RibbonButton, RibbonWideButton)):
+                w.setFixedHeight(bh)
+        m2 = self.main_layout.contentsMargins()
+        ph = bh + m2.top() + m2.bottom()
+        if self.content_widget.height() != ph:
+            self.content_widget.setFixedHeight(ph)
+            self.setFixedHeight(ph)
+        self.preferred_height = ph
         # Artan boşluk iki kenara eşit dağıtılır; şerit sola yapışık, sağda
         # boşluklu durmaz.
         if self.scroll_area._scroll_enabled:
@@ -1334,7 +1348,7 @@ class RibbonWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(117)
+        self.setFixedHeight(106)
         self._pages = []
         self._tab_buttons = []
         self._active = 0
@@ -1360,14 +1374,15 @@ class RibbonWidget(QWidget):
         # (geri dönüşte tersi), bu arada ikisi de kısa süre görünürdür. Bir
         # QVBoxLayout iki sayfayı üst üste koyamaz ve konumu animasyona vermez.
         self._page_area = QWidget(self)
-        self._page_area.setFixedHeight(83)
+        self._page_area.setFixedHeight(72)
+        self._page_h = 72
         self._page_area.setStyleSheet(f"background: {RIBBON_BG};")
         outer.addWidget(self._page_area)
         self._anim = None
 
     def _apply_height(self):
         tabs = 34 if self._tab_bar.isVisibleTo(self) else 0
-        page = 0 if getattr(self, "_collapsed", False) else 83
+        page = 0 if getattr(self, "_collapsed", False) else self._page_h
         self.setFixedHeight(max(tabs + page, 1))
 
     def set_collapsed(self, collapsed: bool):
@@ -1424,6 +1439,11 @@ class RibbonWidget(QWidget):
             else:
                 page.resize(w, h)
             page.fit(w)
+        ph = max((getattr(pg, "preferred_height", 0) for pg in self._pages), default=0)
+        if ph and ph != self._page_h:
+            self._page_h = ph
+            self._page_area.setFixedHeight(ph)
+            self._apply_height()
 
     def select_page(self, page, animate=True):
         """Belirli bir sayfaya geç (Ana Menü'deki "Diğer" düğmesi için)."""
