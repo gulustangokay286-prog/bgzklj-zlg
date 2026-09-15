@@ -858,9 +858,17 @@ ICON_MAP = {
 }
 
 
+_ICON_CACHE = {}
+
+
 def make_icon(key: str, size: int = 32) -> QIcon:
-    fn = ICON_MAP.get(key, icon_school_info)
-    return QIcon(_make_pixmap(size, fn))
+    ck = (key, int(size))
+    ic = _ICON_CACHE.get(ck)
+    if ic is None:
+        fn = ICON_MAP.get(key, icon_school_info)
+        ic = QIcon(_make_pixmap(size, fn))
+        _ICON_CACHE[ck] = ic
+    return ic
 
 
 # ── Ribbon Scroll Area ────────────────────────────────────────────────────────
@@ -947,6 +955,7 @@ class RibbonButton(QToolButton):
     def __init__(self, label: str, icon_key: str, callback=None, parent=None):
         super().__init__(parent)
         self.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        self._icon_key = icon_key
         self.setIcon(make_icon(icon_key, 36))
         self.setIconSize(QSize(36, 36))
         self.setText(label)
@@ -1050,6 +1059,17 @@ class RibbonButton(QToolButton):
             p.drawText(QRectF(1, ty, avail, fm.height()), Qt.AlignHCenter | Qt.AlignVCenter, txt)
             ty += fm.height()
         p.end()
+
+    def set_scale(self, icon_px: int, pt: float):
+        """Dar pencerede ikon ve yazı birlikte küçülür; genişte eski boyuna döner."""
+        if self.iconSize().width() != icon_px:
+            self.setIcon(make_icon(self._icon_key, icon_px))
+            self.setIconSize(QSize(icon_px, icon_px))
+        f = self.font()
+        if abs(f.pointSizeF() - pt) > 0.05:
+            f.setPointSizeF(pt)
+            self.setFont(f)
+        self.update()
 
     def set_actionable(self, actionable: bool):
         """Enable + accent the button, or disable + flatten it.
@@ -1251,23 +1271,30 @@ class RibbonPage(QWidget):
         # daralır (en az 50 px), geniş pencerede genişler (en fazla 118 px).
         # Tam ekranda sola yığılıp sağda boşluk bırakmak yerine şerit boydan
         # boya yayılır; pencere küçülünce de kaymadan sığar.
+        # Kademeli ölçek: pencere daraldıkça önce düğme, sonra ikon ve yazı
+        # küçülür; kaydırmaya ancak 36 px'in altında düşülür (pencere en az
+        # 900 px olduğu için pratikte hiç). "Küçültülmüş" pencerede de sığar.
         cap = (width - fixed) // len(btns)
-        if cap < 50:
-            # Küçük pencere: düğmeleri ezmek yerine rahat boyda bırak, kaydır.
-            cap, small = 60, False
+        if cap >= 56:
+            icon, pt = 36, 7.5
+        elif cap >= 48:
+            icon, pt = 30, 7.0
+        elif cap >= 42:
+            icon, pt = 26, 6.5
+        elif cap >= 36:
+            icon, pt = 22, 6.0
+        else:
+            icon, pt = 22, 6.0
+        if cap < 36:
+            cap = 40
             self.scroll_area.set_scroll_enabled(True)
         else:
             cap = min(118, cap)
-            small = cap < 56
             self.scroll_area.set_scroll_enabled(False)
         for b in btns:
             b.setMinimumWidth(cap)
             b.setMaximumWidth(cap)
-            f = b.font()
-            size = 7 if small else 7.5
-            if abs(f.pointSizeF() - size) > 0.1:
-                f.setPointSizeF(size)
-                b.setFont(f)
+            b.set_scale(icon, pt)
         # Artan boşluk iki kenara eşit dağıtılır; şerit sola yapışık, sağda
         # boşluklu durmaz.
         if self.scroll_area._scroll_enabled:
