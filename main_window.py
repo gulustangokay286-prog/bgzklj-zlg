@@ -287,10 +287,7 @@ class MainWindow(QMainWindow):
         self._updater = None
         self._update_check_was_manual = False
 
-        title = "Chenkron Ders Programı Yöneticisi"
-        if institution_name:
-            title = f"{institution_name} — {title}"
-        self.setWindowTitle(title)
+        self.setWindowTitle("Chenkron Ders Dağıtım ve Yönetim Sistemi")
         self.resize(1280, 780)
         self.setMinimumSize(900, 600)
         self.setStyleSheet("QMainWindow { background: #FFFFFF; }")
@@ -688,6 +685,14 @@ class MainWindow(QMainWindow):
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
         self.setCentralWidget(root)
+
+        # En üst: ortalı başlık şeridi ("Chenkron 2026 — Kurum • v141 Ad")
+        self.top_title_lbl = QLabel("", root)
+        self.top_title_lbl.setAlignment(Qt.AlignCenter)
+        self.top_title_lbl.setFixedHeight(24)
+        self.top_title_lbl.setFont(QFont(FONT_FAMILY, 10, QFont.DemiBold))
+        self.top_title_lbl.setStyleSheet("color: #334155; background: #FFFFFF; border: none; padding-top: 4px;")
+        root_layout.addWidget(self.top_title_lbl)
 
         # Ribbon
         self._ribbon = RibbonWidget(root)
@@ -3383,10 +3388,13 @@ class MainWindow(QMainWindow):
             else:
                 self.ver_lbl.setToolTip("")
 
-        title_parts = [inst_name]
-        if combo:
-            title_parts.append(combo)
-        self.setWindowTitle(f"Chenkron — {' — '.join(title_parts)}")
+        # Uygulama içi ortalı başlık: "Chenkron 2026 — Kurum • v141 Sürüm Adı"
+        if hasattr(self, "top_title_lbl") and self.top_title_lbl:
+            parts = [inst_name]
+            if combo:
+                parts.append(combo)
+            self.top_title_lbl.setText(f"{APP_TITLE} 2026  —  {'  •  '.join(parts)}")
+        self.setWindowTitle("Chenkron Ders Dağıtım ve Yönetim Sistemi")
 
     # ── Actions ───────────────────────────────────────────────────────────────
     def _save_new_version_with_folder_picker(self, note, force=False):
@@ -4123,8 +4131,7 @@ class MainWindow(QMainWindow):
                         import re
                         m = re.match(r"v(\d+)_", ver_fn)
                         if m: v_num = f"v{int(m.group(1))}"
-                    title_suffix = f" — {v_num}" if v_num else ""
-                    self.setWindowTitle(f"Chenkron — {kurum_adi}{title_suffix}")
+                    self._update_header_title()
                 except Exception as e:
                     print(f"Failed to update institution name in meta: {e}")
                     

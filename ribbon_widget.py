@@ -748,24 +748,38 @@ def icon_help(p: QPainter, s: int):
 
 
 def icon_home(p: QPainter, s: int):
-    """Ana Sayfa: Şık Mor Ev İkonu"""
-    p.setPen(QPen(QColor("#4C1D95"), 1))
-    grad = QLinearGradient(3, 4, 29, 28)
-    grad.setColorAt(0, QColor("#A78BFA"))
-    grad.setColorAt(1, QColor("#7C3AED"))
-    p.setBrush(QBrush(grad))
-    
-    roof = QPolygonF([
-        QPointF(16, 3),
-        QPointF(29, 13),
-        QPointF(3, 13)
-    ])
-    p.drawPolygon(roof)
-    
-    p.drawRoundedRect(6, 13, 20, 14, 2, 2)
+    """Ana Sayfa: yumuşak mavi ev — geniş çatı, kapı, baca; diğer ikonlarla aynı dil."""
+    # çatı + gövde tek gövde gibi: önce gövde
+    body = QLinearGradient(6, 12, 26, 29)
+    body.setColorAt(0, QColor("#60A5FA"))
+    body.setColorAt(1, QColor("#2563EB"))
+    p.setPen(QPen(QColor("#1D4ED8"), 1))
+    p.setBrush(QBrush(body))
+    p.drawRoundedRect(QRectF(6.5, 13, 19, 14.5), 3, 3)
+    # baca
+    p.setBrush(QBrush(QColor("#1E40AF")))
+    p.drawRoundedRect(QRectF(21, 5.5, 3.5, 6), 1, 1)
+    # çatı
+    roof = QLinearGradient(3, 3, 29, 14)
+    roof.setColorAt(0, QColor("#93C5FD"))
+    roof.setColorAt(1, QColor("#3B82F6"))
+    p.setBrush(QBrush(roof))
+    p.setPen(QPen(QColor("#1D4ED8"), 1, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    path = QPainterPath()
+    path.moveTo(3.5, 14.5)
+    path.lineTo(16, 3.5)
+    path.lineTo(28.5, 14.5)
+    path.lineTo(25.5, 14.5)
+    path.lineTo(16, 6.5)
+    path.lineTo(6.5, 14.5)
+    path.closeSubpath()
+    p.drawPath(path)
+    # kapı ve pencere
     p.setPen(Qt.NoPen)
     p.setBrush(QBrush(QColor("#FFFFFF")))
-    p.drawRoundedRect(13, 18, 6, 9, 1, 1)
+    p.drawRoundedRect(QRectF(13.5, 18.5, 5, 9), 1.5, 1.5)
+    p.setBrush(QBrush(QColor("#DBEAFE")))
+    p.drawRoundedRect(QRectF(20, 17, 3.5, 3.5), 0.8, 0.8)
 
 
 def icon_clear(p: QPainter, s: int):
@@ -1095,7 +1109,7 @@ def _divider(parent=None):
 class RibbonPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(94)
+        self.setFixedHeight(76)
         
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
@@ -1103,12 +1117,12 @@ class RibbonPage(QWidget):
         
         self.scroll_area = RibbonScrollArea(self)
         self.content_widget = QWidget(self.scroll_area)
-        self.content_widget.setFixedHeight(92)
+        self.content_widget.setFixedHeight(74)
         self.content_widget.setStyleSheet(f"background: {RIBBON_BG};")
         
         self.main_layout = QHBoxLayout(self.content_widget)
-        # Düğmeler üst kenara yapışmasın: 22 px üst boşluk.
-        self.main_layout.setContentsMargins(4, 22, 4, 8)
+        # Üstte 24 px'lik başlık şeridi var; düğmeler onun 3 px altında başlar.
+        self.main_layout.setContentsMargins(4, 3, 4, 9)
         self.main_layout.setSpacing(2)
         self.main_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         
@@ -1249,7 +1263,7 @@ class RibbonWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(128)
+        self.setFixedHeight(110)
         self._pages = []
         self._tab_buttons = []
         self._active = 0
@@ -1275,14 +1289,14 @@ class RibbonWidget(QWidget):
         # (geri dönüşte tersi), bu arada ikisi de kısa süre görünürdür. Bir
         # QVBoxLayout iki sayfayı üst üste koyamaz ve konumu animasyona vermez.
         self._page_area = QWidget(self)
-        self._page_area.setFixedHeight(94)
+        self._page_area.setFixedHeight(76)
         self._page_area.setStyleSheet(f"background: {RIBBON_BG};")
         outer.addWidget(self._page_area)
         self._anim = None
 
     def _apply_height(self):
         tabs = 34 if self._tab_bar.isVisibleTo(self) else 0
-        page = 0 if getattr(self, "_collapsed", False) else 94
+        page = 0 if getattr(self, "_collapsed", False) else 76
         self.setFixedHeight(max(tabs + page, 1))
 
     def set_collapsed(self, collapsed: bool):

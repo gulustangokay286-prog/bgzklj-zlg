@@ -74,7 +74,7 @@ class AppShell(QMainWindow):
         super().__init__()
         self.logo_path = logo_path
         self.auth_data = auth_data
-        self.setWindowTitle("Chenkron — Ders Dağıtım ve Yönetim Sistemi")
+        self.setWindowTitle("Chenkron Ders Dağıtım ve Yönetim Sistemi")
         self.setMinimumSize(1100, 700)
         
         if logo_path and os.path.exists(logo_path):
@@ -192,13 +192,8 @@ class AppShell(QMainWindow):
         # bu bekleme, gecikmenin kendisinden uzun kalıyordu.
         dlg.close_smooth()
         
-        # Update title
-        v_num = ""
-        import re
-        m = re.match(r"v(\d+)_", version_filename)
-        if m:
-            v_num = f"v{int(m.group(1))}"
-        self.setWindowTitle(f"Chenkron — {inst_name} — {v_num}")
+        # Pencere başlığı sabittir; kurum ve sürüm uygulamanın içinde, ortalı başlıkta yazar.
+        self.setWindowTitle("Chenkron Ders Dağıtım ve Yönetim Sistemi")
     
     def _open_empty_timetable(self, slug, mode="current_data", custom_name="", pool_id=None, pool_name=None):
         """Create a new version.
@@ -332,7 +327,7 @@ class AppShell(QMainWindow):
             pass
 
         self._stack.setCurrentWidget(self._dashboard)
-        self.setWindowTitle("Chenkron — Ders Dağıtım ve Yönetim Sistemi")
+        self.setWindowTitle("Chenkron Ders Dağıtım ve Yönetim Sistemi")
         try:
             if hasattr(self._dashboard, "on_returned_to_dashboard"):
                 self._dashboard.on_returned_to_dashboard()
