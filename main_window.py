@@ -762,14 +762,14 @@ class MainWindow(QMainWindow):
 
         # ── 1. Ana Menü ──────────────────────────────────────────────────────
         p1 = r.add_tab("Ana Menü")
-        p1.add_button("Ana Sayfa",      "anasayfa", self._go_home)
+        p1.add_button("Anasayfa",       "anasayfa", self._go_home)
         self.btn_ribbon_new_main = p1.add_button("Yeni", "yeni", self._act_new)
         p1.add_button("Aç",             "ac",       self._act_open)
         p1.add_button("Kaydet",         "kaydet",   self._act_save)
         self.btn_undo_main = p1.add_button("Geri Al\nCtrl+Z","geri_al",  self._act_undo)
         self.btn_redo_main = p1.add_button("Yinele\nCtrl+Y", "yinele",   self._act_redo)
         p1.add_button("Yazdır",         "yazdir",   self._act_print)
-        p1.add_button("Ön İzleme",      "on_izleme",self._act_preview)
+        p1.add_button("Önizleme",       "on_izleme",self._act_preview)
         p1.add_divider()
         p1.add_button("Dersler",        "ders",     self._open_subjects)
         p1.add_button("Sınıflar",       "sinif",    self._open_classes)

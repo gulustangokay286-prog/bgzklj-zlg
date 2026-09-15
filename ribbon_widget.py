@@ -920,9 +920,8 @@ class RibbonButton(QToolButton):
                 background: transparent;
                 border: 1px solid transparent;
                 border-radius: 6px;
-                padding: 0px 2px;
+                padding: 3px 0px 0px 0px;
                 color: #0F172A;
-                font-size: 7pt;
                 font-weight: 500;
                 text-align: center;
             }
@@ -943,16 +942,16 @@ class RibbonButton(QToolButton):
     def __init__(self, label: str, icon_key: str, callback=None, parent=None):
         super().__init__(parent)
         self.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-        self.setIcon(make_icon(icon_key, 36))
-        self.setIconSize(QSize(36, 36))
+        self.setIcon(make_icon(icon_key, 40))
+        self.setIconSize(QSize(40, 40))
         self.setText(label)
         self.setMinimumWidth(56)
         self.setMaximumWidth(76)
-        self.setFixedHeight(66)
+        self.setFixedHeight(72)
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.setCheckable(False)
         self.setCursor(Qt.PointingHandCursor)
-        font = QFont(FONT_FAMILY, 7)
+        font = QFont(FONT_FAMILY, 7.5)
         self.setFont(font)
         self.setStyleSheet(self.BASE_QSS)
         self._actionable = None
@@ -971,9 +970,8 @@ class RibbonButton(QToolButton):
                 background: #E8F1FB;
                 border: 1px solid #B8CCE4;
                 border-radius: 6px;
-                padding: 0px 2px;
+                padding: 3px 0px 0px 0px;
                 color: #0B4A8F;
-                font-size: 7pt;
                 font-weight: 700;
                 text-align: center;
             }
@@ -1015,10 +1013,9 @@ class RibbonButton(QToolButton):
 #                 background: transparent;
 #                 border: 1px solid transparent;
 #                 border-radius: 6px;
-#                 padding: 0px 2px;
+#                 padding: 3px 0px 0px 0px;
 #                 color: #0F172A;
-#                 font-size: 7pt;
-#                 font-weight: 500;
+# #                 font-weight: 500;
 #                 text-align: center;
 #             }
 #             QToolButton:hover {
@@ -1044,7 +1041,7 @@ class RibbonWideButton(QToolButton):
         self.setIcon(make_icon("geri", 32))
         self.setIconSize(QSize(32, 32))
         self.setText("Geri")
-        self.setFixedSize(50, 66)
+        self.setFixedSize(50, 72)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.setCursor(Qt.PointingHandCursor)
         font = QFont(FONT_FAMILY, 7.5, QFont.Bold)
@@ -1054,9 +1051,8 @@ class RibbonWideButton(QToolButton):
                 background: #1E6DB5;
                 border: none;
                 border-radius: 6px;
-                padding: 0px 2px;
+                padding: 3px 0px 0px 0px;
                 color: #FFFFFF;
-                font-size: 7.5pt;
                 font-weight: bold;
             }
             QToolButton:hover { background: #1557A0; }
@@ -1093,7 +1089,7 @@ def _divider(parent=None):
 class RibbonPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(77)
+        self.setFixedHeight(83)
         
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
@@ -1101,11 +1097,11 @@ class RibbonPage(QWidget):
         
         self.scroll_area = RibbonScrollArea(self)
         self.content_widget = QWidget(self.scroll_area)
-        self.content_widget.setFixedHeight(77)
+        self.content_widget.setFixedHeight(83)
         self.content_widget.setStyleSheet(f"background: {RIBBON_BG};")
         
         self.main_layout = QHBoxLayout(self.content_widget)
-        # Düğme 66 px, bant 77 px: üstte 11, altta 0 — sekme satırı hemen altında.
+        # Düğme 72 px, bant 83 px: üstte 11, altta 0 — sekme satırı hemen altında.
         self.main_layout.setContentsMargins(4, 11, 4, 0)
         self.main_layout.setSpacing(2)
         self.main_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -1192,19 +1188,19 @@ class RibbonPage(QWidget):
         # Tam ekranda sola yığılıp sağda boşluk bırakmak yerine şerit boydan
         # boya yayılır; pencere küçülünce de kaymadan sığar.
         cap = (width - fixed) // len(btns)
-        if cap < 48:
+        if cap < 50:
             # Küçük pencere: düğmeleri ezmek yerine rahat boyda bırak, kaydır.
             cap, small = 60, False
             self.scroll_area.set_scroll_enabled(True)
         else:
             cap = min(118, cap)
-            small = cap < 58
+            small = cap < 56
             self.scroll_area.set_scroll_enabled(False)
         for b in btns:
             b.setMinimumWidth(cap)
             b.setMaximumWidth(cap)
             f = b.font()
-            size = 6.5 if small else 7
+            size = 7 if small else 7.5
             if abs(f.pointSizeF() - size) > 0.1:
                 f.setPointSizeF(size)
                 b.setFont(f)
@@ -1247,7 +1243,7 @@ class RibbonWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(111)
+        self.setFixedHeight(117)
         self._pages = []
         self._tab_buttons = []
         self._active = 0
@@ -1273,14 +1269,14 @@ class RibbonWidget(QWidget):
         # (geri dönüşte tersi), bu arada ikisi de kısa süre görünürdür. Bir
         # QVBoxLayout iki sayfayı üst üste koyamaz ve konumu animasyona vermez.
         self._page_area = QWidget(self)
-        self._page_area.setFixedHeight(77)
+        self._page_area.setFixedHeight(83)
         self._page_area.setStyleSheet(f"background: {RIBBON_BG};")
         outer.addWidget(self._page_area)
         self._anim = None
 
     def _apply_height(self):
         tabs = 34 if self._tab_bar.isVisibleTo(self) else 0
-        page = 0 if getattr(self, "_collapsed", False) else 77
+        page = 0 if getattr(self, "_collapsed", False) else 83
         self.setFixedHeight(max(tabs + page, 1))
 
     def set_collapsed(self, collapsed: bool):
