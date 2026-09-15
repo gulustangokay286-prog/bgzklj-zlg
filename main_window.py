@@ -757,8 +757,6 @@ class MainWindow(QMainWindow):
         # ── 1. Ana Menü ──────────────────────────────────────────────────────
         p1 = r.add_tab("Ana Menü")
         p1.add_button("Ana Sayfa",      "anasayfa", self._go_home)
-        self.btn_ribbon_new_main = p1.add_button("Yeni", "yeni", self._act_new)
-        p1.add_button("Aç",             "ac",       self._act_open)
         p1.add_button("Kaydet",         "kaydet",   self._act_save)
         self.btn_undo_main = p1.add_button("Geri Al\nCtrl+Z","geri_al",  self._act_undo)
         self.btn_redo_main = p1.add_button("Yinele\nCtrl+Y", "yinele",   self._act_redo)
@@ -774,14 +772,10 @@ class MainWindow(QMainWindow):
         p1.add_divider()
         p1.add_button("Planlama\nÖncesi Kontrol","kontrol",self._act_test_timetable)
         p1.add_button("Otomatik\nPlanlamayı Başlat","otomatik",self._act_auto_schedule)
-        p1.add_button("Bulut Tabanlı\nPlanlama","bulut_olustur",self._act_cloud_timetable)
         p1.add_button("Planlama Sonrası\nKontrol","kontrol",self._act_verify_timetable)
         p1.add_button("Çizelgeyi\nSıfırla","temizle",self._act_clear_schedule)
         p1.add_divider()
         p1.add_button("Temel\nBilgiler",  "okul",    self._open_school_info)
-        p1.add_button("Evden Kod\nGüncelle", "bulut", self._act_check_updates)
-        p1.add_button("İnternet\nHesabı","internet", lambda: __import__('webbrowser').open("https://chenki.net/"))
-        p1.add_button("Sorular?\nYorumlar?","yardim",lambda: __import__('dialogs.faq_dialog', fromlist=['FAQDialog']).FAQDialog(self).exec())
         p1.add_divider()
         # Sekme şeridi kaldırıldı: Ana Menü diğer sekmelerin neredeyse tamamını
         # taşıyor. Kalan düğmeler "Diğer" sayfasında; düğme şeridi o sayfaya
@@ -886,6 +880,8 @@ class MainWindow(QMainWindow):
         po = r.add_tab("Diğer")
         self._page_other = po
         po.add_back(self._go_main_tab)
+        self.btn_ribbon_new_main = po.add_button("Yeni", "yeni", self._act_new)
+        po.add_button("Aç",                "ac",       self._act_open)
         po.add_button("Kapat",             "temizle",  self._act_close)
         po.add_button("Demo\nDosyaları",   "okul",     self._act_demo_files)
         po.add_button("Aktar",             "internet", self._act_export)
@@ -897,6 +893,7 @@ class MainWindow(QMainWindow):
         po.add_button("Tanımlanan\nKısıtlamalar","sartlar", self._act_constraints_overview)
         po.add_button("Değiştir",          "okul",     lambda: self._open_extracted(135))
         po.add_divider()
+        po.add_button("Bulut Tabanlı\nPlanlama","bulut_olustur", self._act_cloud_timetable)
         po.add_button("İyileştirme\nUygula","otomatik", self._act_improve)
         po.add_button("Analiz /\nİstatistik","kontrol",  self._act_statistics)
         po.add_button("Danışman",          "yardim",   self._act_advisor)
@@ -911,7 +908,9 @@ class MainWindow(QMainWindow):
         po.add_button("Günlük\nİpucu",     "yardim",   self._act_tip_of_day)
         po.add_button("Teknik\nDestek",    "yardim",   self._act_support)
         po.add_button("Hizmet\nYenileme",  "internet", self._act_account)
-        po.add_button("Online\nYardım",    "yardim",   lambda: __import__('webbrowser').open("https://chenki.net/"))
+        po.add_button("Evden Kod\nGüncelle","bulut",    self._act_check_updates)
+        po.add_button("İnternet\nHesabı",  "internet", lambda: __import__('webbrowser').open("https://chenki.net/"))
+        po.add_button("Sorular?\nYorumlar?","yardim",   lambda: __import__('dialogs.faq_dialog', fromlist=['FAQDialog']).FAQDialog(self).exec())
         po.add_stretch()
 
         # Varsayılan: sekme şeridi gizli, tek şerit + "Diğer" sayfası.

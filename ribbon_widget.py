@@ -849,7 +849,9 @@ class RibbonScrollArea(QScrollArea):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWidgetResizable(True)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        # Şerit sağa sola KAYMAZ: kaydırma çubuğu yok, tekerlek/trackpad
+        # hareketi şeridi oynatmaz. Sığmayan düğmeler daraltılır (RibbonPage.fit).
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setFrameShape(QFrame.NoFrame)
         self.setStyleSheet("""
@@ -877,19 +879,8 @@ class RibbonScrollArea(QScrollArea):
         """)
 
     def wheelEvent(self, event):
-        # Enable smooth horizontal scrolling with normal mouse wheel
-        if event.angleDelta().y() != 0:
-            self.horizontalScrollBar().setValue(
-                self.horizontalScrollBar().value() - event.angleDelta().y()
-            )
-            event.accept()
-        elif event.angleDelta().x() != 0:
-            self.horizontalScrollBar().setValue(
-                self.horizontalScrollBar().value() - event.angleDelta().x()
-            )
-            event.accept()
-        else:
-            super().wheelEvent(event)
+        # Tekerlek şeridi kaydırmaz; olay yutulur ki alttaki tabloya da gitmesin.
+        event.accept()
 
 
 # ── Ribbon Button ─────────────────────────────────────────────────────────────
@@ -1148,6 +1139,38 @@ class RibbonPage(QWidget):
         self.main_layout.addWidget(item)
         return item
 
+    def fit(self, width: int):
+        """Düğmeleri verilen genişliğe sığdırır; kaydırma yerine daraltma.
+
+        Doğal genişlik sığıyorsa düğmeler normal (en fazla 76 px). Sığmıyorsa
+        hepsine eşit bir tavan verilir (en az 50 px) ve yazı bir punto küçülür.
+        Tam ekranda bile 24 düğme 1280 px'e sığmıyordu; şerit kayıyor, trackpad
+        hareketiyle sağa sola oynuyordu. Kayma yerine ölçek.
+        """
+        btns = [self.main_layout.itemAt(i).widget() for i in range(self.main_layout.count())]
+        btns = [b for b in btns if isinstance(b, RibbonButton)]
+        if not btns or width <= 0:
+            return
+        m = self.main_layout.contentsMargins()
+        fixed = m.left() + m.right() + self.main_layout.spacing() * max(0, self.main_layout.count() - 1)
+        for i in range(self.main_layout.count()):
+            w = self.main_layout.itemAt(i).widget()
+            if w is not None and not isinstance(w, RibbonButton):
+                fixed += w.sizeHint().width()
+        natural = fixed + sum(min(76, b.sizeHint().width()) for b in btns)
+        if natural <= width:
+            cap, small = 76, False
+        else:
+            cap = max(50, (width - fixed) // len(btns))
+            small = cap < 62
+        for b in btns:
+            b.setMaximumWidth(cap)
+            f = b.font()
+            size = 6.5 if small else 7
+            if abs(f.pointSizeF() - size) > 0.1:
+                f.setPointSizeF(size)
+                b.setFont(f)
+
 
 def make_menu_icon(symbol: str, color1: str, color2: str) -> QIcon:
     pix = QPixmap(28, 28)
@@ -1262,6 +1285,7 @@ class RibbonWidget(QWidget):
                 page.setGeometry(0, 0, w, h)
             else:
                 page.resize(w, h)
+            page.fit(w)
 
     def select_page(self, page, animate=True):
         """Belirli bir sayfaya geç (Ana Menü'deki "Diğer" düğmesi için)."""
