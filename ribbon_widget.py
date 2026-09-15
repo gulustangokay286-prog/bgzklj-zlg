@@ -989,6 +989,63 @@ class RibbonButton(QToolButton):
             }
     """
 
+    # ── Çizim platformdan bağımsız ──
+    #
+    # QToolButton'ın "yazı ikonun altında" yerleşimi macOS stilinde ikonu
+    # tepeye yapıştırıp altta boşluk bırakıyor; Fusion'da ise ortalıyor.
+    # Kafes testinde ortalı görünen düğme kullanıcının ekranında kayık
+    # çıkıyordu. Bu yüzden ikon + yazı bloğu burada elle, tam ortaya çizilir;
+    # arka plan ve kenarlık da stil sayfasına bırakılmaz.
+    _GAP = 4
+
+    def enterEvent(self, e):
+        super().enterEvent(e); self.update()
+
+    def leaveEvent(self, e):
+        super().leaveEvent(e); self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        r = self.rect().adjusted(0, 0, -1, -1)
+        enabled = self.isEnabled()
+        hover = enabled and self.underMouse()
+        down = enabled and self.isDown()
+        actionable = bool(self._actionable)
+        bg = border = None
+        if enabled:
+            if down:
+                bg, border = "#B8D4F0", "#7FA9D6"
+            elif hover:
+                bg, border = "#DAE8FC", "#7FA9D6" if actionable else "#B8CCE4"
+            elif actionable:
+                bg, border = "#E8F1FB", "#B8CCE4"
+        if bg:
+            p.setPen(QPen(QColor(border), 1))
+            p.setBrush(QBrush(QColor(bg)))
+            p.drawRoundedRect(QRectF(r).adjusted(0.5, 0.5, 0, 0), 6, 6)
+
+        icon_px = self.iconSize().width()
+        fm = self.fontMetrics()
+        lines = self.text().split("\n") if self.text() else []
+        text_h = fm.height() * len(lines)
+        block = icon_px + (self._GAP if lines else 0) + text_h
+        y = (self.height() - block) // 2
+        x = (self.width() - icon_px) // 2
+        pix = self.icon().pixmap(QSize(icon_px, icon_px), QIcon.Normal if enabled else QIcon.Disabled)
+        p.drawPixmap(x, y, icon_px, icon_px, pix)
+
+        p.setFont(self.font())
+        p.setPen(QColor("#A0AEC0" if not enabled else ("#0B4A8F" if actionable else "#0F172A")))
+        ty = y + icon_px + self._GAP
+        avail = self.width() - 2
+        for line in lines:
+            txt = fm.elidedText(line, Qt.ElideRight, avail)
+            p.drawText(QRectF(1, ty, avail, fm.height()), Qt.AlignHCenter | Qt.AlignVCenter, txt)
+            ty += fm.height()
+        p.end()
+
     def set_actionable(self, actionable: bool):
         """Enable + accent the button, or disable + flatten it.
 
@@ -1002,6 +1059,8 @@ class RibbonButton(QToolButton):
             return
         self._actionable = actionable
         self.setStyleSheet(self.ACTIONABLE_QSS if actionable else self.BASE_QSS)
+        f = self.font(); f.setBold(actionable); self.setFont(f)
+        self.update()
 
 
 # NOTE: BASE_QSS must be added as a class attribute on RibbonButton, directly
