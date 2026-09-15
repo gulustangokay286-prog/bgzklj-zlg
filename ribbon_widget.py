@@ -1079,31 +1079,14 @@ class RibbonCheckItem(QWidget):
         layout.addWidget(self.cb)
 
 
-class _Divider(QWidget):
-    """Grup ayracı: ince, kısa, soluk.
-
-    Eskisi QFrame.VLine + Sunken idi: iki tonlu (açık + koyu) 2 px'lik oyuk
-    çizgi, üstelik düğmelerden uzun — şeridin tepesinden dibine kadar iniyor
-    ve her grubu kutuya alıyordu. Şimdi tek piksel, düğme boyunun yarısı
-    kadar, düşeyde ortalı ve iki yanında nefes payı var; gruplar ayrılır ama
-    çizgi göze batmaz.
-    """
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedWidth(15)
-        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        h = 40
-        y = (self.height() - h) // 2
-        x = self.width() // 2
-        p.fillRect(x, y, 1, h, QColor("#CBD5E1"))
-        p.end()
-
-
 def _divider(parent=None):
-    return _Divider(parent)
+    """Grup ayracı: ilk tek şerit hâlindeki görünüm (oyuk 2 px dikey çizgi)."""
+    f = QFrame(parent)
+    f.setFrameShape(QFrame.VLine)
+    f.setFrameShadow(QFrame.Sunken)
+    f.setStyleSheet("color: #E2E8F0;")
+    f.setFixedWidth(2)
+    return f
 
 
 # ── Ribbon Tab Page ───────────────────────────────────────────────────────────

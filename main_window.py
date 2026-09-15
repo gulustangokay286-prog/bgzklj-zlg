@@ -785,10 +785,8 @@ class MainWindow(QMainWindow):
         p1.add_button("Sıfırla","temizle",self._act_clear_schedule)
         p1.add_divider()
         p1.add_button("Temel\nBilgiler",  "okul",    self._open_school_info)
-        p1.add_button("Güncelle", "bulut", self._act_check_updates)
         p1.add_button("Hesabım","internet", lambda: __import__('webbrowser').open("https://chenki.net/"))
         p1.add_button("Yardım","yardim",lambda: __import__('dialogs.faq_dialog', fromlist=['FAQDialog']).FAQDialog(self).exec())
-        p1.add_divider()
         # Sekme şeridi kaldırıldı: Ana Menü diğer sekmelerin neredeyse tamamını
         # taşıyor. Kalan düğmeler "Diğer" sayfasında; düğme şeridi o sayfaya
         # kaydırarak geçirir (Apple tarzı geçiş), oradaki "Geri" döndürür.
@@ -917,6 +915,7 @@ class MainWindow(QMainWindow):
         po.add_button("Günlük\nİpucu",     "yardim",   self._act_tip_of_day)
         po.add_button("Teknik\nDestek",    "yardim",   self._act_support)
         po.add_button("Hizmet\nYenileme",  "internet", self._act_account)
+        po.add_button("Güncelle",          "bulut",    self._act_check_updates)
         po.add_button("Online\nYardım",    "yardim",   lambda: __import__('webbrowser').open("https://chenki.net/"))
         po.add_stretch()
 
