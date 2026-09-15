@@ -258,8 +258,32 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
         res.positions = pos
         res.split_pieces = parcalar
         res.status = 'optimal' if durum == 'OPTIMAL' else durum.lower()
+        # Son kartlar için derin arama: CP-SAT durgunlaştıysa (278'de kaldıysa)
+        # açıkta kalan bir iki kart için tahliye zinciri denenir. Ucuz, ve
+        # çoğu zaman tam olarak eksik olan o son saati bulur.
+        if durum in ('STALLED', 'FEASIBLE') and any(i < 0 for i in pos) \
+                and not (callable(cancelled) and cancelled()):
+            try:
+                from .finish import Finisher
+                fin = Finisher(w, rules, pos, forced=forced, pieces=parcalar)
+                yeni, kazanc = fin.run()
+                if kazanc > 0:
+                    hata, _, _ = validate(w, rules, yeni, bend_rules=completion_first,
+                                          forced=forced, pieces=parcalar)
+                    if not hata:
+                        res.positions = yeni
+                        placed += kazanc
+                        res.warnings.append(f"Bitirme geçişi {kazanc} saat daha yerleştirdi.")
+            except Exception as exc:
+                res.warnings.append(f"Bitirme geçişi çalışmadı: {exc}")
+        if durum == 'STALLED':
+            aciklama = "iki tur üst üste ilerleme olmadı, daha fazla beklenmedi"
+        elif durum == 'OPTIMAL' and placed < res.total_hours:
+            aciklama = "CP-SAT bu kurallarla daha fazlasının mümkün olmadığını kanıtladı"
+        else:
+            aciklama = f"CP-SAT {durum}"
         res.warnings.append(
-            f"Optimal kip: {tur} tur, {placed}/{res.total_hours} saat, CP-SAT {durum}."
+            f"Optimal kip: {tur} tur, {placed}/{res.total_hours} saat, {aciklama}."
             + (f" {len(parcalar)} blok parçalara bölündü." if parcalar else ""))
         return _bitir(res, w, rules, data_store, completion_first, start)
 

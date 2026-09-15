@@ -1098,6 +1098,10 @@ class AutoScheduleDialog(QDialog):
         self.lbl_info.setStyleSheet("color: #DC2626; font-weight: 500;")
 
     def _on_finished(self, result):
+        # Çarpıyla kapatılırken gelen kısmi sonuç uygulanmaz; "Durdur ve
+        # Kaydet" ise normal yoldan gelir ve en iyi çözüm kaydedilir.
+        if getattr(self, "_closing", False):
+            return
         placed = result.get("placed_hours", 0)
         demand = result.get("total_assigned_hours", result.get("total_hours", 0))
         self._on_progress(placed, demand)
@@ -1419,7 +1423,39 @@ class AutoScheduleDialog(QDialog):
                 parent.statusBar().showMessage(f"Otomatik çizelge oluşturuldu! ({total_hrs}/{target_hrs} saat yerleştirildi)", 5000)
 
     def reject(self):
+        """Çarpı / Esc / İptal.
+
+        Motor çalışırken arayüz iş parçacığında worker.wait() ÇAĞRILMAZ: CP-SAT
+        turunu bitirene kadar bloklar ve pencere donar, "kapanmıyor, çöküyor"
+        görünür. Bunun yerine durdurma bayrağı kaldırılır (CP-SAT bayrağı
+        saniyede beş kez yoklar ve aramayı anında keser), pencere iş parçacığı
+        bitince kendiliğinden kapanır.
+        """
         if hasattr(self, 'worker') and self.worker is not None and self.worker.isRunning():
-            self.worker.stop()
-            self.worker.wait()
+            if not getattr(self, "_closing", False):
+                self._closing = True
+                self.worker.stop()
+                self.btn_start.setEnabled(False)
+                self.btn_cancel.setEnabled(False)
+                self.lbl_info.setText("Durduruluyor…")
+                self.lbl_info.setStyleSheet("color: #B45309; font-weight: 500;")
+                try:
+                    self.worker.finished.connect(self._close_after_stop)
+                except Exception:
+                    QTimer.singleShot(300, self._close_after_stop)
+            return
         super().reject()
+
+    def _close_after_stop(self):
+        if hasattr(self, 'worker') and self.worker is not None and self.worker.isRunning():
+            QTimer.singleShot(200, self._close_after_stop)
+            return
+        self._closing = False
+        super().reject()
+
+    def closeEvent(self, event):
+        if hasattr(self, 'worker') and self.worker is not None and self.worker.isRunning():
+            event.ignore()
+            self.reject()
+            return
+        super().closeEvent(event)
