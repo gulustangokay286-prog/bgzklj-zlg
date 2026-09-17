@@ -133,6 +133,13 @@ class CloudSyncWorker(QObject):
         self._thread = None
         self._pull_requested = False
         self._offline_streak = 0
+        # "Çevrimdışı" ancak arka arkaya birkaç başarısız yoklama ve en az
+        # birkaç saniye sonra ilan edilir. Yoklama saniyede bir; tek bir
+        # gecikmiş/zaman aşımına uğramış istek anında "Çevrimdışı" yazdırıp
+        # bir saniye sonra "Senkronize"ye dönüyordu — kullanıcı program
+        # "kendi kendine çevrimdışıya düşüyor" sanıyordu.
+        self._offline_since = None
+        self._offline_shown = False
         self._seen_generation = 0
         # Set to break the idle sleep the moment there is something to do.
         self._wake = threading.Event()
@@ -279,26 +286,36 @@ class CloudSyncWorker(QObject):
 
                     try:
                         pull_ok, msg, new_count = api_client.pull_all_from_rtdb(self.auth_data, progress_callback=_on_api_progress)
-                        if pull_ok:
-                            was_offline = (self._offline_streak > 0)
-                            self._offline_streak = 0
-                            self._safe_emit(self.sync_status_changed, "Veritabanı korunuyor")
-                            if had_diff or new_count > 0:
-                                self._safe_emit(self.sync_completed, new_count, "Kurumlar birbirine senkronizedir")
-                            elif was_offline:
-                                self._safe_emit(self.sync_completed, 0, "Kurumlar birbirine senkronizedir")
-                            if new_count > 0:
-                                self._seen_generation = api_client.sync_generation
-                                self._safe_emit(self.institutions_list_changed)
-                                self._safe_emit(self.remote_data_updated, "", "")
-                        else:
-                            self._offline_streak += 1
-                            self._safe_emit(self.sync_status_changed, "Veritabanı: Çevrimdışı (Yerel Mod)")
-                            self._safe_emit(self.sync_failed, msg or "Sunucuya ulaşılamadı.")
                     except Exception as e:
+                        pull_ok, msg, new_count = False, str(e), 0
+                    if pull_ok:
+                        was_offline = self._offline_shown
+                        self._offline_streak = 0
+                        self._offline_since = None
+                        self._offline_shown = False
+                        self._safe_emit(self.sync_status_changed, "Veritabanı korunuyor")
+                        if had_diff or new_count > 0:
+                            self._safe_emit(self.sync_completed, new_count, "Kurumlar birbirine senkronizedir")
+                        elif was_offline:
+                            self._safe_emit(self.sync_completed, 0, "Kurumlar birbirine senkronizedir")
+                        if new_count > 0:
+                            self._seen_generation = api_client.sync_generation
+                            self._safe_emit(self.institutions_list_changed)
+                            self._safe_emit(self.remote_data_updated, "", "")
+                    else:
                         self._offline_streak += 1
-                        self._safe_emit(self.sync_status_changed, "Veritabanı: Çevrimdışı (Yerel Mod)")
-                        self._safe_emit(self.sync_failed, str(e))
+                        if self._offline_since is None:
+                            self._offline_since = now
+                        # Üç ardışık başarısızlık VE en az 8 saniye: geçici bir
+                        # takılma "Çevrimdışı" göstermez, gerçek kopukluk gösterir.
+                        if (self._offline_streak >= 3
+                                and now - self._offline_since >= 8.0):
+                            if not self._offline_shown:
+                                self._offline_shown = True
+                                self._safe_emit(self.sync_status_changed, "Veritabanı: Çevrimdışı (Yerel Mod)")
+                            self._safe_emit(self.sync_failed, msg or "Sunucuya ulaşılamadı.")
+                        else:
+                            self._safe_emit(self.sync_status_changed, "Bağlantı bekleniyor...")
                     self._last_pull_time = now
                 if self._pull_requested:
                     continue
