@@ -38,7 +38,7 @@ _RAW_INK = {}
 # Hedef mürekkep boyu: daire ikonları (Ön Kontrol, Sıfırla) 32'lik tuvalde
 # ~27.5 px doldurur; bütün ikonlar buna eşitlenir ki "Geri Al" gibi küçük
 # çizilmiş ikonlar yanlarında ufak kalmasın.
-_TARGET_INK = 27.5
+_TARGET_INK = 28.0
 
 
 def _raw_ink(draw_fn):
@@ -78,8 +78,14 @@ def _make_pixmap(size: int, draw_fn) -> QPixmap:
     p.setRenderHint(QPainter.Antialiasing)
     p.setRenderHint(QPainter.SmoothPixmapTransform)
     ix, iy, iw, ih = _raw_ink(draw_fn)
-    norm = _TARGET_INK / max(iw, ih, 1.0)
-    norm = max(0.9, min(1.4, norm))
+    # Görünen büyüklük alanla ilgilidir: geniş-basık bir çizim (kep, bulut)
+    # yalnızca en büyük kenarına göre ölçeklenince daire ikonlarının yanında
+    # küçük kalıyordu. Geometrik ortalama hedefe eşitlenir, hiçbir kenar
+    # tuvali (32) aşmaz.
+    gm = max(1.0, (iw * ih) ** 0.5)
+    norm = _TARGET_INK / gm
+    norm = min(norm, 31.0 / max(iw, ih, 1.0))
+    norm = max(0.9, min(1.6, norm))
     k = size / 32.0 * norm
     # Mürekkep merkezi tuval merkezine gelsin.
     cx, cy = ix + iw / 2.0, iy + ih / 2.0
@@ -1119,10 +1125,11 @@ class RibbonButton(QToolButton):
         # düğme iki satırlıya göre aşağı kaymaz. Yalnızca-ikon kipinde ortala.
         x = round((self.width() - iw) / 2.0 - ix) + _OPTICAL_DX.get(self._icon_key, 0)
         if lines:
-            # Etiketli kip: ikon KUTUSU üstten sabit (1 px), mürekkep kutunun
-            # içinde ortalı; yazı satırı bütün düğmelerde aynı yükseklikte.
+            # Etiketli kip: ikon kutusu üstten sabit (1 px); mürekkep kutunun
+            # ALT kenarına oturur (basık ikonlar yazıya yakın, "yere basar"),
+            # yazı satırı bütün düğmelerde aynı yükseklikte.
             box_top = 1.0
-            y = round(box_top + (icon_px - ih) / 2.0 - iy)
+            y = round(box_top + icon_px - ih - iy)
             ty = round(box_top + icon_px + self._GAP)
         else:
             # Yalnızca-ikon: mürekkep düğmede tam ortalı.
