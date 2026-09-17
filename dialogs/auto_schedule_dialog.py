@@ -1038,15 +1038,28 @@ class AutoScheduleDialog(QDialog):
         saat, toplam = info.get("saat", 0), info.get("toplam", 0)
         gecen = int(info.get("gecen", 0))
         eksik = max(0, toplam - saat)
+        ust = info.get("ust")
         self.lbl_info.setText(f"{saat}/{toplam} saat — karar bekleniyor")
         self.lbl_info.setStyleSheet("color: #B45309; font-weight: 600;")
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Question)
         box.setWindowTitle("Beklemeye devam edilsin mi?")
         box.setText(f"{saat}/{toplam} saat yerleşti ({eksik} saat açıkta), {gecen} sn geçti.")
-        box.setInformativeText("Motor son turda ilerleme kaydedemedi. Bir tur daha arayabilirim "
-                               "(en fazla 1 dk) ya da bu hâliyle bitirip açıkta kalanları "
-                               "yerleştirilemeyen dersler listesine koyabilirim.")
+        # Tavan biliniyorsa söylenir: "285'e çıkamıyor" diye beklemek yerine
+        # kullanıcı en fazla kaçın mümkün olduğunu görür (sebebi bitince
+        # raporda yazar).
+        if isinstance(ust, int) and ust < toplam:
+            tavan = (f"Bu kurallarla en fazla {ust}/{toplam} saat mümkün "
+                     f"(kanıtlı); {toplam} bu kurallarla yok. ")
+            if saat >= ust:
+                tavan += "Tavana ulaşıldı. "
+            else:
+                tavan += f"Tavana {ust - saat} saat kaldı. "
+        else:
+            tavan = ""
+        box.setInformativeText(tavan + "Motor son turda ilerleme kaydedemedi. Bir tur daha "
+                               "arayabilirim (en fazla 1 dk) ya da bu hâliyle bitirip açıkta "
+                               "kalanları yerleştirilemeyen dersler listesine koyabilirim.")
         b_wait = box.addButton("Bir tur daha bekle", QMessageBox.AcceptRole)
         b_stop = box.addButton("Bu hâliyle bitir", QMessageBox.RejectRole)
         box.setDefaultButton(b_stop)

@@ -134,6 +134,12 @@ class _Model:
                     m.Add(sum(v for _, v in row) + bol <= 1)
                     for us in su:
                         m.Add(sum(v for _, v in us) == bol)
+                    # Simetri kırma: parçalar birbirinin yerine geçebilir
+                    # (k! eş çözüm); k. parça (k+1). parçadan önce gelsin.
+                    # Aynı çözüm ailesini defalarca aramak yerine bir kez.
+                    yer = [sum(idx * v for idx, v in us) for us in su]
+                    for k in range(len(yer) - 1):
+                        m.Add(yer[k] + 1 <= yer[k + 1]).OnlyEnforceIf(bol)
                     self.splits.append((i, bol, c.duration - 1))
                 else:
                     m.AddAtMostOne(v for _, v in row)
@@ -487,7 +493,8 @@ def solve_cpsat(world, rule_list, seconds=60.0, seed=0, workers=8,
                 warm_start=None, log=False, allow_split=True,
                 pieces_out=None, hedef_saat=None, referans=None,
                 takas_out=None, forced=None, cancelled=None,
-                stop_when_full=False, bound_out=None):
+                stop_when_full=False, bound_out=None,
+                stop_at_hours=None, warm_pieces=None, min_hours=None):
     """World + kurallar -> (positions, placed_hours, status).
 
     positions[i] = kart i'nin ızgara indeksi, yerleşmediyse -1.
@@ -508,6 +515,15 @@ def solve_cpsat(world, rule_list, seconds=60.0, seed=0, workers=8,
                  iyileştirmesi 2. aşamanın işidir; burada beklemek boşa süre.
     bound_out  : sözlük verilirse ['saat'] = CP-SAT'in kanıtladığı üst sınır
                  (sınıf-saati). Bulunan saat bu sınıra eşitse daha fazlası yok.
+    stop_at_hours : stop_when_full ile birlikte; tam çizelge yerine bu saate
+                 ulaşınca dur (kanıtlı tavan toplamın altındaysa).
+    warm_pieces : {kart: [saat indeksleri]} — ısıtmada bölünmüş kartların
+                 parça yerleri. Verilmezse bölünmüş kart ipucu almaz ve CP-SAT
+                 önceki turun çözümünü baştan kurmak zorunda kalır.
+    min_hours  : verilirse yerleşen saat EN AZ bu kadar olmak zorundadır (sert).
+                 Komşuluk onarımında "+1 saat" hedefi böyle verilir: küçük
+                 komşulukta imkânsızsa CP-SAT bunu anında kanıtlar ve süre
+                 harcanmaz; mümkünse bulur.
     """
     import threading
     from ortools.sat.python import cp_model
@@ -532,6 +548,8 @@ def solve_cpsat(world, rule_list, seconds=60.0, seed=0, workers=8,
                 saat_terms.append(agirlik * v)
     yerlesen = sum(saat_terms) if saat_terms else 0
 
+    if min_hours is not None and saat_terms:
+        model.Add(yerlesen >= int(min_hours) * SAAT)
     if hedef_saat is None:
         terms = list(saat_terms)
         for i, bol, kesim in splits:
@@ -566,10 +584,22 @@ def solve_cpsat(world, rule_list, seconds=60.0, seed=0, workers=8,
         model.Minimize(sum(sapma) if sapma else 0)
 
     if warm_start:
+        wp = warm_pieces or {}
         for i, idx in enumerate(warm_start):
-            if i < len(xs) and idx is not None and idx >= 0:
+            if i >= len(xs):
+                break
+            if idx is not None and idx >= 0:
                 for sidx, v in xs[i]:
                     model.AddHint(v, 1 if sidx == idx else 0)
+                for us in su_kayit.get(i, []):
+                    for _, v in us:
+                        model.AddHint(v, 0)
+            elif i in wp and i in su_kayit and len(wp[i]) == len(su_kayit[i]):
+                for sidx, v in xs[i]:
+                    model.AddHint(v, 0)
+                for k, us in enumerate(su_kayit[i]):
+                    for sidx, v in us:
+                        model.AddHint(v, 1 if sidx == wp[i][k] else 0)
 
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = float(seconds)
@@ -593,7 +623,8 @@ def solve_cpsat(world, rule_list, seconds=60.0, seed=0, workers=8,
 
     callback = None
     if stop_when_full and hedef_saat is None and saat_terms:
-        hedef = SAAT * w.total_hours()
+        hedef = SAAT * (min(w.total_hours(), int(stop_at_hours))
+                        if stop_at_hours is not None else w.total_hours())
         class _Full(cp_model.CpSolverSolutionCallback):
             def __init__(self):
                 super().__init__()
@@ -649,7 +680,8 @@ def solve_cpsat(world, rule_list, seconds=60.0, seed=0, workers=8,
 
 def solve_optimal(world, rule_list, referans=None, allow_split=True,
                   tur_saniye=20.0, azami_saniye=3600.0, workers=8,
-                  progress=None, cancelled=None, log=False, ask_continue=None):
+                  progress=None, cancelled=None, log=False, ask_continue=None,
+                  bilinen_ust=None):
     """OPTİMAL KİP — kanıt gelene kadar durmaz.
 
     Kullanıcının isteği: "optimale çıkana kadar durmasın, optimale ulaşınca
@@ -671,10 +703,13 @@ def solve_optimal(world, rule_list, referans=None, allow_split=True,
     yapılır ve sonuçta kaç kartın bölündüğü raporlanır.
 
     ask_continue: çağrılabilir; bir tur tam çizelge getirmeden bittiğinde
-      dict(saat, toplam, tur, gecen) ile çağrılır ve True (bekle, bir tur
+      dict(saat, toplam, tur, gecen, ust) ile çağrılır ve True (bekle, bir tur
       daha) ya da False (bu hâliyle bitir) döner. Arayüz bunu "279/285'te
       kaldı, beklemek ister misin?" sorusuna bağlar. Verilmezse iki durgun
       turdan sonra kendiliğinden durur.
+    bilinen_ust: dışarıdan kanıtlanmış üst sınır (gün-seviyesi gevşetme,
+      bkz. daybound.py). Motor bu sayıya ulaştığı an OPTIMAL der ve durur;
+      "285'e çıkamıyor" diye tur atmaz, çünkü 285 bu kurallarla yoktur.
 
     Dönüş: (positions, parcalar, placed_hours, status, tur_sayisi)
       parcalar = {kart indeksi: [saat indeksleri]} — bölünerek yerleşenler
@@ -690,11 +725,72 @@ def solve_optimal(world, rule_list, referans=None, allow_split=True,
     durum = "NO_SOLUTION"
     tur = 0
     ipucu = None
+    ipucu_parca = None
     durgun = 0          # üst üste iyileşme getirmeyen tur sayısı
-    ust_sinir = None    # CP-SAT'in kanıtladığı saat üst sınırı
+    # Kanıtlanmış saat üst sınırı: dışarıdan (gün-seviyesi) gelir, CP-SAT'in
+    # kendi sınırıyla tur tur aşağı çekilir.
+    ust_sinir = int(bilinen_ust) if bilinen_ust is not None else None
 
     def iptal():
         return bool(callable(cancelled) and cancelled())
+
+    # ── 0. AŞAMA: kısa tur + FİZİBİLİTE ──
+    #
+    # Tek parça en iyileme son iki üç saati şansa bırakıyordu: aynı veride
+    # bir koşu 281, bir koşu 284. Ölçülen çare iki adım:
+    #   a) 12 saniyelik kısa bir en iyileme turu — kolay veride tavanı hemen
+    #      bulur (Boğaziçi kuralsız: 6-15 sn); bulamazsa ekrana ilerleme ve
+    #      elde bir yedek çözüm bırakır.
+    #   b) Tavan (gün-seviyesi kanıt, bilinen_ust) biliniyorsa CP-SAT'e
+    #      "yerleşen saat EN AZ tavan" diye SERT kısıt verilir: en iyileme
+    #      değil fizibilite. Kanıt aramaz, sadece bulur; parça simetrisi
+    #      kırılmış modelde Boğaziçi'de 6/6 koşuda 12-24 sn (en iyileme aynı
+    #      veride 30 sn'de 278-282 veriyordu). INFEASIBLE derse tavan bir
+    #      saat aşağı çekilir ve tekrar denenir — bu da kesin kanıttır.
+    #      İpucu verilmez: ölçümde ipucu süreyi iki katına çıkardı.
+    #   Sonra hâlâ eksikse eski ısıtmalı turlar (1. aşama) devreye girer.
+    if w.cards and not iptal():
+        kalan = azami_saniye - (_t.monotonic() - baslangic)
+        pieces = []
+        pos, placed, st = solve_cpsat(
+            w, rule_list, seconds=min(12.0, max(1.0, kalan)), workers=workers,
+            allow_split=allow_split, pieces_out=pieces, log=log, forced=forced,
+            cancelled=cancelled, stop_when_full=True, stop_at_hours=ust_sinir)
+        if placed > en_iyi_saat:
+            en_iyi_saat, en_iyi_pos, en_iyi_parca = placed, pos, dict(pieces)
+            ipucu, ipucu_parca = pos, dict(pieces)
+        if callable(progress):
+            progress(dict(asama=0, tur=0, saat=en_iyi_saat, toplam=w.total_hours(),
+                          durum=st, ust=ust_sinir, gecen=_t.monotonic() - baslangic))
+        hedef = w.total_hours() if ust_sinir is None else min(w.total_hours(), ust_sinir)
+        deneme = 0
+        while (en_iyi_saat < hedef and ust_sinir is not None and hedef > max(en_iyi_saat, 0)
+               and deneme < 3 and not iptal()):
+            deneme += 1
+            kalan = azami_saniye - (_t.monotonic() - baslangic)
+            if kalan <= 1:
+                break
+            pieces = []
+            pos, placed, st = solve_cpsat(
+                w, rule_list, seconds=min(45.0, kalan), workers=workers,
+                allow_split=allow_split, pieces_out=pieces, log=log, forced=forced,
+                cancelled=cancelled, stop_when_full=True, stop_at_hours=hedef,
+                min_hours=hedef, seed=deneme)
+            if placed > en_iyi_saat:
+                en_iyi_saat, en_iyi_pos, en_iyi_parca = placed, pos, dict(pieces)
+                ipucu, ipucu_parca = pos, dict(pieces)
+            if callable(progress):
+                progress(dict(asama=0, tur=deneme, saat=en_iyi_saat, toplam=w.total_hours(),
+                              durum=st, ust=ust_sinir, gecen=_t.monotonic() - baslangic))
+            if st == "INFEASIBLE":
+                # Saat düzeyinde bu kadar yerleşmiyor: tavan bir saat iner.
+                ust_sinir = hedef - 1
+                hedef = ust_sinir
+                continue
+            break               # bulundu ya da süre doldu (UNKNOWN)
+    hedef = w.total_hours() if ust_sinir is None else min(w.total_hours(), ust_sinir)
+    if en_iyi_saat >= hedef and en_iyi_saat > 0:
+        durum = "OPTIMAL"
 
     # ── 1. AŞAMA: saati en büyükle ──
     #
@@ -706,7 +802,7 @@ def solve_optimal(world, rule_list, referans=None, allow_split=True,
     #     bir tur kazandıracaksa ilk dakikalarda kazandırıyor; 278'de bir
     #     saat beklemek 279 getirmiyor, kullanıcıyı bekletiyor.
     # Tur süresi 30 sn'den başlar ve en fazla 4 dakikaya çıkar.
-    while True:
+    while durum != "OPTIMAL":
         tur += 1
         if iptal():
             durum = "CANCELLED"
@@ -715,22 +811,26 @@ def solve_optimal(world, rule_list, referans=None, allow_split=True,
         if kalan <= 0:
             break
         pieces = []
-        bound = {}
         pos, placed, st = solve_cpsat(
             w, rule_list, seconds=min(tur_saniye, kalan), workers=workers,
-            warm_start=ipucu, allow_split=allow_split, pieces_out=pieces,
-            log=log, forced=forced, cancelled=cancelled, stop_when_full=True,
-            bound_out=bound)
+            warm_start=ipucu, warm_pieces=ipucu_parca, allow_split=allow_split,
+            pieces_out=pieces, log=log, forced=forced, cancelled=cancelled,
+            stop_when_full=True, stop_at_hours=ust_sinir)
         if placed > en_iyi_saat:
             en_iyi_saat = placed
             en_iyi_pos = pos
             en_iyi_parca = dict(pieces)
             ipucu = pos
+            ipucu_parca = dict(pieces)
             durgun = 0
         else:
             durgun += 1
-        if bound.get('saat') is not None:
-            ust_sinir = bound['saat'] if ust_sinir is None else min(ust_sinir, bound['saat'])
+        # CP-SAT'in amaç sınırı SAAT'e bölünerek saat sınırı SAYILMAZ. Amaç
+        # = SAAT*saat - cezalar; zorunlu grupların kaçınılmaz cezaları (her
+        # biri 2000) amaç sınırını bir saatin ağırlığının altına çekebiliyor
+        # ve 284 mümkünken "283'ten fazlası yok" diye YANLIŞ kanıt çıkıyordu
+        # — motor bir saat eksikte duruyordu. Kanıt yalnızca gün-seviyesi
+        # gevşetmeden (bilinen_ust) gelir; CP-SAT'in OPTIMAL demesi yeter.
         durum = st
         if callable(progress):
             progress(dict(asama=1, tur=tur, saat=en_iyi_saat,
@@ -753,7 +853,7 @@ def solve_optimal(world, rule_list, referans=None, allow_split=True,
             try:
                 devam = bool(ask_continue(dict(saat=en_iyi_saat, toplam=w.total_hours(),
                                                tur=tur, gecen=_t.monotonic() - baslangic,
-                                               durgun=durgun)))
+                                               durgun=durgun, ust=ust_sinir)))
             except Exception:
                 devam = False
             if not devam:
@@ -780,9 +880,9 @@ def solve_optimal(world, rule_list, referans=None, allow_split=True,
     # düzen aranır. Bu yüzden kalan bütçenin tamamını yemesine izin verilmez —
     # aksi hâlde sonuç hazırken uygulama dakikalarca bekliyor gibi görünür.
     # Tam çizelge bulundu; kullanıcı bekletilmez. Takas aşamasına en fazla
-    # 3 saniye: bu sürede gereksiz bölmeler temizlenir ve eldeki tabloya
+    # 8 saniye: bu sürede gereksiz bölmeler temizlenir ve eldeki tabloya
     # yakınlaşılır, bulamazsa 1. aşamanın çizelgesi olduğu gibi kalır.
-    takas_butcesi = min(kalan * 0.25, 3.0)
+    takas_butcesi = min(kalan * 0.25, 8.0)
     takas_bitis = _t.monotonic() + takas_butcesi
     tur2 = 0
     takas_sure = takas_butcesi
@@ -796,11 +896,14 @@ def solve_optimal(world, rule_list, referans=None, allow_split=True,
             break
         pieces = []
         takas = {}
+        # İpucu TAM çözümdür (parçalar dahil): CP-SAT eldeki çizelgeden
+        # başlar ve yalnızca iyileştirir. Parçasız ipucuyla 3 saniyede
+        # sıfırdan 285'lik çözüm kuramıyor, 50-60 bölünmüş blok kalıyordu.
         pos2, placed2, st2 = solve_cpsat(
             w, rule_list, seconds=min(takas_sure, kalan), workers=workers,
-            warm_start=en_iyi_pos, allow_split=allow_split, pieces_out=pieces,
-            hedef_saat=en_iyi_saat, referans=ref, takas_out=takas, log=log,
-            forced=forced, cancelled=cancelled)
+            warm_start=en_iyi_pos, warm_pieces=en_iyi_parca, allow_split=allow_split,
+            pieces_out=pieces, hedef_saat=en_iyi_saat, referans=ref,
+            takas_out=takas, log=log, forced=forced, cancelled=cancelled)
         if placed2 == en_iyi_saat and st2 in ("OPTIMAL", "FEASIBLE") \
                 and len(pieces) <= len(en_iyi_parca):
             en_iyi_pos = pos2

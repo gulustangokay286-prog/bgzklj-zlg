@@ -200,6 +200,36 @@ class NativeTests(unittest.TestCase):
         r=self.run_valid(d,optimal_mode=True,azami_saniye=20)
         self.assertTrue(r.complete);self.assertEqual(len({x['day'] for x in r.placements}),2)
 
+    def test_day_bound_proves_ceiling_and_names_the_rule(self):
+        """Gün-seviyesi kanıt: 'iki ders aynı güne gelmesin' + 'aynı ders aynı gün
+        tekrar etmesin' birlikte kartları güne sığdıramıyorsa tavan toplamın
+        altındadır; motor tavana ulaşınca kanıtla durur ve tanı kuralı söyler."""
+        from scheduler.daybound import day_bound
+        d=store(parts='1+1+1',D=3,P=4)      # Matematik 3 kart, 3 gün
+        d['atamalar'].append(dict(**{'class':'9A'},subject='Geometri',teacher='Öğretmen B',type='1+1'))
+        d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin'),
+                                  rule('İki ders aynı güne gelmesin',dersler=['Matematik','Geometri'])]
+        # 3 Mat kartı 3 ayrı güne, 2 Geometri kartı Mat'ın olmadığı güne: 5 gün gerekir, 3 var.
+        r=self.run_valid(d,optimal_mode=True,azami_saniye=20)
+        self.assertEqual(r.upper_bound,3)
+        self.assertEqual(r.placed_hours,3)
+        self.assertTrue(any('gün-seviyesi kanıt' in x for x in r.warnings),r.warnings)
+        self.assertTrue(any('İki ders aynı güne gelmesin' in x['message'] for x in r.diagnostics),
+                        [x['message'] for x in r.diagnostics])
+        self.assertEqual(day_bound(r.world,r.rules,set()),3)
+
+    def test_ceiling_is_reached_every_time(self):
+        """Tavan bilinince motor ona ulaşır; kurallar tavanı düşürmüyorsa tam çizelge."""
+        d=store(parts='2+2',D=4,P=4)
+        d['atamalar'].append(dict(**{'class':'9A'},subject='Geometri',teacher='Öğretmen B',type='2+1'))
+        d['atamalar'].append(dict(**{'class':'9B'},subject='Matematik',teacher='Öğretmen A',type='2+2'))
+        d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin'),
+                                  rule('İki ders aynı güne gelmesin',dersler=['Matematik','Geometri'])]
+        for _ in range(3):
+            r=self.run_valid(copy.deepcopy(d),optimal_mode=True,azami_saniye=20)
+            self.assertEqual(r.placed_hours,r.upper_bound)
+            self.assertEqual(r.placed_hours,r.total_hours)
+
     def test_optimal_mode_respects_daily_limit_and_min_days(self):
         d=store('1+1+1',D=3);d['planlama_iliskileri']=[rule('Günde maksimum ders sayısı',parametre=1)]
         r=self.run_valid(d,optimal_mode=True,azami_saniye=20)

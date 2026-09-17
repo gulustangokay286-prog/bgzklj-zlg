@@ -31,3 +31,4 @@ artifacts/scheduler/
 scheduler/native/chenkron
 scheduler/native/chenkron-scheduler
 scheduler/native/*.exe
+.venv-timefold/

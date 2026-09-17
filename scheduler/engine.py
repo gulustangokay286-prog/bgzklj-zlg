@@ -236,6 +236,32 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
     # için boş kalıyordu. Rapor eski sınırı göstermeye devam eder, arama ise
     # gerçek hedefi kovalar.
     search_target=res.total_hours if completion_first else res.upper_bound
+    # GÜN-SEVİYESİ KANIT (bkz. daybound.py). Kartları güne atayan küçük bir
+    # model, esas modelin gevşetilmiş hâlidir; verdiği sayı geçerli bir üst
+    # sınırdır ve saniyenin altında gelir. Boğaziçi v212'de "Mat1+Mat2 aynı
+    # güne gelmesin" kuralıyla tavan 285 değil 284'tü; saat-seviyesi CP-SAT
+    # bunu dakikalarca kanıtlayamıyor, 282-284 arasında tur atıyordu. Sınır
+    # bilinince motor ona ulaştığı an durur ve rapor SEBEBİ söyler: hangi
+    # kural, hangi sınıflar, hangi öğretmenin tablosu.
+    #
+    # Esnetilen (aritmetik-imkânsız) gruplar gevşetmede de serbesttir; bu
+    # yüzden sınır, tamamlanma öncelikli kipte de arama hedefi olarak
+    # güvenlidir — diagnose()'un sınırından farklı olarak.
+    gun_ust=None
+    if w.cards:
+        try:
+            from .daybound import day_bound, explain_day_bound
+            gun_ust=day_bound(w,rules,forced,seconds=2.0)
+        except Exception as exc:
+            res.warnings.append(f"Gün-seviyesi sınır hesaplanamadı: {exc}")
+    if gun_ust is not None:
+        if gun_ust<min(res.total_hours,res.upper_bound):
+            try:
+                res.diagnostics.extend(explain_day_bound(w,rules,forced,gun_ust,seconds=5.0))
+            except Exception as exc:
+                res.warnings.append(f"Gün-seviyesi tanı çalışmadı: {exc}")
+        if gun_ust<res.upper_bound: res.upper_bound=gun_ust
+        if gun_ust<search_target: search_target=gun_ust
     res.warnings.extend(x['message'] for x in res.diagnostics)
     for c in w.cards:
         if c.locked_at is not None and not c.slots:
@@ -264,7 +290,7 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
         pos, parcalar, placed, durum, tur = solve_optimal(
             w, rules, referans=mevcut, allow_split=allow_split,
             azami_saniye=azami_saniye, progress=_ilerle, cancelled=cancelled,
-            ask_continue=ask_continue)
+            ask_continue=ask_continue, bilinen_ust=gun_ust)
         res.positions = pos
         res.split_pieces = parcalar
         res.status = 'optimal' if durum == 'OPTIMAL' else durum.lower()
@@ -289,7 +315,9 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
         if durum == 'STALLED':
             aciklama = "iki tur üst üste ilerleme olmadı, daha fazla beklenmedi"
         elif durum == 'OPTIMAL' and placed < res.total_hours:
-            aciklama = "CP-SAT bu kurallarla daha fazlasının mümkün olmadığını kanıtladı"
+            aciklama = ("bu kurallarla daha fazlası mümkün değil (gün-seviyesi kanıt)"
+                        if gun_ust is not None and placed >= gun_ust
+                        else "CP-SAT bu kurallarla daha fazlasının mümkün olmadığını kanıtladı")
         else:
             aciklama = f"CP-SAT {durum}"
         res.warnings.append(
