@@ -1260,6 +1260,7 @@ def _divider(parent=None):
     f.setFrameShadow(QFrame.Sunken)
     f.setStyleSheet("color: #E2E8F0;")
     f.setFixedWidth(2)
+    f.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
     return f
 
 
@@ -1407,6 +1408,10 @@ class RibbonPage(QWidget):
         for i in range(self.main_layout.count()):
             w = self.main_layout.itemAt(i).widget()
             if isinstance(w, (RibbonButton, RibbonWideButton)):
+                w.setFixedHeight(bh)
+            elif isinstance(w, QFrame):
+                # Ayraç düğmeyle aynı boyda ve SABİT: yerleşimin esnetmesine
+                # bırakılırsa bant değişirken bir kare aşağı uzuyor.
                 w.setFixedHeight(bh)
         m2 = self.main_layout.contentsMargins()
         ph = bh + m2.top() + m2.bottom()
