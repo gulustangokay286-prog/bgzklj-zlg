@@ -859,6 +859,30 @@ ICON_MAP = {
 
 
 _ICON_CACHE = {}
+_INK_CACHE = {}
+
+
+def icon_ink(key: str, size: int):
+    """İkonun MÜREKKEP sınırları (alfa > 0), mantıksal px: (x, y, w, h).
+
+    Düğme ikonu tuval kutusuna göre değil mürekkebe göre ortalar: çekiç gibi
+    asimetrik çizimler kutuda ortalıyken gözde sola kaymış görünüyordu.
+    """
+    ck = (key, int(size))
+    r = _INK_CACHE.get(ck)
+    if r is None:
+        img = make_icon(key, size).pixmap(QSize(size * 2, size * 2)).toImage()
+        xs, ys = [], []
+        for y in range(img.height()):
+            for x in range(img.width()):
+                if img.pixelColor(x, y).alpha() > 24:
+                    xs.append(x); ys.append(y)
+        if xs:
+            r = (min(xs) / 2.0, min(ys) / 2.0, (max(xs) - min(xs) + 1) / 2.0, (max(ys) - min(ys) + 1) / 2.0)
+        else:
+            r = (0.0, 0.0, float(size), float(size))
+        _INK_CACHE[ck] = r
+    return r
 
 
 def make_icon(key: str, size: int = 32) -> QIcon:
@@ -1046,15 +1070,18 @@ class RibbonButton(QToolButton):
         fm = self.fontMetrics()
         lines = [] if self._compact else (self.text().split("\n") if self.text() else [])
         text_h = fm.height() * len(lines)
-        block = icon_px + (self._GAP if lines else 0) + text_h
-        y = (self.height() - block) // 2
-        x = (self.width() - icon_px) // 2
+        # Mürekkep sınırlarına göre ortala (tuval kutusuna göre değil).
+        ix, iy, iw, ih = icon_ink(self._icon_key, icon_px)
+        block = ih + (self._GAP if lines else 0) + text_h
+        top = (self.height() - block) / 2.0
+        x = round((self.width() - iw) / 2.0 - ix)
+        y = round(top - iy)
         pix = self.icon().pixmap(QSize(icon_px, icon_px), QIcon.Normal if enabled else QIcon.Disabled)
         p.drawPixmap(x, y, icon_px, icon_px, pix)
 
         p.setFont(self.font())
         p.setPen(QColor("#A0AEC0" if not enabled else ("#0B4A8F" if actionable else "#0F172A")))
-        ty = y + icon_px + self._GAP
+        ty = round(top + ih + self._GAP)
         avail = self.width() - 2
         for line in lines:
             txt = fm.elidedText(line, Qt.ElideRight, avail)
@@ -1297,7 +1324,7 @@ class RibbonPage(QWidget):
         if retier or not hasattr(self, "_tier"):
             compact = False
             if cap >= 56:
-                icon, pt = 32, 7.5
+                icon, pt = 34, 7.5
             elif cap >= 46:
                 icon, pt = 32, 7.0       # ikon küçülmez, yalnızca yazı bir tık iner
             else:
