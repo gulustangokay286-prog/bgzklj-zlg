@@ -33,19 +33,59 @@ FONT_FAMILY = ".AppleSystemUIFont, SF Pro Text, Helvetica Neue, Segoe UI, sans-s
 
 
 # ── Retina 2x Icon Painter Helper ──────────────────────────────────────────────
+# Çizimlerin 32'lik tuvaldeki mürekkep sınırları, çizim işlevi başına bir kez.
+_RAW_INK = {}
+# Hedef mürekkep boyu: daire ikonları (Ön Kontrol, Sıfırla) 32'lik tuvalde
+# ~27.5 px doldurur; bütün ikonlar buna eşitlenir ki "Geri Al" gibi küçük
+# çizilmiş ikonlar yanlarında ufak kalmasın.
+_TARGET_INK = 27.5
+
+
+def _raw_ink(draw_fn):
+    r = _RAW_INK.get(draw_fn)
+    if r is None:
+        px = QPixmap(64, 64)
+        px.fill(Qt.transparent)
+        p = QPainter(px)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.scale(2, 2)
+        draw_fn(p, 32)
+        p.end()
+        img = px.toImage()
+        xs, ys = [], []
+        for y in range(64):
+            for x in range(64):
+                if img.pixelColor(x, y).alpha() > 24:
+                    xs.append(x); ys.append(y)
+        if xs:
+            r = (min(xs) / 2.0, min(ys) / 2.0, (max(xs) - min(xs) + 1) / 2.0, (max(ys) - min(ys) + 1) / 2.0)
+        else:
+            r = (0.0, 0.0, 32.0, 32.0)
+        _RAW_INK[draw_fn] = r
+    return r
+
+
 def _make_pixmap(size: int, draw_fn) -> QPixmap:
     """İkon çizimleri 32×32'lik sabit koordinatlarla yazılmıştır; istenen
-    boyuta ÖLÇEKLENEREK çizilir. Eskiden 40 px istenince çizim 40'lık tuvalin
-    sol üst 32×32'sine oturuyor, ikon kutunun içinde sola/yukarı kayık
-    görünüyordu."""
+    boyuta ÖLÇEKLENEREK çizilir ve mürekkebi ortak bir boya NORMALİZE edilir:
+    her ikonun görünen kısmı tuvalin aynı oranını doldurur, tuvalde ortalanır.
+    Eskiden 40 px istenince çizim 40'lık tuvalin sol üst 32×32'sine oturuyor,
+    ikon kutunun içinde sola/yukarı kayık görünüyordu."""
     scale = 2
     px = QPixmap(size * scale, size * scale)
     px.fill(Qt.transparent)
     p = QPainter(px)
     p.setRenderHint(QPainter.Antialiasing)
     p.setRenderHint(QPainter.SmoothPixmapTransform)
-    k = size / 32.0
-    p.scale(scale * k, scale * k)
+    ix, iy, iw, ih = _raw_ink(draw_fn)
+    norm = _TARGET_INK / max(iw, ih, 1.0)
+    norm = max(0.9, min(1.4, norm))
+    k = size / 32.0 * norm
+    # Mürekkep merkezi tuval merkezine gelsin.
+    cx, cy = ix + iw / 2.0, iy + ih / 2.0
+    p.scale(scale, scale)
+    p.translate(size / 2.0 - cx * k, size / 2.0 - cy * k)
+    p.scale(k, k)
     draw_fn(p, 32)
     p.end()
     px.setDevicePixelRatio(scale)
