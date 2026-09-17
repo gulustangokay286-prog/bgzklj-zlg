@@ -1537,29 +1537,65 @@ class RibbonWidget(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        # Kendi genişliğimiz; sayfa alanının genişliği bu anda henüz eski olabilir.
+        # Pencere boyutu DEĞİŞİRKEN şerit yeniden dizilmez: eski düzen olduğu
+        # gibi kalır (yeni genişlikte ortalanır). macOS tam ekran geçişi
+        # pencereyi ~0,3 sn boyunca kare kare büyütürken her karede düğmeleri
+        # esnetmek, ikonları kademe değiştirmek "patlama" gibi görünüyordu.
+        # Boyut oturunca (150 ms sessizlik) yeni düzen bir kez kurulur ve
+        # eski görüntüden yenisine ÇAPRAZ SOLMA ile geçilir.
         w, h = self.width(), self._page_h
-        first = not hasattr(self, "_retier_timer")
+        first = not hasattr(self, "_settle_timer")
+        if first:
+            for i, page in enumerate(self._pages):
+                page.setGeometry(0, 0, w, h)
+                page.setVisible(i == self._active)
+                page.fit(w, retier=True)
+            self._adopt_page_height(animate=False)
+            from PySide6.QtCore import QTimer
+            self._settle_timer = QTimer(self)
+            self._settle_timer.setSingleShot(True)
+            self._settle_timer.timeout.connect(self._settle)
+            self._laid_out_width = w
+            return
+        # Geçiş sırasında: eski düzen, yeni genişlikte ortalı dursun.
+        pw = getattr(self, "_laid_out_width", w)
         for i, page in enumerate(self._pages):
             if i == self._active and (self._anim is None or self._anim.state() != QAbstractAnimation.Running):
-                page.setGeometry(0, 0, w, h)
-            else:
-                page.resize(w, h)
-            page.fit(w, retier=first)
-        if first:
-            self._adopt_page_height()
-            from PySide6.QtCore import QTimer
-            self._retier_timer = QTimer(self)
-            self._retier_timer.setSingleShot(True)
-            self._retier_timer.timeout.connect(self._retier)
-        # Kademe seçimi boyut oturunca: animasyon boyunca yalnızca genişlik akar.
-        self._retier_timer.start(140)
+                page.setGeometry((w - pw) // 2, 0, pw, self._page_h)
+        self._settle_timer.start(150)
 
-    def _retier(self):
+    def _settle(self):
+        """Boyut oturdu: yeni düzeni kur, eski görüntüden çapraz solmayla geç."""
         w = self.width()
+        if w == getattr(self, "_laid_out_width", None):
+            # Genişlik değişmemiş (ör. yalnızca yükseklik): sadece hizala.
+            for page in self._pages:
+                page.setGeometry(0, 0, w, self._page_h)
+            return
+        # Eski görünümün anlık görüntüsü üste bindirilir.
+        snap = QLabel(self)
+        snap.setPixmap(self._page_area.grab())
+        snap.setGeometry(self._page_area.geometry())
+        snap.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        snap.show()
+        snap.raise_()
+        # Yeni düzen.
         for page in self._pages:
+            page.setGeometry(0, 0, w, self._page_h)
             page.fit(w, retier=True)
+        self._laid_out_width = w
         self._adopt_page_height()
+        # Çapraz solma: eski görüntü 200 ms'de kaybolur.
+        fx = QGraphicsOpacityEffect(snap)
+        snap.setGraphicsEffect(fx)
+        a = QPropertyAnimation(fx, b"opacity", snap)
+        a.setDuration(200)
+        a.setStartValue(1.0)
+        a.setEndValue(0.0)
+        a.setEasingCurve(QEasingCurve.OutQuad)
+        a.finished.connect(snap.deleteLater)
+        self._snap_anim = a
+        a.start()
 
     def _adopt_page_height(self, animate=True):
         """Bant yüksekliği AKTİF sayfanın düğme boyuna göre; az düğmeli bir
