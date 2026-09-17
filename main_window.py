@@ -686,14 +686,25 @@ class MainWindow(QMainWindow):
         root_layout.setSpacing(0)
         self.setCentralWidget(root)
 
-        # En üst: ortalı başlık şeridi ("Chenkron 2026 — Kurum • v141 Ad")
-        self.top_title_lbl = QLabel("", root)
+        # En üst bant: ortada başlık ("Chenkron 2026 — Kurum • v141 Ad"),
+        # sağda bulut durumu ("✓ Veritabanı korunuyor"). Durum önceden
+        # "Haftalık Program" sekme satırındaydı; o satır kaldırıldı, tablo
+        # doğrudan şeridin altında başlar.
+        self.top_bar = QWidget(root)
+        self.top_bar.setFixedHeight(24)
+        self.top_bar.setStyleSheet("background: #F8FAFC; border: none; border-bottom: 1px solid #E5E7EB;")
+        top_bar_lay = QHBoxLayout(self.top_bar)
+        top_bar_lay.setContentsMargins(12, 0, 12, 0)
+        top_bar_lay.setSpacing(0)
+        self._top_bar_pad = QWidget(self.top_bar)          # sağdaki durumla aynı genişlik: başlık tam ortada
+        self._top_bar_pad.setStyleSheet("background: transparent; border: none;")
+        self.top_title_lbl = QLabel("", self.top_bar)
         self.top_title_lbl.setAlignment(Qt.AlignCenter)
-        self.top_title_lbl.setFixedHeight(24)
         self.top_title_lbl.setFont(QFont(FONT_FAMILY, 10, QFont.DemiBold))
-        self.top_title_lbl.setStyleSheet("color: #1E293B; background: #F8FAFC; border: none; "
-                                         "border-bottom: 1px solid #E5E7EB;")
-        root_layout.addWidget(self.top_title_lbl)
+        self.top_title_lbl.setStyleSheet("color: #1E293B; background: transparent; border: none;")
+        top_bar_lay.addWidget(self._top_bar_pad, 0)
+        top_bar_lay.addWidget(self.top_title_lbl, 1)
+        root_layout.addWidget(self.top_bar)
 
         # Ribbon
         self._ribbon = RibbonWidget(root)
@@ -1051,11 +1062,11 @@ class MainWindow(QMainWindow):
         self._grid = TimetableGrid(periods, right)
         self._tab_widget.addTab(self._grid, "Haftalık Program")
         
-        # Top Header Bar on the right of the "Haftalık Program" tab (Bare clean text, no component boxes)
-        top_header_bar = QWidget()
+        # Bulut durumu — üst banttaki sağ köşe (sekme satırı kaldırıldı).
+        top_header_bar = QWidget(self.top_bar)
         top_header_bar.setStyleSheet("background: transparent; border: none;")
         top_header_lay = QHBoxLayout(top_header_bar)
-        top_header_lay.setContentsMargins(0, 0, 12, 0)
+        top_header_lay.setContentsMargins(0, 0, 0, 0)
         top_header_lay.setSpacing(14)
         top_header_lay.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
@@ -1111,7 +1122,10 @@ class MainWindow(QMainWindow):
         self.ver_lbl.hide()
         self._update_header_title()
 
-        self._tab_widget.setCornerWidget(top_header_bar, Qt.TopRightCorner)
+        self.top_bar.layout().addWidget(top_header_bar, 0)
+        self._top_bar_pad.setFixedWidth(max(1, top_header_bar.sizeHint().width()))
+        # Tek sekme var; sekme satırı gereksiz — tablo şeridin hemen altında.
+        self._tab_widget.tabBar().hide()
         
         # Connect drop signal
         self._grid.table.lesson_dropped.connect(self._on_lesson_dropped)
