@@ -1412,8 +1412,9 @@ class RibbonPage(QWidget):
             elif isinstance(w, QFrame):
                 # Ayraç, ikon üstünden yazı altına kadar (içerik bloğu); düğme
                 # kutusunun alt payına sarkmaz. Sabit boy: yerleşim esnetmez.
-                block = (icon + 8) if compact else (icon + RibbonButton._GAP + 2 * fm.height())
-                w.setFixedHeight(block)
+                # Etiketli kademelerde ayraç boyu SABİT (54 px): tam ekranda
+                # düğme 63'ten 67'ye büyürken ayraç büyümez, ortada kalır.
+                w.setFixedHeight((icon + 8) if compact else 54)
         m2 = self.main_layout.contentsMargins()
         ph = bh + m2.top() + m2.bottom()
         if self.content_widget.height() != ph:
