@@ -908,7 +908,7 @@ _ICON_CACHE = {}
 _INK_CACHE = {}
 # Göze göre düzeltme: mürekkep ortalamasına rağmen sola ağır görünen
 # ikonlar için ek yatay kaydırma (mantıksal px, +sağ).
-_OPTICAL_DX = {"on_izleme": 2, "sartlar": 2}
+_OPTICAL_DX = {}     # mürekkep normalizasyonundan sonra ek kaydırma gerekmedi
 
 
 def icon_ink(key: str, size: int):
@@ -1279,8 +1279,8 @@ class RibbonPage(QWidget):
         self.content_widget.setStyleSheet(f"background: {RIBBON_BG};")
         
         self.main_layout = QHBoxLayout(self.content_widget)
-        # Üst 3 / alt 1 px; bant yüksekliği düğme boyuna göre fit() içinde kurulur.
-        self.main_layout.setContentsMargins(4, 3, 4, 1)
+        # Üst 5 / alt 5 px; bant yüksekliği düğme boyuna göre fit() içinde kurulur.
+        self.main_layout.setContentsMargins(4, 5, 4, 5)
         self.main_layout.setSpacing(2)
         self.main_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         

@@ -3919,7 +3919,7 @@ class TimetableGrid(QWidget):
 
         # ── Toolbar row
         top = QHBoxLayout()
-        top.setContentsMargins(8, 4, 8, 4)
+        top.setContentsMargins(8, 6, 8, 6)
         top.setSpacing(8)
 
         self.toggle_panel_btn = QPushButton(" Sol Panel", self)

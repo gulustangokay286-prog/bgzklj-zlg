@@ -1043,7 +1043,7 @@ class MainWindow(QMainWindow):
         # Right panel  
         right = QWidget(splitter)
         r_layout = QVBoxLayout(right)
-        r_layout.setContentsMargins(4, 0, 4, 4)
+        r_layout.setContentsMargins(4, 6, 4, 4)
         r_layout.setSpacing(4)
 
         # Tab widget for multiple views
