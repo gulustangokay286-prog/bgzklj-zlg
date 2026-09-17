@@ -1293,7 +1293,7 @@ class RibbonPage(QWidget):
         if cap >= 56:
             icon, pt = 32, 7.5
         elif cap >= 46:
-            icon, pt = 28, 7.0
+            icon, pt = 32, 7.0       # ikon küçülmez, yalnızca yazı bir tık iner
         else:
             compact = True
             icon, pt = 26, 7.0

@@ -721,7 +721,8 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         try:
-            self._apply_density("compact" if self.width() < 1150 else "normal")
+            # Tam ekran dışındaki her pencere (< 1400 px) sıkı yoğunluktadır.
+            self._apply_density("compact" if self.width() < 1400 else "normal")
         except Exception:
             pass
 
