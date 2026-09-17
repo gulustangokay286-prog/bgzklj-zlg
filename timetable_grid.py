@@ -3942,6 +3942,7 @@ class TimetableGrid(QWidget):
         # Segmented view switchers (Sınıflar Çarşafı / Öğretmenler Çarşafı)
         switcher_frame = QFrame(self)
         switcher_frame.setStyleSheet("QFrame { background: #F1F5F9; border: 1px solid #E2E8F0; border-radius: 16px; }")
+        self._switcher_frame = switcher_frame
         switcher_layout = QHBoxLayout(switcher_frame)
         switcher_layout.setContentsMargins(2, 2, 2, 2)
         switcher_layout.setSpacing(2)
@@ -3984,6 +3985,9 @@ class TimetableGrid(QWidget):
         """)
         btn_unlock_all.clicked.connect(self._unlock_all_lessons)
         top.addWidget(btn_unlock_all)
+        self.btn_unlock_all = btn_unlock_all
+        self._toolbar_layout = top
+        self._density = "normal"
         
         layout.addLayout(top)
 
@@ -4227,8 +4231,10 @@ class TimetableGrid(QWidget):
                     update_subject_color_globally(self, data_store, s_name, new_hex)
 
     def _update_view_btn_styles(self):
-        active_style = f"QPushButton {{ background-color: #0071E3; color: #FFFFFF; border: none; border-radius: 14px; padding: 0 16px; font-weight: 700; font-family: {FONT_FAMILY}; font-size: 12px; }} QPushButton:hover {{ background-color: #0062C4; }}"
-        inactive_style = f"QPushButton {{ background-color: transparent; color: #64748B; border: none; border-radius: 14px; padding: 0 16px; font-weight: 600; font-family: {FONT_FAMILY}; font-size: 12px; }} QPushButton:hover {{ background-color: #E2E8F0; color: #0F172A; }}"
+        compact = getattr(self, "_density", "normal") == "compact"
+        rad, pad, fs = (11, 12, 11) if compact else (14, 16, 12)
+        active_style = f"QPushButton {{ background-color: #0071E3; color: #FFFFFF; border: none; border-radius: {rad}px; padding: 0 {pad}px; font-weight: 700; font-family: {FONT_FAMILY}; font-size: {fs}px; }} QPushButton:hover {{ background-color: #0062C4; }}"
+        inactive_style = f"QPushButton {{ background-color: transparent; color: #64748B; border: none; border-radius: {rad}px; padding: 0 {pad}px; font-weight: 600; font-family: {FONT_FAMILY}; font-size: {fs}px; }} QPushButton:hover {{ background-color: #E2E8F0; color: #0F172A; }}"
         self.btn_view_classes.setStyleSheet(active_style if self.current_view_mode == "classes" else inactive_style)
         self.btn_view_teachers.setStyleSheet(active_style if self.current_view_mode == "teachers" else inactive_style)
 
@@ -4528,6 +4534,42 @@ class TimetableGrid(QWidget):
         for off in range(duration):
             self._placed_lessons[(row, col + off)] = info_dict
             
+    def set_density(self, mode: str):
+        """Araç çubuğunu pencere yoğunluğuna uydurur ("normal" / "compact").
+
+        Dar pencerede şerit yalnızca-ikon kipine inerken bu satırdaki
+        haplar 30 px / 9 pt kalınca üstteki komutlardan büyük görünüyor ve
+        hiyerarşi tersine dönüyordu. Compact: 24 px hap, 8.5 pt, kısa etiket.
+        """
+        mode = "compact" if mode == "compact" else "normal"
+        if getattr(self, "_density", None) == mode:
+            return
+        self._density = mode
+        compact = mode == "compact"
+        h_main, h_seg, pt = (24, 22, 8.5) if compact else (30, 28, 9)
+        labels = {
+            self.toggle_panel_btn: (" Panel", " Sol Panel"),
+            self.btn_view_classes: (" Sınıflar", " Sınıflar Çarşafı"),
+            self.btn_view_teachers: (" Öğretmenler", " Öğretmenler Çarşafı"),
+            self.btn_unlock_all: (" Kilitleri Aç", " Tüm Kilitleri Aç"),
+        }
+        for btn, (short, long) in labels.items():
+            btn.setText(short if compact else long)
+            f = btn.font(); f.setPointSizeF(pt); btn.setFont(f)
+        for btn in (self.toggle_panel_btn, self.btn_unlock_all):
+            btn.setFixedHeight(h_main)
+            btn.setStyleSheet(btn.styleSheet().replace("border-radius: 15px", f"border-radius: {h_main // 2}px")
+                              .replace(f"border-radius: {12}px", f"border-radius: {h_main // 2}px")
+                              .replace("padding: 0 14px", f"padding: 0 {10 if compact else 14}px")
+                              .replace("padding: 0 10px", f"padding: 0 {10 if compact else 14}px"))
+        for btn in (self.btn_view_classes, self.btn_view_teachers):
+            btn.setFixedHeight(h_seg)
+        self._switcher_frame.setStyleSheet(
+            "QFrame { background: #F1F5F9; border: 1px solid #E2E8F0; border-radius: %dpx; }" % (13 if compact else 16))
+        self._toolbar_layout.setContentsMargins(6 if compact else 8, 3 if compact else 4,
+                                                6 if compact else 8, 3 if compact else 4)
+        self._update_view_btn_styles()
+
     def get_placed_lessons(self):
         """Return dict of placed lessons for printing"""
         return self._placed_lessons

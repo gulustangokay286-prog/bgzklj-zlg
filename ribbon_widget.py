@@ -969,6 +969,8 @@ class RibbonButton(QToolButton):
         self.setFont(font)
         self.setStyleSheet(self.BASE_QSS)
         self._actionable = None
+        self._compact = False
+        self._label = label
         if callback:
             self.clicked.connect(callback)
 
@@ -1042,7 +1044,7 @@ class RibbonButton(QToolButton):
 
         icon_px = self.iconSize().width()
         fm = self.fontMetrics()
-        lines = self.text().split("\n") if self.text() else []
+        lines = [] if self._compact else (self.text().split("\n") if self.text() else [])
         text_h = fm.height() * len(lines)
         block = icon_px + (self._GAP if lines else 0) + text_h
         y = (self.height() - block) // 2
@@ -1060,8 +1062,12 @@ class RibbonButton(QToolButton):
             ty += fm.height()
         p.end()
 
-    def set_scale(self, icon_px: int, pt: float):
-        """Dar pencerede ikon ve yazı birlikte küçülür; genişte eski boyuna döner."""
+    def set_scale(self, icon_px: int, pt: float, compact: bool = False):
+        """Ölçek: ikon boyu, yazı puntosu ve dar pencerede yalnızca-ikon kipi.
+
+        Yalnızca-ikon kipinde etiket çizilmez, ipucu (tooltip) olarak durur;
+        ikon 22 px'e ezilmek yerine okunur boyda kalır.
+        """
         if self.iconSize().width() != icon_px:
             self.setIcon(make_icon(self._icon_key, icon_px))
             self.setIconSize(QSize(icon_px, icon_px))
@@ -1069,6 +1075,9 @@ class RibbonButton(QToolButton):
         if abs(f.pointSizeF() - pt) > 0.05:
             f.setPointSizeF(pt)
             self.setFont(f)
+        if compact != self._compact:
+            self._compact = compact
+            self.setToolTip(self._label.replace("\n", " ") if compact else "")
         self.update()
 
     def set_actionable(self, actionable: bool):
@@ -1274,31 +1283,34 @@ class RibbonPage(QWidget):
         # Kademeli ölçek: pencere daraldıkça önce düğme, sonra ikon ve yazı
         # küçülür; kaydırmaya ancak 36 px'in altında düşülür (pencere en az
         # 900 px olduğu için pratikte hiç). "Küçültülmüş" pencerede de sığar.
+        # Üç yoğunluk:
+        #   geniş  (düğme ≥ 56 px): 32 px ikon + iki satır etiket
+        #   orta   (düğme ≥ 46 px): 28 px ikon + etiket
+        #   dar    (daha azı)     : YALNIZCA İKON, 26 px, etiket ipucunda —
+        #                            ikon 22 px'e ezilip yazı 6 pt'ye inmez.
         cap = (width - fixed) // len(btns)
+        compact = False
         if cap >= 56:
             icon, pt = 32, 7.5
-        elif cap >= 48:
+        elif cap >= 46:
             icon, pt = 28, 7.0
-        elif cap >= 42:
-            icon, pt = 24, 6.5
-        elif cap >= 36:
-            icon, pt = 22, 6.0
         else:
-            icon, pt = 22, 6.0
-        if cap < 36:
-            cap = 40
+            compact = True
+            icon, pt = 26, 7.0
+        if compact and cap < 34:
+            cap = 36
             self.scroll_area.set_scroll_enabled(True)
         else:
-            cap = min(118, cap)
+            cap = min(44 if compact else 118, cap)
             self.scroll_area.set_scroll_enabled(False)
         for b in btns:
             b.setMinimumWidth(cap)
             b.setMaximumWidth(cap)
-            b.set_scale(icon, pt)
-        # Düğme yüksekliği ölçeğe göre: ikon + aralık + iki satır yazı + 2 px.
-        # Dar pencerede ikon küçülünce bant da küçülür; "otoban" boşluk kalmaz.
+            b.set_scale(icon, pt, compact)
+        # Düğme yüksekliği ölçeğe göre: ikon + aralık + iki satır yazı + 2 px;
+        # yalnızca-ikon kipinde ikon + 10 px. Bant da onunla küçülür.
         fm = btns[0].fontMetrics()
-        bh = icon + RibbonButton._GAP + 2 * fm.height() + 2
+        bh = (icon + 10) if compact else (icon + RibbonButton._GAP + 2 * fm.height() + 2)
         for i in range(self.main_layout.count()):
             w = self.main_layout.itemAt(i).widget()
             if isinstance(w, (RibbonButton, RibbonWideButton)):
