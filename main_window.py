@@ -782,7 +782,7 @@ class MainWindow(QMainWindow):
         p1.add_button("Otomatik\nPlanla","otomatik",self._act_auto_schedule)
         p1.add_button("Bulut\nPlanlama","bulut_olustur",self._act_cloud_timetable)
         p1.add_button("Son\nKontrol","kontrol",self._act_verify_timetable)
-        p1.add_button("Sıfırla","temizle",self._act_clear_schedule)
+        p1.add_button("Çizelgeyi\nSıfırla","temizle",self._act_clear_schedule)
         p1.add_divider()
         p1.add_button("Temel\nBilgiler",  "okul",    self._open_school_info)
         p1.add_button("Hesabım","internet", lambda: __import__('webbrowser').open("https://chenki.net/"))
