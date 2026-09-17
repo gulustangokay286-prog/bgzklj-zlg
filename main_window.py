@@ -689,8 +689,8 @@ class MainWindow(QMainWindow):
         # En üst: ortalı başlık şeridi ("Chenkron 2026 — Kurum • v141 Ad")
         self.top_title_lbl = QLabel("", root)
         self.top_title_lbl.setAlignment(Qt.AlignCenter)
-        self.top_title_lbl.setFixedHeight(28)
-        self.top_title_lbl.setFont(QFont(FONT_FAMILY, 11, QFont.DemiBold))
+        self.top_title_lbl.setFixedHeight(24)
+        self.top_title_lbl.setFont(QFont(FONT_FAMILY, 10, QFont.DemiBold))
         self.top_title_lbl.setStyleSheet("color: #1E293B; background: #F8FAFC; border: none; "
                                          "border-bottom: 1px solid #E5E7EB;")
         root_layout.addWidget(self.top_title_lbl)
@@ -1040,7 +1040,7 @@ class MainWindow(QMainWindow):
         self._tab_widget.setFont(QFont(FONT_FAMILY, 9))
         self._tab_widget.setStyleSheet(f"""
             QTabWidget::pane {{ border: 1px solid #CBD5E1; background: #FFFFFF; border-radius: 6px; }}
-            QTabBar::tab {{ padding: 6px 18px; font-size: 12.5px; font-weight: 700; font-family: {FONT_FAMILY}; }}
+            QTabBar::tab {{ padding: 4px 14px; font-size: 12px; font-weight: 700; font-family: {FONT_FAMILY}; }}
             QTabBar::tab:selected {{ background: #FFFFFF; border-bottom: 2.5px solid #0071E3; color: #0071E3; }}
             QTabBar::tab:!selected {{ background: #F1F5F9; color: #64748B; }}
         """)

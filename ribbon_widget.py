@@ -956,12 +956,12 @@ class RibbonButton(QToolButton):
         super().__init__(parent)
         self.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
         self._icon_key = icon_key
-        self.setIcon(make_icon(icon_key, 36))
-        self.setIconSize(QSize(36, 36))
+        self.setIcon(make_icon(icon_key, 32))
+        self.setIconSize(QSize(32, 32))
         self.setText(label)
         self.setMinimumWidth(56)
         self.setMaximumWidth(76)
-        self.setFixedHeight(72)
+        self.setFixedHeight(58)
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.setCheckable(False)
         self.setCursor(Qt.PointingHandCursor)
@@ -1010,7 +1010,7 @@ class RibbonButton(QToolButton):
     # Kafes testinde ortalı görünen düğme kullanıcının ekranında kayık
     # çıkıyordu. Bu yüzden ikon + yazı bloğu burada elle, tam ortaya çizilir;
     # arka plan ve kenarlık da stil sayfasına bırakılmaz.
-    _GAP = 4
+    _GAP = 3
 
     def enterEvent(self, e):
         super().enterEvent(e); self.update()
@@ -1173,7 +1173,7 @@ def _divider(parent=None):
 class RibbonPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(72)
+        self.setFixedHeight(66)
         
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
@@ -1181,12 +1181,12 @@ class RibbonPage(QWidget):
         
         self.scroll_area = RibbonScrollArea(self)
         self.content_widget = QWidget(self.scroll_area)
-        self.content_widget.setFixedHeight(72)
+        self.content_widget.setFixedHeight(66)
         self.content_widget.setStyleSheet(f"background: {RIBBON_BG};")
         
         self.main_layout = QHBoxLayout(self.content_widget)
-        # Üst 6 / alt 2 px; bant yüksekliği düğme boyuna göre fit() içinde kurulur.
-        self.main_layout.setContentsMargins(4, 6, 4, 2)
+        # Üst 4 / alt 4 px; bant yüksekliği düğme boyuna göre fit() içinde kurulur.
+        self.main_layout.setContentsMargins(4, 4, 4, 4)
         self.main_layout.setSpacing(2)
         self.main_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         
@@ -1276,11 +1276,11 @@ class RibbonPage(QWidget):
         # 900 px olduğu için pratikte hiç). "Küçültülmüş" pencerede de sığar.
         cap = (width - fixed) // len(btns)
         if cap >= 56:
-            icon, pt = 36, 7.5
+            icon, pt = 32, 7.5
         elif cap >= 48:
-            icon, pt = 30, 7.0
+            icon, pt = 28, 7.0
         elif cap >= 42:
-            icon, pt = 26, 6.5
+            icon, pt = 24, 6.5
         elif cap >= 36:
             icon, pt = 22, 6.0
         else:
@@ -1295,10 +1295,10 @@ class RibbonPage(QWidget):
             b.setMinimumWidth(cap)
             b.setMaximumWidth(cap)
             b.set_scale(icon, pt)
-        # Düğme yüksekliği ölçeğe göre: ikon + aralık + iki satır yazı + 4 px.
+        # Düğme yüksekliği ölçeğe göre: ikon + aralık + iki satır yazı + 2 px.
         # Dar pencerede ikon küçülünce bant da küçülür; "otoban" boşluk kalmaz.
         fm = btns[0].fontMetrics()
-        bh = icon + RibbonButton._GAP + 2 * fm.height() + 4
+        bh = icon + RibbonButton._GAP + 2 * fm.height() + 2
         for i in range(self.main_layout.count()):
             w = self.main_layout.itemAt(i).widget()
             if isinstance(w, (RibbonButton, RibbonWideButton)):
@@ -1348,7 +1348,7 @@ class RibbonWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(106)
+        self.setFixedHeight(66)
         self._pages = []
         self._tab_buttons = []
         self._active = 0
@@ -1374,8 +1374,8 @@ class RibbonWidget(QWidget):
         # (geri dönüşte tersi), bu arada ikisi de kısa süre görünürdür. Bir
         # QVBoxLayout iki sayfayı üst üste koyamaz ve konumu animasyona vermez.
         self._page_area = QWidget(self)
-        self._page_area.setFixedHeight(72)
-        self._page_h = 72
+        self._page_area.setFixedHeight(66)
+        self._page_h = 66
         self._page_area.setStyleSheet(f"background: {RIBBON_BG};")
         outer.addWidget(self._page_area)
         self._anim = None
@@ -1432,17 +1432,27 @@ class RibbonWidget(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        w, h = self._page_area.width(), self._page_area.height()
+        # Kendi genişliğimiz; sayfa alanının genişliği bu anda henüz eski olabilir.
+        w, h = self.width(), self._page_h
         for i, page in enumerate(self._pages):
             if i == self._active and (self._anim is None or self._anim.state() != QAbstractAnimation.Running):
                 page.setGeometry(0, 0, w, h)
             else:
                 page.resize(w, h)
             page.fit(w)
-        ph = max((getattr(pg, "preferred_height", 0) for pg in self._pages), default=0)
+        self._adopt_page_height()
+
+    def _adopt_page_height(self):
+        """Bant yüksekliği AKTİF sayfanın düğme boyuna göre; az düğmeli bir
+        sayfa (ör. Dosya) daha büyük ikon alıp bandı yükseltmesin."""
+        if not self._pages:
+            return
+        ph = getattr(self._pages[self._active], "preferred_height", 0)
         if ph and ph != self._page_h:
             self._page_h = ph
             self._page_area.setFixedHeight(ph)
+            for pg in self._pages:
+                pg.resize(self.width(), ph)
             self._apply_height()
 
     def select_page(self, page, animate=True):
@@ -1469,6 +1479,7 @@ class RibbonWidget(QWidget):
             old_page.setVisible(False)
             new_page.setGeometry(0, 0, w, h)
             new_page.setVisible(True)
+            self._adopt_page_height()
             self.tab_changed.emit(idx)
             return
 
@@ -1507,6 +1518,7 @@ class RibbonWidget(QWidget):
             new_page.setGraphicsEffect(None)
             new_page.setGeometry(0, 0, self._page_area.width(), self._page_area.height())
             self._anim = None
+            self._adopt_page_height()
             self.tab_changed.emit(idx)
         group.finished.connect(_done)
         self._anim = group
