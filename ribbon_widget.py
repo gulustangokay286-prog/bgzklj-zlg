@@ -860,6 +860,9 @@ ICON_MAP = {
 
 _ICON_CACHE = {}
 _INK_CACHE = {}
+# Göze göre düzeltme: mürekkep ortalamasına rağmen sola ağır görünen
+# ikonlar için ek yatay kaydırma (mantıksal px, +sağ).
+_OPTICAL_DX = {"on_izleme": 2, "sartlar": 2}
 
 
 def icon_ink(key: str, size: int):
@@ -1074,7 +1077,7 @@ class RibbonButton(QToolButton):
         ix, iy, iw, ih = icon_ink(self._icon_key, icon_px)
         block = ih + (self._GAP if lines else 0) + text_h
         top = (self.height() - block) / 2.0
-        x = round((self.width() - iw) / 2.0 - ix)
+        x = round((self.width() - iw) / 2.0 - ix) + _OPTICAL_DX.get(self._icon_key, 0)
         y = round(top - iy)
         pix = self.icon().pixmap(QSize(icon_px, icon_px), QIcon.Normal if enabled else QIcon.Disabled)
         p.drawPixmap(x, y, icon_px, icon_px, pix)
