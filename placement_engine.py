@@ -482,6 +482,14 @@ class TimetableSnapshot:
         self.reserved = {}
         if not self.slug:
             return
+        # Kurumlar bağımsız: başka kurumun dersi/rezervasyonu burada çakışma
+        # değildir; disk de okunmaz.
+        try:
+            import constraint_sync as _cs
+            if _cs.institutions_independent():
+                return
+        except Exception:
+            pass
         try:
             import version_store
             raw = version_store.get_cross_institution_teacher_busy_slots(

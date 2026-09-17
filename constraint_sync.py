@@ -38,6 +38,31 @@ OPEN = 2      # ✔ Müsait
 AVOID = 1     # ? Zorunlu olmadıkça atanmasın (yumuşak kısıt)
 CLOSED = 0    # ✖ Kapalı (sert kısıt)
 
+# ── Kurum bağımsızlığı ────────────────────────────────────────────────
+# Kurumlar zaman tablosu bakımından TAMAMEN bağımsızdır. Ortak bir öğretmenin
+# başka kurumdaki dersi, rezervasyonu ya da kişisel kısıtı bu kurumun hiçbir
+# yerini etkilemez: ne otomatik planlayıcıyı, ne ön kontrolü, ne elle
+# yerleştirmeyi, ne de Zaman Tablosu ekranını. Bu kurumun kısıtları da
+# dışarıya yayınlanmaz.
+#
+# Neden: paylaşım üç ayrı yoldan hocaların tablosunu "kendi kendine"
+# değiştirmiş ya da motoru açık saate ders koymaz hâle getirmişti —
+#   * ana kurum kaydedilince ikincil kurumun tablosu tersine yazılıyordu
+#     (propagate_primary_timeoff_to_secondary, v4.0.6'da kapatıldı),
+#   * planlayıcı diğer kurumun saatlerini öğretmenin timeoff'una işliyordu
+#     (12 Eylül'de kapatıldı),
+#   * diğer kurumun ESKİ aktif sürümündeki dersler ve yerel önbellekteki bayat
+#     kişisel kısıtlar, buradaki motor/ön kontrol/elle yerleştirme tarafından
+#     kapalı sayılıyordu — kullanıcı saati açsa da "kapalı" kalıyordu.
+# Bütün bu okuma noktaları bu tek bayrağa bakar. Testler mekanizmayı sınamak
+# için bayrağı geçici olarak kapatabilir; uygulama hiçbir yerden değiştirmez.
+INSTITUTIONS_INDEPENDENT = True
+
+
+def institutions_independent() -> bool:
+    """Kurumlar birbirinden bağımsız mı? (Uygulamada her zaman True.)"""
+    return bool(INSTITUTIONS_INDEPENDENT)
+
 
 def _coerce_state(value) -> int:
     """Bir hücre değerini 0/1/2 durumuna çevirir.
@@ -281,6 +306,33 @@ def set_matrix(entity: dict, name: str, data_store: dict, matrix: list):
                     kis[o_ad] = cell_map
 
 
+# Eski sürümlerin kisitlamalar sözlüğüne yanlışlıkla yazdığı kurum anahtarları.
+_LEGACY_WRAPPER_KEYS = ("bogazici_egitim_kurumlari", "birey_egitim_kurumlari",
+                        "bogazici_anadolu_lisesi")
+
+
+def strip_institution_wrappers(kisitlamalar: dict) -> int:
+    """kisitlamalar içindeki kurum sarmalayıcılarını siler; silinen sayısını döndürür.
+
+    Bir birimin girdisi {"gün,saat": durum} sözlüğüdür. Kurum sarmalayıcısı ise
+    {birim: {...}} — değerleri de sözlük olan bir sözlük. Eski temizlik "değeri
+    sözlük olan her anahtar"ı siliyordu; bu HER birimin kısıtlamasıydı. timeoff
+    listesi olan birimlerde sync_all geri üretiyordu, yalnızca eski biçimde
+    (timeoff'suz) kaydedilmiş bir birim ilk açılışta kısıtlamasını kaybediyordu.
+    """
+    if not isinstance(kisitlamalar, dict):
+        return 0
+    removed = 0
+    for key in list(kisitlamalar.keys()):
+        val = kisitlamalar[key]
+        is_wrapper = isinstance(val, dict) and bool(val) and all(
+            isinstance(v, dict) for v in val.values())
+        if key in _LEGACY_WRAPPER_KEYS or is_wrapper:
+            kisitlamalar.pop(key, None)
+            removed += 1
+    return removed
+
+
 def sync_all(data_store: dict):
     """data_store içindeki tüm birimlerin iki gösterimini yeniden hizalar.
 
@@ -433,6 +485,8 @@ def publish(slug: str, data_store: dict):
     ayrıca yürür: kişisel kısıt (burası) ve o kurumun gerçekten ders koyduğu /
     rezerve ettiği saat (rezervasyon defteri).
     """
+    if institutions_independent():
+        return
     if not slug or not isinstance(data_store, dict) or not _institution_exists(slug):
         return
     day_count, periods = grid_dimensions(data_store)
@@ -570,6 +624,8 @@ def load_reservations() -> dict:
     okunur; bir kuruma ait kayıt her iki yerde de varsa meta.json kazanır.
     """
     merged = {}
+    if institutions_independent():
+        return merged
     legacy = _read_shared(_reservations_path())
     for key, cells in (legacy or {}).items():
         if isinstance(cells, dict):
@@ -599,6 +655,8 @@ def set_reservation(slug: str, teacher_name: str, slot: tuple, owned: bool):
     Dönüş: True = işlem yapıldı, False = hücre başka kuruma ait.
     """
     key = _norm_teacher(teacher_name)
+    if institutions_independent():
+        return False
     if not slug or not key or not _institution_exists(slug):
         return False
     d, p = slot
@@ -754,6 +812,8 @@ def shared_teacher_states(exclude_slug: str, day_count: int, periods: int) -> di
     hepsinin en kısıtlayıcı halini görür.
     """
     result = {}
+    if institutions_independent():
+        return result
     try:
         from version_store import normalize_teacher_name
     except Exception:

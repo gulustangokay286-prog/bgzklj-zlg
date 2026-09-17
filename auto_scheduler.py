@@ -167,6 +167,13 @@ def _build_teacher_timeoff_map(data_store: dict, institution_slug: str = None, i
     """
     import constraint_sync
 
+    # Kurumlar bağımsız: diğer kurumların yayınladığı kısıtlar buraya karışmaz.
+    # Motor, ön kontrol (check_feasibility) ve kaydetme öncesi kontrol hep bu
+    # fonksiyonu kullandığı için üçü de aynı şeyi görür: yalnızca BU kurumun
+    # zaman tablosu.
+    if constraint_sync.institutions_independent():
+        include_shared = False
+
     blocked = defaultdict(set)
     avoid = defaultdict(set)
     day_count, periods = constraint_sync.grid_dimensions(data_store)
@@ -762,6 +769,12 @@ def _build_cross_institution_map(institution_slug: str) -> tuple:
     """
     occupied = defaultdict(set)
     details = {}
+    try:
+        import constraint_sync
+        if constraint_sync.institutions_independent():
+            return dict(occupied), details
+    except Exception:
+        pass
     try:
         import version_store
         for inst in version_store.list_institutions():
@@ -2219,11 +2232,14 @@ class AutoSchedulerWorker(QThread):
         self.institution_slug = institution_slug or (self.data_store.get("settings", {}).get("institution_slug", None) if isinstance(self.data_store, dict) else None)
         self.use_vds = use_vds
         self.infinite_mode = infinite_mode
-        # "Diğer kurumları yoksay": hours a shared teacher owes to another branch stop
-        # being treated as unavailable, so this institution can fill its own grid on
-        # its own terms. Off by default — double-booking a teacher is normally a
-        # mistake, not a preference.
-        self.ignore_other_institutions = ignore_other_institutions
+        # "Diğer kurumları yoksay" HER ZAMAN açık: kurumlar zaman tablosu
+        # bakımından bağımsızdır (constraint_sync.INSTITUTIONS_INDEPENDENT).
+        # Ortak öğretmenin başka kurumdaki dersi, rezervasyonu ya da kişisel
+        # kısıtı bu kurumun çizelgesini etkilemez. Parametre yalnızca eski
+        # çağıranlar bozulmasın diye duruyor; değeri dikkate alınmaz.
+        import constraint_sync
+        self.ignore_other_institutions = (True if constraint_sync.institutions_independent()
+                                          else bool(ignore_other_institutions))
         # "Sınıfları bağımsız doldur": each class is filled as if it were the only one,
         # so a teacher may end up booked in two classes at the same hour. That fills
         # the grid, and it is sometimes what the user wants — they will resolve the

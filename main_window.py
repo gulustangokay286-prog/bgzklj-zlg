@@ -1244,11 +1244,10 @@ class MainWindow(QMainWindow):
                                 if isinstance(tv, list):
                                     self.data_store["kisitlamalar"][tk] = tv
 
-                # Clean any accidental institution slugs in kisitlamalar
-                if isinstance(self.data_store.get("kisitlamalar"), dict):
-                    for bad_key in list(self.data_store["kisitlamalar"].keys()):
-                        if bad_key in ("bogazici_egitim_kurumlari", "birey_egitim_kurumlari", "bogazici_anadolu_lisesi") or isinstance(self.data_store["kisitlamalar"][bad_key], dict):
-                            self.data_store["kisitlamalar"].pop(bad_key, None)
+                # Clean any accidental institution slugs in kisitlamalar —
+                # yalnızca sarmalayıcıları; birimlerin kendi girdileri kalır
+                # (bkz. constraint_sync.strip_institution_wrappers).
+                constraint_sync.strip_institution_wrappers(self.data_store.get("kisitlamalar"))
 
                 if "kisitlamalar" not in self.data_store:
                     self.data_store["kisitlamalar"] = {}
@@ -3076,9 +3075,12 @@ class MainWindow(QMainWindow):
                 has_teacher_conflict = True
 
         # ── 3.5. KESİN KONTROL: Çapraz Kurum Öğretmen Çakışması Kontrolü
-        if teacher:
+        # Kurumlar bağımsızken (constraint_sync.INSTITUTIONS_INDEPENDENT) bu
+        # kontrol yapılmaz: başka kurumun — çoğu zaman ESKİ aktif sürümündeki —
+        # dersi burada elle yerleştirmeyi engellemez.
+        import constraint_sync
+        if teacher and not constraint_sync.institutions_independent():
             import version_store
-            import constraint_sync
             my_slug = getattr(self, "institution_slug", None)
             cross_busy = version_store.get_cross_institution_teacher_busy_slots(exclude_slug=my_slug)
             t_norm = version_store.normalize_teacher_name(teacher)

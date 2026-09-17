@@ -221,6 +221,10 @@ def run():
     check("no temp file is left behind", not leftovers, str(leftovers))
 
     print("\n[cross-institution conflict map]")
+    # Uygulamada kurumlar bağımsızdır ve bu harita boş döner; burada haritanın
+    # kendisi sınanıyor (bkz. test_kurum_bagimsizligi.py).
+    import constraint_sync as _cs
+    _cs.INSTITUTIONS_INDEPENDENT = False
     other = version_store.create_institution("Diger Okul")
     version_store.save_version(
         other["slug"], schedule(placement(2, 3, subject="Kimya", cls="10B")), note="c"

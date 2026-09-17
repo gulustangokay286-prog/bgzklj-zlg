@@ -298,6 +298,15 @@ def get_cross_institution_teacher_busy_slots(exclude_slug: str = None) -> dict:
     naming schemes are emitted below so either caller shape keeps working.
     """
     import time as _time
+    # Kurumlar bağımsız: başka kurumun dersi burada meşguliyet sayılmaz.
+    # (Bkz. constraint_sync.INSTITUTIONS_INDEPENDENT.) Diskten hiçbir şey
+    # okunmaz — elle yerleştirme ve Zaman Tablosu ekranı bu yüzden de hızlanır.
+    try:
+        import constraint_sync as _cs
+        if _cs.institutions_independent():
+            return {}
+    except Exception:
+        pass
     now = _time.monotonic()
     cached = _cross_busy_cache.get(exclude_slug)
     if cached and (now - cached[0]) < _CROSS_BUSY_CACHE_TTL:

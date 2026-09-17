@@ -33,6 +33,9 @@ class TimeoffDialog(QDialog):
         self.inst_slug = None
         self.is_teacher = str(entity_type).strip().lower().startswith("öğretmen") or \
             str(entity_type).strip().lower().startswith("ogretmen")
+        # Kurumlar bağımsız (constraint_sync.INSTITUTIONS_INDEPENDENT): başka
+        # kurumdaki ders, rezervasyon ve kişisel kısıt bu ekranda görünmez,
+        # hücreleri kilitlemez. Kullanıcının gördüğü tablo kaydedilen tablodur.
         try:
             import constraint_sync
             from version_store import (
@@ -42,18 +45,20 @@ class TimeoffDialog(QDialog):
             inst_slug = self.data_store.get("settings", {}).get("institution_slug") \
                 or get_last_active_institution_slug()
             norm_name = normalize_teacher_name(name)
+            self.independent = constraint_sync.institutions_independent()
 
             # Only lock slots where the teacher is actually scheduled/reserved in another institution.
             # Slots closed at another institution mean the teacher is FREE for this institution.
 
-            cross_busy = get_cross_institution_teacher_busy_slots(exclude_slug=inst_slug)
+            cross_busy = {} if self.independent else \
+                get_cross_institution_teacher_busy_slots(exclude_slug=inst_slug)
             for (t_norm, d, p_slot), conflict_info in cross_busy.items():
                 if t_norm == norm_name or conflict_info.get("teacher_name") == name:
                     self.cross_institution_locks.add((d, p_slot))
                     self.cross_institution_conflicts[(d, p_slot)] = conflict_info
 
             self.inst_slug = inst_slug
-            if self.is_teacher:
+            if self.is_teacher and not self.independent:
                 import version_store as _vs
                 slug_to_name = {}
                 try:
@@ -398,23 +403,30 @@ class TimeoffDialog(QDialog):
 
         owner_other = self.other_reserved.get(slot)
         menu = QMenu(self)
-        if owner_other:
-            info_act = menu.addAction(f"ℹ️ '{owner_other}' kurumunda planlı")
-            info_act.setEnabled(False)
-            menu.addSeparator()
+        independent = getattr(self, "independent", True)
+        act_toggle = None
+        want = False
+        if not independent:
+            if owner_other:
+                info_act = menu.addAction(f"ℹ️ '{owner_other}' kurumunda planlı")
+                info_act.setEnabled(False)
+                menu.addSeparator()
 
-        if slot in self.my_reserved:
-            act_toggle = menu.addAction("⚑ Rezervasyonu Kaldır")
-            want = False
-        else:
-            act_toggle = menu.addAction("⚑ Bu Saati Kurumumuza Rezerve Et")
-            want = True
+            if slot in self.my_reserved:
+                act_toggle = menu.addAction("⚑ Rezervasyonu Kaldır")
+                want = False
+            else:
+                act_toggle = menu.addAction("⚑ Bu Saati Kurumumuza Rezerve Et")
+                want = True
 
         act_personal = act_half_am = act_half_pm = act_half_clear = None
         if self.is_teacher:
-            menu.addSeparator()
+            if not independent:
+                menu.addSeparator()
             if self._is_personal(d_idx, p_idx):
                 act_personal = menu.addAction("🔓 Kişisel kısıtı kaldır")
+            elif independent:
+                act_personal = menu.addAction("🔒 Kişisel kısıt (izin/rapor) olarak kapat")
             else:
                 act_personal = menu.addAction("🔒 Kişisel: hiçbir kurumda müsait değil")
             menu.addSeparator()
@@ -443,7 +455,7 @@ class TimeoffDialog(QDialog):
                                      personal=False)
             return
 
-        if chosen != act_toggle:
+        if act_toggle is None or chosen != act_toggle:
             return
 
         import constraint_sync
@@ -471,7 +483,13 @@ class TimeoffDialog(QDialog):
         # istemiyor; tek tıklama artık durumu doğrudan tersine çeviriyor.
         new_state = 0 if current_state == 2 else 2
 
-
+        # Açılan saat GERÇEKTEN açılır. Kişisel kısıt (sağ tık) ayrı bir
+        # katmanda durur ve kurum matrisini ezer; eskiden sol tık yalnızca
+        # kurum matrisini açıyor, kişisel katman kalıyordu — kullanıcı ✕'i
+        # tıklıyor, hücre "✕ Kişisel" kalıyor, kayıtta saat kapalı çıkıyor ve
+        # motor oraya ders koymuyordu. Şimdi açmak iki katmanı da açar.
+        if new_state == 2:
+            self.personal_data[col][row] = False
         self.timeoff_data[col][row] = new_state
         item = self.table.item(row, col)
         self._update_item_visuals(item, new_state, col, row)
@@ -482,6 +500,8 @@ class TimeoffDialog(QDialog):
         any_open = any(self.timeoff_data[col][p] > 0 for p in range(self.periods))
         new_st = 0 if any_open else 2
         for p in range(self.periods):
+            if new_st == 2:
+                self.personal_data[col][p] = False
             self.timeoff_data[col][p] = new_st
             item = self.table.item(p, col)
             if item: self._update_item_visuals(item, new_st, col, p)
@@ -492,6 +512,8 @@ class TimeoffDialog(QDialog):
         any_open = any(self.timeoff_data[d][row] > 0 for d in range(len(self.days)))
         new_st = 0 if any_open else 2
         for d in range(len(self.days)):
+            if new_st == 2:
+                self.personal_data[d][row] = False
             self.timeoff_data[d][row] = new_st
             item = self.table.item(row, d)
             if item: self._update_item_visuals(item, new_st, d, row)
@@ -500,6 +522,7 @@ class TimeoffDialog(QDialog):
     def _make_all_open(self):
         for d in range(len(self.days)):
             for p in range(self.periods):
+                self.personal_data[d][p] = False
                 self.timeoff_data[d][p] = 2
                 item = self.table.item(p, d)
                 if item: self._update_item_visuals(item, 2, d, p)
@@ -529,7 +552,7 @@ class TimeoffDialog(QDialog):
                 self.data_store, self.entity_dict, ent_name,
                 self.timeoff_data, self.personal_data)
             note = ""
-            if self.is_teacher:
+            if self.is_teacher and not getattr(self, "independent", True):
                 note = ("Bu saatleri BU kurum için kapattınız; öğretmen diğer "
                         "kurumlarda bu saatlerde müsait sayılmaya devam eder. "
                         "Hiçbir yerde olmadığı saatler için hücreye sağ tıklayıp "

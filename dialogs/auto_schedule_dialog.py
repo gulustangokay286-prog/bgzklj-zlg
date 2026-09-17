@@ -819,9 +819,12 @@ class AutoScheduleDialog(QDialog):
             False, is_disabled=True, badge_text="Bakımda"
         )
         
+        # Her zaman açık ve kapatılamaz: kurumlar zaman tablosu bakımından
+        # bağımsızdır (constraint_sync.INSTITUTIONS_INDEPENDENT). Ortak
+        # öğretmenin başka kurumdaki dersi burada dikkate alınmaz.
         row_ignore, self.sw_ignore_cross = make_switch_row(
             "Diğer Kurumları Yoksay",
-            "Aynı öğretmen başka kurumda derste olsa bile bu kuruma yerleştir",
+            "Kurumlar birbirinden bağımsızdır — bu ayar her zaman açıktır, kapatılamaz",
             True, is_disabled=True
         )
 

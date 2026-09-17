@@ -39,6 +39,10 @@ import constraint_sync  # noqa: E402
 
 version_store._base_dir = lambda: INST_ROOT
 constraint_sync._global_path = lambda: GLOBAL_FILE
+# Uygulamada kurumlar bağımsızdır ve paylaşım kapalıdır
+# (constraint_sync.INSTITUTIONS_INDEPENDENT). Bu dosya paylaşım MEKANİZMASINI
+# sınar; bağımsız kipin kendisi test_kurum_bagimsizligi.py'de sınanır.
+constraint_sync.INSTITUTIONS_INDEPENDENT = False
 
 PASSED, FAILED = [], []
 DAYS = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"]
