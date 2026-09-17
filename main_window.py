@@ -1040,7 +1040,7 @@ class MainWindow(QMainWindow):
         self._tab_widget.setFont(QFont(FONT_FAMILY, 9))
         self._tab_widget.setStyleSheet(f"""
             QTabWidget::pane {{ border: 1px solid #CBD5E1; background: #FFFFFF; border-radius: 6px; }}
-            QTabBar::tab {{ padding: 4px 14px; font-size: 12px; font-weight: 700; font-family: {FONT_FAMILY}; }}
+            QTabBar::tab {{ padding: 2px 14px 3px 14px; font-size: 12px; font-weight: 700; font-family: {FONT_FAMILY}; }}
             QTabBar::tab:selected {{ background: #FFFFFF; border-bottom: 2.5px solid #0071E3; color: #0071E3; }}
             QTabBar::tab:!selected {{ background: #F1F5F9; color: #64748B; }}
         """)

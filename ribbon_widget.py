@@ -1075,16 +1075,24 @@ class RibbonButton(QToolButton):
         text_h = fm.height() * len(lines)
         # Mürekkep sınırlarına göre ortala (tuval kutusuna göre değil).
         ix, iy, iw, ih = icon_ink(self._icon_key, icon_px)
-        block = ih + (self._GAP if lines else 0) + text_h
-        top = (self.height() - block) / 2.0
+        # İkonlar bir hizada (üstten), yazı hemen altında: tek satırlı etiketli
+        # düğme iki satırlıya göre aşağı kaymaz. Yalnızca-ikon kipinde ortala.
         x = round((self.width() - iw) / 2.0 - ix) + _OPTICAL_DX.get(self._icon_key, 0)
-        y = round(top - iy)
+        if lines:
+            # Etiketli kip: ikon KUTUSU üstten sabit (1 px), mürekkep kutunun
+            # içinde ortalı; yazı satırı bütün düğmelerde aynı yükseklikte.
+            box_top = 1.0
+            y = round(box_top + (icon_px - ih) / 2.0 - iy)
+            ty = round(box_top + icon_px + self._GAP)
+        else:
+            # Yalnızca-ikon: mürekkep düğmede tam ortalı.
+            y = round((self.height() - ih) / 2.0 - iy)
+            ty = 0
         pix = self.icon().pixmap(QSize(icon_px, icon_px), QIcon.Normal if enabled else QIcon.Disabled)
         p.drawPixmap(x, y, icon_px, icon_px, pix)
 
         p.setFont(self.font())
         p.setPen(QColor("#A0AEC0" if not enabled else ("#0B4A8F" if actionable else "#0F172A")))
-        ty = round(top + ih + self._GAP)
         avail = self.width() - 2
         for line in lines:
             txt = fm.elidedText(line, Qt.ElideRight, avail)
@@ -1224,8 +1232,8 @@ class RibbonPage(QWidget):
         self.content_widget.setStyleSheet(f"background: {RIBBON_BG};")
         
         self.main_layout = QHBoxLayout(self.content_widget)
-        # Üst 4 / alt 4 px; bant yüksekliği düğme boyuna göre fit() içinde kurulur.
-        self.main_layout.setContentsMargins(4, 4, 4, 4)
+        # Üst 3 / alt 1 px; bant yüksekliği düğme boyuna göre fit() içinde kurulur.
+        self.main_layout.setContentsMargins(4, 3, 4, 1)
         self.main_layout.setSpacing(2)
         self.main_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         
@@ -1348,7 +1356,7 @@ class RibbonPage(QWidget):
         # Düğme yüksekliği ölçeğe göre: ikon + aralık + iki satır yazı + 2 px;
         # yalnızca-ikon kipinde ikon + 10 px. Bant da onunla küçülür.
         fm = btns[0].fontMetrics()
-        bh = (icon + 10) if compact else (icon + RibbonButton._GAP + 2 * fm.height() + 2)
+        bh = (icon + 10) if compact else (icon + RibbonButton._GAP + 2 * fm.height() + 1)
         for i in range(self.main_layout.count()):
             w = self.main_layout.itemAt(i).widget()
             if isinstance(w, (RibbonButton, RibbonWideButton)):
