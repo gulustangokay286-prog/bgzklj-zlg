@@ -720,11 +720,20 @@ class MainWindow(QMainWindow):
     # altındaki "Öğretmenler Çarşafı" hapları kocaman kalıyordu.
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        try:
-            # Tam ekran dışındaki her pencere (< 1400 px) sıkı yoğunluktadır.
-            self._apply_density("compact" if self.width() < 1400 else "normal")
-        except Exception:
-            pass
+        # Yoğunluk, pencere boyutu OTURDUKTAN sonra tek seferde uygulanır.
+        # macOS tam ekran geçişi ~0,3 sn boyunca pencereyi kare kare büyütür;
+        # her karede hap boyu / yazı değişince geçiş kırık görünüyordu.
+        if not hasattr(self, "_density_timer"):
+            from PySide6.QtCore import QTimer
+            self._density_timer = QTimer(self)
+            self._density_timer.setSingleShot(True)
+            self._density_timer.timeout.connect(
+                lambda: self._apply_density("compact" if self.width() < 1400 else "normal"))
+            try:
+                self._apply_density("compact" if self.width() < 1400 else "normal")
+            except Exception:
+                pass
+        self._density_timer.start(160)
 
     def _apply_density(self, mode: str):
         if getattr(self, "_density", None) == mode:

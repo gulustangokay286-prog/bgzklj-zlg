@@ -4547,14 +4547,9 @@ class TimetableGrid(QWidget):
         self._density = mode
         compact = mode == "compact"
         h_main, h_seg, pt = (24, 22, 8.5) if compact else (30, 28, 9)
-        labels = {
-            self.toggle_panel_btn: (" Panel", " Sol Panel"),
-            self.btn_view_classes: (" Sınıflar", " Sınıflar Çarşafı"),
-            self.btn_view_teachers: (" Öğretmenler", " Öğretmenler Çarşafı"),
-            self.btn_unlock_all: (" Kilitleri Aç", " Tüm Kilitleri Aç"),
-        }
-        for btn, (short, long) in labels.items():
-            btn.setText(short if compact else long)
+        # Etiketler kısaltılmaz; yalnızca hap boyu ve punto küçülür.
+        for btn in (self.toggle_panel_btn, self.btn_view_classes,
+                    self.btn_view_teachers, self.btn_unlock_all):
             f = btn.font(); f.setPointSizeF(pt); btn.setFont(f)
         for btn in (self.toggle_panel_btn, self.btn_unlock_all):
             btn.setFixedHeight(h_main)

@@ -1256,8 +1256,13 @@ class RibbonPage(QWidget):
         self.main_layout.addWidget(item)
         return item
 
-    def fit(self, width: int):
+    def fit(self, width: int, retier: bool = True):
         """Düğmeleri verilen genişliğe sığdırır; kaydırma yerine daraltma.
+
+        retier=False: yalnızca genişlikler yeniden dağıtılır, ikon boyu /
+        yalnızca-ikon kipi / bant yüksekliği DEĞİŞMEZ. Pencere büyütme-küçültme
+        animasyonu sırasında her karede kademe atlamak "bozuk geçiş" gibi
+        görünüyordu; kademe, boyut oturduktan sonra tek seferde seçilir.
 
         Doğal genişlik sığıyorsa düğmeler normal (en fazla 76 px). Sığmıyorsa
         hepsine eşit bir tavan verilir (en az 50 px) ve yazı bir punto küçülür.
@@ -1289,14 +1294,17 @@ class RibbonPage(QWidget):
         #   dar    (daha azı)     : YALNIZCA İKON, 26 px, etiket ipucunda —
         #                            ikon 22 px'e ezilip yazı 6 pt'ye inmez.
         cap = (width - fixed) // len(btns)
-        compact = False
-        if cap >= 56:
-            icon, pt = 32, 7.5
-        elif cap >= 46:
-            icon, pt = 32, 7.0       # ikon küçülmez, yalnızca yazı bir tık iner
-        else:
-            compact = True
-            icon, pt = 26, 7.0
+        if retier or not hasattr(self, "_tier"):
+            compact = False
+            if cap >= 56:
+                icon, pt = 32, 7.5
+            elif cap >= 46:
+                icon, pt = 32, 7.0       # ikon küçülmez, yalnızca yazı bir tık iner
+            else:
+                compact = True
+                icon, pt = 26, 7.0
+            self._tier = (icon, pt, compact)
+        icon, pt, compact = self._tier
         if compact and cap < 34:
             cap = 36
             self.scroll_area.set_scroll_enabled(True)
@@ -1446,12 +1454,26 @@ class RibbonWidget(QWidget):
         super().resizeEvent(event)
         # Kendi genişliğimiz; sayfa alanının genişliği bu anda henüz eski olabilir.
         w, h = self.width(), self._page_h
+        first = not hasattr(self, "_retier_timer")
         for i, page in enumerate(self._pages):
             if i == self._active and (self._anim is None or self._anim.state() != QAbstractAnimation.Running):
                 page.setGeometry(0, 0, w, h)
             else:
                 page.resize(w, h)
-            page.fit(w)
+            page.fit(w, retier=first)
+        if first:
+            self._adopt_page_height()
+            from PySide6.QtCore import QTimer
+            self._retier_timer = QTimer(self)
+            self._retier_timer.setSingleShot(True)
+            self._retier_timer.timeout.connect(self._retier)
+        # Kademe seçimi boyut oturunca: animasyon boyunca yalnızca genişlik akar.
+        self._retier_timer.start(140)
+
+    def _retier(self):
+        w = self.width()
+        for page in self._pages:
+            page.fit(w, retier=True)
         self._adopt_page_height()
 
     def _adopt_page_height(self):
