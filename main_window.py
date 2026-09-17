@@ -713,48 +713,6 @@ class MainWindow(QMainWindow):
         # Connect tree item click
         self._tree.itemClicked.connect(self._on_tree_item_clicked)
 
-    # ── Yoğunluk: pencere daralınca üst yapı bir bütün olarak küçülür ──
-    #
-    # Şerit yalnızca-ikon kipine inerken başlık bandı, sekme satırı ve
-    # tablo araç çubuğu da aynı oranda küçülür; aksi hâlde ikonlar minik,
-    # altındaki "Öğretmenler Çarşafı" hapları kocaman kalıyordu.
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        # Yoğunluk, pencere boyutu OTURDUKTAN sonra tek seferde uygulanır.
-        # macOS tam ekran geçişi ~0,3 sn boyunca pencereyi kare kare büyütür;
-        # her karede hap boyu / yazı değişince geçiş kırık görünüyordu.
-        if not hasattr(self, "_density_timer"):
-            from PySide6.QtCore import QTimer
-            self._density_timer = QTimer(self)
-            self._density_timer.setSingleShot(True)
-            self._density_timer.timeout.connect(
-                lambda: self._apply_density("compact" if self.width() < 1400 else "normal"))
-            try:
-                self._apply_density("compact" if self.width() < 1400 else "normal")
-            except Exception:
-                pass
-        self._density_timer.start(160)
-
-    def _apply_density(self, mode: str):
-        if getattr(self, "_density", None) == mode:
-            return
-        self._density = mode
-        compact = mode == "compact"
-        if hasattr(self, "top_title_lbl") and self.top_title_lbl:
-            self.top_title_lbl.setFixedHeight(22 if compact else 24)
-            f = self.top_title_lbl.font(); f.setPointSizeF(9.5 if compact else 10); self.top_title_lbl.setFont(f)
-        if hasattr(self, "_tab_widget") and self._tab_widget:
-            pad, fs = ("3px 10px", "11px") if compact else ("4px 14px", "12px")
-            self._tab_widget.setStyleSheet(f"""
-                QTabWidget::pane {{ border: 1px solid #CBD5E1; background: #FFFFFF; border-radius: 6px; }}
-                QTabBar::tab {{ padding: {pad}; font-size: {fs}; font-weight: 700; font-family: {FONT_FAMILY}; }}
-                QTabBar::tab:selected {{ background: #FFFFFF; border-bottom: 2.5px solid #0071E3; color: #0071E3; }}
-                QTabBar::tab:!selected {{ background: #F1F5F9; color: #64748B; }}
-            """)
-        grid = getattr(self, "_grid", None)
-        if grid is not None and hasattr(grid, "set_density"):
-            grid.set_density(mode)
-
     def _on_tree_item_expanded_collapsed(self, item):
         icon_type = item.data(0, Qt.UserRole + 10)
         if icon_type:

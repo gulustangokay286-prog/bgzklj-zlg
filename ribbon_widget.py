@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QSizePolicy, QFrame, QCheckBox, QToolButton, QScrollArea, QMenu
 )
 from PySide6.QtCore import (Qt, QSize, Signal, QPoint, QPointF, QRectF, QPropertyAnimation,
-                            QParallelAnimationGroup, QEasingCurve, QAbstractAnimation)
+                            QParallelAnimationGroup, QEasingCurve, QAbstractAnimation, Property)
 from PySide6.QtWidgets import QGraphicsOpacityEffect
 from PySide6.QtGui import (
     QIcon, QPixmap, QColor, QPainter, QPen, QFont, QBrush,
@@ -1476,18 +1476,45 @@ class RibbonWidget(QWidget):
             page.fit(w, retier=True)
         self._adopt_page_height()
 
-    def _adopt_page_height(self):
+    def _adopt_page_height(self, animate=True):
         """Bant yüksekliği AKTİF sayfanın düğme boyuna göre; az düğmeli bir
-        sayfa (ör. Dosya) daha büyük ikon alıp bandı yükseltmesin."""
+        sayfa (ör. Dosya) daha büyük ikon alıp bandı yükseltmesin.
+
+        Yükseklik değişimi ANİMASYONLUDUR: tam ekran geçişinde bant 44'ten
+        69'a bir anda zıplayınca altındaki tablo da zıplıyor, "yeniden
+        hesaplanıp aşağı genişliyor" gibi görünüyordu. 180 ms'de kayar."""
         if not self._pages:
             return
         ph = getattr(self._pages[self._active], "preferred_height", 0)
-        if ph and ph != self._page_h:
-            self._page_h = ph
+        if not ph or ph == self._page_h:
+            return
+        start = self._page_h
+        self._page_h = ph
+        for pg in self._pages:
+            pg.resize(self.width(), ph)
+        if not animate or not self.isVisible():
             self._page_area.setFixedHeight(ph)
-            for pg in self._pages:
-                pg.resize(self.width(), ph)
             self._apply_height()
+            return
+        anim = QPropertyAnimation(self, b"band_height", self)
+        anim.setDuration(180)
+        anim.setStartValue(start)
+        anim.setEndValue(ph)
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._band_anim = anim
+        anim.start()
+
+    def _get_band_height(self):
+        return self._page_area.height()
+
+    def _set_band_height(self, h):
+        h = int(h)
+        self._page_area.setFixedHeight(h)
+        tabs = 34 if self._tab_bar.isVisibleTo(self) else 0
+        page = 0 if getattr(self, "_collapsed", False) else h
+        self.setFixedHeight(max(tabs + page, 1))
+
+    band_height = Property(int, _get_band_height, _set_band_height)
 
     def select_page(self, page, animate=True):
         """Belirli bir sayfaya geç (Ana Menü'deki "Diğer" düğmesi için)."""
