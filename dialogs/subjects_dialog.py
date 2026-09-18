@@ -130,7 +130,7 @@ class _SubjectEditDialog(QDialog):
     def _pick(self):
         from dialogs.color_picker_dialog import ModernColorPickerDialog
         s_name = self._w.get("ad", None)
-        title_str = f"🎨 {s_name.text().strip()} — Renk Seçimi" if s_name else "🎨 Renk Seçimi"
+        title_str = f"{s_name.text().strip()} — Renk Seçimi" if s_name else "Renk Seçimi"
         c = ModernColorPickerDialog.pick_color(
             initial_color=self._color,
             parent=self,

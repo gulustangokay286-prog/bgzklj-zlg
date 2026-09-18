@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QColor, QBrush
+from ui_icons import icon, pixmap
 
 DAYS = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"]
 
@@ -84,7 +85,7 @@ class ConstraintsDialog(QDialog):
         header_layout.addWidget(btn_clear_all)
         t1_lay.addLayout(header_layout)
         
-        hint = QLabel("💡 İpucu: Hücreye tıklayarak durumu değiştirin (Yeşil ✓ Müsait → Kırmızı ✗ Kapalı → Sarı ? Tercih Edilmez).<br>"
+        hint = QLabel("İpucu: Hücreye tıklayarak durumu değiştirin (Yeşil ✓ Müsait → Kırmızı ✗ Kapalı → Sarı ? Tercih Edilmez).<br>"
                       "Bu ekran <b>Zaman Tablosu</b> ekranıyla tamamen aynı veriyi kullanır; birinde yaptığınız değişiklik diğerine de yansır.")
         hint.setStyleSheet("color: #64748B; font-style: italic; font-size: 11px;")
         t1_lay.addWidget(hint)
@@ -110,7 +111,7 @@ class ConstraintsDialog(QDialog):
         quick_layout.addStretch(1)
         t1_lay.addLayout(quick_layout)
         
-        self.tabs.addTab(tab1, "🕒 Zaman Müsaitlik Matrisi")
+        self.tabs.addTab(tab1, icon("calendar", 15, "#334155"), "Zaman Müsaitlik Matrisi")
         
         # TAB 2: Gelişmiş Pedagojik Kurallar
         tab2 = QWidget()
@@ -118,29 +119,29 @@ class ConstraintsDialog(QDialog):
         t2_lay.setContentsMargins(16, 16, 16, 16)
         t2_lay.setSpacing(14)
         
-        grp_pedagogic = QGroupBox("🧠 Pedagojik Dağılım ve Sağlık Kuralları")
+        grp_pedagogic = QGroupBox("Pedagojik Dağılım ve Sağlık Kuralları")
         grp_pedagogic.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #CBD5E1; border-radius: 6px; margin-top: 10px; padding-top: 10px; }")
         v_ped = QVBoxLayout(grp_pedagogic)
         v_ped.setSpacing(10)
         
         cur_c = self.data_store.get("constraints", {})
         
-        self.chk_no_consecutive_hard = QCheckBox("✅ İki zor ders (Matematik, Fizik, Kimya, Biyoloji, Geometri vb.) aynı gün art arda gelmesin")
+        self.chk_no_consecutive_hard = QCheckBox("İki zor ders (Matematik, Fizik, Kimya, Biyoloji, Geometri vb.) aynı gün art arda gelmesin")
         self.chk_no_consecutive_hard.setChecked(cur_c.get("no_consecutive_hard", True))
         v_ped.addWidget(self.chk_no_consecutive_hard)
         
-        self.chk_limit_gaps = QCheckBox("✅ Öğretmenlerin haftalık programında boş saatler (pencere) minimize edilsin")
+        self.chk_limit_gaps = QCheckBox("Öğretmenlerin haftalık programında boş saatler (pencere) minimize edilsin")
         self.chk_limit_gaps.setChecked(cur_c.get("limit_teacher_gaps", True))
         v_ped.addWidget(self.chk_limit_gaps)
         
-        self.chk_max_daily = QCheckBox("✅ Bir günde aynı dersten en fazla 2 saat blok ders yerleştirilsin")
+        self.chk_max_daily = QCheckBox("Bir günde aynı dersten en fazla 2 saat blok ders yerleştirilsin")
         self.chk_max_daily.setChecked(cur_c.get("max_daily_same_subject", 2) == 2)
         v_ped.addWidget(self.chk_max_daily)
         
         t2_lay.addWidget(grp_pedagogic)
         
         # Subject Time Window Settings
-        grp_subjs = QGroupBox("🎯 Ders Bazlı Saat Tercihi (X Dersi Sabah / Öğle Saatlerine Yerleşsin)")
+        grp_subjs = QGroupBox("Ders Bazlı Saat Tercihi (X Dersi Sabah / Öğle Saatlerine Yerleşsin)")
         grp_subjs.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #CBD5E1; border-radius: 6px; margin-top: 10px; padding-top: 10px; }")
         v_subjs = QVBoxLayout(grp_subjs)
         
@@ -172,12 +173,13 @@ class ConstraintsDialog(QDialog):
         v_subjs.addWidget(self.tbl_subj_pref)
         t2_lay.addWidget(grp_subjs)
         
-        self.tabs.addTab(tab2, "⚙️ Gelişmiş Pedagojik Ayarlar")
+        self.tabs.addTab(tab2, icon("gear", 15, "#334155"), "Gelişmiş Pedagojik Ayarlar")
         layout.addWidget(self.tabs, 1)
         
         # Action Buttons
         btn_layout = QHBoxLayout()
-        btn_save = QPushButton("💾 Kaydet ve Uygula")
+        btn_save = QPushButton("Kaydet ve Uygula")
+        btn_save.setIcon(icon("save", 15, "#FFFFFF"))
         btn_save.setStyleSheet("background: #2563EB; color: white; border: none; padding: 8px 22px;")
         btn_save.clicked.connect(self._save_and_accept)
         

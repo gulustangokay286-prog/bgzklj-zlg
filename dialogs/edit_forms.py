@@ -10,6 +10,7 @@ from PySide6.QtGui import QFont, QColor, QBrush, QPainter, QPen, QPainterPath, Q
 from database import trigger_save_db
 from auto_scheduler import matches_class
 import lesson_hours
+from ui_icons import icon, pixmap
 
 def get_asset_path(rel_path):
     if hasattr(sys, '_MEIPASS'):
@@ -1402,7 +1403,7 @@ class LessonAssignmentDialog(QDialog):
             parent=self
         )
         if dlg.exec() == QDialog.Accepted:
-            # If the user clicked '🔗 Birleşik Dersler Ayarla' inside the dialog,
+            # If the user clicked 'Birleşik Dersler Ayarla' inside the dialog,
             # they may have forced a combined class assignment directly to 'atamalar'.
             # We must preserve this state so final save doesn't overwrite it as separate assignments.
             forced_combined = getattr(dlg, "_is_combined_forced", False)
@@ -1977,7 +1978,8 @@ class DersEditDialog(QDialog):
         l1.addRow(QLabel("Dersin Adı"), self.txt_ad)
         l1.addRow(QLabel("Kısa Kodu"), self.txt_kisa)
         
-        btn_ozel = QPushButton("🏷️ Özel Alanlar...")
+        btn_ozel = QPushButton("Özel Alanlar...")
+        btn_ozel.setIcon(icon("tag", 14, "#0F172A"))
         btn_ozel.setStyleSheet("background: #F1F5F9; color: #1E293B; font-weight: 500;")
         btn_ozel.clicked.connect(self._open_custom_fields)
         l1.addRow("", btn_ozel)
@@ -2191,7 +2193,7 @@ class BranchMultiSelectDialog(QDialog):
         lay.setContentsMargins(18, 18, 18, 18)
         lay.setSpacing(12)
         
-        lbl = QLabel(f"🎓 <b>{teacher_name}</b> — Atanacak Branş(lar)")
+        lbl = QLabel(f"<b>{teacher_name}</b> — Atanacak Branş(lar)")
         lbl.setStyleSheet("color: #0284C7; font-size: 13px;")
         lay.addWidget(lbl)
         
@@ -2465,12 +2467,12 @@ class MultiClassAssignDialog(QDialog):
             comb_text = "+".join(comb)
             if separate:
                 sep_text = ", ".join(separate)
-                self.lbl_preview.setText(f"🔗 <b>Birleşik (Ortak) Sınıflar:</b> {comb_text} (Ortak İşlenir)<br>📌 <b>Ayrı Sınıflar:</b> {sep_text} (Bağımsız İşlenir)")
+                self.lbl_preview.setText(f"<b>Birleşik (Ortak) Sınıflar:</b> {comb_text} (Ortak İşlenir)<br><b>Ayrı Sınıflar:</b> {sep_text} (Bağımsız İşlenir)")
             else:
-                self.lbl_preview.setText(f"🔗 <b>Birleşik (Ortak) Sınıflar:</b> {comb_text} (Tümü Ortak İşlenir)")
+                self.lbl_preview.setText(f"<b>Birleşik (Ortak) Sınıflar:</b> {comb_text} (Tümü Ortak İşlenir)")
             self.lbl_preview.setStyleSheet("background: #F0FDF4; border: 1px solid #BBF7D0; border-radius: 6px; padding: 10px; color: #166534; font-size: 12px;")
         else:
-            self.lbl_preview.setText(f"📌 <b>Ayrı Sınıflar:</b> {', '.join(sel)} (Her sınıf bağımsız olarak işlenecektir)")
+            self.lbl_preview.setText(f"<b>Ayrı Sınıflar:</b> {', '.join(sel)} (Her sınıf bağımsız olarak işlenecektir)")
             self.lbl_preview.setStyleSheet("background: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 6px; padding: 10px; color: #1E40AF; font-size: 12px;")
 
     def get_selected_classes(self):
@@ -2508,7 +2510,7 @@ class CombinedClassesAssignDialog(QDialog):
         self.default_teacher = default_teacher
         self.default_classes = default_classes or []
         
-        self.setWindowTitle("🔗 Birleşik Dersler Ayarla — Sınıf ve Ders Birleştirme")
+        self.setWindowTitle("Birleşik Dersler Ayarla — Sınıf ve Ders Birleştirme")
         self.resize(520, 520)
         chk_checked = get_asset_path("resources/chk_checked.png")
         chk_unchk = get_asset_path("resources/chk_unchecked.png")
@@ -2531,7 +2533,7 @@ class CombinedClassesAssignDialog(QDialog):
         
         # Info Box
         info_lbl = QLabel(
-            "💡 <b>Birleşik Ders Nedir?</b><br>"
+ "<b>Birleşik Ders Nedir?</b><br>"
             "Farklı sınıflar (Örn: <b>10A ve 10B</b>) aynı derste (Örn: <b>Beden Eğitimi / Müzik</b>) "
             "birleştirildiğinde, haftalık çizelgede ve otomatik planlamada <b>aynı gün ve saatte tek bir öğretmen</b> "
             "ile ortak derse katılırlar."
@@ -2602,7 +2604,7 @@ class CombinedClassesAssignDialog(QDialog):
         btn_cancel.setStyleSheet("background: white; border: 1px solid #CBD5E1; color: #475569;")
         btn_cancel.clicked.connect(self.reject)
         
-        btn_save = QPushButton("✅ Birleşik Dersi Ata ve Kaydet")
+        btn_save = QPushButton("Birleşik Dersi Ata ve Kaydet")
         btn_save.setStyleSheet("background: #2563EB; color: white; border: none;")
         btn_save.clicked.connect(self._save_combined)
         
@@ -3918,6 +3920,7 @@ class OgretmenEditDialog(BaseEditForm):
         lay_temel.addRow(QLabel("<b>Kısa Kodu:</b>"), self.w_kisa)
         
         btn_ozel = QPushButton("Özel Alanlar...")
+        btn_ozel.setIcon(icon("tag", 14, "#0F172A"))
         btn_ozel.setStyleSheet("background: #F8FAFC; color: #334155; font-weight: 600; border: 1px solid #CBD5E1; border-radius: 16px; min-height: 32px; padding: 0 16px;")
         btn_ozel.clicked.connect(self._open_custom_fields)
         lay_temel.addRow("", btn_ozel)
@@ -4329,6 +4332,7 @@ class DerslikEditDialog(BaseEditForm):
         self.main_layout.addLayout(form)
         
         btn_ozel = QPushButton("Özel Alanlar...")
+        btn_ozel.setIcon(icon("tag", 14, "#0F172A"))
         btn_ozel.setFixedWidth(200)
         btn_ozel.setStyleSheet("background: #F1F5F9; color: #1E293B; font-weight: 500;")
         btn_ozel.clicked.connect(self._open_custom_fields)
@@ -4421,7 +4425,7 @@ class ClassComprehensiveAssignmentDialog(QDialog):
         super().__init__(parent)
         self.class_name = class_name
         self.data_store = data_store or {}
-        self.setWindowTitle(f"🎓 {self.class_name} Sınıfı — Ders ve Öğretmen Atama Paneli")
+        self.setWindowTitle(f"{self.class_name} Sınıfı — Ders ve Öğretmen Atama Paneli")
         self.setFixedSize(1040, 700)
         self.setStyleSheet("""
             QDialog { background-color: #F8FAFC; font-family: system-ui, -apple-system, sans-serif; }
@@ -4849,7 +4853,7 @@ class ClassComprehensiveAssignmentDialog(QDialog):
                 item_sep.setForeground(QBrush(QColor("#CBD5E1")))
                 self.table.setItem(row, 2, item_sep)
                 
-            # 3. Sütun 3: 🔗 Birleşik Ders Saati (Combined Hour)
+            # 3. Sütun 3: Birleşik Ders Saati (Combined Hour)
             if is_cur_class_in_comb:
                 # If this class is combined, combined hour is ACTIVE and EDITABLE!
                 cb_comb = FastComboBox()

@@ -651,6 +651,6 @@ class AppleChangePasswordDialog(bk_ui.HeroSheetDialog):
         QTimer.singleShot(1000, self.accept)
 
     def _show_error(self, text: str):
-        self.status_lbl.setText("⚠ " + text)
+        self.status_lbl.setText(text)
         self.status_lbl.setStyleSheet("color: #EF4444; font-weight: 500; border: none;")
         self.status_lbl.show()

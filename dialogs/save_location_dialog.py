@@ -10,6 +10,7 @@ from PySide6.QtGui import QFont, QColor, QPixmap, QPainter, QLinearGradient, QBr
 from PySide6.QtCore import Qt, QRectF, QPointF
 
 import version_store
+from ui_icons import icon, pixmap
 
 FONT_FAMILY = ".AppleSystemUIFont, SF Pro Text, Helvetica Neue, Segoe UI, sans-serif"
 
@@ -201,7 +202,8 @@ class FolderTransferChoiceDialog(QDialog):
 
         btn_box.addStretch(1)
 
-        btn_move = QPushButton("📁  Bu Klasöre Taşı")
+        btn_move = QPushButton(" Bu Klasöre Taşı")
+        btn_move.setIcon(icon("folder", 15, "#0F172A"))
         btn_move.setFixedHeight(36)
         btn_move.setCursor(Qt.PointingHandCursor)
         btn_move.setToolTip("Çizelgeyi doğrudan bu klasöre taşır (eski klasörde kopya bırakmaz).")
@@ -221,7 +223,8 @@ class FolderTransferChoiceDialog(QDialog):
         btn_move.clicked.connect(self._on_move)
         btn_box.addWidget(btn_move)
 
-        btn_copy = QPushButton("📋  Kopya Olarak Kaydet (+1 Versiyon)")
+        btn_copy = QPushButton(" Kopya Olarak Kaydet (+1 Versiyon)")
+        btn_copy.setIcon(icon("save", 15, "#0F172A"))
         btn_copy.setFixedHeight(36)
         btn_copy.setCursor(Qt.PointingHandCursor)
         btn_copy.setToolTip("Mevcut çizelgeyi önceki klasörde korur, bu klasöre yeni bir versiyon olarak kopyalar.")
@@ -316,13 +319,15 @@ class SaveLocationDialog(QDialog):
         btn_action_box = QHBoxLayout()
         btn_action_box.setSpacing(8)
 
-        self.btn_add_name = QPushButton("🏷️  İsim Tanımla")
+        self.btn_add_name = QPushButton(" İsim Tanımla")
+        self.btn_add_name.setIcon(icon("tag", 14, "#0F172A"))
         self.btn_add_name.setFixedHeight(34)
         self.btn_add_name.setCursor(Qt.PointingHandCursor)
         self.btn_add_name.setToolTip("Çizelgeye 'v200 Oturmaya Yakın' gibi özel bir isim tanımlayın")
         btn_action_box.addWidget(self.btn_add_name)
 
-        self.btn_add_note = QPushButton("📝  Not Ekle")
+        self.btn_add_note = QPushButton(" Not Ekle")
+        self.btn_add_note.setIcon(icon("note", 14, "#0F172A"))
         self.btn_add_note.setFixedHeight(34)
         self.btn_add_note.setCursor(Qt.PointingHandCursor)
         self.btn_add_note.setToolTip("Versiyona ait özel bir not ekleyin")
@@ -424,7 +429,7 @@ class SaveLocationDialog(QDialog):
         note_lay.setContentsMargins(8, 4, 10, 4)
         note_lay.setSpacing(10)
 
-        note_badge = QLabel("📝 Not")
+        note_badge = QLabel("Not")
         note_badge.setFont(QFont(FONT_FAMILY, 9.5, QFont.Bold))
         note_badge.setAlignment(Qt.AlignCenter)
         note_badge.setStyleSheet("""
@@ -567,6 +572,7 @@ class SaveLocationDialog(QDialog):
         new_row.addWidget(self.new_folder_edit, 1)
 
         btn_new = QPushButton("  Yeni Klasör")
+        btn_new.setIcon(icon("folder", 15, "#0F172A"))
         btn_new.setIcon(make_save_vector_icon("plus", 12, "#0071E3"))
         btn_new.setCursor(Qt.PointingHandCursor)
         btn_new.setFixedHeight(36)

@@ -1367,7 +1367,7 @@ class PlanningRelationsDialog(QDialog):
                 grps = [subj] if subj else []
             unusable = (item.get("kural") == "İki ders aynı güne gelmesin" or is_group) and len(subj) < 2
             if unusable:
-                subj_text = "⚠ Ders seçilmedi — kural uygulanmaz"
+                subj_text = "Ders seçilmedi — kural uygulanmaz"
             elif len(grps) > 1:
                 subj_text = "  |  ".join(" + ".join(g) for g in grps) + ("  (her grup tek ders)" if tek else "")
             elif is_group or tek:

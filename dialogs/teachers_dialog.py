@@ -161,7 +161,7 @@ class _TeacherEditDialog(QDialog):
     def _pick_color(self):
         from dialogs.color_picker_dialog import ModernColorPickerDialog
         t_name = self._widgets["ad"].text().strip()
-        title_str = f"🎨 {t_name} — Renk Seçimi" if t_name else "🎨 Renk Seçimi"
+        title_str = f"{t_name} — Renk Seçimi" if t_name else "Renk Seçimi"
         c = ModernColorPickerDialog.pick_color(
             initial_color=self._color,
             parent=self,

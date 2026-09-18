@@ -12,6 +12,7 @@ from PySide6.QtPrintSupport import QPrintPreviewWidget, QPrinter
 from PySide6.QtGui import QPainter, QPen, QFont, QColor, QPageLayout, QBrush, QPageSize, QPainterPath, QPixmap, QIcon
 from PySide6.QtCore import Qt, QRectF, QPointF, QSize, Signal
 from auto_scheduler import matches_class
+from ui_icons import icon, pixmap
 import lesson_hours
 import bk_ui
 
@@ -509,7 +510,7 @@ def get_subject_badge(subj_name, data_store=None):
     return f"{clean_alpha[:5]}{num_str}".strip()
 
 def format_teacher_display_name(t_name, data_store=None):
-    if not t_name or t_name in ["—", "Atanmadı", "❌ Atama Yok"]:
+    if not t_name or t_name in ["—", "Atanmadı", "Atama Yok"]:
         return "—"
     
     t_clean = str(t_name).strip()
@@ -1294,7 +1295,7 @@ class TimetablePrintPreview(QDialog):
                         painter.drawRoundedRect(comb_rect, 2.5, 2.5)
                         painter.setFont(make_font(14 if is_single_page else 8.5, True))
                         painter.setPen(QPen(QColor("#1E40AF"), 1))
-                        painter.drawText(comb_rect, Qt.AlignCenter, "📎")
+                        painter.drawPixmap(comb_rect.toRect().adjusted(3, 3, -3, -3), pixmap("link", 12, "#334155"))
                         painter.restore()
                     
                     p_idx += dur
@@ -1639,7 +1640,8 @@ class TimetablePrintPreview(QDialog):
         
         painter.setPen(QPen(QColor("#0F172A"), 1))
         painter.setFont(make_font(10, True))
-        painter.drawText(QRectF(tbl_x + 8, 20, 20, 24), Qt.AlignCenter, "👨‍🏫" if is_teacher_report else "🗂️")
+        painter.drawPixmap(QRectF(tbl_x + 10, 24, 16, 16).toRect(),
+                           pixmap("user" if is_teacher_report else "grid", 16, "#0F172A"))
         painter.drawText(QRectF(tbl_x + 30, 20, 300, 24), Qt.AlignLeft | Qt.AlignVCenter, panel_title)
         
         # Top right "TÜM ÖĞRETMENLER" / "TÜM SINIFLAR" header indicator
@@ -1748,7 +1750,7 @@ class TimetablePrintPreview(QDialog):
             if is_teacher_report:
                 if is_comb_item:
                     painter.setPen(QPen(QColor("#16A34A"), 1)) # Green for combined
-                    comb_lbl = f"{cls_name.upper()} (🔗 Birleşik)" if "Birleşik" not in cls_name else cls_name.upper()
+                    comb_lbl = f"{cls_name.upper()} (Birleşik)" if "Birleşik" not in cls_name else cls_name.upper()
                     painter.drawText(QRectF(cur_x + 8, cur_y, col_w1 - 12, row_h), Qt.AlignLeft | Qt.AlignVCenter, comb_lbl)
                 else:
                     painter.setPen(QPen(QColor("#1E293B"), 1))

@@ -4,6 +4,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QBrush, QIcon, QFont
+from ui_icons import icon, pixmap
 
 FONT_FAMILY = ".AppleSystemUIFont, SF Pro Text, -apple-system, Helvetica Neue, Segoe UI, sans-serif"
 
@@ -408,15 +409,17 @@ class TimeoffDialog(QDialog):
         want = False
         if not independent:
             if owner_other:
-                info_act = menu.addAction(f"ℹ️ '{owner_other}' kurumunda planlı")
+                info_act = menu.addAction(icon("info", 14, "#64748B"),
+                                          f"'{owner_other}' kurumunda planlı")
                 info_act.setEnabled(False)
                 menu.addSeparator()
 
             if slot in self.my_reserved:
-                act_toggle = menu.addAction("⚑ Rezervasyonu Kaldır")
+                act_toggle = menu.addAction(icon("flag", 14, "#94A3B8"), "Rezervasyonu Kaldır")
                 want = False
             else:
-                act_toggle = menu.addAction("⚑ Bu Saati Kurumumuza Rezerve Et")
+                act_toggle = menu.addAction(icon("flag", 14, "#2563EB"),
+                                            "Bu Saati Kurumumuza Rezerve Et")
                 want = True
 
         act_personal = act_half_am = act_half_pm = act_half_clear = None
@@ -424,15 +427,20 @@ class TimeoffDialog(QDialog):
             if not independent:
                 menu.addSeparator()
             if self._is_personal(d_idx, p_idx):
-                act_personal = menu.addAction("🔓 Kişisel kısıtı kaldır")
+                act_personal = menu.addAction(icon("unlock", 14, "#059669"), "Kişisel kısıtı kaldır")
             elif independent:
-                act_personal = menu.addAction("🔒 Kişisel kısıt (izin/rapor) olarak kapat")
+                act_personal = menu.addAction(icon("lock", 14, "#7F1D1D"),
+                                              "Kişisel kısıt (izin/rapor) olarak kapat")
             else:
-                act_personal = menu.addAction("🔒 Kişisel: hiçbir kurumda müsait değil")
+                act_personal = menu.addAction(icon("lock", 14, "#7F1D1D"),
+                                              "Kişisel: hiçbir kurumda müsait değil")
             menu.addSeparator()
-            act_half_am = menu.addAction("🌅 Bu gün: sabah gelmiyor (yarım gün)")
-            act_half_pm = menu.addAction("🌇 Bu gün: öğleden sonra gelmiyor (yarım gün)")
-            act_half_clear = menu.addAction("↺ Bu günü tamamen aç")
+            act_half_am = menu.addAction(icon("sun", 14, "#B45309"),
+                                         "Bu gün: sabah gelmiyor (yarım gün)")
+            act_half_pm = menu.addAction(icon("moon", 14, "#4338CA"),
+                                         "Bu gün: öğleden sonra gelmiyor (yarım gün)")
+            act_half_clear = menu.addAction(icon("refresh", 14, "#059669"),
+                                            "Bu günü tamamen aç")
 
         chosen = menu.exec_(self.table.viewport().mapToGlobal(pos))
 

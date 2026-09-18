@@ -1959,7 +1959,7 @@ class AppleVersionRow(QFrame):
                     border-radius: 5px;
                 """)
             else:
-                stats_badge = QLabel(f"⚠ {unp} Boş")
+                stats_badge = QLabel(f"{unp} Boş")
                 stats_badge.setFont(bk_ui.font(8.0, QFont.Medium))
                 stats_badge.setFixedHeight(22)
                 stats_badge.setAlignment(Qt.AlignCenter)
@@ -1996,7 +1996,7 @@ class AppleVersionRow(QFrame):
             from PySide6.QtGui import QFontMetrics
             fm = QFontMetrics(bk_ui.font(8.2))
             elided_note = fm.elidedText(note_text, Qt.ElideRight, 260)
-            note_lbl = QLabel(f"📝 {elided_note}")
+            note_lbl = QLabel(f"{elided_note}")
             note_lbl.setToolTip(f"Not: {note_text}")
             note_lbl.setFont(bk_ui.font(8.2))
             note_lbl.setStyleSheet("color: #475569; background: transparent; border: none;")
@@ -2831,14 +2831,14 @@ class SearchOverlay(bk_ui.MorphOverlay):
                 # Subtitle: Kurum · [Klasör] · [Aktif] · Tarih · [Not]
                 bits = [v.get("inst_name", "")]
                 if v.get("folder_name"):
-                    bits.append(f"📁 {v['folder_name']}")
+                    bits.append(f"{v['folder_name']}")
                 if v.get("is_active"):
                     bits.append("● Aktif")
                 if v.get("date_time"):
                     bits.append(v["date_time"])
                 if note:
                     short_note = note[:55] + ("..." if len(note) > 55 else "")
-                    bits.append(f"💬 {short_note}")
+                    bits.append(f"{short_note}")
 
                 row = SearchResultRow(
                     ("ver", v.get("slug", ""), v.get("filename", "")),

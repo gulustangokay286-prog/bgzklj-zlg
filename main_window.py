@@ -486,7 +486,7 @@ class MainWindow(QMainWindow):
             self._refresh_tree()
             self._initial_hash = self._calc_data_hash()
             self._is_dirty = False
-            self.statusBar().showMessage("☁️ Diğer bilgisayardaki değişiklik alındı", 4000)
+            self.statusBar().showMessage("Diğer bilgisayardaki değişiklik alındı", 4000)
         except Exception as e:
             print(f"[MainWindow] Live data update notice: {e}")
 
@@ -511,7 +511,7 @@ class MainWindow(QMainWindow):
                         self.data_store.update(refreshed)
                         self._refresh_tree()
                         self._refresh_grid()
-                        self.statusBar().showMessage("VDS'den veriler senkronize edildi ✅", 4000)
+                        self.statusBar().showMessage("VDS'den veriler senkronize edildi ", 4000)
                 if show_message:
                     QMessageBox.information(self, "Bulut Senkronizasyon", f"Senkronizasyon tamamlandı.\n{msg}")
             elif show_message:
@@ -1755,7 +1755,7 @@ class MainWindow(QMainWindow):
                     json.dump(self.data_store, f, ensure_ascii=False, indent=2)
                 
             fname = os.path.basename(self.current_roz_path)
-            self.statusBar().showMessage(f"💾 Tüm değişiklikler '{fname}' dosyasına anlık kaydedildi.", 2000)
+            self.statusBar().showMessage(f"Tüm değişiklikler '{fname}' dosyasına anlık kaydedildi.", 2000)
             
         except Exception as e:
             self.statusBar().showMessage(f"Kaydetme hatası: {e}")
@@ -2539,7 +2539,7 @@ class MainWindow(QMainWindow):
                     nb_subj = nb.get("subject_name", nb.get("subject", ""))
                     nb_cls = nb.get("class_name", nb.get("class", ""))
                     if same_subject(nb_subj, subject, fam) and (not class_name or nb_cls == class_name):
-                        return False, f"⚠️ <b>'Aynı ders art arda gelmesin'</b> kuralına göre <b>{subject}</b> dersi bitişiğindeki <b>{nb_subj}</b> dersiyle art arda gelemez!"
+                        return False, f"<b>'Aynı ders art arda gelmesin'</b> kuralına göre <b>{subject}</b> dersi bitişiğindeki <b>{nb_subj}</b> dersiyle art arda gelemez!"
                 continue
 
             # Rule 1: Günde maksimum ders sayısı
@@ -2547,15 +2547,15 @@ class MainWindow(QMainWindow):
                 max_h = int(val) if str(val).isdigit() else 2
                 if not f_subjs:
                     if existing_subj_daily_hours > 0 and new_total_daily_hours > max_h:
-                        return False, f"⚠️ <b>'Günde maksimum ders sayısı'</b> kuralına göre <b>{subject}</b> dersi günde en fazla <b>{max_h} saat</b> olabilir. (Bu günde zaten {existing_subj_daily_hours} saat var, bu yerleşimle {new_total_daily_hours} saat oluyor!)"
+                        return False, f"<b>'Günde maksimum ders sayısı'</b> kuralına göre <b>{subject}</b> dersi günde en fazla <b>{max_h} saat</b> olabilir. (Bu günde zaten {existing_subj_daily_hours} saat var, bu yerleşimle {new_total_daily_hours} saat oluyor!)"
                 else:
                     if existing_subj_daily_hours > 0 and new_total_daily_hours > max_h:
-                        return False, f"⚠️ <b>'Günde maksimum ders sayısı'</b> kuralına göre <b>{subject}</b> dersi günde en fazla <b>{max_h} saat</b> olabilir. (Bu günde zaten {existing_subj_daily_hours} saat var, bu yerleşimle {new_total_daily_hours} saat oluyor!)"
+                        return False, f"<b>'Günde maksimum ders sayısı'</b> kuralına göre <b>{subject}</b> dersi günde en fazla <b>{max_h} saat</b> olabilir. (Bu günde zaten {existing_subj_daily_hours} saat var, bu yerleşimle {new_total_daily_hours} saat oluyor!)"
 
             # Rule 2: Beden Eğitimi / Uygulamalı dersler günde en fazla 2 saat olsun
             elif "Uygulamalı dersler" in r_type or "Beden Eğitimi" in r_type:
                 if existing_subj_daily_hours > 0 and new_total_daily_hours > 2:
-                    return False, f"⚠️ <b>'Uygulamalı dersler günde en fazla 2 saat'</b> kuralına göre <b>{subject}</b> dersi bu gün 2 saati aşıyor!"
+                    return False, f"<b>'Uygulamalı dersler günde en fazla 2 saat'</b> kuralına göre <b>{subject}</b> dersi bu gün 2 saati aşıyor!"
 
             # Rule 3: Aynı ders aynı gün tekrar etmesin (Tek blok kuralı)
             elif "tekrar etmesin" in r_type:
@@ -2563,7 +2563,7 @@ class MainWindow(QMainWindow):
                     if teacher and existing_teacher_day_lessons:
                         return False, f"{teacher}, {day_name} günü {class_name} sınıfında zaten ders veriyor."
                 elif existing_subj_daily_hours > 0:
-                    return False, f"⚠️ <b>'Aynı ders aynı gün tekrar etmesin'</b> kuralına göre <b>{subject}</b> dersi {day_name} gününde zaten mevcuttur!"
+                    return False, f"<b>'Aynı ders aynı gün tekrar etmesin'</b> kuralına göre <b>{subject}</b> dersi {day_name} gününde zaten mevcuttur!"
 
             # Rule 4: İki ders aynı güne gelmesin
             elif "aynı güne gelmesin" in r_type or "İki ders aynı güne" in r_type:
@@ -2571,20 +2571,20 @@ class MainWindow(QMainWindow):
                     for r_ex, data_ex in current_day_lessons:
                         d_subj = data_ex.get("subject_name", data_ex.get("subject", ""))
                         if any(normalize_clean(d_subj) == normalize_clean(fs) for fs in f_subjs if normalize_clean(fs) != normalize_clean(subject)):
-                            return False, f"⚠️ <b>'İki ders aynı güne gelmesin'</b> kuralına göre <b>{subject}</b> ve <b>{d_subj}</b> aynı gün ({day_name}) olamaz!"
+                            return False, f"<b>'İki ders aynı güne gelmesin'</b> kuralına göre <b>{subject}</b> ve <b>{d_subj}</b> aynı gün ({day_name}) olamaz!"
                 elif teacher and existing_teacher_day_lessons:
                     other_subj = existing_teacher_day_lessons[0][1].get("subject_name", existing_teacher_day_lessons[0][1].get("subject", "Ders"))
-                    return False, f"⚠️ <b>'Aynı ders / öğretmen aynı güne gelmesin'</b> kuralına göre <b>{teacher}</b> öğretmeni {day_name} gününde bu sınıfta zaten <b>{other_subj}</b> dersine girmektedir!"
+                    return False, f"<b>'Aynı ders / öğretmen aynı güne gelmesin'</b> kuralına göre <b>{teacher}</b> öğretmeni {day_name} gününde bu sınıfta zaten <b>{other_subj}</b> dersine girmektedir!"
 
             # Rule 5: Öğretmenin dersleri öğleden önce toplansın (Period < 4)
             elif "öğleden önce toplansın" in r_type or "Sabah" in r_type:
                 if period >= 4:
-                    return False, f"⚠️ <b>'Öğretmenin dersleri öğleden önce toplansın'</b> kuralına göre <b>{teacher}</b> öğretmeninin dersi öğleden sonraki saatlere ({period+1}. saat) konulamaz!"
+                    return False, f"<b>'Öğretmenin dersleri öğleden önce toplansın'</b> kuralına göre <b>{teacher}</b> öğretmeninin dersi öğleden sonraki saatlere ({period+1}. saat) konulamaz!"
 
             # Rule 6: Öğretmenin dersleri öğleden sonra toplansın (Period >= 4)
             elif "öğleden sonra toplansın" in r_type:
                 if period < 4:
-                    return False, f"⚠️ <b>'Öğretmenin dersleri öğleden sonra toplansın'</b> kuralına göre <b>{teacher}</b> öğretmeninin dersi sabah saatlerine ({period+1}. saat) konulamaz!"
+                    return False, f"<b>'Öğretmenin dersleri öğleden sonra toplansın'</b> kuralına göre <b>{teacher}</b> öğretmeninin dersi sabah saatlerine ({period+1}. saat) konulamaz!"
 
             # Rule 7: Son ders saatine zor ders konulmasın
             elif "Son ders saatine zor ders" in r_type:
@@ -2592,7 +2592,7 @@ class MainWindow(QMainWindow):
                 HARD_KEYWORDS = ["MAT", "FİZ", "KİM", "BİYO", "GEO"]
                 is_hard = any(k in subject.upper() for k in HARD_KEYWORDS)
                 if (period + duration - 1 >= last_period) and is_hard:
-                    return False, f"⚠️ <b>'Son ders saatine zor ders konulmasın'</b> kuralına göre <b>{subject}</b> gibi zor bir ders günün son saatine ({last_period+1}. saat) konulamaz!"
+                    return False, f"<b>'Son ders saatine zor ders konulmasın'</b> kuralına göre <b>{subject}</b> gibi zor bir ders günün son saatine ({last_period+1}. saat) konulamaz!"
 
             # Rule 8: İki zor ders art arda gelmesin
             elif "İki zor ders art arda" in r_type:
@@ -2602,9 +2602,9 @@ class MainWindow(QMainWindow):
                     prev_data = placed.get((period - 1, day))
                     next_data = placed.get((period + duration, day))
                     if prev_data and any(k in prev_data.get("subject_name", "").upper() for k in HARD_KEYWORDS):
-                        return False, f"⚠️ <b>'İki zor ders art arda gelmesin'</b> kuralına göre <b>{subject}</b> dersi öncesindeki <b>{prev_data.get('subject_name')}</b> dersiyle peş peşe gelemez!"
+                        return False, f"<b>'İki zor ders art arda gelmesin'</b> kuralına göre <b>{subject}</b> dersi öncesindeki <b>{prev_data.get('subject_name')}</b> dersiyle peş peşe gelemez!"
                     if next_data and any(k in next_data.get("subject_name", "").upper() for k in HARD_KEYWORDS):
-                        return False, f"⚠️ <b>'İki zor ders art arda gelmesin'</b> kuralına göre <b>{subject}</b> dersi sonrasındaki <b>{next_data.get('subject_name')}</b> dersiyle peş peşe gelemez!"
+                        return False, f"<b>'İki zor ders art arda gelmesin'</b> kuralına göre <b>{subject}</b> dersi sonrasındaki <b>{next_data.get('subject_name')}</b> dersiyle peş peşe gelemez!"
 
         return True, ""
 
@@ -2687,7 +2687,7 @@ class MainWindow(QMainWindow):
             import re
             seen_rules = set()
             lines = [c.message for c in rule_hits if not (c.message in seen_rules or seen_rules.add(c.message))]
-            body = ("⚠️ <b>Planlama İlişkileri'ndeki bir kural bu yerleşime izin vermiyor:</b><br><br>"
+            body = ("<b>Planlama İlişkileri'ndeki bir kural bu yerleşime izin vermiyor:</b><br><br>"
                     + "<br>".join(f"• {m}" for m in lines[:4])
                     + ("<br>…" if len(lines) > 4 else "")
                     + "<br><br>Yine de yerleştirirseniz ders çizelgede kalır; kural ihlali "
@@ -2729,7 +2729,7 @@ class MainWindow(QMainWindow):
                 if card_teacher and card_teacher != target_row_teacher:
                     QMessageBox.warning(
                         self, "Hatalı Öğretmen Satırı",
-                        f"⛔ Bu ders <b>{card_teacher}</b> öğretmenine aittir.<br><br>"
+                        f"Bu ders <b>{card_teacher}</b> öğretmenine aittir.<br><br>"
                         f"<b>{target_row_teacher}</b> öğretmeninin satırına yerleştirilemez!"
                     )
                     return
@@ -2747,7 +2747,7 @@ class MainWindow(QMainWindow):
                     if not comb_match:
                         QMessageBox.warning(
                             self, "Hatalı Sınıf Satırı",
-                            f"⛔ Bu birleşik ders (<b>{' + '.join(combined_classes)}</b>) sınıflarına aittir.<br><br>"
+                            f"Bu birleşik ders (<b>{' + '.join(combined_classes)}</b>) sınıflarına aittir.<br><br>"
                             f"<b>{target_row_cls}</b> sınıfının satırına yerleştirilemez!"
                         )
                         return
@@ -2762,7 +2762,7 @@ class MainWindow(QMainWindow):
                         if not cls_match:
                             QMessageBox.warning(
                                 self, "Hatalı Sınıf Satırı",
-                                f"⛔ Bu ders <b>{card_cls}</b> sınıfına aittir.<br><br>"
+                                f"Bu ders <b>{card_cls}</b> sınıfına aittir.<br><br>"
                                 f"<b>{target_row_cls}</b> sınıfının satırına yerleştirilemez!"
                             )
                             return
@@ -2809,7 +2809,7 @@ class MainWindow(QMainWindow):
         if period_idx + duration > periods:
             QMessageBox.warning(
                 self, "Geçersiz Konum",
-                f"⚠️ Ders {duration} saatlik olduğu için günün kalan saatlerine sığmıyor!\n\n"
+                f"Ders {duration} saatlik olduğu için günün kalan saatlerine sığmıyor!\n\n"
                 f"Günün {period_idx+1}. saatine bırakıldı, ancak gün {periods} saatten oluşuyor."
             )
             return
@@ -3038,7 +3038,7 @@ class MainWindow(QMainWindow):
         if blocked_reasons:
             seen = set()
             uniq = [r for r in blocked_reasons if not (r in seen or seen.add(r))]
-            body = ("⚠️ " + "<br>".join(uniq[:6])
+            body = ("" + "<br>".join(uniq[:6])
                     + ("<br>…" if len(uniq) > 6 else "")
                     + "<br><br><b>Bu saat kapalı işaretli.</b> Yine de yerleştirmek "
                       "isterseniz ders çizelgede kalır; kapalı saat uyarısı "
@@ -3087,7 +3087,7 @@ class MainWindow(QMainWindow):
                 # class to make room, which is data loss triggered by a drag.
                 ret = QMessageBox.warning(
                     self, "Öğretmen Çakışması",
-                    f"⚠️ <b>{teacher}</b> öğretmeni <b>{day_name}</b> günü "
+                    f"<b>{teacher}</b> öğretmeni <b>{day_name}</b> günü "
                     f"<b>{period_idx+1}. saatte</b> zaten <b>{occ_c}</b> sınıfında "
                     f"<b>{occ_s}</b> dersinde görünüyor.<br><br>"
                     f"Yine de yerleştirilsin mi?<br>"
@@ -3168,7 +3168,7 @@ class MainWindow(QMainWindow):
                 box.setWindowTitle("Çapraz Kurum Öğretmen Çakışması")
                 box.setTextFormat(Qt.RichText)
                 box.setText(
-                    f"⚠️ <b>Bu saatte bu öğretmenin başka kurumda dersi var.</b><br><br>"
+                    f"<b>Bu saatte bu öğretmenin başka kurumda dersi var.</b><br><br>"
                     f"<b>{teacher}</b> öğretmeni <b>{c_inst}</b> kurumunda "
                     f"<b>{day_name}</b> günü <b>{c_per}. ders saatinde</b> "
                     f"<b>{c_cls}</b> ({c_subj}) dersinde görevli görünüyor.<br><br>"
@@ -3387,7 +3387,7 @@ class MainWindow(QMainWindow):
             msg = (f"'{subject_name}' ({cls_name} - {teacher}) dersi {day_name} günü "
                    f"{period_idx+1}. saate yerleştirildi.")
         if has_teacher_conflict:
-            msg += "  ⚠ Öğretmen çakışması var — düzenlemeyi unutmayın."
+            msg += "Öğretmen çakışması var — düzenlemeyi unutmayın."
         self.statusBar().showMessage(msg, 8000)
 
     def _update_header_title(self):
@@ -3530,7 +3530,7 @@ class MainWindow(QMainWindow):
             if prev_count:
                 answer = QMessageBox.warning(
                     self, "Çizelge Boş",
-                    f"⚠️ <b>Kaydedilecek çizelge boş görünüyor.</b><br><br>"
+                    f"<b>Kaydedilecek çizelge boş görünüyor.</b><br><br>"
                     f"Şu anki versiyonda <b>{prev_count} yerleştirilmiş ders</b> var, "
                     f"ama kaydedilmek üzere olan çizelgede hiç ders yok.<br><br>"
                     f"Boş olarak kaydedilirse bu dersler diğer bilgisayarlarda da silinir.<br><br>"
@@ -3559,7 +3559,7 @@ class MainWindow(QMainWindow):
                 self._is_dirty = False
                 self._update_header_title()
                 dst_name = version_store.get_folder_name(slug, folder_id)
-                self.statusBar().showMessage(f"📋 Çizelge '{dst_name}' klasörüne yeni bir versiyon olarak kopyalandı.", 4000)
+                self.statusBar().showMessage(f"Çizelge '{dst_name}' klasörüne yeni bir versiyon olarak kopyalandı.", 4000)
 
             elif action == "move":
                 # BU KLASÖRE TAŞI:
@@ -3582,7 +3582,7 @@ class MainWindow(QMainWindow):
                 self._is_dirty = False
                 self._update_header_title()
                 dst_name = version_store.get_folder_name(slug, folder_id)
-                self.statusBar().showMessage(f"📁 Çizelge '{dst_name}' klasörüne taşındı.", 4000)
+                self.statusBar().showMessage(f"Çizelge '{dst_name}' klasörüne taşındı.", 4000)
 
             else:  # "save" (aynı klasöre standart kayıt)
                 new_vf = version_store.save_version(
@@ -3631,7 +3631,7 @@ class MainWindow(QMainWindow):
         if not subject_name and not teacher_name and not class_name:
             item = grid_table.item(row, col)
             if item and item.text().strip():
-                subject_name = item.text().strip().replace("🔒", "")
+                subject_name = item.text().strip().replace("", "")
                 
         if not subject_name:
             return
@@ -3744,7 +3744,7 @@ class MainWindow(QMainWindow):
         fname = os.path.basename(self.current_roz_path or self.db_path or "program.roz")
         from save_dialog import run_apple_save_sequence
         run_apple_save_sequence(self, duration_seconds=0.35, title="Kaydediliyor", message=f"'{fname}' başarıyla kaydedildi ve yeni versiyon yayına alındı.")
-        self.statusBar().showMessage(f"💾 Yeni versiyon kaydedildi ve yayına alındı.", 3000)
+        self.statusBar().showMessage(f"Yeni versiyon kaydedildi ve yayına alındı.", 3000)
 
     def _act_print(self):
         self._handle_print_preview(is_direct_print=True)
@@ -4076,7 +4076,7 @@ class MainWindow(QMainWindow):
     def _act_undo(self):
         if not (hasattr(self, "_history_stack") and self._history_stack):
             self._update_undo_redo_ui()
-            self._announce_undo_redo("⚠️ Geri alınacak başka işlem yok.")
+            self._announce_undo_redo("Geri alınacak başka işlem yok.")
             return
 
         prev_state = self._history_stack.pop()
@@ -4108,7 +4108,7 @@ class MainWindow(QMainWindow):
     def _act_redo(self):
         if not (hasattr(self, "_redo_stack") and self._redo_stack):
             self._update_undo_redo_ui()
-            self._announce_undo_redo("⚠️ Yinelenecek başka işlem yok.")
+            self._announce_undo_redo("Yinelenecek başka işlem yok.")
             return
 
         next_state = self._redo_stack.pop()
@@ -4237,12 +4237,12 @@ class MainWindow(QMainWindow):
         
         menu = QMenu(self)
         if "Sınıflar" in parent_text:
-            act = menu.addAction(f"🎓 {entity_name} Sınıfının Dersleri (Atama Paneli)")
+            act = menu.addAction(f"{entity_name} Sınıfının Dersleri (Atama Paneli)")
             chosen = menu.exec_(self._tree.mapToGlobal(pos))
             if chosen == act:
                 self._open_class_assignments(target_class=entity_name)
         elif "Öğretmenler" in parent_text:
-            act = menu.addAction(f"🎓 {entity_name} Öğretmenin Atamaları")
+            act = menu.addAction(f"{entity_name} Öğretmenin Atamaları")
             chosen = menu.exec_(self._tree.mapToGlobal(pos))
             if chosen == act:
                 import copy
@@ -4356,7 +4356,7 @@ class MainWindow(QMainWindow):
         if not atamalar:
             QMessageBox.warning(
                 self, "Ders Ataması Bulunamadı",
-                "⚠️ Henüz hiçbir sınıfa ders/öğretmen ataması yapılmamış!\n\n"
+ "Henüz hiçbir sınıfa ders/öğretmen ataması yapılmamış!\n\n"
                 "Otomatik planlama başlatılabilmesi için önce sınıflara ders ve öğretmen atamalısınız.\n\n"
                 "Sınıflar → [Sınıf Seç] → Ders & Öğretmen Ata yolunu izleyebilirsiniz."
             )
@@ -4431,15 +4431,15 @@ class MainWindow(QMainWindow):
         if not understaffed and not unplaced:
             QMessageBox.information(
                 self, "Otomatik Planlama Tamamlandı",
-                f"🎉 Otomatik planlama tamamlandı.<br><br>"
+                f"Otomatik planlama tamamlandı.<br><br>"
                 f"Toplam <b>{total_hours} ders saati</b> haftalık çizelgeye eksiksiz yerleştirildi."
             )
             return
 
         parts = [
-            "✅ Otomatik planlama tamamlandı.<br>",
+ "Otomatik planlama tamamlandı.<br>",
             f"Çizelgeye <b>{total_hours} ders saati</b> yerleştirildi.<br><br>",
-            "<b>⚠️ Bazı saatler boş kaldı.</b> Sebep, planlayıcının yetersizliği değil; "
+ "<b>Bazı saatler boş kaldı.</b> Sebep, planlayıcının yetersizliği değil; "
             "o saatlerde <b>ders verebilecek öğretmen bulunmaması</b>:<br><br>",
         ]
 
@@ -4537,7 +4537,7 @@ class MainWindow(QMainWindow):
             self.mark_dirty()
             self.save_db(sync_from_grid=False)
             self._refresh_grid()
-            self.statusBar().showMessage("🧹 Tüm çizelge dersleri başarıyla sıfırlandı.")
+            self.statusBar().showMessage("Tüm çizelge dersleri başarıyla sıfırlandı.")
 
     def _open_extracted(self, dialog_id):
         from dialogs.extracted_dialog import open_extracted_dialog

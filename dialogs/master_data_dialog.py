@@ -11,6 +11,7 @@ from PySide6.QtCore import Signal, QEvent
 from dialogs.edit_forms import DersEditDialog, SinifEditDialog, OgretmenEditDialog, DerslikEditDialog, make_edit_svg_icon
 from auto_scheduler import format_tr_name, matches_class
 import lesson_hours
+from ui_icons import icon, pixmap
 from database import trigger_save_db
 from PySide6.QtWidgets import QAbstractItemView
 
@@ -881,7 +882,7 @@ class MasterDataDialog(QDialog):
                     assignments_summary_list.append(subj)
             atanan_dersler_str = ", ".join(assignments_summary_list) if assignments_summary_list else "Atama Yok"
             
-            zaman_str = "📅 Çizelge Göster / Yazdır"
+            zaman_str = "Çizelge Göster / Yazdır"
             
             self._add_row(self.table_ogretmen, [
                 t_name, data.get("kisa",""), toplam, zaman_str, so_class, brans, atanan_dersler_str
@@ -1268,7 +1269,7 @@ class MasterDataDialog(QDialog):
             win = self.window() or self.parent()
             if win and hasattr(win, "statusBar") and callable(getattr(win, "statusBar")):
                 sb = win.statusBar()
-                if sb: sb.showMessage("⚠️ Geri alınacak başka işlem yok.")
+                if sb: sb.showMessage("Geri alınacak başka işlem yok.")
 
     def _act_redo(self):
         import copy
@@ -1294,7 +1295,7 @@ class MasterDataDialog(QDialog):
             win = self.window() or self.parent()
             if win and hasattr(win, "statusBar") and callable(getattr(win, "statusBar")):
                 sb = win.statusBar()
-                if sb: sb.showMessage("⚠️ Yinelenecek başka işlem yok.")
+                if sb: sb.showMessage("Yinelenecek başka işlem yok.")
 
     def _reset_all_class_assignments(self):
         test_mode = getattr(self, "_test_mode", False) or getattr(getattr(self, "main_window", None), "_test_mode", False)
@@ -2286,7 +2287,7 @@ class TeacherIndividualTimetableDialog(QDialog):
         # Summary footer bar
         banner_txt = f"Toplam Tanımlı Ders: {total_assigned_hours} Saat  |  Bu Kurumda Yerleşen: {placed_hours} Saat"
         if cross_hours > 0:
-            banner_txt += f"  |  🏢 Diğer Kurumlarda: {cross_hours} Saat"
+            banner_txt += f"  |  Diğer Kurumlarda: {cross_hours} Saat"
         info_banner = QLabel(banner_txt)
         info_banner.setStyleSheet("color: #1E293B; background: #E2E8F0; padding: 6px 12px; border-radius: 6px; font-weight: 600;")
         lay.addWidget(info_banner)

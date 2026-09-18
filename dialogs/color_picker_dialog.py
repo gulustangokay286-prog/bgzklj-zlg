@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QColor, QFont, QPainter, QBrush, QPen
 from PySide6.QtCore import Qt, QSize, Signal
+from ui_icons import icon, pixmap
 
 CURATED_PALETTE = [
     "#4F75C2", "#388FB8", "#2E9AA6", "#2D9488", "#2E9970", "#43A066", "#73A034",
@@ -46,7 +47,7 @@ class ColorSwatchButton(QPushButton):
 def normalize_tr(s: str) -> str:
     if not s:
         return ""
-    s_str = str(s).strip().replace("🔒", "").strip()
+    s_str = str(s).strip().replace("", "").strip()
     if " - " in s_str:
         s_str = s_str.split(" - ")[-1].strip()
     tr_map = str.maketrans({
@@ -153,8 +154,8 @@ def normalize_subject_match(s1, s2) -> bool:
     if not s1 or not s2:
         return False
     return _subject_match_cached(
-        str(s1).strip().replace("🔒", "").strip(),
-        str(s2).strip().replace("🔒", "").strip())
+        str(s1).strip().replace("", "").strip(),
+        str(s2).strip().replace("", "").strip())
 
 
 
@@ -164,7 +165,7 @@ def resolve_subject_color(subject_name: str, data_store: dict = None) -> str:
     if not subject_name:
         return "#2563EB"
         
-    s_clean = str(subject_name).replace("🔒", "").strip()
+    s_clean = str(subject_name).replace("", "").strip()
     if data_store and isinstance(data_store, dict):
         # 1. Check dersler (highest priority for user configured subject colors)
         for d in data_store.get("dersler", []):
@@ -616,7 +617,7 @@ def update_subject_color_globally(widget_or_parent, data_store: dict, subject_na
                 for c in range(grid.table.columnCount()):
                     it = grid.table.item(r, c)
                     if it and it.text().strip():
-                        clean_text = it.text().replace("🔒", "").strip()
+                        clean_text = it.text().replace("", "").strip()
                         if normalize_subject_match(clean_text, subject_name):
                             it.setBackground(QBrush(QColor(new_hex)))
                             lum = (0.299 * QColor(new_hex).red() + 0.587 * QColor(new_hex).green() + 0.114 * QColor(new_hex).blue())
@@ -666,7 +667,7 @@ class ModernColorPickerDialog(QDialog):
     """Modern, Sade ve Şık Renk Seçim Penceresi"""
     def __init__(self, current_color="#2563EB", title="Renk Seçimi", parent=None):
         super().__init__(parent)
-        clean_title = str(title).replace("🎨", "").strip()
+        clean_title = str(title).replace("", "").strip()
         self.setWindowTitle(clean_title)
         self.setFixedSize(400, 460)
         
@@ -745,6 +746,7 @@ class ModernColorPickerDialog(QDialog):
         prev_lay.addStretch(1)
         
         btn_custom = QPushButton("Özel Renk...")
+        btn_custom.setIcon(icon("palette", 15, "#0F172A"))
         btn_custom.setStyleSheet("""
             QPushButton {
                 background: #FFFFFF;
@@ -849,7 +851,7 @@ class ModernColorPickerDialog(QDialog):
     @staticmethod
     def pick_color(initial_color="#2563EB", parent=None, title="Renk Seçimi", data_store=None, subject_name=None):
         """Helper that opens dialog and optionally saves to data_store automatically."""
-        clean_title = str(title).replace("🎨", "").strip()
+        clean_title = str(title).replace("", "").strip()
         dlg = ModernColorPickerDialog(current_color=initial_color, title=clean_title, parent=parent)
         if dlg.exec() == QDialog.Accepted:
             chosen_hex = dlg.get_hex()

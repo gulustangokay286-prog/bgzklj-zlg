@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QFont, QIcon, QPixmap, QPainter, QColor, QBrush, QPen, QLinearGradient
 import database
+from ui_icons import icon, pixmap
 
 def make_wizard_icon(icon_type: str, size: int = 20) -> QIcon:
     pix = QPixmap(size, size)
@@ -113,7 +114,7 @@ class PrintWizardDialog(QDialog):
         
         # ── Search Box
         self.search_box = QLineEdit(self)
-        self.search_box.setPlaceholderText("🔍 Hızlı filtrele (Sınıf / Öğretmen adı yazın)...")
+        self.search_box.setPlaceholderText("Hızlı filtrele (Sınıf / Öğretmen adı yazın)...")
         self.search_box.textChanged.connect(self._filter_list)
         layout.addWidget(self.search_box)
         
@@ -187,7 +188,7 @@ class PrintWizardDialog(QDialog):
         for c in classes:
             c_name = c.get("ad", "")
             if not c_name: continue
-            item = QListWidgetItem(f"🎓  {c_name}")
+            item = QListWidgetItem(icon("grid", 14, "#475569"), f" {c_name}")
             item.setData(Qt.UserRole, c_name)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
             if self.default_entity:
@@ -202,7 +203,7 @@ class PrintWizardDialog(QDialog):
         for t in teachers:
             t_name = t.get("ad", "")
             if not t_name: continue
-            item = QListWidgetItem(f"👤  {t_name}")
+            item = QListWidgetItem(icon("user", 14, "#475569"), f" {t_name}")
             item.setData(Qt.UserRole, t_name)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
             if self.default_entity and is_teacher_view:

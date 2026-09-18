@@ -246,19 +246,35 @@ class StickyGhostWidget(QLabel):
         return super().eventFilter(obj, event)
 
 def make_context_icon(symbol: str, color1: str, color2: str) -> QIcon:
-    pix = QPixmap(24, 24)
+    """Sağ tık menüsü ikonu: renkli kare zemin + BEYAZ VEKTÖR işaret.
+
+    Eskiden zemine emoji yazılıyordu ("", ""): işletim sistemine göre
+    başka görünüyor, rengi menüye uymuyor ve yazı tipiyle birlikte kayıyordu.
+    Artık sembol ui_icons'ta karşılığı olan bir addır; emoji verilirse
+    EMOJI_MAP üzerinden vektör ikona çevrilir. "2+2", "X", "+" gibi kısa
+    metinler yazı olarak kalır (dağılım kalıpları için anlamlı).
+    """
+    dpr = 2
+    pix = QPixmap(24 * dpr, 24 * dpr)
+    pix.setDevicePixelRatio(dpr)
     pix.fill(Qt.transparent)
     p = QPainter(pix)
     p.setRenderHint(QPainter.Antialiasing)
-    grad = QLinearGradient(0, 0, 0, 24)
-    grad.setColorAt(0, QColor(color1))
-    grad.setColorAt(1, QColor(color2))
-    p.setBrush(QBrush(grad))
-    p.setPen(QPen(QColor(0,0,0,50), 1))
-    p.drawRoundedRect(2, 2, 20, 20, 4, 4)
-    p.setPen(QPen(Qt.white, 1))
-    p.setFont(QFont("Segoe UI", 10, QFont.Bold))
-    p.drawText(2, 2, 20, 20, Qt.AlignCenter, symbol)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(color1))
+    p.drawRoundedRect(QRectF(2, 2, 20, 20), 6, 6)
+    try:
+        import ui_icons
+        name = ui_icons.EMOJI_MAP.get(symbol) or (symbol if symbol in ui_icons.DRAW else None)
+    except Exception:
+        ui_icons, name = None, None
+    if name:
+        p.drawPixmap(QRectF(5, 5, 14, 14), ui_icons.pixmap(name, 14, "#FFFFFF"),
+                     QRectF(0, 0, 14 * 2, 14 * 2))
+    else:
+        p.setPen(QPen(Qt.white, 1))
+        p.setFont(QFont(FONT_FAMILY, 8 if len(symbol) > 2 else 10, QFont.Bold))
+        p.drawText(QRectF(2, 2, 20, 20), Qt.AlignCenter, symbol)
     p.end()
     return QIcon(pix)
 
@@ -946,7 +962,7 @@ class DraggableLessonCard(QWidget):
         comb_str = "\n(Birleşik / Ortak Ders)" if self.is_comb else ""
         tch_str = f"\nÖğretmen: {self.teacher}" if self.teacher else ""
         cls_str = f"\nSınıf: {self.class_name}" if self.class_name else ""
-        blk_str = f"\n⚠️ Kısıtlama: {self.blocked_reason}" if self.blocked_reason else ""
+        blk_str = f"\nKısıtlama: {self.blocked_reason}" if self.blocked_reason else ""
         self.setToolTip(f"<b>{self.subject_name}</b> ({dur_str}){cnt_str}{cls_str}{tch_str}{comb_str}{blk_str}")
 
     def set_color(self, new_hex: str):
@@ -1238,16 +1254,16 @@ class DraggableLessonCard(QWidget):
             QMenu::separator { height: 1px; background: #E2E8F0; margin: 3px 8px; }
         """)
         
-        act_palette = menu.addAction(make_context_icon("🎨", "#E91E63", "#C2185B"), f"🎨 {self.subject_name} Rengini Ayarla...")
+        act_palette = menu.addAction(make_context_icon("palette", "#E91E63", "#C2185B"), f"{self.subject_name} Rengini Ayarla...")
         menu.addSeparator()
         
         # Split / Combine options
         act_split = None
         act_merge = None
         if self.duration == 2:
-            act_split = menu.addAction(make_context_icon("✂️", "#0284C7", "#0369A1"), "✂️ İkiye Böl (1+1 Saat Yap)")
+            act_split = menu.addAction(make_context_icon("scissors", "#0284C7", "#0369A1"), "İkiye Böl (1+1 Saat Yap)")
         elif self.duration == 1 and self.count >= 2:
-            act_merge = menu.addAction(make_context_icon("🔗", "#0284C7", "#0369A1"), "🔗 2 Kartı Birleştir (2 Saatlik Blok Yap)")
+            act_merge = menu.addAction(make_context_icon("link", "#0284C7", "#0369A1"), "2 Kartı Birleştir (2 Saatlik Blok Yap)")
             
         menu.addSeparator()
         act_2_2 = menu.addAction(make_context_icon("2+2", "#AB47BC", "#7B1FA2"), "2+2 Saat (2 İkili Blok)")
@@ -1255,9 +1271,9 @@ class DraggableLessonCard(QWidget):
         act_2_2_1 = menu.addAction(make_context_icon("2+2+1", "#AB47BC", "#7B1FA2"), "2+2+1 Saat (5 Saat)")
         act_3_2 = menu.addAction(make_context_icon("3+2", "#AB47BC", "#7B1FA2"), "3+2 Saat (5 Saat)")
         act_1_1_1 = menu.addAction(make_context_icon("1+1+1", "#AB47BC", "#7B1FA2"), "1+1+1 Saat (3 Tekli)")
-        act_custom = menu.addAction(make_context_icon("✏️", "#4CAF50", "#2E7D32"), "Özel Dağılım Yapısı Gir...")
+        act_custom = menu.addAction(make_context_icon("pencil", "#4CAF50", "#2E7D32"), "Özel Dağılım Yapısı Gir...")
         menu.addSeparator()
-        act_del = menu.addAction(make_context_icon("X", "#EF5350", "#C62828"), "Atamayı Sil (Kaldır)")
+        act_del = menu.addAction(make_context_icon("trash", "#EF5350", "#C62828"), "Atamayı Sil (Kaldır)")
         
         action = menu.exec_(self.mapToGlobal(pos))
         if not action:
@@ -1382,7 +1398,7 @@ class DraggableLessonCard(QWidget):
                 if capacity is not None and sum(parts) > capacity:
                     QMessageBox.warning(
                         self, "Yeterli Boş Saat Yok",
-                        f"⚠️ '{self.subject_name}' dersi için seçilen <b>{'+'.join(map(str, parts))}</b> dağılımı "
+                        f"'{self.subject_name}' dersi için seçilen <b>{'+'.join(map(str, parts))}</b> dağılımı "
                         f"toplam <b>{sum(parts)} saat</b> gerektiriyor.<br><br>"
                         f"Ancak <b>{self.class_name}</b>{' / ' + self.teacher if self.teacher else ''} için çizelgede "
                         f"sadece <b>{capacity} saat</b> boş yer var.<br><br>"
@@ -1448,7 +1464,7 @@ class DraggableLessonCard(QWidget):
                 if hasattr(win, "_refresh_unplaced_lessons"):
                     win._refresh_unplaced_lessons()
                 if hasattr(win, "statusBar") and win.statusBar():
-                    win.statusBar().showMessage(f"ℹ️ '{self.subject_name}' dersi {'+'.join(map(str, parts))} yapısına dönüştürüldü ({sum(parts)} saat).", 4000)
+                    win.statusBar().showMessage(f"'{self.subject_name}' dersi {'+'.join(map(str, parts))} yapısına dönüştürüldü ({sum(parts)} saat).", 4000)
 
 
 class UnplacedLessonsDock(QWidget):
@@ -1561,7 +1577,7 @@ class UnplacedLessonsDock(QWidget):
                 if s_name:
                     relevant_assignments.append({"subject": s_name, "class": target_entity or "", "teacher": "", "duration": 2})
                     
-        title_text = f"📚 {target_entity} — Eklenecek Dersi Seçin:" if target_entity else "📚 Eklenecek Dersi Seçin:"
+        title_text = f"{target_entity} — Eklenecek Dersi Seçin:" if target_entity else "Eklenecek Dersi Seçin:"
         title_act = menu.addAction(title_text)
         title_act.setEnabled(False)
         menu.addSeparator()
@@ -1577,7 +1593,7 @@ class UnplacedLessonsDock(QWidget):
             seen.add(key)
             
             tch_label = f" ({t_name})" if t_name else ""
-            sub_menu = menu.addMenu(f"📖 {s_name}{tch_label}")
+            sub_menu = menu.addMenu(f"{s_name}{tch_label}")
             sub_menu.setStyleSheet(menu.styleSheet())
             
             act_1 = sub_menu.addAction("1 Saat Ekle (Tekli Kart)")
@@ -2500,7 +2516,7 @@ class DropTableWidget(QTableWidget):
                                 for off in range(dur):
                                     chk_p = period_idx + off
                                     if day_idx < len(toff) and chk_p < len(toff[day_idx]) and toff[day_idx][chk_p] == 0:
-                                        win.statusBar().showMessage(f"ℹ️ {t_ad} öğretmeninin bu saatte kısıtlaması bulunuyor.", 3000)
+                                        win.statusBar().showMessage(f"{t_ad} öğretmeninin bu saatte kısıtlaması bulunuyor.", 3000)
                                         break
                             break
                 
@@ -2690,7 +2706,7 @@ class DropTableWidget(QTableWidget):
 
         item = self.item(row, col)
         text = item.text() if item is not None else ""
-        clean_str = text.replace("🔒", "").strip() if text else ""
+        clean_str = text.replace("", "").strip() if text else ""
 
         subject_name = ""
         if info:
@@ -3012,7 +3028,7 @@ class DropTableWidget(QTableWidget):
                         painter.drawRoundedRect(badge, 2.5, 2.5)
                         painter.setFont(_cell_font(6.5))
                         set_pen(_LOCK_INK)
-                        painter.drawText(badge, Qt.AlignCenter, "🔒")
+                        painter.drawText(badge, Qt.AlignCenter, "")
                     if vis.combined:
                         badge = QRectF(x + w - 17, y + 1, 16, 16)
                         painter.setBrush(_COMB_BG)
@@ -3020,7 +3036,7 @@ class DropTableWidget(QTableWidget):
                         painter.drawRoundedRect(badge, 3, 3)
                         painter.setFont(_emoji_font(9))
                         set_pen(_COMB_INK)
-                        painter.drawText(badge, Qt.AlignCenter, "📎")
+                        painter.drawText(badge, Qt.AlignCenter, "")
 
     def _text_stamp(self, text, colour, font_px, w, h):
         dpr = self.devicePixelRatioF()
@@ -3269,7 +3285,7 @@ class DropTableWidget(QTableWidget):
                             from auto_scheduler import matches_class
                             ret = QMessageBox.warning(
                                 self, "Kilitli Ders Uyarısı",
-                                f"🔒 '{s_name}' ({c_name}) dersi kilitlenmiştir.\n\n"
+                                f"'{s_name}' ({c_name}) dersi kilitlenmiştir.\n\n"
                                 "Kilitli bir dersi taşımak istiyor musunuz?",
                                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No
                             )
@@ -3471,7 +3487,7 @@ class DropTableWidget(QTableWidget):
         if is_locked and not getattr(self, "_test_mode", False) and not getattr(self.window(), "_test_mode", False):
             ret = QMessageBox.warning(
                 self, "Kilitli Ders Uyarısı",
-                f"🔒 '{s_name}' ({c_name}) dersi kilitlenmiştir.\n\n"
+                f"'{s_name}' ({c_name}) dersi kilitlenmiştir.\n\n"
                 "Kilitli dersin kilidini kaldırıp programa/tepsiye geri almak istiyor musunuz?",
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No
             )
@@ -3640,19 +3656,19 @@ class DropTableWidget(QTableWidget):
             info = grid._placed_lessons.get((orig_r, orig_c), {}) if hasattr(grid, "_placed_lessons") else {}
             is_currently_locked = bool(info.get("locked") in [True, "true", "True", 1, "1"])
             
-            act_edit = menu.addAction(make_context_icon("✏️", "#2196F3", "#1976D2"), "Düzenle")
-            act_move = menu.addAction(make_context_icon("✥", "#FFCA28", "#FF8F00"), "Taşı")
+            act_edit = menu.addAction(make_context_icon("pencil", "#2196F3", "#1976D2"), "Düzenle")
+            act_move = menu.addAction(make_context_icon("arrow_right", "#FFCA28", "#FF8F00"), "Taşı")
             if not is_currently_locked:
-                act_lock = menu.addAction(make_context_icon("🔒", "#9C27B0", "#7B1FA2"), "Dersi Kilitle (Sabitle)")
+                act_lock = menu.addAction(make_context_icon("lock", "#9C27B0", "#7B1FA2"), "Dersi Kilitle (Sabitle)")
                 act_unlock = None
             else:
                 act_lock = None
-                act_unlock = menu.addAction(make_context_icon("🔓", "#E53935", "#C62828"), "Bu Dersin Kilidini Kaldır")
+                act_unlock = menu.addAction(make_context_icon("unlock", "#E53935", "#C62828"), "Bu Dersin Kilidini Kaldır")
                 
             act_unlock_all = None
             act_color = menu.addAction(make_grid_action_icon("palette", 16), "Renk Paleti Ayarla...")
             menu.addSeparator()
-            act_del = menu.addAction(make_context_icon("X", "#EF5350", "#C62828"), "Sil (Kaldır)")
+            act_del = menu.addAction(make_context_icon("trash", "#EF5350", "#C62828"), "Sil (Kaldır)")
             
             action = menu.exec_(self.viewport().mapToGlobal(pos))
             
@@ -3731,15 +3747,15 @@ class DropTableWidget(QTableWidget):
                                 it = self.item(r_k, c_k)
                                 if it:
                                     if new_lock_state:
-                                        if "🔒" not in it.text():
-                                            it.setText(f"🔒 {it.text()}")
+                                        if "" not in it.text():
+                                            it.setText(f"{it.text()}")
                                     else:
-                                        it.setText(it.text().replace("🔒", "").strip())
+                                        it.setText(it.text().replace("", "").strip())
                                         
                     if hasattr(win, "save_db"): win.save_db(sync_from_grid=False)
                     if hasattr(win, "_refresh_grid"): win._refresh_grid()
                     lock_msg = "kilitlendi" if new_lock_state else "kilidi kaldırıldı"
-                    lock_icon = "🔒" if new_lock_state else "🔓"
+                    lock_icon = "" if new_lock_state else ""
                     if hasattr(win, "statusBar") and win.statusBar():
                         win.statusBar().showMessage(f"{lock_icon} '{s_name}' ({c_name}) dersi {lock_msg}.")
                     self.viewport().update()
@@ -3805,8 +3821,8 @@ class DropTableWidget(QTableWidget):
                             if hasattr(win, "_refresh_tree"):
                                 win._refresh_tree()
         else:
-            act_add = menu.addAction(make_context_icon("+", "#B0BEC5", "#546E7A"), "Ders Ekle (Aşağıdan Sürükle)")
-            act_block = menu.addAction(make_context_icon("L", "#B0BEC5", "#546E7A"), "Bu Slotu Kilitle")
+            act_add = menu.addAction(make_context_icon("plus", "#B0BEC5", "#546E7A"), "Ders Ekle (Aşağıdan Sürükle)")
+            act_block = menu.addAction(make_context_icon("lock", "#B0BEC5", "#546E7A"), "Bu Slotu Kilitle")
             menu.exec_(self.viewport().mapToGlobal(pos))
 
     def _set_span(self, row, col, span):
@@ -4201,7 +4217,7 @@ class TimetableGrid(QWidget):
             s_name = info.get("subject_name", "")
             cur_color = info.get("color", "#2563EB")
         elif self.info_subject_lbl.text().strip():
-            txt = self.info_subject_lbl.text().replace("🔒", "").strip()
+            txt = self.info_subject_lbl.text().replace("", "").strip()
             if " - " in txt:
                 s_name = txt.split(" - ")[-1].strip()
             else:
@@ -4265,7 +4281,7 @@ class TimetableGrid(QWidget):
             p_info["is_manual"] = False
             c_item = self.table.item(r, c)
             if c_item:
-                c_item.setText(c_item.text().replace("🔒", ""))
+                c_item.setText(c_item.text().replace("", ""))
         win = self.window()
         if hasattr(win, "data_store"):
             for p in win.data_store.get("grid_placements", []):
@@ -4285,7 +4301,7 @@ class TimetableGrid(QWidget):
         self.table.viewport().update()
         self.table.update()
         if hasattr(win, "statusBar") and win.statusBar():
-            win.statusBar().showMessage("🔓 Tüm derslerin kilitleri başarıyla açıldı.", 3000)
+            win.statusBar().showMessage("Tüm derslerin kilitleri başarıyla açıldı.", 3000)
 
     def _on_vertical_header_clicked(self, logicalIndex):
         if logicalIndex < 0:
@@ -4410,7 +4426,7 @@ class TimetableGrid(QWidget):
         self.info_color_box.setStyleSheet(f"background: {color}; border: 1px solid rgba(0,0,0,0.15); border-radius: 5px;")
         
         # Subject Label
-        lock_prefix = "🔒 " if is_locked else ""
+        lock_prefix = "" if is_locked else ""
         self.info_subject_lbl.setText(f"{lock_prefix}{subj}")
         
         # Weekly Distribution & Curly Format Calculation (e.g. {2+1}, {2+2})

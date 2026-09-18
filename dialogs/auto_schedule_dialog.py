@@ -1353,7 +1353,7 @@ class AutoScheduleDialog(QDialog):
             lines = [
                 f"Çizelge oluşturuldu: {total_hrs}/{target_hrs} saat yerleşti.",
                 "",
-                f"⚠ 'Sınıfları Bağımsız Doldur' açıktı, bu yüzden {len(clashes)} saatte",
+                f"'Sınıfları Bağımsız Doldur' açıktı, bu yüzden {len(clashes)} saatte",
                 "öğretmen çakışması var — aynı öğretmen aynı saatte birden fazla sınıfta.",
                 "",
                 "Bu çizelge bu haliyle UYGULANAMAZ. Çakışan dersler gridde işaretli;",

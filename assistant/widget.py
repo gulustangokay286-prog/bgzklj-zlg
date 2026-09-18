@@ -204,7 +204,7 @@ class _Bubble(QWidget):
             if kind == "soru":
                 html.append(f"<div style='color:#A5A5AA; margin-bottom:6px;'>{t}</div>")
             elif kind == "arac":
-                html.append(f"<div style='color:#8FB4FF;'>⚙︎ {t}</div>")
+                html.append(f"<div style='color:#8FB4FF;'>{t}</div>")
             elif kind == "hata":
                 html.append(f"<div style='color:#FF8A80;'>{t}</div>")
             else:

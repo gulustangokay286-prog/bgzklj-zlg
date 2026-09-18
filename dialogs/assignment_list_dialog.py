@@ -2,6 +2,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QTableWidget, QTableWidgetI
                                QHeaderView, QPushButton, QLabel, QHBoxLayout, QWidget, QLineEdit)
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont
+from ui_icons import icon, pixmap
 
 class ClassAssignmentsPreviewDialog(QDialog):
     def __init__(self, data_store, parent=None):
@@ -26,7 +27,7 @@ class ClassAssignmentsPreviewDialog(QDialog):
         layout.setContentsMargins(15, 15, 15, 15)
         
         top_bar = QHBoxLayout()
-        lbl = QLabel("📚 <b>Sınıf Dersleri & Atama Listesi</b>")
+        lbl = QLabel("<b>Sınıf Dersleri & Atama Listesi</b>")
         lbl.setFont(QFont("Segoe UI", 14))
         top_bar.addWidget(lbl)
         
@@ -38,7 +39,8 @@ class ClassAssignmentsPreviewDialog(QDialog):
         self.txt_search.textChanged.connect(self._filter_table)
         top_bar.addWidget(self.txt_search)
         
-        btn_print = QPushButton("🖨️ Yazdır / PDF Önizle")
+        btn_print = QPushButton("Yazdır / PDF Önizle")
+        btn_print.setIcon(icon("printer", 15, "#0F172A"))
         btn_print.clicked.connect(self._open_print_preview)
         top_bar.addWidget(btn_print)
         
