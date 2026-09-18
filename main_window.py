@@ -1061,6 +1061,7 @@ class MainWindow(QMainWindow):
         periods = int(settings.get("periods", 8))
         self._grid = TimetableGrid(periods, right)
         self._tab_widget.addTab(self._grid, "Haftalık Program")
+        self._grid.assistant_requested.connect(self._open_assistant)
         
         # Bulut durumu — üst banttaki sağ köşe (sekme satırı kaldırıldı).
         top_header_bar = QWidget(self.top_bar)
@@ -4305,7 +4306,46 @@ class MainWindow(QMainWindow):
         self._refresh_unplaced_lessons()
         self._refresh_grid()
 
-    def _act_auto_schedule(self):
+    # ── Chenkron Asistan ──────────────────────────────────────────────────
+    def _open_assistant(self):
+        """Mavi daire: genie ile aşağı akan asistan katmanı."""
+        try:
+            from assistant.widget import AssistantOverlay
+            from assistant.agent import AssistantAgent
+            from assistant.actions import AppActions
+        except Exception as exc:
+            QMessageBox.warning(self, "Asistan", f"Asistan yüklenemedi: {exc}")
+            return
+        if getattr(self, "_assistant_overlay", None) is None:
+            ov = AssistantOverlay(self)
+            self._assistant_overlay = ov
+            ag = AssistantAgent(AppActions(self), parent=self)
+            self._assistant_agent = ag
+            ov.submitted.connect(ag.ask)
+            ov.cancel_requested.connect(ag.cancel)
+            ag.thinking.connect(ov.set_busy)
+            ag.thinking.connect(lambda on: self._grid.btn_assistant.set_busy(on)
+                                if getattr(self._grid, "btn_assistant", None) else None)
+            ag.tool_started.connect(ov.show_tool)
+            ag.tool_finished.connect(ov.show_tool_result)
+            ag.answered.connect(ov.show_answer)
+            ag.failed.connect(ov.show_error)
+            ov.closed.connect(lambda: ag.cancel() if ag.busy() else None)
+        ov = self._assistant_overlay
+        if ov.isVisible():
+            ov.close_overlay()
+            return
+        ov.setGeometry(self.rect())
+        ov.open_from(getattr(self._grid, "btn_assistant", None))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        ov = getattr(self, "_assistant_overlay", None)
+        if ov is not None and ov.isVisible():
+            ov.setGeometry(self.rect())
+
+    def _act_auto_schedule(self, auto_start=False):
+        """auto_start: pencere açılır açılmaz planlamayı başlat (asistan için)."""
         self._push_undo_state()
         self._sync_grid_to_store()
         self.save_db(sync_from_grid=False)
@@ -4323,6 +4363,8 @@ class MainWindow(QMainWindow):
             return
 
         d = AutoScheduleDialog(self.data_store, self, target_class=None)
+        if auto_start and hasattr(d, "_start_generation"):
+            QTimer.singleShot(250, d._start_generation)
         if d.exec() == QDialog.Accepted:
             # AI produced a schedule
             results = self.data_store.get("auto_schedule_results", [])

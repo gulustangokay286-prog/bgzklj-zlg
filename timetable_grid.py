@@ -3904,6 +3904,7 @@ class DropTableWidget(QTableWidget):
 class TimetableGrid(QWidget):
     cell_right_clicked = Signal(int, int)
     view_mode_changed = Signal(str)
+    assistant_requested = Signal()      # araç çubuğundaki mavi daire
 
     def __init__(self, periods: int = 8, parent=None):
         super().__init__(parent)
@@ -3968,6 +3969,18 @@ class TimetableGrid(QWidget):
         top.addWidget(switcher_frame)
         
         top.addStretch(1)
+
+        # Chenkron Asistan: mavi daire, "Tüm Kilitleri Aç"ın solunda. Tıklanınca
+        # ana pencere genie animasyonuyla asistan katmanını açar.
+        try:
+            from assistant.widget import AssistantButton
+            self.btn_assistant = AssistantButton(self, diameter=26)
+            self.btn_assistant.clicked.connect(self.assistant_requested.emit)
+            top.addWidget(self.btn_assistant)
+            top.addSpacing(6)
+        except Exception as _ae:
+            self.btn_assistant = None
+            print(f"[TimetableGrid] asistan düğmesi kurulamadı: {_ae}")
         
         # Unlock All Button
         btn_unlock_all = QPushButton(" Tüm Kilitleri Aç", self)
