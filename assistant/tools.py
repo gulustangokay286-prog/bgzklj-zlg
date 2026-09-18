@@ -127,10 +127,28 @@ TOOLS += [
     # ── kurumlar arası (okuma) ──
     {"name": "list_institutions", "description": "Bu bilgisayardaki bütün kurumları (Birey, Boğaziçi...) ve aktif sürümlerini listeler.", "parameters": _obj({})},
     {"name": "institution_teacher_availability",
-     "description": "BAŞKA bir kurumda bir öğretmenin hangi gün hangi saatlerinin kapalı olduğunu ve o kurumda hangi saatlerde dersi olduğunu söyler (yalnızca okur).",
+     "description": "BAŞKA bir kurumda bir öğretmenin hangi gün hangi saatlerinin kapalı olduğunu ve o kurumda hangi saatlerde dersi olduğunu söyler (o kurumun EN SON çizelgesinden; yalnızca okur).",
      "parameters": _obj({"institution": _s("kurum adı ya da kısaltması, örn. Birey"), "teacher": _s()}, ["institution", "teacher"])},
+    {"name": "institution_info",
+     "description": "BAŞKA bir kurumun EN SON çizelgesinden özet: kaç öğretmen, kaç sınıf, kaç ders, "
+                    "kaç saat atanmış ve kaç saat yerleşmiş, hangi sürüm. Şu an açık olmayan bir kurum "
+                    "hakkında SAYI sorulduğunda (ör. 'Birey'de kaç öğretmen var') BU aracı kullan; "
+                    "list_teachers yalnızca açık olan kurumu bilir.",
+     "parameters": _obj({"institution": _s()}, ["institution"])},
+    {"name": "institution_teachers",
+     "description": "BAŞKA bir kurumun en son çizelgesindeki öğretmenler: ad, branş, atanmış ders saati.",
+     "parameters": _obj({"institution": _s()}, ["institution"])},
+    {"name": "institution_classes",
+     "description": "BAŞKA bir kurumun en son çizelgesindeki sınıflar.",
+     "parameters": _obj({"institution": _s()}, ["institution"])},
+    {"name": "institution_teacher_schedule",
+     "description": "Bir öğretmenin BAŞKA kurumdaki haftalık ders programı: gün gün hangi saatte hangi ders ve sınıf.",
+     "parameters": _obj({"institution": _s(), "teacher": _s()}, ["institution", "teacher"])},
     # ── yazma ──
-    {"name": "clear_schedule", "description": "Çizelgeyi sıfırlar: bütün yerleşmiş dersleri kaldırır (kullanıcı onay kutusunu görür).", "parameters": _obj({})},
+    {"name": "clear_schedule",
+     "description": "Çizelgeyi sıfırlar: bütün yerleşmiş dersleri kaldırır. Kullanıcı istediyse doğrudan "
+                    "yap, ayrıca onay sorma — işlem Ctrl+Z ile geri alınabilir.",
+     "parameters": _obj({})},
     {"name": "set_class_day", "description": "Bir sınıfın bir gününü tamamen açar/kapatır (sınıf Zaman Tablosu). " + DAY_HINT,
      "parameters": _obj({"class_name": _s(), "day": _s(), "open": _b()}, ["class_name", "day", "open"])},
     {"name": "set_class_period", "description": "Bir sınıfın belirli gün ve saatini açar/kapatır. period 1'den başlar.",
@@ -195,7 +213,12 @@ Kullanıcı bir EYLEM istiyorsa (aç, kapat, başlat, sıfırla, kaydet, geri al
 Birden fazla iş verirse sırayla hepsini yap. Araç sonucunu tek cümleyle özetle; listeleri kısa ve okunur ver.
 Öğretmen/sınıf/ders adı belirsizse ya da araç "bulunamadı" derse önce list_* araçlarıyla bak, yine de emin değilsen sor.
 Bir gün için "aç" = o günün bütün saatlerini açık yap; "kapat" = kapalı yap.
-Başka kurumla ilgili sorularda (ör. "Birey'de Ahmet hocanın hangi saatleri kapalı?") institution_teacher_availability kullan; list_institutions kurum adlarını verir.
+ŞU AN AÇIK OLMAYAN bir kurum sorulduğunda (ör. "Birey'de kaç öğretmen var?", "Birey'de Ahmet hocanın
+hangi saatleri kapalı?") mutlaka institution_* araçlarını kullan: institution_info (sayılar/özet),
+institution_teachers, institution_classes, institution_teacher_schedule, institution_teacher_availability.
+list_teachers / list_classes / schedule_summary YALNIZCA şu an açık olan kurumu bilir; başka kurum için
+onları kullanma. institution_* araçları o kurumun EN SON çizelgesini okur ve hangi sürüm olduğunu söyler;
+cevabında sürümü de belirt.
 Silme/sıfırlama gibi geri dönüşü zor işleri kullanıcı açıkça istediyse yap; uygulama kendi onay kutusunu gösterir.
 Sorunun cevabı veride ise (program, boş saat, açıkta kalan ders, kural listesi) tahmin etme, aracı çağırıp gerçek veriyi söyle.
 Uydurma: bilmediğin bir ekranı ya da düğmeyi varmış gibi anlatma.

@@ -457,27 +457,147 @@ class AppActions:
                 "current": getattr(self.win, "institution_slug", None),
                 "message": f"{len(out)} kurum."}
 
-    def _institution_store(self, institution):
+    def _find_institution(self, institution):
+        """(slug, ad) — ada ya da kısaltmaya göre kurum bulur."""
         import version_store as vs
         q = _fold(institution)
+        if not q:
+            return None, None
+        best = None
         for inst in vs.list_institutions() or []:
-            if q and (q in _fold(inst.get("name", "")) or q in _fold(inst.get("slug", ""))):
-                slug = inst.get("slug")
-                if slug == getattr(self.win, "institution_slug", None):
-                    return self.store, inst.get("name", slug)
-                fn = inst.get("active_version") or vs.get_active_version(slug)
-                if not fn:
-                    vers = vs.list_versions(slug, source_filter="all")
-                    fn = vers[0]["filename"] if vers else None
-                data = vs.load_version(slug, fn) if fn else None
-                return data, inst.get("name", slug)
+            name, slug = _fold(inst.get("name", "")), _fold(inst.get("slug", ""))
+            if q == name or q == slug:
+                return inst.get("slug"), inst.get("name", inst.get("slug"))
+            if q in name or q in slug:
+                best = best or inst
+        if best:
+            return best.get("slug"), best.get("name", best.get("slug"))
         return None, None
+
+    def _institution_store(self, institution):
+        """(veri, kurum adı, sürüm etiketi) — kurumun EN SON çizelgesi.
+
+        Kullanıcı başka kurumu sorduğunda "en son durumu" bekler; aktif
+        sürüm günler önce işaretlenmiş olabilir. Bu yüzden en yeni sürüm
+        (list_versions zaten en yeniden sıralar) esas alınır; kurum şu anda
+        açık olan kurumsa bellekteki veri kullanılır.
+        """
+        import version_store as vs
+        slug, name = self._find_institution(institution)
+        if not slug:
+            return None, None, ""
+        if slug == getattr(self.win, "institution_slug", None):
+            vm = self.store.get("_version_meta") or {}
+            return self.store, name, (vm.get("custom_name") or vm.get("filename") or "açık çizelge")
+        vers = vs.list_versions(slug, source_filter="all") or []
+        if not vers:
+            return None, name, ""
+        # "En son" = en son DEĞİŞTİRİLEN. Liste dosya adına göre sıralı; sürüm
+        # numarası büyük olan her zaman en son düzenlenen olmayabilir.
+        try:
+            v = max(vers, key=lambda x: x.get("datetime"))
+        except Exception:
+            v = vers[0]
+        data = vs.load_version(slug, v["filename"])
+        etiket = (v.get("custom_name") or v["filename"]) + f" ({v.get('date_str','')} {v.get('time_str','')})"
+        return data, name, etiket
+
+    # Aşağıdaki araçlar BAŞKA kurumları yalnızca OKUR; hiçbiri yazmaz.
+    def institution_info(self, institution):
+        """Bir kurumun en son çizelgesinden özet: öğretmen/sınıf/ders sayısı, saatler."""
+        import lesson_hours
+        data, name, etiket = self._institution_store(institution)
+        if data is None:
+            return {"ok": False, "message": f"'{institution}' kurumu bulunamadı ya da çizelgesi yok.",
+                    "institutions": [i.get("name") for i in __import__("version_store").list_institutions() or []]}
+        teachers = [t for t in data.get("ogretmenler", []) if isinstance(t, dict)]
+        classes = [c for c in data.get("siniflar", []) if isinstance(c, dict)]
+        subjects = [d for d in data.get("dersler", []) if isinstance(d, dict)]
+        assigned = 0
+        for a in data.get("atamalar", []) or []:
+            try:
+                assigned += lesson_hours.hours(a) * max(1, len(lesson_hours.classes(a)))
+            except Exception:
+                pass
+        placed = sum(int(p.get("duration") or 1) for p in data.get("grid_placements", []) or []
+                     if isinstance(p, dict))
+        return {"ok": True, "institution": name, "version": etiket,
+                "teacher_count": len(teachers), "class_count": len(classes),
+                "subject_count": len(subjects), "assigned_hours": assigned, "placed_hours": placed,
+                "message": f"{name} ({etiket}): {len(teachers)} öğretmen, {len(classes)} sınıf, "
+                           f"{len(subjects)} ders, {placed}/{assigned} saat yerleşmiş."}
+
+    def institution_teachers(self, institution):
+        """Bir kurumun en son çizelgesindeki öğretmen adları (ve ders saatleri)."""
+        import lesson_hours
+        data, name, etiket = self._institution_store(institution)
+        if data is None:
+            return {"ok": False, "message": f"'{institution}' kurumu bulunamadı ya da çizelgesi yok."}
+        load = {}
+        for a in data.get("atamalar", []) or []:
+            try:
+                t = lesson_hours.teacher(a)
+                load[t] = load.get(t, 0) + lesson_hours.hours(a) * max(1, len(lesson_hours.classes(a)))
+            except Exception:
+                pass
+        out = []
+        for t in data.get("ogretmenler", []) or []:
+            if isinstance(t, dict):
+                ad = (t.get("ad") or t.get("name") or "").strip()
+                if ad:
+                    out.append({"name": ad, "branch": t.get("brans", ""),
+                                "assigned_hours": load.get(ad, 0)})
+        return {"ok": True, "institution": name, "version": etiket, "teachers": out,
+                "message": f"{name} ({etiket}): {len(out)} öğretmen."}
+
+    def institution_classes(self, institution):
+        """Bir kurumun en son çizelgesindeki sınıflar."""
+        data, name, etiket = self._institution_store(institution)
+        if data is None:
+            return {"ok": False, "message": f"'{institution}' kurumu bulunamadı ya da çizelgesi yok."}
+        names = [(c.get("ad") or "").strip() for c in data.get("siniflar", []) if isinstance(c, dict)]
+        return {"ok": True, "institution": name, "version": etiket, "classes": names,
+                "message": f"{name} ({etiket}): {len(names)} sınıf."}
+
+    def institution_teacher_schedule(self, institution, teacher):
+        """Bir öğretmenin BAŞKA kurumdaki haftalık programı (gün gün ders)."""
+        import constraint_sync as cs
+        data, name_i, etiket = self._institution_store(institution)
+        if data is None:
+            return {"ok": False, "message": f"'{institution}' kurumu bulunamadı ya da çizelgesi yok."}
+        teachers = [t for t in data.get("ogretmenler", []) if isinstance(t, dict)]
+        hits = [t for t in teachers if _matches(teacher, t.get("ad") or "")
+                or _fold(teacher) in _fold(t.get("ad") or "")]
+        if not hits:
+            return {"ok": False, "message": f"{name_i}: '{teacher}' adında öğretmen yok.",
+                    "teachers": [(t.get("ad") or "") for t in teachers][:80]}
+        name = (hits[0].get("ad") or "").strip()
+        days = cs.day_names(data)
+        by_day = {d: [] for d in days}
+        for p in data.get("grid_placements", []) or []:
+            if not isinstance(p, dict):
+                continue
+            if not _matches(p.get("teacher_name") or p.get("teacher") or "", name):
+                continue
+            d = int(p.get("day", p.get("col", 0)) or 0)
+            pr = int(p.get("period", p.get("row", 0)) or 0)
+            if d >= len(days):
+                continue
+            for k in range(int(p.get("duration") or 1)):
+                by_day[days[d]].append(
+                    f"{pr + 1 + k}. saat {(p.get('subject_name') or p.get('subject') or '')}"
+                    f" ({(p.get('class_name') or p.get('class') or '')})")
+        for d in by_day:
+            by_day[d].sort(key=lambda x: int(x.split(".")[0]))
+        total = sum(len(v) for v in by_day.values())
+        return {"ok": True, "institution": name_i, "version": etiket, "teacher": name,
+                "days": by_day, "message": f"{name_i} ({etiket}) — {name}: {total} saat dersi var."}
 
     def institution_teacher_availability(self, institution, teacher):
         import constraint_sync as cs
-        data, name_i = self._institution_store(institution)
+        data, name_i, etiket = self._institution_store(institution)
         if data is None:
-            return {"ok": False, "message": f"'{institution}' kurumu bulunamadı ya da verisi yok."}
+            return {"ok": False, "message": f"'{institution}' kurumu bulunamadı ya da çizelgesi yok."}
         teachers = [t for t in data.get("ogretmenler", []) if isinstance(t, dict)]
         hits = [t for t in teachers if _matches(teacher, t.get("ad") or "") or _fold(teacher) in _fold(t.get("ad") or "")]
         if not hits:
@@ -498,14 +618,10 @@ class AppActions:
         for d in range(min(len(m), len(days))):
             out[days[d]] = {"kapali_saatler": [p + 1 for p, v in enumerate(m[d]) if v == cs.CLOSED],
                             "ders_saatleri": sorted(busy.get(d, []))}
-        return {"ok": True, "institution": name_i, "teacher": name, "days": out,
-                "message": f"{name_i} — {name}: " + "; ".join(
+        return {"ok": True, "institution": name_i, "version": etiket, "teacher": name, "days": out,
+                "message": f"{name_i} ({etiket}) — {name}: " + "; ".join(
                     f"{k}: kapalı {v['kapali_saatler'] or '-'}, ders {v['ders_saatleri'] or '-'}"
                     for k, v in out.items())}
-
-    def institution_teacher_schedule(self, institution, teacher):
-        r = self.institution_teacher_availability(institution, teacher)
-        return r
 
     # ── yazma: sınıf tablosu, kurallar, atamalar, dersler ────────────────
     def set_class_day(self, class_name, day, open):
@@ -691,15 +807,42 @@ class AppActions:
 
     # ── yazma: çizelge ───────────────────────────────────────────────────
     def clear_schedule(self):
-        """Çizelgeyi sıfırla — onay kutusu uygulamanın kendi kutusudur."""
+        """Çizelgeyi sıfırlar — onay SORULMAZ.
+
+        Kullanıcı bunu zaten asistana söyledi; üstüne bir de evet/hayır
+        kutusu çıkarmak aynı kararı iki kez sormaktır. Geri alınabilir:
+        işlem öncesi durum geçmişe konur (Ctrl+Z).
+        """
         before = len(self.store.get("grid_placements", []) or [])
-        self.win._act_clear_schedule()
-        after = len(self.store.get("grid_placements", []) or [])
-        if after == 0 and before > 0:
-            return {"ok": True, "message": f"Çizelge sıfırlandı ({before} yerleşim kaldırıldı)."}
         if before == 0:
             return {"ok": True, "message": "Çizelge zaten boştu."}
-        return {"ok": False, "message": "Sıfırlama onaylanmadı, çizelge olduğu gibi duruyor."}
+        try:
+            self.win._push_undo_state("Çizelge sıfırlandı (asistan)")
+        except Exception:
+            pass
+        self.store["grid_placements"] = []
+        self.store["auto_schedule_results"] = []
+        self.store["yerlesim"] = {}
+        self.store["loose_unplaced_cards"] = []
+        self.store["manual_unplaced_cards"] = []
+        g = getattr(self.win, "_grid", None)
+        if g is not None and hasattr(g, "clear_grid"):
+            g.clear_grid()
+        try:
+            self.win.mark_dirty()
+        except Exception:
+            pass
+        try:
+            self.win.save_db(sync_from_grid=False)
+        except Exception:
+            pass
+        for fn in ("_refresh_grid", "_refresh_unplaced_lessons", "_refresh_tree"):
+            try:
+                getattr(self.win, fn)()
+            except Exception:
+                pass
+        return {"ok": True, "message": f"Çizelge sıfırlandı: {before} yerleşim kaldırıldı "
+                                       f"(geri almak için Ctrl+Z)."}
 
     def _find_placement(self, class_name, subject, teacher=None):
         hits = [pl for pl in self._placements()
