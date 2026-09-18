@@ -1087,84 +1087,96 @@ class AppleInstitutionCard(QFrame):
         self._selected = is_selected
         self.is_master_admin = is_master_admin
         
+        # Sağ paneldeki klasör satırıyla aynı dil: 3B ikon, DemiBold ad,
+        # soluk alt satır, sağda chevron; üzerine gelince chevron yerini
+        # ••• düğmesine bırakır. Seçim, satırın altında kayan karttır.
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedHeight(50)
+        self.setFixedHeight(56)
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._context_menu)
-        
+
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 4, 8, 4)
-        layout.setSpacing(10)
-        
-        # Institution 3D Building Avatar
+        layout.setContentsMargins(10, 6, 8, 6)
+        layout.setSpacing(12)
+
         self.icon_lbl = QLabel()
         self.icon_lbl.setFixedSize(34, 34)
         self.icon_lbl.setAlignment(Qt.AlignCenter)
         self.icon_lbl.setStyleSheet("border: none; background: transparent;")
         self.icon_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         layout.addWidget(self.icon_lbl)
-        
-        # Text Info
+
         t_layout = QVBoxLayout()
-        t_layout.setSpacing(1)
+        t_layout.setSpacing(2)
         t_layout.setContentsMargins(0, 0, 0, 0)
-        
+
         self.name_lbl = ElidedLabel(self.inst_name)
-        self.name_lbl.setFont(bk_ui.font(9.3, QFont.DemiBold))
+        self.name_lbl.setFont(bk_ui.font(9.8, QFont.DemiBold))
         self.name_lbl.setStyleSheet("border: none; background: transparent;")
         self.name_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         t_layout.addWidget(self.name_lbl)
-        
+
         v_count = inst_data.get("version_count", 0)
         upd = inst_data.get("last_updated_str", "")
         sub_text = f"{v_count} versiyon" + (f" · {upd}" if upd else "")
-        self.sub_lbl = QLabel(sub_text)
-        self.sub_lbl.setFont(bk_ui.font(7.8))
+        self.sub_lbl = ElidedLabel(sub_text)
+        self.sub_lbl.setFont(bk_ui.font(8.2))
         self.sub_lbl.setStyleSheet("border: none; background: transparent;")
         self.sub_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         t_layout.addWidget(self.sub_lbl)
-        
+
         layout.addLayout(t_layout, 1)
 
-        # Hover Actions Button (•••)
-        self.btn_more = AppleThreeDotsButton(color="#8E8E93", size=22, tooltip="Seçenekler", parent=self)
+        # Sağ uç: chevron (sakin) ya da ••• (üzerine gelince)
+        self.chevron_lbl = QLabel()
+        self.chevron_lbl.setFixedSize(22, 22)
+        self.chevron_lbl.setAlignment(Qt.AlignCenter)
+        self.chevron_lbl.setPixmap(bk_ui.chevron_glyph(bk_ui.INK_FAINT, 14))
+        self.chevron_lbl.setStyleSheet("border: none; background: transparent;")
+        self.chevron_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        layout.addWidget(self.chevron_lbl, 0, Qt.AlignVCenter)
+
+        self.btn_more = AppleThreeDotsButton(color=bk_ui.INK_SOFT, size=22, tooltip="Seçenekler", parent=self)
         self.btn_more.clicked.connect(lambda: self._context_menu(self.btn_more.mapToGlobal(QPoint(0, self.btn_more.height() + 2))))
         self.btn_more.hide()
         layout.addWidget(self.btn_more, 0, Qt.AlignVCenter)
-        
+
         self._update_style()
-    
+
     def _update_style(self):
-        self.setStyleSheet("""
-            AppleInstitutionCard {
+        self.setStyleSheet(f"""
+            AppleInstitutionCard {{
                 background: transparent;
                 border: none;
-                border-radius: 10px;
-            }
-            AppleInstitutionCard:hover {
-                background: rgba(0, 0, 0, 0.04);
-            }
+                border-radius: 12px;
+            }}
+            AppleInstitutionCard:hover {{
+                background: {bk_ui.HOVER};
+            }}
         """)
         if self._selected:
-            self.name_lbl.setStyleSheet("color: #0F172A; font-weight: 600; background: transparent; border: none;")
-            self.sub_lbl.setStyleSheet("color: #334155; background: transparent; border: none;")
+            self.name_lbl.setStyleSheet(f"color: {bk_ui.INK}; background: transparent; border: none;")
+            self.sub_lbl.setStyleSheet(f"color: {bk_ui.INK_SOFT}; background: transparent; border: none;")
         else:
-            self.name_lbl.setStyleSheet("color: #334155; font-weight: 500; background: transparent; border: none;")
-            self.sub_lbl.setStyleSheet("color: #8E8E93; background: transparent; border: none;")
+            self.name_lbl.setStyleSheet(f"color: {bk_ui.INK_BODY}; background: transparent; border: none;")
+            self.sub_lbl.setStyleSheet(f"color: {bk_ui.INK_FAINT}; background: transparent; border: none;")
         self.icon_lbl.setPixmap(make_3d_institution_icon(self.inst_name, self.inst_color, 34))
+        self.chevron_lbl.setVisible(self._selected and not self.btn_more.isVisible())
 
     def enterEvent(self, event):
+        self.chevron_lbl.hide()
         self.btn_more.show()
         if not self._selected:
-            self.name_lbl.setStyleSheet("color: #0F172A; font-weight: 600; background: transparent; border: none;")
-            self.sub_lbl.setStyleSheet("color: #475569; background: transparent; border: none;")
+            self.name_lbl.setStyleSheet(f"color: {bk_ui.INK}; background: transparent; border: none;")
+            self.sub_lbl.setStyleSheet(f"color: {bk_ui.INK_SOFT}; background: transparent; border: none;")
         super().enterEvent(event)
 
     def leaveEvent(self, event):
         self.btn_more.hide()
+        self.chevron_lbl.setVisible(self._selected)
         if not self._selected:
-            self.name_lbl.setStyleSheet("color: #334155; font-weight: 500; background: transparent; border: none;")
-            self.sub_lbl.setStyleSheet("color: #8E8E93; background: transparent; border: none;")
+            self.name_lbl.setStyleSheet(f"color: {bk_ui.INK_BODY}; background: transparent; border: none;")
+            self.sub_lbl.setStyleSheet(f"color: {bk_ui.INK_FAINT}; background: transparent; border: none;")
         super().leaveEvent(event)
             
     def set_selected(self, selected):
@@ -2500,28 +2512,34 @@ class SlidingSelection(QWidget):
         p.setRenderHint(QPainter.SmoothPixmapTransform)
         
         # Inset slightly so antialiasing does not clip at the widget boundaries
-        r = QRectF(self.rect()).adjusted(1.0, 1.0, -1.0, -1.0)
-        radius = 10.0
+        r = QRectF(self.rect()).adjusted(1.5, 1.0, -1.5, -2.0)
+        radius = 12.0
+        c = self._current()
+
+        # 1. Yumuşak gölge: kart sayfadan hafifçe kalkar (sağdaki "Yeni Klasör"
+        #    düğmesi gibi), yayvan ve soluk — çizgi değil, ışık.
+        p.setPen(Qt.NoPen)
+        for i in range(3, 0, -1):
+            sh = QColor(c)
+            sh.setAlpha(int(10 / i))
+            p.setBrush(sh)
+            p.drawRoundedRect(r.adjusted(-i * 0.5, i * 0.8, i * 0.5, i * 1.2), radius + i, radius + i)
 
         path = QPainterPath()
         path.addRoundedRect(r, radius, radius)
 
-        # 1. Clean solid white base
-        p.setPen(Qt.NoPen)
+        # 2. Beyaz taban + kurum tonunda çok ince yıkama
         p.setBrush(QColor("#FFFFFF"))
         p.drawPath(path)
-
-        # 2. Institution brand tint wash
-        c = self._current()
         fill = QColor(c)
-        fill.setAlpha(26)
+        fill.setAlpha(16)
         p.setBrush(fill)
         p.drawPath(path)
 
-        # 3. Crisp, smooth border stroke
+        # 3. Kenar: kurum tonu, sakin
         edge = QColor(c)
-        edge.setAlpha(80)
-        p.setPen(QPen(edge, 1.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        edge.setAlpha(64)
+        p.setPen(QPen(edge, 1.0, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
         p.setBrush(Qt.NoBrush)
         p.drawRoundedRect(r, radius, radius)
         p.end()
@@ -3852,52 +3870,59 @@ class HomeDashboard(QWidget):
         # sidebar is chrome; the page is the paper. Making the chrome the
         # darker surface is what lets the content pane read as the thing
         # you are working in rather than as another panel of equal weight.
+        # Ray, sağ panelle aynı kâğıt: beyaz, tek bir ince ayraç. Farklı
+        # bir gri yüzey, sol tarafı "ikinci sınıf bir panel" gibi
+        # gösteriyordu; şimdi iki taraf aynı belgenin iki sütunu.
         left_panel = QFrame()
         left_panel.setObjectName("leftRail")
-        left_panel.setFixedWidth(252)
+        left_panel.setFixedWidth(264)
         left_panel.setStyleSheet(f"""
             QFrame#leftRail {{
-                background: #F5F5F7;
+                background: {bk_ui.SURFACE};
                 border: none;
                 border-right: 1px solid {bk_ui.HAIRLINE};
             }}
         """)
         left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(12, 16, 12, 12)
+        left_layout.setContentsMargins(14, 18, 14, 14)
         left_layout.setSpacing(0)
 
+        # Başlık satırı sağdaki klasör başlığıyla aynı ritimde: DemiBold ad,
+        # yanında sessiz bir rozet, en sağda yuvarlak "+".
         left_hdr = QHBoxLayout()
-        left_hdr.setContentsMargins(6, 0, 4, 0)
+        left_hdr.setContentsMargins(8, 0, 2, 0)
         left_hdr.setSpacing(8)
 
-        left_title = QLabel("KURUMLAR")
-        left_title.setFont(bk_ui.font(8.6, QFont.Bold, spacing=0.4))
-        left_title.setStyleSheet(f"color: {bk_ui.INK_FAINT}; background: transparent;")
+        left_title = QLabel("Kurumlar")
+        left_title.setFont(bk_ui.font(10.4, QFont.DemiBold))
+        left_title.setStyleSheet(f"color: {bk_ui.INK}; background: transparent;")
         left_hdr.addWidget(left_title)
 
-        self.inst_count_lbl = QLabel("")
-        self.inst_count_lbl.setFont(bk_ui.font(8.4))
-        self.inst_count_lbl.setStyleSheet(f"color: {bk_ui.INK_FAINT}; background: transparent;")
+        self.inst_count_lbl = bk_ui.Chip("", "neutral")
+        self.inst_count_lbl.hide()
         left_hdr.addWidget(self.inst_count_lbl, 0, Qt.AlignVCenter)
         left_hdr.addStretch(1)
 
-        # Quick Add Button in sidebar header
         btn_quick_add = QPushButton()
-        btn_quick_add.setIcon(QIcon(bk_ui.plus_glyph(bk_ui.INK_SOFT, 13)))
+        btn_quick_add.setIcon(QIcon(bk_ui.plus_glyph(bk_ui.INK_BODY, 13)))
         btn_quick_add.setIconSize(QSize(13, 13))
-        btn_quick_add.setFixedSize(24, 24)
+        btn_quick_add.setFixedSize(28, 28)
         btn_quick_add.setCursor(Qt.PointingHandCursor)
+        btn_quick_add.setFocusPolicy(Qt.NoFocus)
         btn_quick_add.setToolTip("Yeni Kurum Ekle")
-        btn_quick_add.setStyleSheet("""
-            QPushButton { background: transparent; border: none; border-radius: 6px; }
-            QPushButton:hover { background: rgba(0, 0, 0, 0.06); }
-            QPushButton:pressed { background: rgba(0, 0, 0, 0.1); }
+        btn_quick_add.setStyleSheet(f"""
+            QPushButton {{
+                background: {bk_ui.SURFACE}; border: 1.5px solid {bk_ui.HAIRLINE_STRONG};
+                border-radius: 14px;
+            }}
+            QPushButton:hover {{ background: {bk_ui.HOVER}; border-color: {bk_ui.INK_FAINT}; }}
+            QPushButton:pressed {{ background: {bk_ui.SURFACE_SUNK}; }}
         """)
         btn_quick_add.clicked.connect(self._on_new_institution_clicked)
         left_hdr.addWidget(btn_quick_add)
 
         left_layout.addLayout(left_hdr)
-        left_layout.addSpacing(10)
+        left_layout.addSpacing(12)
 
         scroll_inst = QScrollArea()
         scroll_inst.setWidgetResizable(True)
@@ -3915,7 +3940,7 @@ class HomeDashboard(QWidget):
         self.inst_list_widget.setStyleSheet("background: transparent; border: none;")
         self.inst_list_layout = QVBoxLayout(self.inst_list_widget)
         self.inst_list_layout.setContentsMargins(0, 0, 0, 0)
-        self.inst_list_layout.setSpacing(4)
+        self.inst_list_layout.setSpacing(6)
         self.inst_list_layout.addStretch(1)
 
         # Behind the rows, so it can slide underneath them.
@@ -3928,23 +3953,12 @@ class HomeDashboard(QWidget):
         left_layout.addWidget(bk_ui.hairline())
         left_layout.addSpacing(10)
 
-        btn_add_inst = QPushButton("Yeni Kurum Ekle")
-        btn_add_inst.setFixedHeight(36)
-        btn_add_inst.setCursor(Qt.PointingHandCursor)
+        btn_add_inst = bk_ui.secondary_button("Yeni Kurum Ekle", height=36)
         btn_add_inst.setFocusPolicy(Qt.NoFocus)
-        btn_add_inst.setFont(bk_ui.font(9.2, QFont.DemiBold))
-        btn_add_inst.setIcon(QIcon(bk_ui.plus_glyph(bk_ui.INK_BODY, 13)))
-        btn_add_inst.setIconSize(QSize(13, 13))
+        btn_add_inst.setFont(bk_ui.font(9.4, QFont.DemiBold))
+        btn_add_inst.setIcon(QIcon(bk_ui.plus_glyph(bk_ui.INK_BODY, 15)))
+        btn_add_inst.setIconSize(QSize(15, 15))
         btn_add_inst.setToolTip("Yeni Kurum Ekle")
-        btn_add_inst.setStyleSheet(f"""
-            QPushButton {{
-                background: #FFFFFF; color: {bk_ui.INK};
-                border: 1px solid {bk_ui.HAIRLINE};
-                border-radius: 9px; text-align: center;
-            }}
-            QPushButton:hover {{ background: #FFFFFF; border-color: {bk_ui.HAIRLINE_STRONG}; }}
-            QPushButton:pressed {{ background: {bk_ui.SURFACE_SUNK}; }}
-        """)
         btn_add_inst.clicked.connect(self._on_new_institution_clicked)
         self.btn_add_inst = btn_add_inst
         left_layout.addWidget(btn_add_inst)
@@ -4453,7 +4467,8 @@ class HomeDashboard(QWidget):
                 self.inst_list_layout.insertWidget(self.inst_list_layout.count() - 1, card)
 
         if hasattr(self, "inst_count_lbl"):
-            self.inst_count_lbl.setText(str(len(filtered)) if filtered else "")
+            self.inst_count_lbl.setText(str(len(filtered)))
+            self.inst_count_lbl.setVisible(bool(filtered))
         # The list was just rebuilt, so the card is placed rather than
         # flown: animating from wherever it sat before a refresh is motion
         # that describes nothing.
