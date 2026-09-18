@@ -358,26 +358,35 @@ class AssistantOverlay(QWidget):
         p.end()
         self._shadow_pix = sh
 
-        # Parıltı: yatayda gökkuşağı, düşeyde alt kenardan yukarı solma.
-        # Genişlik iki kat: faz kaydırarak "nefes" alır (yatay kayma).
+        # Parıltı: alt kenardan yükselen yumuşak ışık lekeleri. Her renk bir
+        # elips gradyan (merkezde yoğun, kenara doğru sıfıra iner); lekeler
+        # TOPLAMSAL karışır — ışık gibi üst üste biner, keskin kenar oluşmaz.
+        # Genişlik iki kat ve düzen periyodik: faz ile kaydırınca akar.
         gw = W * 2
         gl = QPixmap(int(gw * dpr), int(GLOW_H * dpr))
         gl.setDevicePixelRatio(dpr)
         gl.fill(Qt.transparent)
         p = QPainter(gl)
-        hg = QLinearGradient(0, 0, gw, 0)
-        n = len(GLOW_COLORS)
-        for i, c in enumerate(GLOW_COLORS):
-            hg.setColorAt(i / (n - 1) / 2, QColor(c))
-            hg.setColorAt(0.5 + i / (n - 1) / 2, QColor(c))
-        p.fillRect(QRect(0, 0, gw, GLOW_H), hg)
-        p.setCompositionMode(QPainter.CompositionMode_DestinationIn)
-        vg = QLinearGradient(0, 0, 0, GLOW_H)
-        vg.setColorAt(0.0, QColor(0, 0, 0, 0))
-        vg.setColorAt(0.5, QColor(0, 0, 0, 55))
-        vg.setColorAt(0.85, QColor(0, 0, 0, 165))
-        vg.setColorAt(1.0, QColor(0, 0, 0, 235))
-        p.fillRect(QRect(0, 0, gw, GLOW_H), vg)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setCompositionMode(QPainter.CompositionMode_Plus)
+        p.setPen(Qt.NoPen)
+        blobs = list(zip((0.08, 0.30, 0.52, 0.74, 0.96), GLOW_COLORS))
+        rx, ry = W * 0.34, GLOW_H * 1.15
+        for rep in (0, 1):
+            for fx, col in blobs:
+                cx, cy = (fx + rep) * W, GLOW_H + ry * 0.35     # merkez alt kenarın altında
+                c = QColor(col)
+                rg = QRadialGradient(0, 0, 1.0)
+                rg.setColorAt(0.0, QColor(c.red(), c.green(), c.blue(), 150))
+                rg.setColorAt(0.45, QColor(c.red(), c.green(), c.blue(), 70))
+                rg.setColorAt(0.8, QColor(c.red(), c.green(), c.blue(), 18))
+                rg.setColorAt(1.0, QColor(c.red(), c.green(), c.blue(), 0))
+                p.save()
+                p.translate(cx, cy)
+                p.scale(rx, ry)
+                p.setBrush(QBrush(rg))
+                p.drawEllipse(QRectF(-1, -1, 2, 2))
+                p.restore()
         p.end()
         self._glow_pix = gl
 
@@ -569,40 +578,123 @@ class AssistantOverlay(QWidget):
         self._place_children()
 
     # ── çizim ──
-    def _draw_genie(self, p, t, pix, alpha=1.0):
-        """Hap görüntüsünü t anındaki huni boyunca dilim dilim çizer."""
+    def _funnel_geometry(self, t):
+        """t anındaki huni: pürüzsüz yol (maske) ve y -> (sol, sağ) kenar tablosu."""
         pr = QRectF(self.pill_rect())
         ox, oy, r = self._origin.x(), self._origin.y(), self._radius
         a = min(1.0, t / 0.62)                  # akış / büyüme
-        b = max(0.0, (t - 0.62) / 0.38)         # boyun kopar, iner
+        b = max(0.0, (t - 0.62) / 0.38)         # boyun kopar, iner, genişler
         ea = 1 - (1 - a) ** 3
         eb = b * b * (3 - 2 * b)
         pw = pr.width() * (0.10 + 0.90 * ea)
-        neck_y = oy + (pr.top() - oy) * eb
-        neck_w = 2 * r * (1 - eb) + 6 * eb
-        span = max(1.0, pr.bottom() - neck_y)
-        pcx = pr.center().x()
-        # Dilim sayısı huninin boyuna göre: ~3 px'lik dilimler, kaynak
-        # görüntünün satır sayısını aşmadan. Az dilim basamak yapıyordu.
+        ph = pr.height() * (0.45 + 0.55 * ea)
+        x0, x1 = pr.center().x() - pw / 2, pr.center().x() + pw / 2
+        bottom = pr.bottom()
+        top = bottom - ph
+        rad = ph / 2
+        # üst kapak: boyunda daire (2r), sonda hapın üst kenarı (pw, köşe rad)
+        cw = 2 * r + (pw - 2 * r) * eb
+        cr = min(cw / 2, r + (rad - r) * eb)
+        ncx = ox + (pr.center().x() - ox) * eb
+        neck_top = (oy - r) + (top - (oy - r)) * eb
+        NLx, NLy = ncx - cw / 2, neck_top + cr          # sol köşe yayının bittiği nokta
+        NRx = ncx + cw / 2
+        SLy = top + rad                                  # hap sol kenarının başladığı nokta
+        dy = max(0.0, SLy - NLy)
+
+        path = QPainterPath()
+        path.moveTo(x0, SLy)
+        path.cubicTo(QPointF(x0, SLy - dy * 0.5), QPointF(NLx, NLy + dy * 0.5), QPointF(NLx, NLy))
+        path.arcTo(QRectF(NLx, neck_top, 2 * cr, 2 * cr), 180, -90)
+        path.lineTo(NRx - cr, neck_top)
+        path.arcTo(QRectF(NRx - 2 * cr, neck_top, 2 * cr, 2 * cr), 90, -90)
+        path.cubicTo(QPointF(NRx, NLy + dy * 0.5), QPointF(x1, SLy - dy * 0.5), QPointF(x1, SLy))
+        path.lineTo(x1, bottom - rad)
+        path.arcTo(QRectF(x1 - 2 * rad, bottom - 2 * rad, 2 * rad, 2 * rad), 0, -90)
+        path.lineTo(x0 + rad, bottom)
+        path.arcTo(QRectF(x0, bottom - 2 * rad, 2 * rad, 2 * rad), 270, -90)
+        path.closeSubpath()
+
+        # kenar tablosu: y artan sırada (y, sol, sağ)
+        lut = []
+        steps = 24
+        for i in range(steps + 1):
+            yy = neck_top + cr * i / steps
+            dxx = math.sqrt(max(0.0, cr * cr - (cr - (yy - neck_top)) ** 2))
+            lut.append((yy, NLx + cr - dxx, NRx - cr + dxx))
+        if dy > 0.5:
+            for i in range(1, 61):
+                u = i / 60.0
+                mu = 1 - u
+                bx = (mu ** 3) * NLx + 3 * mu * mu * u * NLx + 3 * mu * u * u * x0 + (u ** 3) * x0
+                by = (mu ** 3) * NLy + 3 * mu * mu * u * (NLy + dy * 0.5) + 3 * mu * u * u * (SLy - dy * 0.5) + (u ** 3) * SLy
+                bxr = (mu ** 3) * NRx + 3 * mu * mu * u * NRx + 3 * mu * u * u * x1 + (u ** 3) * x1
+                lut.append((by, bx, bxr))
+        lut.append((max(SLy, bottom - rad), x0, x1))
+        for i in range(1, steps + 1):
+            yy = bottom - rad + rad * i / steps
+            dxx = math.sqrt(max(0.0, rad * rad - (yy - (bottom - rad)) ** 2))
+            lut.append((yy, x0 + rad - dxx, x1 - rad + dxx))
+        lut.sort(key=lambda e: e[0])
+        return path, lut, neck_top, bottom
+
+    @staticmethod
+    def _edges_at(lut, y):
+        lo, hi = 0, len(lut) - 1
+        if y <= lut[0][0]:
+            return lut[0][1], lut[0][2]
+        if y >= lut[-1][0]:
+            return lut[-1][1], lut[-1][2]
+        while hi - lo > 1:
+            mid = (lo + hi) // 2
+            if lut[mid][0] <= y:
+                lo = mid
+            else:
+                hi = mid
+        y0, l0, r0 = lut[lo]
+        y1, l1, r1 = lut[hi]
+        f = 0.0 if y1 <= y0 else (y - y0) / (y1 - y0)
+        return l0 + (l1 - l0) * f, r0 + (r1 - r0) * f
+
+    def _draw_genie(self, p, t, pix, alpha=1.0):
+        """Hap görüntüsünü huni boyunca dilim dilim büker; kenarı pürüzsüz yolla maskeler."""
+        path, lut, y_top, y_bottom = self._funnel_geometry(t)
+        span = max(1.0, y_bottom - y_top)
+        bounds = path.boundingRect().adjusted(-2, -2, 2, 2)
         dpr = pix.devicePixelRatio()
-        n = int(max(SLICES_MIN, min(SLICES_MAX, pix.height(), span / 2.5)))
+        buf = QPixmap(int(bounds.width() * dpr) + 1, int(bounds.height() * dpr) + 1)
+        buf.setDevicePixelRatio(dpr)
+        buf.fill(Qt.transparent)
+        q = QPainter(buf)
+        q.setRenderHint(QPainter.SmoothPixmapTransform)
+        q.translate(-bounds.left(), -bounds.top())
         sw = pix.width() / dpr
+        n = int(max(SLICES_MIN, min(SLICES_MAX, pix.height(), span / 2.0)))
         sh = pix.height() / dpr / n
-        p.setOpacity(alpha)
         for j in range(n):
-            u0, u1 = j / n, (j + 1) / n
-            um = (u0 + u1) / 2
-            # huni profili: boyunda dar, ağza doğru geniş; sonda tam genişlik
-            prof = um ** 1.7
-            w_f = neck_w + (pw - neck_w) * prof
-            w = w_f * (1 - eb) + pw * eb
-            cx_f = ox + (pcx - ox) * (um * um * (3 - 2 * um))
-            cx = cx_f * (1 - eb) + pcx * eb
-            y0 = neck_y + u0 * span
-            y1 = neck_y + u1 * span
+            y0 = y_top + span * j / n
+            y1 = y_top + span * (j + 1) / n
+            # Dilim, kendi yüksekliği boyunca yolu TAMAMEN kaplamalı; kenarı
+            # maske belirler. Aksi hâlde eğimli yerde dilim yolun içinde kalır
+            # ve basamak görünür.
+            l0, r0 = self._edges_at(lut, y0)
+            l1, r1 = self._edges_at(lut, y1)
+            lm, rm = self._edges_at(lut, (y0 + y1) / 2)
+            xl, xr = min(l0, l1, lm), max(r0, r1, rm)
             src = QRectF(0, j * sh * dpr, sw * dpr, sh * dpr)
-            dst = QRectF(cx - w / 2, y0, w, max(1.0, y1 - y0 + 0.6))
-            p.drawPixmap(dst, pix, src)
+            dst = QRectF(xl - 1.0, y0, (xr - xl) + 2.0, (y1 - y0) + 0.8)
+            q.drawPixmap(dst, pix, src)
+        # maske: yolun DIŞI silinir (DestinationOut), kenar antialias.
+        q.setRenderHint(QPainter.Antialiasing)
+        q.setCompositionMode(QPainter.CompositionMode_DestinationOut)
+        q.setPen(Qt.NoPen)
+        q.setBrush(QColor(0, 0, 0, 255))
+        outer = QPainterPath()
+        outer.addRect(bounds.adjusted(-4, -4, 4, 4))
+        q.drawPath(outer.subtracted(path))
+        q.end()
+        p.setOpacity(alpha)
+        p.drawPixmap(bounds.topLeft(), buf)
         p.setOpacity(1.0)
 
     def paintEvent(self, e):
