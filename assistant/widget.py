@@ -2,68 +2,67 @@
 
 Akış
 ----
-Araç çubuğundaki küçük mavi daireye tıklanınca pencerenin üstüne şeffaf bir
-katman (AssistantOverlay) gelir. Katman iki şeyi kendisi çizer:
+Araç çubuğundaki küçük mavi daireye (parıltı ikonu) tıklanınca pencerenin
+üstüne şeffaf bir katman (AssistantOverlay) gelir. Katman kendisi çizer:
 
   * Alttan yukarı SOLAN GÖLGE — ilerlemeyle koyulaşır.
-  * GENIE HUNİSİ — macOS'un küçültme efektinin tersi: daireden aşağıya doğru
-    bir huni akar, altta hap biçimli giriş kutusuna dönüşür; sonra huninin
-    boynu daireden kopup aşağı çekilir ve yalnızca hap kalır. Kapanırken
-    aynı yol tersinden oynar.
+  * GENIE — hap giriş kutusunun GÖRÜNTÜSÜ (arka plan + yazı + düğme) yatay
+    dilimlere bölünür; her dilim daireden çıkan bir huni boyunca aşağı akar,
+    dar boyundan geniş ağza doğru esneyerek altta hapın kendisine oturur.
+    macOS küçültme efektinin tersi: bir gölge değil, kutunun kendisi bükülür.
+    Boyun daireden kopup aşağı çekilince yalnızca hap kalır. Hareket
+    bulanıklığı: aynı kare, birkaç önceki anıyla soluk olarak üst üste
+    çizilir; hız arttıkça iz uzar. Kapanış aynı yolun tersidir.
 
-Hapın içi (＋, metin kutusu, model rozeti, mikrofon, mavi gönder dairesi)
-gerçek widget'lardır; huni hap hâline geldiğinde solarak görünürler. Cevap
-balonu hapın üstünde durur, araç adımlarını ve modelin cevabını gösterir.
+Hapın içi (＋, metin kutusu, ↑ gönder) gerçek widget'lardır; genie hap hâline
+gelince solarak görünürler. Gönder düğmesi yazı yokken soluktur, yazınca
+dolar, model düşünürken "durdur" olur. Cevap balonu hapın üstünde durur.
 """
-from PySide6.QtCore import (Qt, QRect, QRectF, QPointF, QPropertyAnimation, QEasingCurve,
-                            Property, QTimer, Signal, QSize, QParallelAnimationGroup)
-from PySide6.QtGui import (QPainter, QColor, QLinearGradient, QPainterPath, QPen, QBrush,
-                           QFont, QRadialGradient)
-from PySide6.QtWidgets import (QWidget, QToolButton, QLineEdit, QLabel, QHBoxLayout,
-                               QGraphicsOpacityEffect, QMenu, QSizePolicy)
+import math
 
-FONT = ".AppleSystemUIFont, SF Pro Text, Helvetica Neue, Segoe UI, sans-serif"
+from PySide6.QtCore import (Qt, QRect, QRectF, QPointF, QPropertyAnimation, QEasingCurve,
+                            Property, QTimer, Signal, QAbstractAnimation)
+from PySide6.QtGui import (QPainter, QColor, QLinearGradient, QPainterPath, QPen, QBrush,
+                           QFont, QRadialGradient, QPixmap, QPolygonF)
+from PySide6.QtWidgets import (QWidget, QToolButton, QLineEdit, QLabel, QHBoxLayout,
+                               QGraphicsOpacityEffect, QMenu)
+
 BLUE = QColor("#2F6BE4")
 BLUE_HI = QColor("#4A85F0")
 PILL_BG = QColor(30, 30, 32)
 PILL_BORDER = QColor(255, 255, 255, 22)
-TEXT = QColor("#F2F2F2")
-MUTED = QColor("#A5A5AA")
 
 PILL_H = 56
 PILL_MAX_W = 720
 PILL_BOTTOM = 26
-OPEN_MS = 520
-CLOSE_MS = 380
-WAVE = (0.36, 0.72, 1.0, 0.62, 0.30)
+OPEN_MS = 560
+CLOSE_MS = 400
+SLICES = 28
 
 
-def draw_waveform(p, rect, color, phase=0.0, amp=None):
-    """Beş dikey çubuk — ses dalgası. amp verilirse çubuk boyları onunla çarpılır."""
+def draw_sparkle(p, center, size, color, rot=0.0):
+    """Dört uçlu parıltı (AI işareti): içbükey kenarlı yıldız."""
     p.save()
     p.setRenderHint(QPainter.Antialiasing)
+    p.translate(center)
+    p.rotate(rot)
+    r, k = size / 2.0, size * 0.14
+    path = QPainterPath(QPointF(0, -r))
+    path.quadTo(QPointF(k, -k), QPointF(r, 0))
+    path.quadTo(QPointF(k, k), QPointF(0, r))
+    path.quadTo(QPointF(-k, k), QPointF(-r, 0))
+    path.quadTo(QPointF(-k, -k), QPointF(0, -r))
     p.setPen(Qt.NoPen)
     p.setBrush(color)
-    n = len(WAVE)
-    bw = max(2.0, rect.width() / (n * 2.2))
-    gap = (rect.width() - n * bw) / (n - 1)
-    x = rect.left()
-    for i, h in enumerate(WAVE):
-        if amp is not None:
-            h = 0.25 + 0.75 * abs(__import__("math").sin(phase + i * 0.9)) * h / max(WAVE)
-        bh = max(bw, rect.height() * h)
-        y = rect.center().y() - bh / 2
-        p.drawRoundedRect(QRectF(x, y, bw, bh), bw / 2, bw / 2)
-        x += bw + gap
+    p.drawPath(path)
     p.restore()
 
 
 class AssistantButton(QToolButton):
-    """Araç çubuğundaki mavi daire (26 px)."""
+    """Araç çubuğundaki mavi daire (26 px): büyük + küçük parıltı."""
 
     def __init__(self, parent=None, diameter=26):
         super().__init__(parent)
-        self._d = diameter
         self.setFixedSize(diameter, diameter)
         self.setCursor(Qt.PointingHandCursor)
         self.setToolTip("Chenkron Asistan — soru sor ya da iş ver")
@@ -71,19 +70,16 @@ class AssistantButton(QToolButton):
         self._busy = False
         self._phase = 0.0
         self._timer = QTimer(self)
-        self._timer.setInterval(60)
+        self._timer.setInterval(40)
         self._timer.timeout.connect(self._tick)
 
     def set_busy(self, on):
         self._busy = bool(on)
-        if self._busy:
-            self._timer.start()
-        else:
-            self._timer.stop()
+        (self._timer.start if self._busy else self._timer.stop)()
         self.update()
 
     def _tick(self):
-        self._phase += 0.35
+        self._phase += 0.12
         self.update()
 
     def enterEvent(self, e):
@@ -106,31 +102,35 @@ class AssistantButton(QToolButton):
         p.setPen(Qt.NoPen)
         p.setBrush(QBrush(g))
         p.drawEllipse(r)
-        inner = r.adjusted(r.width() * 0.28, r.height() * 0.30, -r.width() * 0.28, -r.height() * 0.30)
-        draw_waveform(p, inner, QColor("#FFFFFF"), self._phase, amp=1.0 if self._busy else None)
+        c = r.center()
+        big = r.width() * 0.56
+        pulse = 1.0 + (0.08 * math.sin(self._phase * 4) if self._busy else 0.0)
+        draw_sparkle(p, QPointF(c.x() - r.width() * 0.05, c.y() + r.height() * 0.05),
+                     big * pulse, QColor("#FFFFFF"), rot=self._phase * 40 if self._busy else 0)
+        draw_sparkle(p, QPointF(c.x() + r.width() * 0.24, c.y() - r.height() * 0.24),
+                     big * 0.42, QColor(255, 255, 255, 230))
         p.end()
 
 
 class _SendButton(QToolButton):
+    """↑ gönder: yazı yokken soluk, yazınca dolu; meşgulken ■ durdur."""
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(38, 38)
+        self.setFixedSize(34, 34)
         self.setCursor(Qt.PointingHandCursor)
         self._busy = False
-        self._phase = 0.0
-        self._timer = QTimer(self)
-        self._timer.setInterval(60)
-        self._timer.timeout.connect(self._tick)
+        self._has_text = False
         self.setToolTip("Gönder (Enter)")
+        self.setStyleSheet("background: transparent; border: none;")
 
     def set_busy(self, on):
         self._busy = bool(on)
-        (self._timer.start if self._busy else self._timer.stop)()
         self.setToolTip("Durdur" if self._busy else "Gönder (Enter)")
         self.update()
 
-    def _tick(self):
-        self._phase += 0.35
+    def set_has_text(self, on):
+        self._has_text = bool(on)
         self.update()
 
     def paintEvent(self, e):
@@ -138,36 +138,22 @@ class _SendButton(QToolButton):
         p.setRenderHint(QPainter.Antialiasing)
         r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
         p.setPen(Qt.NoPen)
-        p.setBrush(BLUE_HI if self.underMouse() else BLUE)
-        p.drawEllipse(r)
-        inner = r.adjusted(11, 12, -11, -12)
-        draw_waveform(p, inner, QColor("#FFFFFF"), self._phase, amp=1.0 if self._busy else None)
-        p.end()
-
-
-class _MicLabel(QLabel):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedSize(28, 28)
-        self.setToolTip("Sesli giriş — yakında")
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setStyleSheet("background: transparent; border: none;")
-
-    def paintEvent(self, e):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        c = QColor("#E8E8EC")
-        p.setPen(Qt.NoPen)
-        p.setBrush(c)
-        w, h = self.width(), self.height()
-        p.drawRoundedRect(QRectF(w / 2 - 4, 4, 8, 13), 4, 4)
-        pen = QPen(c, 1.8)
-        pen.setCapStyle(Qt.RoundCap)
-        p.setPen(pen)
-        p.setBrush(Qt.NoBrush)
-        p.drawArc(QRectF(w / 2 - 7.5, 8, 15, 14), 200 * 16, 140 * 16)
-        p.drawLine(QPointF(w / 2, 22), QPointF(w / 2, 25))
-        p.drawLine(QPointF(w / 2 - 4, 25), QPointF(w / 2 + 4, 25))
+        if self._busy:
+            p.setBrush(QColor("#F2F2F2"))
+            p.drawEllipse(r)
+            p.setBrush(QColor("#1E1E20"))
+            p.drawRoundedRect(QRectF(r.center().x() - 5, r.center().y() - 5, 10, 10), 2, 2)
+        else:
+            alpha = 255 if self._has_text else 70
+            p.setBrush(QColor(242, 242, 242, alpha))
+            p.drawEllipse(r)
+            pen = QPen(QColor(30, 30, 32, alpha), 2.2)
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
+            p.setPen(pen)
+            cx, cy = r.center().x(), r.center().y()
+            p.drawLine(QPointF(cx, cy + 6), QPointF(cx, cy - 6))
+            p.drawPolyline(QPolygonF([QPointF(cx - 5, cy - 1), QPointF(cx, cy - 6), QPointF(cx + 5, cy - 1)]))
         p.end()
 
 
@@ -194,10 +180,26 @@ class _Bubble(QWidget):
         self._lines.append((kind, text))
         self._render()
 
+    @staticmethod
+    def _md(text):
+        """Modelin hafif Markdown'ını HTML'e çevirir: kalın, madde, satır."""
+        import re as _re
+        t = (text or "").replace("&", "&amp;").replace("<", "&lt;")
+        t = _re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", t)
+        t = _re.sub(r"`([^`]+)`", r"<span style='color:#C9D6FF'>\1</span>", t)
+        lines = []
+        for ln in t.split("\n"):
+            m = _re.match(r"^\s*[\*\-•]\s+(.*)$", ln)
+            if m:
+                ln = "&nbsp;&nbsp;• " + m.group(1)
+            lines.append(ln)
+        return "<br>".join(lines)
+
     def _render(self):
         html = []
-        for kind, text in self._lines[-8:]:
-            t = (text or "").replace("&", "&amp;").replace("<", "&lt;").replace("\n", "<br>")
+        for kind, text in self._lines[-10:]:
+            t = self._md(text) if kind == "cevap" else \
+                (text or "").replace("&", "&amp;").replace("<", "&lt;").replace("\n", "<br>")
             if kind == "soru":
                 html.append(f"<div style='color:#A5A5AA; margin-bottom:6px;'>{t}</div>")
             elif kind == "arac":
@@ -214,8 +216,8 @@ class _Bubble(QWidget):
         w = self.width()
         self.label.setFixedWidth(max(50, w - 36))
         h = self.label.sizeHint().height() + 28
-        self.setFixedHeight(min(h, 320))
-        self.label.setGeometry(18, 14, w - 36, min(h, 320) - 28)
+        self.setFixedHeight(min(h, 340))
+        self.label.setGeometry(18, 14, w - 36, min(h, 340) - 28)
 
     def resizeEvent(self, e):
         self._relayout()
@@ -231,7 +233,7 @@ class _Bubble(QWidget):
 
 
 class AssistantOverlay(QWidget):
-    """Pencerenin üstündeki katman: gölge + genie hunisi + hap + balon."""
+    """Pencerenin üstündeki katman: gölge + genie + hap + balon."""
 
     submitted = Signal(str)
     closed = Signal()
@@ -242,10 +244,13 @@ class AssistantOverlay(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setFocusPolicy(Qt.StrongFocus)
         self._progress = 0.0
+        self._prev = []                 # hareket bulanıklığı için önceki ilerlemeler
         self._origin = QPointF(0, 0)
         self._radius = 13.0
         self._opening = False
         self._busy = False
+        self._pix_full = None           # hap + yazı + düğme (animasyon için)
+        self._pix_bg = None             # yalnızca hap zemini (dururken)
         self.hide()
 
         # ── hap içi ──
@@ -255,7 +260,7 @@ class AssistantOverlay(QWidget):
         self._content_fx.setOpacity(0.0)
         self.content.setGraphicsEffect(self._content_fx)
         lay = QHBoxLayout(self.content)
-        lay.setContentsMargins(14, 0, 9, 0)
+        lay.setContentsMargins(14, 0, 11, 0)
         lay.setSpacing(8)
 
         self.btn_plus = QToolButton(self.content)
@@ -276,16 +281,8 @@ class AssistantOverlay(QWidget):
         self.edit.setStyleSheet("QLineEdit { background: transparent; color: #F2F2F2; "
                                 "border: none; selection-background-color: #2F6BE4; }")
         self.edit.returnPressed.connect(self._submit)
+        self.edit.textChanged.connect(lambda t: self.btn_send.set_has_text(bool(t.strip())))
         lay.addWidget(self.edit, 1)
-
-        self.lbl_model = QLabel("Flash Lite  ⌄", self.content)
-        self.lbl_model.setFont(QFont(".AppleSystemUIFont", 13))
-        self.lbl_model.setStyleSheet("color: #D0D0D4; background: transparent;")
-        self.lbl_model.setToolTip("Model: gemini-3.1-flash-lite")
-        lay.addWidget(self.lbl_model, 0)
-
-        self.mic = _MicLabel(self.content)
-        lay.addWidget(self.mic, 0)
 
         self.btn_send = _SendButton(self.content)
         self.btn_send.clicked.connect(self._send_or_stop)
@@ -304,6 +301,8 @@ class AssistantOverlay(QWidget):
         return self._progress
 
     def _set_progress(self, v):
+        self._prev.append(self._progress)
+        self._prev = self._prev[-4:]
         self._progress = float(v)
         self.update()
 
@@ -325,7 +324,36 @@ class AssistantOverlay(QWidget):
 
     def resizeEvent(self, e):
         self._place_children()
+        self._pix_full = self._pix_bg = None
         super().resizeEvent(e)
+
+    # ── hap görüntüsü (genie için) ──
+    def _render_pill(self, with_glyphs):
+        pr = self.pill_rect()
+        dpr = float(self.devicePixelRatioF()) if hasattr(self, "devicePixelRatioF") else 1.0
+        pix = QPixmap(int(pr.width() * dpr), int(pr.height() * dpr))
+        pix.setDevicePixelRatio(dpr)
+        pix.fill(Qt.transparent)
+        p = QPainter(pix)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(0, 0, pr.width(), pr.height()).adjusted(0.5, 0.5, -0.5, -0.5)
+        rad = r.height() / 2
+        p.setPen(QPen(PILL_BORDER, 1))
+        p.setBrush(PILL_BG)
+        p.drawRoundedRect(r, rad, rad)
+        if with_glyphs:
+            p.setPen(QColor("#F2F2F2"))
+            p.setFont(QFont(".AppleSystemUIFont", 18))
+            p.drawText(QRectF(14, 0, 30, r.height()), Qt.AlignCenter, "＋")
+            p.setPen(QColor("#8E8E93"))
+            p.setFont(QFont(".AppleSystemUIFont", 15))
+            p.drawText(QRectF(56, 0, r.width() - 120, r.height()),
+                       Qt.AlignVCenter | Qt.AlignLeft, "Chenkron'a sor")
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(242, 242, 242, 70))
+            p.drawEllipse(QRectF(r.right() - 11 - 32, r.center().y() - 16, 32, 32))
+        p.end()
+        return pix
 
     # ── açma / kapama ──
     def open_from(self, button):
@@ -333,13 +361,22 @@ class AssistantOverlay(QWidget):
         parent = self.parentWidget()
         if parent is not None:
             self.setGeometry(parent.rect())
-        c = button.mapTo(self, button.rect().center()) if button is not None else None
-        self._origin = QPointF(c) if c is not None else QPointF(self.width() / 2, 40)
-        self._radius = (button.width() / 2.0) if button is not None else 13.0
+        if button is not None:
+            # Düğme bu katmanın çocuğu değil; mapTo çalışmaz. Global üzerinden:
+            # küçültülmüş pencerede de kaynak tam dairenin merkezidir.
+            g = button.mapToGlobal(button.rect().center())
+            self._origin = QPointF(self.mapFromGlobal(g))
+            self._radius = button.width() / 2.0
+        else:
+            self._origin = QPointF(self.width() / 2, 40)
+            self._radius = 13.0
         self._place_children()
+        self._pix_full = self._render_pill(True)
+        self._pix_bg = self._render_pill(False)
         self.bubble.clear()
         self.content.hide()
         self._content_fx.setOpacity(0.0)
+        self._prev = []
         self.show()
         self.raise_()
         self.setFocus()
@@ -357,6 +394,7 @@ class AssistantOverlay(QWidget):
         self._opening = False
         self.content.hide()
         self.bubble.hide()
+        self._prev = []
         self._anim.stop()
         self._anim.setDuration(CLOSE_MS)
         self._anim.setEasingCurve(QEasingCurve.InCubic)
@@ -375,6 +413,7 @@ class AssistantOverlay(QWidget):
             self.edit.setFocus()
             if self.bubble._lines:
                 self.bubble.show()
+            self.update()
         elif not self._opening and self._progress <= 0.001:
             self.hide()
             self.closed.emit()
@@ -414,12 +453,14 @@ class AssistantOverlay(QWidget):
         menu.setStyleSheet("QMenu { background: #2A2A2D; color: #F2F2F2; border: 1px solid #3A3A3E; "
                            "border-radius: 8px; padding: 6px; } QMenu::item { padding: 6px 14px; "
                            "border-radius: 6px; } QMenu::item:selected { background: #2F6BE4; }")
-        for ex in ("Ahmet Yılmaz hocasının pazartesini aç",
-                   "Sultan Yılmaz'ın salı 3. saatini kapat",
+        for ex in ("Sultan Yılmaz hocasının pazartesini aç",
+                   "Birey'de Mesut Çolak'ın hangi saatleri kapalı?",
                    "Otomatik planlamayı başlat",
-                   "Çizelge durumu ne?",
-                   "Zaman tablosunu nasıl açarım?",
-                   "İki dersin aynı güne gelmemesini nasıl ayarlarım?"):
+                   "Çizelgeyi sıfırla",
+                   "Açıkta kalan dersler hangileri?",
+                   "Matematik1 ile Matematik2 aynı güne gelmesin kuralı ekle",
+                   "12 A sınıfının programını göster",
+                   "Son kontrol yap"):
             a = menu.addAction(ex)
             a.triggered.connect(lambda _=False, t=ex: (self.edit.setText(t), self.edit.setFocus()))
         menu.exec(self.btn_plus.mapToGlobal(self.btn_plus.rect().topLeft()))
@@ -430,13 +471,30 @@ class AssistantOverlay(QWidget):
         self.btn_send.set_busy(self._busy)
         self.edit.setPlaceholderText("Düşünüyor…" if self._busy else "Chenkron'a sor")
 
+    _PRETTY = {
+        "set_teacher_day": "Öğretmen günü", "set_teacher_period": "Öğretmen saati",
+        "set_class_day": "Sınıf günü", "set_class_period": "Sınıf saati",
+        "start_auto_schedule": "Otomatik planlama", "open_screen": "Ekran",
+        "save_schedule": "Kaydet", "undo": "Geri al", "redo": "Yinele",
+        "list_teachers": "Öğretmenler", "teacher_availability": "Zaman tablosu",
+        "schedule_summary": "Çizelge özeti", "unlock_all_lessons": "Kilitler",
+        "clear_schedule": "Çizelgeyi sıfırla", "list_institutions": "Kurumlar",
+        "institution_teacher_availability": "Diğer kurum", "add_rule": "Kural ekle",
+        "remove_rule": "Kural sil", "set_rule_active": "Kural aç/kapat",
+        "add_assignment": "Atama", "remove_assignment": "Atama sil",
+        "move_lesson": "Ders taşı", "lock_lesson": "Kilit", "remove_lesson_from_grid": "Çizelgeden al",
+        "precheck": "Ön kontrol", "verify_schedule": "Son kontrol",
+        "unplaced_lessons": "Açıkta kalanlar", "free_slots": "Boş saatler",
+        "teacher_schedule": "Öğretmen programı", "class_schedule": "Sınıf programı",
+        "list_rules": "Kurallar", "list_assignments": "Atamalar", "list_classes": "Sınıflar",
+        "list_subjects": "Dersler", "add_subject": "Ders ekle", "add_teacher": "Öğretmen ekle",
+        "go_home": "Anasayfa", "print_preview": "Önizleme",
+    }
+
     def show_tool(self, name, args):
-        pretty = {"set_teacher_day": "Gün ayarlanıyor", "set_teacher_period": "Saat ayarlanıyor",
-                  "start_auto_schedule": "Otomatik planlama", "open_screen": "Ekran açılıyor",
-                  "save_schedule": "Kaydediliyor", "undo": "Geri alınıyor", "redo": "Yineleniyor",
-                  "list_teachers": "Öğretmenler okunuyor", "teacher_availability": "Zaman tablosu okunuyor",
-                  "schedule_summary": "Çizelge özeti", "unlock_all_lessons": "Kilitler açılıyor"}.get(name, name)
-        arg = ", ".join(f"{v}" for k, v in (args or {}).items() if isinstance(v, (str, int)))
+        pretty = self._PRETTY.get(name, name)
+        arg = ", ".join(f"{v}" for k, v in (args or {}).items()
+                        if isinstance(v, (str, int)) and not isinstance(v, bool))
         self.bubble.add("arac", f"{pretty}{' — ' + arg if arg else ''}")
         self._place_children()
 
@@ -455,12 +513,49 @@ class AssistantOverlay(QWidget):
         self._place_children()
 
     # ── çizim ──
+    def _draw_genie(self, p, t, pix, alpha=1.0):
+        """Hap görüntüsünü t anındaki huni boyunca dilim dilim çizer."""
+        pr = QRectF(self.pill_rect())
+        ox, oy, r = self._origin.x(), self._origin.y(), self._radius
+        a = min(1.0, t / 0.62)                  # akış / büyüme
+        b = max(0.0, (t - 0.62) / 0.38)         # boyun kopar, iner
+        ea = 1 - (1 - a) ** 3
+        eb = b * b * (3 - 2 * b)
+        pw = pr.width() * (0.10 + 0.90 * ea)
+        neck_y = oy + (pr.top() - oy) * eb
+        neck_w = 2 * r * (1 - eb) + 6 * eb
+        span = max(1.0, pr.bottom() - neck_y)
+        pcx = pr.center().x()
+        # Dilim sayısı huninin boyuna göre: ~3 px'lik dilimler, kaynak
+        # görüntünün satır sayısını aşmadan. Az dilim basamak yapıyordu.
+        dpr = pix.devicePixelRatio()
+        n = int(max(SLICES, min(pix.height(), span / 3.0)))
+        sw = pix.width() / dpr
+        sh = pix.height() / dpr / n
+        p.setOpacity(alpha)
+        for j in range(n):
+            u0, u1 = j / n, (j + 1) / n
+            um = (u0 + u1) / 2
+            # huni profili: boyunda dar, ağza doğru geniş; sonda tam genişlik
+            prof = um ** 1.7
+            w_f = neck_w + (pw - neck_w) * prof
+            w = w_f * (1 - eb) + pw * eb
+            cx_f = ox + (pcx - ox) * (um * um * (3 - 2 * um))
+            cx = cx_f * (1 - eb) + pcx * eb
+            y0 = neck_y + u0 * span
+            y1 = neck_y + u1 * span
+            src = QRectF(0, j * sh * dpr, sw * dpr, sh * dpr)
+            dst = QRectF(cx - w / 2, y0, w, max(1.0, y1 - y0 + 0.6))
+            p.drawPixmap(dst, pix, src)
+        p.setOpacity(1.0)
+
     def paintEvent(self, e):
         t = max(0.0, min(1.0, self._progress))
         if t <= 0.0:
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
         W, H = self.width(), self.height()
 
         # 1) alttan solan gölge
@@ -470,52 +565,25 @@ class AssistantOverlay(QWidget):
         p.fillRect(QRect(0, int(H * 0.45), W, H - int(H * 0.45)), g)
         p.fillRect(self.rect(), QColor(0, 0, 0, int(22 * t)))
 
-        # 2) genie hunisi + hap
+        if self._pix_full is None:
+            self._pix_full = self._render_pill(True)
+            self._pix_bg = self._render_pill(False)
+
         pr = QRectF(self.pill_rect())
-        ox, oy, r = self._origin.x(), self._origin.y(), self._radius
-        # A: huni akar, hap büyür (0 → 0.62); B: boyun daireden kopup iner (0.62 → 1)
-        a = min(1.0, t / 0.62)
-        b = max(0.0, (t - 0.62) / 0.38)
-        ea = 1 - (1 - a) ** 3
-        pw = pr.width() * (0.12 + 0.88 * ea)
-        ph = pr.height() * (0.35 + 0.65 * ea)
-        pill = QRectF(pr.center().x() - pw / 2, pr.bottom() - ph, pw, ph)
-
-        path = QPainterPath()
-        if b < 1.0:
-            # boyun: daire etrafından başlar; B aşamasında aşağı çekilir ve incelir
-            neck_y = oy + (pill.top() - oy) * b
-            neck_r = r * (1.0 - b) + 2.0 * b
-            # huni geometrisi
-            top_l = QPointF(ox - neck_r, neck_y)
-            top_r = QPointF(ox + neck_r, neck_y)
-            bot_l = QPointF(pill.left() + pill.height() / 2, pill.top())
-            bot_r = QPointF(pill.right() - pill.height() / 2, pill.top())
-            dy = max(1.0, pill.top() - neck_y)
-            path.moveTo(bot_l)
-            path.cubicTo(QPointF(bot_l.x(), bot_l.y() - dy * 0.55),
-                         QPointF(top_l.x(), top_l.y() + dy * 0.45), top_l)
-            # dairenin üst yayı
-            path.arcTo(QRectF(ox - neck_r, neck_y - neck_r, 2 * neck_r, 2 * neck_r), 180, -180)
-            path.cubicTo(QPointF(top_r.x(), top_r.y() + dy * 0.45),
-                         QPointF(bot_r.x(), bot_r.y() - dy * 0.55), bot_r)
-            path.closeSubpath()
-            # Huni yarı saydam ve aşağı doğru koyulaşır: altındaki çizelge
-            # seçilir, akış hapta toplanıyor hissi verir.
-            fg = QLinearGradient(0, neck_y, 0, pill.top())
-            fg.setColorAt(0.0, QColor(PILL_BG.red(), PILL_BG.green(), PILL_BG.blue(), int(120 * (1 - b * 0.7))))
-            fg.setColorAt(1.0, QColor(PILL_BG.red(), PILL_BG.green(), PILL_BG.blue(), int(215 * (1 - b * 0.7))))
+        rad = pr.height() / 2
+        if t >= 0.999 and self._anim.state() != QAbstractAnimation.Running:
+            # dururken: yumuşak gölge + zemin; içerik widget'ları üstte
             p.setPen(Qt.NoPen)
-            p.setBrush(QBrush(fg))
-            p.drawPath(path)
+            for i in range(3, 0, -1):
+                p.setBrush(QColor(0, 0, 0, int(16 / i)))
+                p.drawRoundedRect(pr.adjusted(-i * 2, i * 2, i * 2, i * 3), rad + i, rad + i)
+            p.drawPixmap(pr.topLeft(), self._pix_bg)
+            p.end()
+            return
 
-        # hap gölgesi (yumuşak), sonra hap
-        rad = pill.height() / 2
-        p.setPen(Qt.NoPen)
-        for i in range(3, 0, -1):
-            p.setBrush(QColor(0, 0, 0, int(16 * ea / i)))
-            p.drawRoundedRect(pill.adjusted(-i * 2, i * 2, i * 2, i * 3), rad + i, rad + i)
-        p.setPen(QPen(PILL_BORDER, 1))
-        p.setBrush(QColor(PILL_BG.red(), PILL_BG.green(), PILL_BG.blue(), int(200 + 55 * ea)))
-        p.drawRoundedRect(pill, rad, rad)
+        # 2) genie: hareket bulanıklığı (önceki anlar soluk), sonra bu an
+        prev = [q for q in self._prev if abs(q - t) > 0.004]
+        for k, q in enumerate(reversed(prev[-3:])):
+            self._draw_genie(p, q, self._pix_full, alpha=0.22 / (k + 1))
+        self._draw_genie(p, t, self._pix_full, alpha=1.0)
         p.end()

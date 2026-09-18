@@ -86,6 +86,86 @@ TOOLS = [
     },
 ]
 
+
+def _obj(props, required=()):
+    return {"type": "OBJECT", "properties": props, "required": list(required)}
+
+def _s(desc=""):
+    return {"type": "STRING", "description": desc}
+
+def _b(desc=""):
+    return {"type": "BOOLEAN", "description": desc}
+
+def _i(desc=""):
+    return {"type": "INTEGER", "description": desc}
+
+def _arr(desc=""):
+    return {"type": "ARRAY", "items": {"type": "STRING"}, "description": desc}
+
+TOOLS += [
+    # ── okuma ──
+    {"name": "list_classes", "description": "Sınıfları listeler.", "parameters": _obj({})},
+    {"name": "list_subjects", "description": "Dersleri listeler.", "parameters": _obj({})},
+    {"name": "list_assignments",
+     "description": "Ders atamalarını (sınıf, ders, öğretmen, saat, dağılım) listeler; sınıf ya da öğretmenle süzülebilir.",
+     "parameters": _obj({"class_name": _s("isteğe bağlı"), "teacher": _s("isteğe bağlı")})},
+    {"name": "teacher_schedule",
+     "description": "Bir öğretmenin bu kurumdaki haftalık ders programı (gün gün hangi saatte hangi sınıf).",
+     "parameters": _obj({"teacher": _s()}, ["teacher"])},
+    {"name": "class_schedule",
+     "description": "Bir sınıfın haftalık programı (gün gün ders ve öğretmen).",
+     "parameters": _obj({"class_name": _s()}, ["class_name"])},
+    {"name": "free_slots",
+     "description": "Öğretmenin hem açık hem BOŞ saatleri (ders konabilecek yerler).",
+     "parameters": _obj({"teacher": _s()}, ["teacher"])},
+    {"name": "unplaced_lessons",
+     "description": "Çizelgeye yerleşmemiş (açıkta kalan) dersler ve son planlama raporunun sebepleri.",
+     "parameters": _obj({})},
+    {"name": "list_rules", "description": "Planlama İlişkileri kurallarını numaralarıyla listeler.", "parameters": _obj({})},
+    {"name": "precheck", "description": "Ön Kontrol: bu veri ve tablolarla çizelge dolar mı? Kapasite ve yük sorunlarını söyler.", "parameters": _obj({})},
+    {"name": "verify_schedule", "description": "Son Kontrol: yerleşmiş çizelgede çakışma, kapalı saat ve kural ihlallerini bulur.", "parameters": _obj({})},
+    # ── kurumlar arası (okuma) ──
+    {"name": "list_institutions", "description": "Bu bilgisayardaki bütün kurumları (Birey, Boğaziçi...) ve aktif sürümlerini listeler.", "parameters": _obj({})},
+    {"name": "institution_teacher_availability",
+     "description": "BAŞKA bir kurumda bir öğretmenin hangi gün hangi saatlerinin kapalı olduğunu ve o kurumda hangi saatlerde dersi olduğunu söyler (yalnızca okur).",
+     "parameters": _obj({"institution": _s("kurum adı ya da kısaltması, örn. Birey"), "teacher": _s()}, ["institution", "teacher"])},
+    # ── yazma ──
+    {"name": "clear_schedule", "description": "Çizelgeyi sıfırlar: bütün yerleşmiş dersleri kaldırır (kullanıcı onay kutusunu görür).", "parameters": _obj({})},
+    {"name": "set_class_day", "description": "Bir sınıfın bir gününü tamamen açar/kapatır (sınıf Zaman Tablosu). " + DAY_HINT,
+     "parameters": _obj({"class_name": _s(), "day": _s(), "open": _b()}, ["class_name", "day", "open"])},
+    {"name": "set_class_period", "description": "Bir sınıfın belirli gün ve saatini açar/kapatır. period 1'den başlar.",
+     "parameters": _obj({"class_name": _s(), "day": _s(), "period": _i(), "open": _b()}, ["class_name", "day", "period", "open"])},
+    {"name": "add_rule",
+     "description": "Planlama İlişkileri'ne kural ekler. kind: ayni_ders_ayni_gun, iki_ders_ayni_gune_gelmesin (en az 2 ders), "
+                    "ayni_ders_sayilsin (en az 2 ders), ayni_ders_art_arda_gelmesin, iki_zor_ders_art_arda, gunde_maksimum_ders (param), "
+                    "ayni_ogretmen_ayni_gun, ogretmen_haftada_en_fazla_n_gun (param), sinif_gunde_en_fazla_n_saat (param), "
+                    "ogretmen_gunde_en_fazla_n_saat (param), sinifta_bos_saat_kalmasin, ogretmende_bos_saat_kalmasin, "
+                    "ders_ogleden_once, ders_ogleden_sonra, son_derse_zor_ders_konulmasin, ilk_derse_konulmasin. "
+                    "subjects/classes/teachers boşsa kural hepsine uygulanır. importance: sıkı | yüksek | normal.",
+     "parameters": _obj({"kind": _s(), "subjects": _arr("ders adları"), "classes": _arr("sınıf adları"),
+                         "teachers": _arr("öğretmen adları"), "importance": _s(), "param": _i("sayısal parametre")}, ["kind"])},
+    {"name": "remove_rule", "description": "Kuralı numarasıyla siler (list_rules).", "parameters": _obj({"index": _i()}, ["index"])},
+    {"name": "set_rule_active", "description": "Kuralı numarasıyla açar/kapatır.", "parameters": _obj({"index": _i(), "active": _b()}, ["index", "active"])},
+    {"name": "add_assignment",
+     "description": "Bir sınıfa ders ve öğretmen atar. distribution: blok dağılımı, örn. '2+2+1' (haftada 5 saat).",
+     "parameters": _obj({"class_name": _s(), "subject": _s(), "teacher": _s(), "distribution": _s()},
+                        ["class_name", "subject", "teacher", "distribution"])},
+    {"name": "remove_assignment", "description": "Bir sınıftaki bir dersin atamasını kaldırır.",
+     "parameters": _obj({"class_name": _s(), "subject": _s()}, ["class_name", "subject"])},
+    {"name": "add_subject", "description": "Yeni ders tanımlar.", "parameters": _obj({"name": _s(), "short": _s("kısa kod")}, ["name"])},
+    {"name": "add_teacher", "description": "Yeni öğretmen ekler.", "parameters": _obj({"name": _s(), "branch": _s("branş")}, ["name"])},
+    {"name": "move_lesson",
+     "description": "Bir sınıfın yerleşmiş bir dersini (ilk bloğunu) verilen gün/saate taşır; çakışma varsa taşımaz ve sebebini söyler.",
+     "parameters": _obj({"class_name": _s(), "subject": _s(), "day": _s(), "period": _i("1'den başlar"), "teacher": _s("isteğe bağlı")},
+                        ["class_name", "subject", "day", "period"])},
+    {"name": "lock_lesson", "description": "Bir sınıfın bir dersinin bütün bloklarını kilitler/serbest bırakır (kilitli ders planlamada oynamaz).",
+     "parameters": _obj({"class_name": _s(), "subject": _s(), "locked": _b()}, ["class_name", "subject", "locked"])},
+    {"name": "remove_lesson_from_grid", "description": "Bir sınıfın bir dersini çizelgeden alır (açıkta kalan derslere düşer).",
+     "parameters": _obj({"class_name": _s(), "subject": _s()}, ["class_name", "subject"])},
+    {"name": "go_home", "description": "Anasayfaya (kurum ve sürüm listesi) döner.", "parameters": _obj({})},
+    {"name": "print_preview", "description": "Yazdırma önizlemesini açar.", "parameters": _obj({})},
+]
+
 # Uygulama bilgisi: kullanıcı "nasıl yapılır" diye sorduğunda model buradan
 # anlatır. Ekran adları ve yollar uygulamadaki gerçek adlardır.
 KNOWLEDGE = """
@@ -111,11 +191,13 @@ NASIL YAPILIR
 SYSTEM = f"""Sen Chenkron ders dağıtım programının yerleşik asistanısın. Adın "Chenkron Asistan".
 Türkçe konuş. Kısa ve net ol: en fazla birkaç cümle; adım anlatırken numaralı kısa liste kullan.
 
-Kullanıcı bir EYLEM istiyorsa (aç, kapat, başlat, kaydet, geri al, göster) konuşma, uygun aracı çağır.
-Birden fazla iş verirse sırayla hepsini yap. Araç sonucunu tek cümleyle özetle.
-Öğretmen adı belirsizse ya da tam eşleşmezse list_teachers ile bak, yine de emin değilsen sor.
+Kullanıcı bir EYLEM istiyorsa (aç, kapat, başlat, sıfırla, kaydet, geri al, taşı, ekle, sil, göster) konuşma, uygun aracı çağır.
+Birden fazla iş verirse sırayla hepsini yap. Araç sonucunu tek cümleyle özetle; listeleri kısa ve okunur ver.
+Öğretmen/sınıf/ders adı belirsizse ya da araç "bulunamadı" derse önce list_* araçlarıyla bak, yine de emin değilsen sor.
 Bir gün için "aç" = o günün bütün saatlerini açık yap; "kapat" = kapalı yap.
-Yapamadığın bir şey istenirse (ör. ders atama, kural ekleme) nasıl yapılacağını 2-3 adımda anlat.
+Başka kurumla ilgili sorularda (ör. "Birey'de Ahmet hocanın hangi saatleri kapalı?") institution_teacher_availability kullan; list_institutions kurum adlarını verir.
+Silme/sıfırlama gibi geri dönüşü zor işleri kullanıcı açıkça istediyse yap; uygulama kendi onay kutusunu gösterir.
+Sorunun cevabı veride ise (program, boş saat, açıkta kalan ders, kural listesi) tahmin etme, aracı çağırıp gerçek veriyi söyle.
 Uydurma: bilmediğin bir ekranı ya da düğmeyi varmış gibi anlatma.
 
 {KNOWLEDGE}
