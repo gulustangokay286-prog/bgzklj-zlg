@@ -40,7 +40,7 @@ OPEN_MS = 620
 CLOSE_MS = 360
 GLOW_H = 280
 GLOW_COLORS = ("#4285F4", "#9B72CB", "#D96570", "#F2A93B")
-CONTENT_AT = 0.80          # içerik bu ilerlemede solarak gelmeye başlar
+CONTENT_MS = 220           # içerik solma süresi (şekil oturduktan SONRA)
 
 
 def draw_sparkle(p, center, size, color, rot=0.0):
@@ -298,7 +298,10 @@ class AssistantOverlay(QWidget):
         self._anim = QPropertyAnimation(self, b"progress", self)
         self._anim.finished.connect(self._on_anim_done)
         self._fade = QPropertyAnimation(self._content_fx, b"opacity", self)
-        self._fade.setDuration(200)
+        self._fade.setDuration(CONTENT_MS)
+        # Solma sırasında hapın zemini de her adımda yeniden çizilir; yoksa
+        # yarı saydam içerik ile altındaki gövde arasında iz kalıyor.
+        self._fade.valueChanged.connect(lambda _v: self.update(self.pill_rect().adjusted(-8, -8, 8, 8)))
 
     # ── animasyon özelliği ──
     def _get_progress(self):
@@ -306,10 +309,6 @@ class AssistantOverlay(QWidget):
 
     def _set_progress(self, v):
         self._progress = float(v)
-        # İçerik animasyonun SONUNU beklemez; gövde hapa yaklaşırken solarak
-        # gelir. Böylece bitişte hiçbir şey "bir daha oturmaz".
-        if self._opening and self._progress >= CONTENT_AT and not self.content.isVisible():
-            self._show_content()
         self.update()
 
     progress = Property(float, _get_progress, _set_progress)
@@ -513,6 +512,13 @@ class AssistantOverlay(QWidget):
         self._anim.start()
 
     def _show_content(self):
+        """Yazı ve düğmeler yalnızca ŞEKİL TAM HAP OLDUĞUNDA gelir.
+
+        Daha erken gösterilince içerik hapın son genişliğine göre yerleşiyor,
+        ama arkasındaki gövde hâlâ büyümekte oluyordu: yazı ve düğme kutunun
+        dışına taşıyor, sonra kutu yetişiyordu — "yarısından warping" denen
+        bozulma buydu.
+        """
         self._place_children()
         self.content.show()
         self._fade.stop()
