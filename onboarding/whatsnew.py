@@ -35,6 +35,18 @@ def _ribbon_button(win, label_startswith):
     return best
 
 
+def _open_relations_with_tour(win):
+    """Planlama İlişkileri ekranını açar ve tanıtım turunu zorla çalıştırır."""
+    from . import state as _st
+    _st.reset(KEY_RELATIONS)              # tanıtımda her hâlükârda gösterilsin
+    fn = getattr(win, "_open_relations", None)
+    if callable(fn):
+        fn()
+
+
+KEY_RELATIONS = "tour:relations"
+
+
 PAGES = [
     {
         "key": "asistan",
@@ -47,7 +59,6 @@ PAGES = [
             "title": "Asistan burada",
             "text": "Çizelgenin sağ üstündeki bu daireye tıklayın. Alttan açılan kutuya sorunuzu "
                     "yazın ya da işi tarif edin — yaptığı her adımı üstünde görürsünüz.",
-            "allow_missing": True,
         },
     },
     {
@@ -61,7 +72,6 @@ PAGES = [
             "title": "Otomatik Planla",
             "text": "Aynı veriyle her çalıştırmada aynı en iyi sonuca ulaşır. Eksik kalırsa "
                     "rapor “şu kural şu sınıflarda şu kadar saati dışarıda bırakıyor” diye yazar.",
-            "allow_missing": True,
         },
     },
     {
@@ -73,10 +83,12 @@ PAGES = [
         "step": {
             "target": lambda win: _ribbon_button(win, "Planlama"),
             "title": "Planlama İlişkileri",
-            "text": "Kurallar burada. Ekranı ilk kez açtığınızda kısa bir tur çalışır: kural seçimi, "
-                    "ders seçimi, <b>gruplar</b> ve önem derecesi tek tek anlatılır.",
-            "allow_missing": True,
+            "text": "Kurallar burada. “Anladım”a basınca ekranı açıyorum ve içinde kısa bir tur "
+                    "çalıştırıyorum: kural seçimi, süzgeçler, <b>gruplar</b> ve önem derecesi.",
+            "next": "Anladım, aç",
         },
+        # Adım bitince EKRANI AÇAR ve kendi turunu zorla çalıştırır.
+        "after": lambda win: _open_relations_with_tour(win),
     },
     {
         "key": "elle",
@@ -88,7 +100,6 @@ PAGES = [
             "title": "Çizelge üzerinde",
             "text": "Kart sürüklerken hücre rengi kuralları da hesaba katar. Kilitli dersler "
                     "planlamada yerinden oynamaz; buradan hepsini serbest bırakabilirsiniz.",
-            "allow_missing": True,
         },
     },
     {
@@ -237,10 +248,18 @@ class WhatsNewDialog(QDialog):
             return
         tgt = step.get("target")
         step["target"] = (lambda t=tgt: t(self.win)) if callable(tgt) else tgt
-        step["next"] = "Anladım"
+        step.setdefault("next", "Anladım")
+        after = page.get("after")
         self.hide()
 
         def done():
+            # Adımdan sonra ilgili ekran açılabilir (modal); kart o ekran
+            # kapanınca geri gelir.
+            if callable(after):
+                try:
+                    after(self.win)
+                except Exception as exc:
+                    print(f"[onboarding] ekran açılamadı: {exc}")
             # Tur adımı bitti: kart geri gelir ve sıradaki yeniliğe geçer.
             if self.index < len(self.pages) - 1:
                 self.index += 1

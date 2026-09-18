@@ -194,6 +194,21 @@ class AppShell(QMainWindow):
         
         # Pencere başlığı sabittir; kurum ve sürüm uygulamanın içinde, ortalı başlıkta yazar.
         self.setWindowTitle("Chenkron Ders Dağıtım ve Yönetim Sistemi")
+
+        # SÜRÜM TANITIMI burada tetiklenir, açılışta değil: tanıttığı şeylerin
+        # (asistan dairesi, şerit düğmeleri, çizelge) hepsi ÇİZELGE ekranında
+        # yaşar. Anasayfada açılınca hiçbirini bulamıyor ve ekranın ortasını
+        # gösteriyordu.
+        def _show_whats_new(ed=self._editor):
+            try:
+                if ed is None or ed is not self._editor or not ed.isVisible():
+                    return
+                from onboarding.whatsnew import maybe_show
+                from version import APP_VERSION
+                maybe_show(ed, APP_VERSION)
+            except Exception as exc:
+                print(f"[onboarding] tanıtım açılmadı: {exc}")
+        QTimer.singleShot(1200, _show_whats_new)
     
     def _open_empty_timetable(self, slug, mode="current_data", custom_name="", pool_id=None, pool_name=None):
         """Create a new version.
@@ -493,19 +508,7 @@ def main():
     except Exception:
         pass  # must never block app startup
 
-    # Sürüm tanıtımı: bu sürümün yenilikleri daha önce gösterilmediyse kart
-    # açılır ve "Göster" ile ilgili ekranlar tek tek vurgulanır. Bir kez
-    # görüldükten sonra bir daha açılmaz (~/.chenki_akademi/onboarding.json).
-    def _show_whats_new():
-        try:
-            from onboarding.whatsnew import maybe_show
-            from version import APP_VERSION
-            ed = getattr(shell, "_editor", None)
-            host = ed if (ed is not None and ed.isVisible()) else shell
-            maybe_show(host, APP_VERSION)
-        except Exception as exc:
-            print(f"[onboarding] tanıtım açılmadı: {exc}")
-    QTimer.singleShot(1400, _show_whats_new)
+
 
     exit_code = app.exec()
 
