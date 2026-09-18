@@ -10,9 +10,15 @@ Araç çubuğundaki küçük mavi daireye (parıltı ikonu) tıklanınca pencere
     dilimlere bölünür; her dilim daireden çıkan bir huni boyunca aşağı akar,
     dar boyundan geniş ağza doğru esneyerek altta hapın kendisine oturur.
     macOS küçültme efektinin tersi: bir gölge değil, kutunun kendisi bükülür.
-    Boyun daireden kopup aşağı çekilince yalnızca hap kalır. Hareket
-    bulanıklığı: aynı kare, birkaç önceki anıyla soluk olarak üst üste
-    çizilir; hız arttıkça iz uzar. Kapanış aynı yolun tersidir.
+    Boyun daireden kopup aşağı çekilince yalnızca hap kalır. Kapanış aynı
+    yolun tersidir.
+  * GÖKKUŞAĞI PARILTI — alt kenardan yukarı doğru solan mavi→mor→pembe→turuncu
+    ışık (Gemini'deki gibi); açılışla belirir, model düşünürken hafifçe
+    nefes alır.
+
+Gölge ve parıltı boyuta göre bir kez piksel haritasına çizilir, her karede
+yalnızca kopyalanır: animasyon boyunca kare başına iş küçük kalır, akış
+takılmaz.
 
 Hapın içi (＋, metin kutusu, ↑ gönder) gerçek widget'lardır; genie hap hâline
 gelince solarak görünürler. Gönder düğmesi yazı yokken soluktur, yazınca
@@ -35,9 +41,12 @@ PILL_BORDER = QColor(255, 255, 255, 22)
 PILL_H = 56
 PILL_MAX_W = 720
 PILL_BOTTOM = 26
-OPEN_MS = 560
-CLOSE_MS = 400
-SLICES = 28
+OPEN_MS = 600
+CLOSE_MS = 380
+SLICES_MIN = 28
+SLICES_MAX = 112
+GLOW_H = 170
+GLOW_COLORS = ("#4285F4", "#8E6BD9", "#D96570", "#F2A93B", "#4285F4")
 
 
 def draw_sparkle(p, center, size, color, rot=0.0):
@@ -96,11 +105,9 @@ class AssistantButton(QToolButton):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        g = QRadialGradient(r.center().x(), r.top() + r.height() * 0.3, r.width())
-        g.setColorAt(0.0, BLUE_HI if self._hover else QColor("#3F7BEA"))
-        g.setColorAt(1.0, QColor("#2458C8"))
+        # Düz renk: gölge yok, derinlik yok — araç çubuğundaki diğer haplar gibi.
         p.setPen(Qt.NoPen)
-        p.setBrush(QBrush(g))
+        p.setBrush(BLUE_HI if self._hover else BLUE)
         p.drawEllipse(r)
         c = r.center()
         big = r.width() * 0.56
@@ -244,13 +251,18 @@ class AssistantOverlay(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setFocusPolicy(Qt.StrongFocus)
         self._progress = 0.0
-        self._prev = []                 # hareket bulanıklığı için önceki ilerlemeler
         self._origin = QPointF(0, 0)
         self._radius = 13.0
         self._opening = False
         self._busy = False
         self._pix_full = None           # hap + yazı + düğme (animasyon için)
         self._pix_bg = None             # yalnızca hap zemini (dururken)
+        self._shadow_pix = None         # alt gölge (boyuta göre bir kez)
+        self._glow_pix = None           # gökkuşağı parıltı (boyuta göre bir kez)
+        self._glow_phase = 0.0
+        self._glow_timer = QTimer(self)
+        self._glow_timer.setInterval(50)
+        self._glow_timer.timeout.connect(self._glow_tick)
         self.hide()
 
         # ── hap içi ──
@@ -301,10 +313,12 @@ class AssistantOverlay(QWidget):
         return self._progress
 
     def _set_progress(self, v):
-        self._prev.append(self._progress)
-        self._prev = self._prev[-4:]
         self._progress = float(v)
         self.update()
+
+    def _glow_tick(self):
+        self._glow_phase += 0.06
+        self.update(QRect(0, self.height() - GLOW_H, self.width(), GLOW_H))
 
     progress = Property(float, _get_progress, _set_progress)
 
@@ -325,7 +339,47 @@ class AssistantOverlay(QWidget):
     def resizeEvent(self, e):
         self._place_children()
         self._pix_full = self._pix_bg = None
+        self._shadow_pix = self._glow_pix = None
         super().resizeEvent(e)
+
+    # ── gölge ve parıltı (boyuta göre bir kez) ──
+    def _build_layers(self):
+        W, H = max(1, self.width()), max(1, self.height())
+        dpr = float(self.devicePixelRatioF()) if hasattr(self, "devicePixelRatioF") else 1.0
+        sh = QPixmap(int(W * dpr), int(H * dpr))
+        sh.setDevicePixelRatio(dpr)
+        sh.fill(Qt.transparent)
+        p = QPainter(sh)
+        p.fillRect(QRect(0, 0, W, H), QColor(0, 0, 0, 22))
+        g = QLinearGradient(0, H * 0.45, 0, H)
+        g.setColorAt(0.0, QColor(0, 0, 0, 0))
+        g.setColorAt(1.0, QColor(0, 0, 0, 150))
+        p.fillRect(QRect(0, int(H * 0.45), W, H - int(H * 0.45)), g)
+        p.end()
+        self._shadow_pix = sh
+
+        # Parıltı: yatayda gökkuşağı, düşeyde alt kenardan yukarı solma.
+        # Genişlik iki kat: faz kaydırarak "nefes" alır (yatay kayma).
+        gw = W * 2
+        gl = QPixmap(int(gw * dpr), int(GLOW_H * dpr))
+        gl.setDevicePixelRatio(dpr)
+        gl.fill(Qt.transparent)
+        p = QPainter(gl)
+        hg = QLinearGradient(0, 0, gw, 0)
+        n = len(GLOW_COLORS)
+        for i, c in enumerate(GLOW_COLORS):
+            hg.setColorAt(i / (n - 1) / 2, QColor(c))
+            hg.setColorAt(0.5 + i / (n - 1) / 2, QColor(c))
+        p.fillRect(QRect(0, 0, gw, GLOW_H), hg)
+        p.setCompositionMode(QPainter.CompositionMode_DestinationIn)
+        vg = QLinearGradient(0, 0, 0, GLOW_H)
+        vg.setColorAt(0.0, QColor(0, 0, 0, 0))
+        vg.setColorAt(0.5, QColor(0, 0, 0, 55))
+        vg.setColorAt(0.85, QColor(0, 0, 0, 165))
+        vg.setColorAt(1.0, QColor(0, 0, 0, 235))
+        p.fillRect(QRect(0, 0, gw, GLOW_H), vg)
+        p.end()
+        self._glow_pix = gl
 
     # ── hap görüntüsü (genie için) ──
     def _render_pill(self, with_glyphs):
@@ -376,14 +430,16 @@ class AssistantOverlay(QWidget):
         self.bubble.clear()
         self.content.hide()
         self._content_fx.setOpacity(0.0)
-        self._prev = []
+        if self._shadow_pix is None:
+            self._build_layers()
+        self._glow_timer.start()
         self.show()
         self.raise_()
         self.setFocus()
         self._opening = True
         self._anim.stop()
         self._anim.setDuration(OPEN_MS)
-        self._anim.setEasingCurve(QEasingCurve.InOutCubic)
+        self._anim.setEasingCurve(QEasingCurve.OutCubic)
         self._anim.setStartValue(self._progress)
         self._anim.setEndValue(1.0)
         self._anim.start()
@@ -394,7 +450,6 @@ class AssistantOverlay(QWidget):
         self._opening = False
         self.content.hide()
         self.bubble.hide()
-        self._prev = []
         self._anim.stop()
         self._anim.setDuration(CLOSE_MS)
         self._anim.setEasingCurve(QEasingCurve.InCubic)
@@ -415,6 +470,7 @@ class AssistantOverlay(QWidget):
                 self.bubble.show()
             self.update()
         elif not self._opening and self._progress <= 0.001:
+            self._glow_timer.stop()
             self.hide()
             self.closed.emit()
 
@@ -529,7 +585,7 @@ class AssistantOverlay(QWidget):
         # Dilim sayısı huninin boyuna göre: ~3 px'lik dilimler, kaynak
         # görüntünün satır sayısını aşmadan. Az dilim basamak yapıyordu.
         dpr = pix.devicePixelRatio()
-        n = int(max(SLICES, min(pix.height(), span / 3.0)))
+        n = int(max(SLICES_MIN, min(SLICES_MAX, pix.height(), span / 2.5)))
         sw = pix.width() / dpr
         sh = pix.height() / dpr / n
         p.setOpacity(alpha)
@@ -557,13 +613,21 @@ class AssistantOverlay(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         p.setRenderHint(QPainter.SmoothPixmapTransform)
         W, H = self.width(), self.height()
+        if self._shadow_pix is None:
+            self._build_layers()
 
-        # 1) alttan solan gölge
-        g = QLinearGradient(0, H * 0.45, 0, H)
-        g.setColorAt(0.0, QColor(0, 0, 0, 0))
-        g.setColorAt(1.0, QColor(0, 0, 0, int(150 * t)))
-        p.fillRect(QRect(0, int(H * 0.45), W, H - int(H * 0.45)), g)
-        p.fillRect(self.rect(), QColor(0, 0, 0, int(22 * t)))
+        # 1) alttan solan gölge (önbellekten, ilerlemeyle saydamlık)
+        p.setOpacity(t)
+        p.drawPixmap(0, 0, self._shadow_pix)
+        # 2) gökkuşağı parıltı: alt kenardan yukarı; faz ile yatay kayma
+        glow_w = self._glow_pix.width() / self._glow_pix.devicePixelRatio()
+        shift = (math.sin(self._glow_phase) * 0.5 + 0.5) * (glow_w / 2)
+        breathe = 0.85 + (0.15 * math.sin(self._glow_phase * 2.2) if self._busy else 0.0)
+        p.setOpacity(t * breathe)
+        p.drawPixmap(QRectF(0, H - GLOW_H, W, GLOW_H), self._glow_pix,
+                     QRectF(shift * self._glow_pix.devicePixelRatio(), 0,
+                            W * self._glow_pix.devicePixelRatio(), GLOW_H * self._glow_pix.devicePixelRatio()))
+        p.setOpacity(1.0)
 
         if self._pix_full is None:
             self._pix_full = self._render_pill(True)
@@ -581,9 +645,6 @@ class AssistantOverlay(QWidget):
             p.end()
             return
 
-        # 2) genie: hareket bulanıklığı (önceki anlar soluk), sonra bu an
-        prev = [q for q in self._prev if abs(q - t) > 0.004]
-        for k, q in enumerate(reversed(prev[-3:])):
-            self._draw_genie(p, q, self._pix_full, alpha=0.22 / (k + 1))
+        # 3) genie
         self._draw_genie(p, t, self._pix_full, alpha=1.0)
         p.end()
