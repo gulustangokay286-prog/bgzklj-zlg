@@ -265,7 +265,9 @@ class WhatsNewDialog(QDialog):
                 self.index += 1
                 self._render()
                 self.show()
+                self._recenter()
                 self.raise_()
+                self.activateWindow()
             else:
                 self._finish()
 
@@ -273,12 +275,48 @@ class WhatsNewDialog(QDialog):
         self._tour_page = runner
         QTimer.singleShot(60, runner.start)
 
+    # ── konum: ana pencereyi TAKİP eder ──
+    def _recenter(self):
+        """Kart ana pencerenin ortasında durur ve önde kalır.
+
+        Eskiden konum yalnızca gösterilirken bir kez hesaplanıyordu: pencere
+        taşınınca ya da tam ekrana geçince kart yerinde kalıyor, çoğu zaman
+        pencerenin altında görünmez oluyordu.
+        """
+        w = self.win
+        if w is None:
+            return
+        try:
+            g = w.window().frameGeometry()
+        except Exception:
+            g = w.geometry()
+        self.move(int(g.center().x() - self.width() / 2),
+                  int(g.center().y() - self.height() / 2))
+        self.raise_()
+
+    def eventFilter(self, obj, ev):
+        from PySide6.QtCore import QEvent
+        if ev.type() in (QEvent.Move, QEvent.Resize, QEvent.WindowStateChange,
+                         QEvent.WindowActivate) and self.isVisible():
+            self._recenter()
+        return super().eventFilter(obj, ev)
+
     def showEvent(self, e):
-        # Ana pencerenin ortasında dursun.
-        if self.win is not None:
-            g = self.win.geometry()
-            self.move(g.center().x() - self.width() // 2, g.center().y() - self.height() // 2)
+        self._recenter()
+        self.raise_()
+        self.activateWindow()
+        w = self.win.window() if self.win is not None else None
+        if w is not None and not getattr(self, "_filter_on", False):
+            w.installEventFilter(self)
+            self._filter_on = True
         super().showEvent(e)
+
+    def closeEvent(self, e):
+        w = self.win.window() if self.win is not None else None
+        if w is not None and getattr(self, "_filter_on", False):
+            w.removeEventFilter(self)
+            self._filter_on = False
+        super().closeEvent(e)
 
 
 def maybe_show(win, version, force=False):

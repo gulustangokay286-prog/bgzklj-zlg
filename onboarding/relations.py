@@ -72,6 +72,8 @@ def steps(dlg):
                     "<b>grup</b> oluşturmalısınız; gruplamazsanız dördü birden tek ders sayılır ve "
                     "çizelge oturmaz.",
             "allow_missing": True,
+            "next": "Göster",
+            "after": lambda: show_group_sheet(dlg),
         },
         {
             "target": lambda: _button(dlg, "Kapat ve Kaydet", "Kaydet", "Kapat", "Tamam"),
@@ -83,6 +85,71 @@ def steps(dlg):
             "next": "Bitir",
         },
     ]
+
+
+def show_group_sheet(dlg):
+    """Ders seçme sayfasını (gruplama sheet'i) tanıtım amacıyla açar.
+
+    Turun en önemli maddesi gruplama; onu anlatıp geçmek yetmiyor, sayfanın
+    kendisi açılıp "Seçilenleri Grup Yap" düğmesi gösteriliyor. Seçim hiçbir
+    yere kaydedilmez: sayfa örnek iki grupla (Mat1+Mat2 | Türkçe+Edebiyat)
+    açılır, kullanıcı kapatınca tur devam eder.
+    """
+    try:
+        from dialogs.relations_dialog import MultiSelectDialog
+    except Exception as exc:
+        print(f"[onboarding] ders seçme sayfası açılamadı: {exc}")
+        return
+    store = getattr(dlg, "data_store", {}) or {}
+    items = sorted({(d.get("ad") or "").strip() for d in store.get("dersler", []) if isinstance(d, dict)}
+                   | {(a.get("subject") or "").strip() for a in store.get("atamalar", []) if isinstance(a, dict)}
+                   - {""})
+    if not items:
+        items = ["Matematik1", "Matematik2", "Türkçe", "Edebiyat", "Fizik", "Kimya"]
+
+    def _pick(*names):
+        out = []
+        for n in names:
+            hit = next((i for i in items if i.replace(" ", "").lower() == n.replace(" ", "").lower()), None)
+            if hit:
+                out.append(hit)
+        return out
+
+    demo = [g for g in (_pick("Matematik1", "Matematik2"), _pick("Türkçe", "Edebiyat")) if len(g) >= 2]
+    if not demo:
+        demo = [items[:2]] if len(items) >= 2 else []
+    sheet = MultiSelectDialog(items, [x for g in demo for x in g],
+                              "Dersleri Seç — GRUP oluşturma (tanıtım)", dlg,
+                              groups=demo or None)
+    steps_sheet = [
+        {
+            "target": lambda: _button(sheet, "Grup Yap", "Seçilenleri Grup"),
+            "title": "Grup burada oluşturulur",
+            "text": "Soldan <b>Mat1</b> ve <b>Mat2</b>'yi işaretleyip bu düğmeye basarsanız ikisi "
+                    "BİR ders olur. Sonra <b>Türkçe</b> ile <b>Edebiyat</b>'ı işaretleyip yine "
+                    "basarsanız ikinci grup olur. Gruplar birbirinden bağımsızdır.",
+            "next": "Devam",
+        },
+        {
+            "target": lambda: _button(sheet, "Grubu Kaldır", "Kaldır"),
+            "title": "Grup yapmazsanız ne olur?",
+            "text": "Seçtiğiniz bütün dersler <b>tek grup</b> sayılır: Mat1, Mat2, Türkçe, Edebiyat "
+                    "dördü birden aynı ders kabul edilir ve çizelge oturmaz. Sayfanın altındaki not "
+                    "bunu hatırlatır.",
+            "next": "Devam",
+        },
+        {
+            "target": lambda: _button(sheet, "Uygula", "Tamam"),
+            "title": "Uygula",
+            "text": "Gruplar burada onaylanır ve kural satırında “Mat1 + Mat2 | Türkçe + Edebiyat” "
+                    "şeklinde görünür. Bu tanıtım penceresinde yaptığınız seçim kaydedilmez.",
+            "next": "Bitir",
+        },
+    ]
+    runner = TourRunner(sheet, steps_sheet, on_finish=sheet.reject)
+    sheet._tour = runner
+    QTimer.singleShot(240, runner.start)
+    sheet.exec()
 
 
 def maybe_run(dlg, force=False):

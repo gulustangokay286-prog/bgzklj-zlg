@@ -105,6 +105,11 @@ class SpotlightOverlay(QWidget):
         self._layout_card()
         self.show()
         self.raise_()
+        try:
+            self.window().raise_()
+            self.window().activateWindow()
+        except Exception:
+            pass
         self.btn_next.setFocus()
         self._timer.start()
         self._anim.stop()
@@ -243,6 +248,14 @@ class TourRunner:
         if self.overlay is not None:
             self.overlay.stop()
             self.overlay = None
+            # Adım bitti: "after" varsa çalışır (ilgili sayfayı açmak gibi).
+            if 0 <= self.i < len(self.steps):
+                after = self.steps[self.i].get("after")
+                if callable(after):
+                    try:
+                        after()
+                    except Exception as exc:
+                        print(f"[tour] adım sonrası iş yapılamadı: {exc}")
         self.i += 1
         while self.i < len(self.steps):
             step = self.steps[self.i]
