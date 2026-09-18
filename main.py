@@ -493,6 +493,20 @@ def main():
     except Exception:
         pass  # must never block app startup
 
+    # Sürüm tanıtımı: bu sürümün yenilikleri daha önce gösterilmediyse kart
+    # açılır ve "Göster" ile ilgili ekranlar tek tek vurgulanır. Bir kez
+    # görüldükten sonra bir daha açılmaz (~/.chenki_akademi/onboarding.json).
+    def _show_whats_new():
+        try:
+            from onboarding.whatsnew import maybe_show
+            from version import APP_VERSION
+            ed = getattr(shell, "_editor", None)
+            host = ed if (ed is not None and ed.isVisible()) else shell
+            maybe_show(host, APP_VERSION)
+        except Exception as exc:
+            print(f"[onboarding] tanıtım açılmadı: {exc}")
+    QTimer.singleShot(1400, _show_whats_new)
+
     exit_code = app.exec()
 
     # Safety net for "uygulamadan çıkınca kapatmıyor": if some background

@@ -726,6 +726,32 @@ class EditRelationDialog(QDialog):
             QMessageBox.warning(self, "Grup", "Her grupta en az iki ders olmalı.")
             self._change_subjects()
             return
+        # GRUPLAMA ZORUNLULUĞU. Seçilen dersler tek bir küme sayılır: Mat1, Mat2,
+        # Türkçe, Edebiyat'ı gruplamadan seçmek "dördü birden aynı ders" demektir,
+        # oysa kullanıcı genelde Mat1+Mat2 ve Türkçe+Edebiyat diye İKİ küme ister.
+        # Kaydetmeden önce söylenir; sessizce kaydedilirse motor dördünü tek ders
+        # sayar ve çizelge oturmaz.
+        if many and not self.selected_groups and n_subj >= 3:
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Warning)
+            box.setWindowTitle("Gruplama gerekli")
+            box.setTextFormat(Qt.RichText)
+            box.setText(
+                f"<b>{n_subj} ders seçtiniz ama grup oluşturmadınız.</b><br><br>"
+                "Bu kuralda seçilen derslerin <b>hepsi tek bir küme</b> sayılır: "
+                f"{', '.join(self.selected_subjects[:6])}"
+                f"{'…' if len(self.selected_subjects) > 6 else ''} birlikte <b>aynı ders</b> "
+                "kabul edilir.<br><br>"
+                "Mat1 + Mat2 bir ders, Türkçe + Edebiyat ayrı bir ders olsun istiyorsanız "
+                "ders seçme penceresinde <b>grup oluşturmalısınız</b>. Gruplamazsanız dördü "
+                "birden tek ders sayılır ve çizelge büyük ihtimalle oturmaz.")
+            b_group = box.addButton("Grupları düzenle", QMessageBox.AcceptRole)
+            box.addButton("Tek küme olarak kaydet", QMessageBox.DestructiveRole)
+            box.setDefaultButton(b_group)
+            box.exec()
+            if box.clickedButton() is b_group:
+                self._change_subjects()
+                return
         if self.selected_groups:
             n_subj = max(len(g) for g in self.selected_groups)   # uyarı en büyük gruba bakar
         if many and n_subj >= 2:
@@ -932,7 +958,7 @@ class EditRelationDialog(QDialog):
 
         grouped = self._grouped_kind()
         d = MultiSelectDialog(items, self.selected_subjects,
-                              "Dersleri Seç" + (" (gruplayabilirsiniz)" if grouped else ""), self,
+                              "Dersleri Seç" + (" — birden çok küme için GRUP oluşturun" if grouped else ""), self,
                               groups=(self.selected_groups if grouped else None))
         if d.exec():
             self.selected_subjects = d.get_selected()
@@ -1106,6 +1132,13 @@ class PlanningRelationsDialog(QDialog):
         """)
         self._build_ui()
         self._load_table()
+        # Ekran ilk kez açıldığında kısa bir tur: kural listesi, süzgeçler,
+        # GRUPLAR ve önem derecesi tek tek gösterilir.
+        try:
+            from onboarding.relations import maybe_run
+            maybe_run(self)
+        except Exception as exc:
+            print(f"[relations] tur atlandı: {exc}")
 
     def _build_ui(self):
         main_layout = QVBoxLayout(self)

@@ -4669,6 +4669,23 @@ class MainWindow(QMainWindow):
         FAQDialog(self).exec()
 
     def _act_tip_of_day(self):
+        """Günün ipucu — ilk seçenek sürüm tanıtımını yeniden oynatmaktır."""
+        from PySide6.QtWidgets import QMessageBox as _QMB
+        box = _QMB(self)
+        box.setIcon(_QMB.Information)
+        box.setWindowTitle("İpucu")
+        box.setText("Bu sürümün yeniliklerini yeniden izlemek ister misiniz?")
+        b_tour = box.addButton("Yenilikleri göster", _QMB.AcceptRole)
+        box.addButton("Rastgele ipucu", _QMB.RejectRole)
+        box.exec()
+        if box.clickedButton() is b_tour:
+            try:
+                from onboarding.whatsnew import maybe_show
+                from version import APP_VERSION
+                maybe_show(self, APP_VERSION, force=True)
+                return
+            except Exception as exc:
+                print(f"[onboarding] tanıtım açılmadı: {exc}")
         import random as _random
         tips = [
             "Bir dersi gridde başka bir dersin üzerine sürüklerseniz ikisi yer değiştirir; "
