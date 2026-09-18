@@ -36,11 +36,12 @@ PILL_BORDER = QColor(255, 255, 255, 24)
 PILL_H = 56
 PILL_MAX_W = 720
 PILL_BOTTOM = 26
-OPEN_MS = 620
-CLOSE_MS = 360
+OPEN_MS = 520
+CLOSE_MS = 340
+SETTLED = 0.90             # bu ilerlemeden sonra şekil HİÇ değişmez
 GLOW_H = 280
 GLOW_COLORS = ("#4285F4", "#9B72CB", "#D96570", "#F2A93B")
-CONTENT_MS = 220           # içerik solma süresi (şekil oturduktan SONRA)
+CONTENT_MS = 180           # içerik solma süresi (şekil oturduktan SONRA)
 
 
 def draw_sparkle(p, center, size, color, rot=0.0):
@@ -418,14 +419,21 @@ class AssistantOverlay(QWidget):
         pr = QRectF(self.pill_rect())
         ox, oy, r = self._origin.x(), self._origin.y(), self._radius
         # Zamanlama genie'nin okunmasını belirler: gövde ÖNCE dar kalır
-        # (huni ince bir akış gibi görünür), boyun ikinci yarıda düğmeden
-        # kopup inerken gövde asıl genişlemesini yapar. Tersi olursa şekil
-        # huni değil, ekranı kaplayan bir kütle gibi görünüyor.
-        a = min(1.0, t / 0.92)                     # gövde genişler (yavaş)
-        b = max(0.0, (t - 0.45) / 0.55)            # boyun aşağı iner
-        # Boyun GENİŞLEMESİ en sona bırakılır: aksi hâlde inerken şişiyor ve
-        # huni yerine geniş bir omuz/kütle görünüyor.
-        bw = max(0.0, (t - 0.78) / 0.22)
+        # (huni ince bir akış gibi görünür), boyun sonra düğmeden kopup
+        # inerken gövde asıl genişlemesini yapar, boynun genişlemesi en sona
+        # kalır. Tersi olursa şekil huni değil, ekranı kaplayan kütle olur.
+        #
+        # ÜÇÜ DE t = SETTLED'DE BİTER. Son dilim tamamen sabittir: eskiden
+        # boyun kapağı son %20'de hâlâ genişliyordu ve hap oturmuş görünürken
+        # üst kenarı boyunca gecikmeli bir hareket kalıyordu.
+        # SIRA ÖNEMLİ: boynun GENİŞLEMESİ inişten ÖNCE biter. Tersi olduğunda
+        # hap oturmuş görünürken üst kenarın iki ucunda tümsekler kalıyor ve
+        # son anda içeri çekiliyordu — "silindirin üst yarısı hizasında
+        # gecikmeli gelen şey" buydu.
+        a = min(1.0, t / (SETTLED * 0.80))                      # gövde genişler
+        bw = max(0.0, (t - SETTLED * 0.40) / (SETTLED * 0.46))  # boyun genişler
+        b = max(0.0, (t - SETTLED * 0.30) / (SETTLED * 0.70))   # boyun iner (en son)
+        a, b, bw = min(1.0, a), min(1.0, b), min(1.0, bw)
         ea = a * a * (3 - 2 * a)
         eb = b * b * (3 - 2 * b)
         ebw = bw * bw * (3 - 2 * bw)
@@ -645,8 +653,13 @@ class AssistantOverlay(QWidget):
         if self._shadow_pix is None:
             self._build_layers()
 
+        # Gölge ve ışığın saydamlığı da SETTLED'de biter: şekil donduğu hâlde
+        # arka plan koyulaşmaya devam ederse "son anda bir şey daha geliyor"
+        # gibi görünüyordu.
+        ft = min(1.0, t / SETTLED)
+
         # 1) alt gölge
-        p.setOpacity(t)
+        p.setOpacity(ft)
         p.drawPixmap(0, 0, self._shadow_pix)
 
         # 2) parıltı: faz ile yavaşça kayar, model düşünürken nefes alır
@@ -658,7 +671,7 @@ class AssistantOverlay(QWidget):
         # TOPLAMSAL: altındaki karartmayı aydınlatır — boyanmış bir şerit
         # değil, pozlama gibi bir ışık olur.
         p.setCompositionMode(QPainter.CompositionMode_Plus)
-        p.setOpacity(t * breathe)
+        p.setOpacity(ft * breathe)
         p.drawPixmap(QRectF(0, H - GLOW_H, W, GLOW_H), gp,
                      QRectF(shift * dpr, 0, W * dpr, GLOW_H * dpr))
         p.setOpacity(1.0)
@@ -668,7 +681,7 @@ class AssistantOverlay(QWidget):
         path, body = self._genie_path(t)
         p.setPen(Qt.NoPen)
         for i in range(3, 0, -1):
-            p.setBrush(QColor(0, 0, 0, int(14 * t / i)))
+            p.setBrush(QColor(0, 0, 0, int(14 * ft / i)))
             p.translate(0, i * 1.5)
             p.drawPath(path)
             p.translate(0, -i * 1.5)
