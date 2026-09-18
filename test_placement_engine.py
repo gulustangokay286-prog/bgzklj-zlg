@@ -345,6 +345,39 @@ def run():
     check("indeks kurulumu hızlı (<1.5s)", build < 1.5, f"{build:.2f}s")
     check("40 hücre taraması hızlı (<0.05s)", scan < 0.05, f"{scan:.4f}s")
 
+    print("\n[planlama ilişkisi: 'iki ders aynı güne gelmesin' bırakmada söylenir]")
+    sert = "Sıkı (Kesinlikle uygulanmalı)"
+    d = store(
+        dersler=[{"ad": "Matematik1"}, {"ad": "Matematik2"}, {"ad": "Fizik"}],
+        grid_placements=[placement("9A", "Matematik2", "Ayşe Demir", 3, 3)],
+        planlama_iliskileri=[{"kural": "İki ders aynı güne gelmesin", "aktif": True, "onem": sert,
+                              "dersler": ["Matematik1", "Matematik2"], "siniflar": ["9A"],
+                              "ogretmenler": []}])
+    r = analyze(d, lesson(cls="9A", subject="Matematik1"), 3, 0)
+    hits = r.rule_violations
+    check("Mat2'nin gününe Mat1: kural ihlali", bool(hits), [c.type for c in r.conflicts])
+    check("ihlal tipi PAIR_NOT_SAME_DAY", hits and hits[0].type == pe.PAIR_NOT_SAME_DAY)
+    check("mesaj kuralı ve iki dersi söylüyor",
+          hits and "İki ders aynı güne gelmesin" in hits[0].message
+          and "Matematik1" in hits[0].message and "Matematik2" in hits[0].message,
+          hits[0].message if hits else "")
+    check("sınıf filtresi motorla aynı anahtarla (norm_class) eşleşti", bool(hits))
+    r2 = analyze(d, lesson(cls="9A", subject="Matematik1"), 1, 0)
+    check("Mat2'siz güne Mat1: ihlal yok", not r2.rule_violations, [c.type for c in r2.conflicts])
+    r3 = analyze(d, lesson(cls="9B", subject="Matematik1"), 3, 0)
+    check("kapsam dışı sınıfta ihlal yok", not r3.rule_violations)
+    r4 = analyze(d, lesson(cls="9A", subject="Fizik"), 3, 0)
+    check("listede olmayan ders serbest", not r4.rule_violations)
+    # Aynı ders aynı gün: sıkı kuralda rule etiketi taşır, tercihte taşımaz
+    d2 = store(grid_placements=[placement("9A", "Matematik", "Ahmet Yılmaz", 2, 1)],
+               planlama_iliskileri=[{"kural": "Aynı ders aynı gün tekrar etmesin", "aktif": True,
+                                     "onem": sert, "dersler": [], "siniflar": [], "ogretmenler": []}])
+    r5 = analyze(d2, lesson(), 2, 4)
+    check("sıkı 'aynı ders aynı gün' bırakmada sorulur", any(c.type == pe.SAME_SUBJECT_SAME_DAY for c in r5.rule_violations))
+    d3 = store(grid_placements=[placement("9A", "Matematik", "Ahmet Yılmaz", 2, 1)])
+    r6 = analyze(d3, lesson(), 2, 4)
+    check("kural yokken yalnızca tercih, soru yok", not r6.rule_violations)
+
 
 if __name__ == "__main__":
     try:

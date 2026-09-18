@@ -213,7 +213,7 @@ def _matches_subject(s1, s2):
     return False
 
 
-def ask_place_anyway(parent, body_html):
+def ask_place_anyway(parent, body_html, title="Bu Saate Yerleştirilemez"):
     """Kapalı saat uyarısını göster; kullanıcı yine de istiyorsa True dön.
 
     Modül düzeyinde duruyor ki testler tek bir yerden yamalayabilsin. Eskiden
@@ -223,7 +223,7 @@ def ask_place_anyway(parent, body_html):
     """
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Warning)
-    box.setWindowTitle("Bu Saate Yerleştirilemez")
+    box.setWindowTitle(title)
     box.setText(body_html)
     btn_force = box.addButton("Yine de Yerleştir", QMessageBox.AcceptRole)
     btn_cancel = box.addButton("Vazgeç", QMessageBox.RejectRole)
@@ -2607,8 +2607,8 @@ class MainWindow(QMainWindow):
 
         return True, ""
 
-    def _ask_place_anyway(self, body_html):
-        return ask_place_anyway(self, body_html)
+    def _ask_place_anyway(self, body_html, title="Bu Saate Yerleştirilemez"):
+        return ask_place_anyway(self, body_html, title)
 
     def _final_placement_check(self, row, col, lesson_info):
         """Bırakma anında SON doğrulama — sürüklerken görünen renkle aynı kaynak.
@@ -2673,6 +2673,30 @@ class MainWindow(QMainWindow):
                 blocked_reasons.append(verdict.explanation)
             self.statusBar().showMessage(
                 f"Kapalı saate elle yerleştirildi — {verdict.explanation}", 8000)
+
+        # ── PLANLAMA İLİŞKİSİ: bırakılan yer sıkı bir kuralı çiğniyorsa SÖYLE ve SOR.
+        #
+        # Sürüklerken renk ve ipucu görünüyordu ama bırakınca ders sessizce
+        # yerleşiyordu. "İki ders aynı güne gelmesin: Matematik1 + Matematik2"
+        # kuralı varken Mat1'i Mat2'nin gününe bırakan kullanıcı bunu duymalı:
+        # kural hangisi, neyle çakışıyor, yine de yerleşsin mi. Motorla aynı
+        # analiz (placement_engine.rule_violations), tek soru.
+        rule_hits = list(getattr(verdict, "rule_violations", []) or []) if verdict is not None else []
+        if rule_hits:
+            import re
+            seen_rules = set()
+            lines = [c.message for c in rule_hits if not (c.message in seen_rules or seen_rules.add(c.message))]
+            body = ("⚠️ <b>Planlama İlişkileri'ndeki bir kural bu yerleşime izin vermiyor:</b><br><br>"
+                    + "<br>".join(f"• {m}" for m in lines[:4])
+                    + ("<br>…" if len(lines) > 4 else "")
+                    + "<br><br>Yine de yerleştirirseniz ders çizelgede kalır; kural ihlali "
+                      "Son Kontrol'de ve motor raporunda görünmeye devam eder.")
+            if not self._ask_place_anyway(body, title="Planlama Kuralı"):
+                self.statusBar().showMessage(
+                    "Yerleştirilemedi: " + re.sub(r"<[^>]+>", "", lines[0]), 8000)
+                return
+            self.statusBar().showMessage("Kural ihlaliyle elle yerleştirildi: "
+                                         + re.sub(r"<[^>]+>", "", lines[0]), 8000)
 
         display_mode = getattr(self._grid, "current_view_mode", "classes")
         subject_name = lesson_info.get("subject_name", "Ders")

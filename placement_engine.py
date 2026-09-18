@@ -91,6 +91,7 @@ LOCKED_SOURCE = "LOCKED_SOURCE"
 SAME_SUBJECT_SAME_DAY = "SAME_SUBJECT_SAME_DAY"
 SUBJECT_WINDOW = "SUBJECT_WINDOW"
 CONSECUTIVE_RULE = "CONSECUTIVE_RULE"
+PAIR_NOT_SAME_DAY = "PAIR_NOT_SAME_DAY"      # "İki ders aynı güne gelmesin"
 NO_ROOM_AVAILABLE = "NO_ROOM_AVAILABLE"
 GEOMETRY = "GEOMETRY"
 DATA_ERROR = "DATA_ERROR"
@@ -142,10 +143,10 @@ class Conflict:
     """Tek bir ihlal. 'çakışma var' demek yetmez; kim, nerede, neden."""
 
     __slots__ = ("type", "resource_kind", "resource_name", "periods",
-                 "severity", "message", "lessons")
+                 "severity", "message", "lessons", "rule")
 
     def __init__(self, type, resource_kind="", resource_name="", periods=(),
-                 severity=SEV_HARD, message="", lessons=()):
+                 severity=SEV_HARD, message="", lessons=(), rule=""):
         self.type = type
         self.resource_kind = resource_kind
         self.resource_name = resource_name
@@ -153,12 +154,14 @@ class Conflict:
         self.severity = severity
         self.message = message
         self.lessons = tuple(lessons)
+        self.rule = rule            # çiğnenen Planlama İlişkisi'nin adı ("" = tercih)
 
     def as_dict(self):
         return {"type": self.type, "resource_kind": self.resource_kind,
                 "resource_name": self.resource_name, "periods": list(self.periods),
                 "severity": SEVERITY_NAMES.get(self.severity, self.severity),
-                "message": self.message, "lessons": list(self.lessons)}
+                "message": self.message, "lessons": list(self.lessons),
+                "rule": self.rule}
 
     def __repr__(self):
         return f"<{self.type} {self.resource_name} {list(self.periods)}>"
@@ -254,7 +257,18 @@ class PlacementAnalysisResult:
     @property
     def relationship_conflicts(self):
         return self._of(SAME_SUBJECT_SAME_DAY, SUBJECT_WINDOW, CONSECUTIVE_RULE,
-                        LOCKED_TARGET, LOCKED_SOURCE)
+                        PAIR_NOT_SAME_DAY, LOCKED_TARGET, LOCKED_SOURCE)
+
+    @property
+    def rule_violations(self):
+        """Planlama İlişkileri'ndeki SIKI bir kuralı çiğneyen çakışmalar.
+
+        Bırakma anında kullanıcıya sorulur: "kural şu, yine de yerleştirilsin
+        mi?" Tercihler (yumuşak öneriler) burada değildir.
+        """
+        return [c for c in self.conflicts
+                if c.type in (SAME_SUBJECT_SAME_DAY, CONSECUTIVE_RULE, PAIR_NOT_SAME_DAY)
+                and c.severity >= SEV_SOFT and c.rule]
 
     @property
     def visual(self):
@@ -520,16 +534,23 @@ class TimetableSnapshot:
         # bir grupsa burada da tek derstir.
         try:
             from scheduler.rules import (family_lookup, subject_rule_scopes, subject_count,
-                                         X_SUBJECT_ONCE_DAY, X_SUBJECT_NOT_ADJACENT)
+                                         X_SUBJECT_ONCE_DAY, X_SUBJECT_NOT_ADJACENT,
+                                         X_PAIR_NOT_SAME_DAY)
             rels = self.data_store.get("planlama_iliskileri", []) or []
             self.family = family_lookup(rels, subject_count(self.data_store))
             scopes = subject_rule_scopes(rels)
             self.rule_once_day = scopes.get(X_SUBJECT_ONCE_DAY, [])
             self.rule_not_adjacent = scopes.get(X_SUBJECT_NOT_ADJACENT, [])
+            # "İki ders aynı güne gelmesin": listedeki derslerden aynı sınıfta
+            # aynı gün en fazla biri. Dersler ADIYLA ayrılır (motorla aynı:
+            # Mat1 ile Mat2 iki ayrı derstir, kural tam da bunu ayırmak için).
+            self.rule_pair = [sc for sc in scopes.get(X_PAIR_NOT_SAME_DAY, [])
+                              if len(sc["subjects"]) >= 2]
         except Exception:
             self.family = {}
             self.rule_once_day = []
             self.rule_not_adjacent = []
+            self.rule_pair = []
 
     def same_subject(self, a, b):
         try:
@@ -538,14 +559,32 @@ class TimetableSnapshot:
         except Exception:
             return _upper(a) == _upper(b)
 
+    @staticmethod
+    def _rule_class_key(class_name):
+        """Kural kapsamındaki sınıf anahtarı — subject_rule_scopes ile AYNI
+        normalizasyon (scheduler.model.norm_class: '12 A (MF)' -> '12amf').
+        class_key ('12A') ile karşılaştırılınca sınıf filtreli hiçbir kural
+        eşleşmiyordu; kural sessizce "bu sınıfa uygulanmıyor" sayılıyordu."""
+        try:
+            from scheduler.model import norm_class
+            return norm_class(class_name)
+        except Exception:
+            return _upper(class_name).replace(" ", "").lower()
+
+    def rule_scope_matches(self, sc, teachers, class_name):
+        """Kuralın öğretmen/sınıf filtresi bu bırakmaya uyuyor mu?"""
+        if sc["teachers"] and not any(teacher_key(t) in sc["teachers"] for t in teachers):
+            return False
+        if sc["classes"] and self._rule_class_key(class_name) not in sc["classes"]:
+            return False
+        return True
+
     def rule_applies(self, scopes, subject, teachers, class_name):
         """Aktif sıkı kural bu derse/öğretmene/sınıfa uygulanıyor mu?"""
         for sc in scopes:
             if sc["subjects"] and not any(self.same_subject(subject, x) for x in sc["subjects"]):
                 continue
-            if sc["teachers"] and not any(teacher_key(t) in sc["teachers"] for t in teachers):
-                continue
-            if sc["classes"] and class_key(class_name) not in sc["classes"]:
+            if not self.rule_scope_matches(sc, teachers, class_name):
                 continue
             return sc["label"]
         return ""
@@ -738,7 +777,8 @@ def _check_relationships(snapshot, candidate, conflicts):
                 candidate.periods, SEV_SOFT if label else SEV_PREFERENCE,
                 (f"{label}: {cn} sınıfı {candidate.subject} dersini bugün zaten görüyor "
                  f"({same_day[0]['subject']})." if label else
-                 f"{cn} sınıfı {candidate.subject} dersini bugün zaten görüyor.")))
+                 f"{cn} sınıfı {candidate.subject} dersini bugün zaten görüyor."),
+                rule=label))
         if len(same_day) + 1 > snapshot.pref_max_daily_same_subject:
             conflicts.append(Conflict(
                 SAME_SUBJECT_SAME_DAY, "ders", candidate.subject,
@@ -757,8 +797,30 @@ def _check_relationships(snapshot, candidate, conflicts):
                         conflicts.append(Conflict(
                             CONSECUTIVE_RULE, "ders", candidate.subject,
                             candidate.periods, SEV_SOFT,
-                            f"{label}: {candidate.subject} ile {e['subject']} art arda geliyor."))
+                            f"{label}: {candidate.subject} ile {e['subject']} art arda geliyor.",
+                            rule=label))
                         break
+        # "İki ders aynı güne gelmesin": Mat1 bırakılıyor, o gün sınıfta Mat2 var.
+        for sc in snapshot.rule_pair:
+            if not snapshot.rule_scope_matches(sc, teachers, cn):
+                continue
+            subs = {_upper(x) for x in sc["subjects"]}
+            if _upper(candidate.subject) not in subs:
+                continue
+            others = [e for e in snapshot.class_lessons_on_day(cn, candidate.day)
+                      if _upper(e["subject"]) in subs
+                      and _upper(e["subject"]) != _upper(candidate.subject)
+                      and not _same_block(e["raw"], candidate)]
+            if others:
+                conflicts.append(Conflict(
+                    PAIR_NOT_SAME_DAY, "ders", candidate.subject, candidate.periods,
+                    SEV_SOFT,
+                    f"{sc['label']}: {cn} sınıfında {candidate.subject} ile "
+                    f"{others[0]['subject']} aynı güne gelemez "
+                    f"({_slot_label(snapshot, candidate.day, others[0]['period'])} "
+                    f"{others[0]['subject']} var).",
+                    rule=sc["label"]))
+                break
 
     window = snapshot.pref_subject_windows.get(_upper(candidate.subject))
     if window:
