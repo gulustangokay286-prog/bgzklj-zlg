@@ -63,6 +63,19 @@ def validate(world, rules, positions, bend_rules=False, forced=None, pieces=None
                                   f"{' + '.join(c.class_names)} · {c.subject_name}, gün {d+1}")
             continue
         placed.append((c, idx))
+    # Aynı sınıfta aynı dersin aynı güne düşen saatleri tek kesintisiz blok
+    # olmalı — kuraldan bağımsız (bkz. cpsat._same_lesson_contiguous).
+    ayni_ders=defaultdict(set)
+    for c,idx in placed:
+        if idx<0: continue
+        d=idx//world.P
+        for off in range(c.duration):
+            ayni_ders[(tuple(c.classes),c.subject,d)].add(idx+off)
+    for (cls,subj,d),cells in ayni_ders.items():
+        lst=sorted(cells)
+        if any(b-a!=1 for a,b in zip(lst,lst[1:])):
+            errors.append(f"Aynı ders aynı günde araya ders girerek bölünmüş: "
+                          f"{' + '.join(world.classes[ci] for ci in cls)} · {world.subjects[subj]}, gün {d+1}")
     for c,idx in placed:
         label=f"{' + '.join(c.class_names)} · {c.subject_name}"
         if idx < 0:

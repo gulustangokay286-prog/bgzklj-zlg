@@ -90,8 +90,58 @@ class _Model:
         self.occ = []            # yerleşimler: dict(i, d, p, dur, v, card)
         self._build_vars(allow_split)
         self._physical()
+        self._same_lesson_contiguous()
         self._compact()
         self._rules()
+
+    # ── aynı ders aynı günde tek parça ───────────────────────────────────
+    def _same_lesson_contiguous(self):
+        """Bir sınıfta aynı dersin aynı güne düşen bütün kartları/parçaları
+        TEK KESİNTİSİZ BLOK oluşturur — kuraldan bağımsız, sert.
+
+        "İngilizce, Paragraf, İngilizce" olmaz: iki İngilizce saati aynı güne
+        geliyorsa yan yana gelir; gelemiyorsa o gün ikinciye yer yoktur. Kural
+        ("aynı ders aynı gün tekrar etmesin") seçilmemiş ya da dersi
+        kapsamıyor olsa da geçerlidir.
+
+        Kuruluş: (sınıf kümesi, ders) grubunda aynı güne düşebilecek her
+        yerleşim çifti için, aralarında boşluk kaldığında o boşluğun HER
+        hücresi aynı grubun başka bir yerleşimince doldurulmak zorundadır
+        (a + b - 1 <= hücreyi kaplayanlar). Üç kartlık 1+1+1 böylece yan yana
+        üçlü olabilir, ama araya başka ders giremez.
+        """
+        m = self.m
+        groups = defaultdict(list)
+        for o in self.occ:
+            c = o['card']
+            groups[(tuple(c.classes), c.subject)].append(o)
+        for key, occs in groups.items():
+            if len({o['i'] for o in occs}) < 2 and not any(o['piece'] for o in occs):
+                continue
+            cover = defaultdict(list)
+            for o in occs:
+                for off in range(o['dur']):
+                    cover[(o['d'], o['p'] + off)].append(o['v'])
+            by_day = defaultdict(list)
+            for o in occs:
+                by_day[o['d']].append(o)
+            for d, lst in by_day.items():
+                for x in range(len(lst)):
+                    a = lst[x]
+                    for y in range(x):
+                        b = lst[y]
+                        if self._exclusive(a, b):
+                            continue
+                        lo, hi = (a, b) if a['p'] <= b['p'] else (b, a)
+                        gap0, gap1 = lo['p'] + lo['dur'], hi['p']
+                        if gap1 <= gap0:
+                            continue            # bitişik ya da çakışık (çakışma zaten yasak)
+                        for q in range(gap0, gap1):
+                            cov = [v for v in cover[(d, q)] if v is not a['v'] and v is not b['v']]
+                            if not cov:
+                                m.AddBoolOr([a['v'].Not(), b['v'].Not()])
+                                break
+                            m.Add(a['v'] + b['v'] - 1 <= sum(cov))
 
     # ── değişkenler ───────────────────────────────────────────────────────
     def _build_vars(self, allow_split):
