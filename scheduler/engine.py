@@ -312,12 +312,37 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
                         res.warnings.append(f"Bitirme geçişi {kazanc} saat daha yerleştirdi.")
             except Exception as exc:
                 res.warnings.append(f"Bitirme geçişi çalışmadı: {exc}")
+        # Açıkta kalan her kart için SAAT düzeyinde sebep: öğretmenin açık
+        # saati, sınıfla ORTAK açık saati ve yükü. Gün-seviyesi tanı bunu
+        # göremez (kapasite gün gün yeterken saatler örtüşmeyebilir).
+        try:
+            P_ = w.P
+            parca = res.split_pieces or {}
+            for i, c in enumerate(w.cards):
+                if res.positions[i] >= 0 or i in parca or c.teacher < 0:
+                    continue
+                ti = c.teacher
+                t_open = [cell for cell in range(w.D * P_) if not (w.teacher_closed[ti] >> cell) & 1]
+                ortak = [cell for cell in t_open
+                         if not any((w.class_closed[ci] >> cell) & 1 for ci in c.classes)]
+                yuk = sum(x.duration for x in w.cards if x.teacher == ti)
+                gunler = sorted({cell // P_ for cell in ortak})
+                res.diagnostics.append(dict(
+                    message=(f"Yerleşmedi — {' + '.join(c.class_names)} · {c.subject_name} "
+                             f"({c.duration} saat, {c.teacher_name}): öğretmenin haftalık açık saati "
+                             f"{len(t_open)}, yükü {yuk} saat; bu sınıfla ORTAK açık saat {len(ortak)} "
+                             f"(gün: {', '.join(str(d + 1) for d in gunler) or '-'}). Ortak saatler "
+                             f"öğretmenin diğer derslerine gidince bu karta yer kalmıyor; öğretmenin "
+                             f"ya da sınıfın tablosunda saat açmak gerekir."),
+                    cards=[i], kind='hour_level'))
+        except Exception as exc:
+            res.warnings.append(f"Saat düzeyi tanı çalışmadı: {exc}")
         if durum == 'STALLED':
             aciklama = "iki tur üst üste ilerleme olmadı, daha fazla beklenmedi"
         elif durum == 'OPTIMAL' and placed < res.total_hours:
             aciklama = ("bu kurallarla daha fazlası mümkün değil (gün-seviyesi kanıt)"
                         if gun_ust is not None and placed >= gun_ust
-                        else "CP-SAT bu kurallarla daha fazlasının mümkün olmadığını kanıtladı")
+                        else "bu kurallar ve zaman tablolarıyla daha fazlası mümkün değil (CP-SAT kanıtı)")
         else:
             aciklama = f"CP-SAT {durum}"
         res.warnings.append(

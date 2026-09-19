@@ -35,7 +35,9 @@ from collections import defaultdict
 
 from . import rules as R
 
-DAY_RULE_KINDS = (R.X_SUBJECT_ONCE_DAY, R.X_TEACHER_ONCE_DAY, R.X_PAIR_NOT_SAME_DAY)
+DAY_RULE_KINDS = (R.X_SUBJECT_ONCE_DAY, R.X_TEACHER_ONCE_DAY, R.X_PAIR_NOT_SAME_DAY,
+                  R.X_SUBJECT_MAX_HOURS, R.X_PRACTICAL_MAX_HOURS, R.X_CLASS_MAX_HOURS,
+                  R.X_TEACHER_MAX_HOURS)
 
 
 def _open_hours(mask, d, P):
@@ -104,9 +106,13 @@ def _solve(world, rules, forced, seconds, skip=None, open_teachers=(),
             hv = m.NewIntVar(0, c.duration, f"h{c.cid}_{d}")
             h[c.cid, d] = hv
             if can_split:
-                pv = m.NewBoolVar(f"p{c.cid}_{d}")
+                # Bir günde 0..süre parça saati (3 saatlik kart 2+1 olarak iki
+                # güne yayılabilir; aynı gündeki parçalar bitişik tek bloktur).
+                # Bool olsaydı bu yerleşim gün modelinde ifade edilemez, sınır
+                # ulaşılabilir bir çözümü imkânsız gösterirdi.
+                pv = m.NewIntVar(0, c.duration, f"p{c.cid}_{d}")
                 piece[c.cid, d] = pv
-                m.Add(pv + sum(ws) <= 1)          # parça varsa bütün blok yok
+                m.Add(pv + c.duration * sum(ws) <= c.duration)   # parça varsa bütün blok yok
                 m.Add(hv == c.duration * whole[c.cid, d] + pv)
                 if (c.cid, d) in avoid:
                     cezalar.append(pv)
@@ -142,14 +148,64 @@ def _solve(world, rules, forced, seconds, skip=None, open_teachers=(),
                 for ci in c.classes:
                     if r.applies_class(ci) and (ri, ci) not in skip:
                         groups[ci, res].append(c)
-            # NOT: "aynı ders aynı gün tekrar etmesin" artık BİTİŞİK kartlara
-            # izin veriyor (1+1 yan yana tek bloktur). Bitişiklik gün modelinde
-            # ifade edilemez — saat yok — bu yüzden burada kısıt KURULMAZ.
-            # Sonuç: sınır biraz gevşer ama GEÇERLİ kalır (üst sınırın fazla
-            # sıkı olması, ulaşılabilir bir çözümü imkânsız göstererek motoru
-            # erken durdururdu; gevşek olması yalnızca biraz fazla aramaya
-            # yol açar).
+            # Bitişiklik istisnası yalnızca AYNI ATAMANIN (origin) kartları
+            # için geçerli (bkz. cpsat._once_day). Gün modelinde bu şöyle
+            # ifade edilir: bir günde o (sınıf, aile) için EN FAZLA BİR atama
+            # ders yapar. Aynı atamanın kartları aynı güne (yan yana) gelebilir;
+            # farklı atamalar gelemez. Esas modelin gevşetmesi, sınır GEÇERLİ.
+            # Aritmetik-imkânsız (forced) gruplar esas modelde esnediği için
+            # burada da kısıtlanmaz.
+            for (ci, res), cards in groups.items():
+                if (which, ci, res) in forced:
+                    continue
+                by_origin = defaultdict(list)
+                for c in cards:
+                    by_origin[c.origin].append(c)
+                if len(by_origin) < 2:
+                    continue
+                for d in range(D):
+                    flags = []
+                    for g, cs in by_origin.items():
+                        vs = [h[c.cid, d] for c in cs if (c.cid, d) in h]
+                        if vs:
+                            flags.append(used(sum(vs), f"o{which}{ci}_{res}_{d}_{g}"))
+                    if len(flags) > 1:
+                        m.Add(sum(flags) <= 1)
             continue
+        elif r.kind in (R.X_SUBJECT_MAX_HOURS, R.X_PRACTICAL_MAX_HOURS):
+            # Günde en fazla N saat (sınıf, aile): saat modeliyle birebir aynı
+            # anlam, gün modelinde doğrudan ifade edilir.
+            lim = max(1, int(r.param or 0))
+            groups = defaultdict(list)
+            for c in w.cards:
+                if not r.applies_card(c) or c.family < 0:
+                    continue
+                for ci in c.classes:
+                    if r.applies_class(ci) and (ri, ci) not in skip:
+                        groups[ci, c.family].append(c)
+            for (ci, f), cards in groups.items():
+                for d in range(D):
+                    vs = [h[c.cid, d] for c in cards if (c.cid, d) in h]
+                    if vs:
+                        m.Add(sum(vs) <= lim)
+        elif r.kind == R.X_CLASS_MAX_HOURS:
+            lim = max(1, int(r.param or 0))
+            for ci in range(len(w.classes)):
+                if not r.applies_class(ci) or (ri, ci) in skip:
+                    continue
+                for d in range(D):
+                    vs = [h[c.cid, d] for c in w.cards if ci in c.classes and r.applies_card(c) and (c.cid, d) in h]
+                    if vs:
+                        m.Add(sum(vs) <= lim)
+        elif r.kind == R.X_TEACHER_MAX_HOURS:
+            lim = max(1, int(r.param or 0))
+            for ti in range(len(w.teachers)):
+                if not r.applies_teacher(ti):
+                    continue
+                for d in range(D):
+                    vs = [h[c.cid, d] for c in w.cards if c.teacher == ti and r.applies_card(c) and (c.cid, d) in h]
+                    if vs:
+                        m.Add(sum(vs) <= lim)
         elif r.kind == R.X_PAIR_NOT_SAME_DAY:
             for ci in range(len(w.classes)):
                 if not r.applies_class(ci) or (ri, ci) in skip:

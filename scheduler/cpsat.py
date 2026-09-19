@@ -623,7 +623,8 @@ def solve_cpsat(world, rule_list, seconds=60.0, seed=0, workers=8,
                 pieces_out=None, hedef_saat=None, referans=None,
                 takas_out=None, forced=None, cancelled=None,
                 stop_when_full=False, bound_out=None,
-                stop_at_hours=None, warm_pieces=None, min_hours=None):
+                stop_at_hours=None, warm_pieces=None, min_hours=None,
+                pure_objective=False):
     """World + kurallar -> (positions, placed_hours, status).
 
     positions[i] = kart i'nin ızgara indeksi, yerleşmediyse -1.
@@ -649,6 +650,10 @@ def solve_cpsat(world, rule_list, seconds=60.0, seed=0, workers=8,
     warm_pieces : {kart: [saat indeksleri]} — ısıtmada bölünmüş kartların
                  parça yerleri. Verilmezse bölünmüş kart ipucu almaz ve CP-SAT
                  önceki turun çözümünü baştan kurmak zorunda kalır.
+    pure_objective : amaç YALNIZCA yerleşen saat (ceza yok). Böylece
+                 BestObjectiveBound // SAAT geçerli bir saat ÜST SINIRIDIR —
+                 cezalı amaçta değildi (zorunlu grup cezaları sınırı bir saatin
+                 altına çekip yanlış kanıt üretiyordu). Tavan sondası için.
     min_hours  : verilirse yerleşen saat EN AZ bu kadar olmak zorundadır (sert).
                  Komşuluk onarımında "+1 saat" hedefi böyle verilir: küçük
                  komşulukta imkânsızsa CP-SAT bunu anında kanıtlar ve süre
@@ -681,10 +686,11 @@ def solve_cpsat(world, rule_list, seconds=60.0, seed=0, workers=8,
         model.Add(yerlesen >= int(min_hours) * SAAT)
     if hedef_saat is None:
         terms = list(saat_terms)
-        for i, bol, kesim in splits:
-            terms.append(-SPLIT_PEN * kesim * bol)
-        for t in M.pen:
-            terms.append(-t)
+        if not pure_objective:
+            for i, bol, kesim in splits:
+                terms.append(-SPLIT_PEN * kesim * bol)
+            for t in M.pen:
+                terms.append(-t)
         model.Maximize(sum(terms) if terms else 0)
     else:
         model.Add(yerlesen == int(hedef_saat) * SAAT)
@@ -769,7 +775,8 @@ def solve_cpsat(world, rule_list, seconds=60.0, seed=0, workers=8,
     if bound_out is not None:
         try:
             b = solver.BestObjectiveBound()
-            bound_out['saat'] = int(b // SAAT) if hedef_saat is None else None
+            # Yalnızca cezasız amaçta saat sınırı olarak GEÇERLİ.
+            bound_out['saat'] = int(b // SAAT) if (hedef_saat is None and pure_objective) else None
         except Exception:
             bound_out['saat'] = None
     positions = [-1] * len(w.cards)
@@ -863,166 +870,109 @@ def solve_optimal(world, rule_list, referans=None, allow_split=True,
     def iptal():
         return bool(callable(cancelled) and cancelled())
 
-    # ── 0. AŞAMA: kısa tur + FİZİBİLİTE ──
+    # ── 1. AŞAMA: saati en büyükle ──
     #
-    # Tek parça en iyileme son iki üç saati şansa bırakıyordu: aynı veride
-    # bir koşu 281, bir koşu 284. Ölçülen çare iki adım:
-    #   a) 12 saniyelik kısa bir en iyileme turu — kolay veride tavanı hemen
-    #      bulur (Boğaziçi kuralsız: 6-15 sn); bulamazsa ekrana ilerleme ve
-    #      elde bir yedek çözüm bırakır.
-    #   b) Tavan (gün-seviyesi kanıt, bilinen_ust) biliniyorsa CP-SAT'e
-    #      "yerleşen saat EN AZ tavan" diye SERT kısıt verilir: en iyileme
-    #      değil fizibilite. Kanıt aramaz, sadece bulur; parça simetrisi
-    #      kırılmış modelde Boğaziçi'de 6/6 koşuda 12-24 sn (en iyileme aynı
-    #      veride 30 sn'de 278-282 veriyordu). INFEASIBLE derse tavan bir
-    #      saat aşağı çekilir ve tekrar denenir — bu da kesin kanıttır.
-    #      İpucu verilmez: ölçümde ipucu süreyi iki katına çıkardı.
-    #   Sonra hâlâ eksikse eski ısıtmalı turlar (1. aşama) devreye girer.
-    if w.cards and not iptal():
+    # Ölçülen gerçek (Boğaziçi v213, sıkı kurallar): "yerleşen saat >= hedef"
+    # sert kısıtıyla fizibilite araması, hedef ulaşılabilir olsa bile
+    # amacı olmadığı için körlemesine dolaşıyor (270 hedefi 27 sn'de bulunamadı;
+    # aynı sürede en iyileme 276'ya çıktı). Buna karşılık ISITMALI EN İYİLEME
+    # turları eldekini her turda yükseltir. O yüzden ana tırmanıcı en
+    # iyilemedir; fizibilite yalnızca son adımda, eldeki sayı kanıtlı tavana
+    # 1-2 saat kaldığında "tepeye it" olarak bir kez denenir. INFEASIBLE her
+    # zaman kanıttır ve tavanı bir indirir.
+    #
+    # Durma: tavana ulaşıldı (kanıtlı tavan = optimum) ya da kullanıcı
+    # "bu hâliyle bitir" dedi. Soru, ilk turdan sonra ilerleme getirmeyen
+    # her turun ardından sorulur; soran yoksa iki durgun turda durulur.
+    tur_saniye = 20.0
+    fiz_denendi = set()
+    while durum not in ("OPTIMAL", "STALLED", "CANCELLED"):
+        if iptal():
+            durum = "CANCELLED"
+            break
         kalan = azami_saniye - (_t.monotonic() - baslangic)
-        pieces = []
-        pos, placed, st = solve_cpsat(
-            w, rule_list, seconds=min(12.0, max(1.0, kalan)), workers=workers,
-            allow_split=allow_split, pieces_out=pieces, log=log, forced=forced,
-            cancelled=cancelled, stop_when_full=True, stop_at_hours=ust_sinir)
-        if placed > en_iyi_saat:
-            en_iyi_saat, en_iyi_pos, en_iyi_parca = placed, pos, dict(pieces)
-            ipucu, ipucu_parca = pos, dict(pieces)
-        if callable(progress):
-            progress(dict(asama=0, tur=0, saat=en_iyi_saat, toplam=w.total_hours(),
-                          durum=st, ust=ust_sinir, gecen=_t.monotonic() - baslangic))
+        if kalan <= 1:
+            break
         hedef = w.total_hours() if ust_sinir is None else min(w.total_hours(), ust_sinir)
-        deneme = 0
-        # Hedef merdiveni. İlk deneme TEPEYİ ister (kolay veride tavan bir
-        # seferde gelir). Gelmezse eldekinin BİR ÜSTÜ istenir ve her başarıda
-        # bir basamak daha çıkılır (279 → 280 → … → 284): +1 ısıtmalı ve
-        # ucuz, tepeye körlemesine 3×45 sn saldırmak ise 282'de kalıyordu.
-        # +1 bile gelmiyorsa karar kullanıcının ("beklemek ister misin").
-        # INFEASIBLE her zaman kanıttır: tavan o hedefin bir altına iner.
-        target = hedef
-        while (en_iyi_saat < hedef and ust_sinir is not None and hedef > max(en_iyi_saat, 0)
-               and not iptal()):
-            deneme += 1
-            kalan = azami_saniye - (_t.monotonic() - baslangic)
-            if kalan <= 1:
-                break
-            target = max(min(target, hedef), en_iyi_saat + 1)
-            tepe = (target == hedef)
-            pieces = []
+        if en_iyi_saat >= hedef and en_iyi_saat > 0:
+            durum = "OPTIMAL"
+            break
+        tur += 1
+        pieces = []
+        # Tepeye itiş: tavana 1-2 saat kaldıysa ve bu tavan daha önce
+        # denenmediyse fizibilite (25 sn). Bulursa bitti; INFEASIBLE ise tavan
+        # bir iner (kanıt); bulamazsa en iyilemeye döner.
+        # İlk turdan sonra tavan denenmemişse tepeye itiş. INFEASIBLE kanıtı
+        # genelde hızlı (v209: 16-27 sn) ve tavanı bir indirir; döngü hemen
+        # bir altını dener. Böylece ekrandaki "tavan" gerçeğe iner ve tavan
+        # ulaşılabilirse tam orada bulunur. UNKNOWN ise en iyilemeye dönülür.
+        if (en_iyi_saat > 0 and hedef > en_iyi_saat and hedef not in fiz_denendi
+                and tur >= 1 and kalan > 5):
+            fiz_denendi.add(hedef)
+            itis = 60.0 if hedef - en_iyi_saat <= 2 else 40.0
             pos, placed, st = solve_cpsat(
-                w, rule_list, seconds=min(25.0 if tepe else 15.0, kalan), workers=workers,
+                w, rule_list, seconds=min(itis, kalan), workers=workers,
                 allow_split=allow_split, pieces_out=pieces, log=log, forced=forced,
-                cancelled=cancelled, stop_when_full=True, stop_at_hours=target,
-                min_hours=target, seed=deneme,
-                warm_start=None if tepe else ipucu,
-                warm_pieces=None if tepe else ipucu_parca)
+                cancelled=cancelled, stop_when_full=True, stop_at_hours=hedef,
+                min_hours=hedef, seed=tur * 7 + 3)
             if placed > en_iyi_saat:
                 en_iyi_saat, en_iyi_pos, en_iyi_parca = placed, pos, dict(pieces)
                 ipucu, ipucu_parca = pos, dict(pieces)
-            if callable(progress):
-                progress(dict(asama=0, tur=deneme, saat=en_iyi_saat, toplam=w.total_hours(),
-                              durum=st, ust=ust_sinir, gecen=_t.monotonic() - baslangic))
+                durgun = 0
             if st == "INFEASIBLE":
-                # Bu kadar saat yerleşmiyor — daha fazlası da yerleşmez (kanıt).
-                ust_sinir = target - 1
-                hedef = min(hedef, ust_sinir)
-                target = hedef
-                continue
-            if placed >= target:
-                target = en_iyi_saat + 1        # bir basamak daha
-                continue
-            # UNKNOWN: bu hedef süre içinde bulunamadı.
-            if tepe and en_iyi_saat + 1 < hedef:
-                target = en_iyi_saat + 1        # tepe gelmedi: tırmanmaya geç
-                continue
-            if callable(ask_continue) and en_iyi_saat > 0:
+                ust_sinir = hedef - 1
+            if callable(progress):
+                progress(dict(asama=1, tur=tur, saat=en_iyi_saat, toplam=w.total_hours(),
+                              durum=st, ust=ust_sinir, gecen=_t.monotonic() - baslangic))
+            continue
+        pos, placed, st = solve_cpsat(
+            w, rule_list, seconds=min(tur_saniye, kalan), workers=workers,
+            warm_start=ipucu, warm_pieces=ipucu_parca, allow_split=allow_split,
+            pieces_out=pieces, log=log, forced=forced, cancelled=cancelled,
+            stop_when_full=True, stop_at_hours=ust_sinir, seed=tur)
+        if placed > en_iyi_saat:
+            en_iyi_saat, en_iyi_pos, en_iyi_parca = placed, pos, dict(pieces)
+            ipucu, ipucu_parca = pos, dict(pieces)
+            durgun = 0
+        else:
+            durgun += 1
+        durum = st
+        if callable(progress):
+            progress(dict(asama=1, tur=tur, saat=en_iyi_saat, toplam=w.total_hours(),
+                          durum=st, ust=ust_sinir, gecen=_t.monotonic() - baslangic))
+        if iptal():
+            durum = "CANCELLED"
+            break
+        if st in ("INFEASIBLE", "MODEL_INVALID"):
+            break
+        hedef = w.total_hours() if ust_sinir is None else min(w.total_hours(), ust_sinir)
+        if en_iyi_saat >= hedef and en_iyi_saat > 0:
+            durum = "OPTIMAL"
+            break
+        if st == "OPTIMAL":
+            # CP-SAT amacı (saat - cezalar) için kanıt verdi: daha çok saat de
+            # yok, çünkü bir saat her cezadan ağır basar. Tavan = eldeki.
+            ust_sinir = en_iyi_saat
+            durum = "OPTIMAL"
+            break
+        # İlk turdan sonra ilerleme getirmeyen her tur: karar kullanıcının.
+        if tur >= 2 and durgun >= 1 and en_iyi_saat > 0:
+            if callable(ask_continue):
                 try:
                     devam = bool(ask_continue(dict(saat=en_iyi_saat, toplam=w.total_hours(),
-                                                   tur=deneme, gecen=_t.monotonic() - baslangic,
-                                                   durgun=1, ust=ust_sinir)))
+                                                   tur=tur, gecen=_t.monotonic() - baslangic,
+                                                   durgun=durgun, ust=ust_sinir)))
                 except Exception:
                     devam = False
                 if not devam:
                     durum = "STALLED"
                     break
-                target = hedef                  # bekliyor: bir kez daha tepeyi dene
-            elif deneme >= 4:
-                break                           # soran yok: 1. aşamaya geç
-    hedef = w.total_hours() if ust_sinir is None else min(w.total_hours(), ust_sinir)
-    if en_iyi_saat >= hedef and en_iyi_saat > 0:
-        durum = "OPTIMAL"
-
-    # ── 1. AŞAMA: saati en büyükle ──
-    #
-    # Durma koşulları, sırasıyla:
-    #   • bütün saatler yerleşti (tam çizelge = optimum, kanıt beklenmez);
-    #   • CP-SAT OPTIMAL dedi ya da üst sınırı bulunan saate indirdi
-    #     (daha fazlası YOK — 278'de bekleyip durmanın anlamı yok);
-    #   • iki tur üst üste tek saat bile kazanılmadı (durgunluk). Ölçüm şu:
-    #     bir tur kazandıracaksa ilk dakikalarda kazandırıyor; 278'de bir
-    #     saat beklemek 279 getirmiyor, kullanıcıyı bekletiyor.
-    # Tur süresi 30 sn'den başlar ve en fazla 4 dakikaya çıkar.
-    while durum not in ("OPTIMAL", "STALLED"):
-        tur += 1
-        if iptal():
-            durum = "CANCELLED"
-            break
-        kalan = azami_saniye - (_t.monotonic() - baslangic)
-        if kalan <= 0:
-            break
-        pieces = []
-        pos, placed, st = solve_cpsat(
-            w, rule_list, seconds=min(tur_saniye, kalan), workers=workers,
-            warm_start=ipucu, warm_pieces=ipucu_parca, allow_split=allow_split,
-            pieces_out=pieces, log=log, forced=forced, cancelled=cancelled,
-            stop_when_full=True, stop_at_hours=ust_sinir)
-        if placed > en_iyi_saat:
-            en_iyi_saat = placed
-            en_iyi_pos = pos
-            en_iyi_parca = dict(pieces)
-            ipucu = pos
-            ipucu_parca = dict(pieces)
-            durgun = 0
-        else:
-            durgun += 1
-        # CP-SAT'in amaç sınırı SAAT'e bölünerek saat sınırı SAYILMAZ. Amaç
-        # = SAAT*saat - cezalar; zorunlu grupların kaçınılmaz cezaları (her
-        # biri 2000) amaç sınırını bir saatin ağırlığının altına çekebiliyor
-        # ve 284 mümkünken "283'ten fazlası yok" diye YANLIŞ kanıt çıkıyordu
-        # — motor bir saat eksikte duruyordu. Kanıt yalnızca gün-seviyesi
-        # gevşetmeden (bilinen_ust) gelir; CP-SAT'in OPTIMAL demesi yeter.
-        durum = st
-        if callable(progress):
-            progress(dict(asama=1, tur=tur, saat=en_iyi_saat,
-                          toplam=w.total_hours(), durum=st, ust=ust_sinir,
-                          gecen=_t.monotonic() - baslangic))
-        if en_iyi_saat >= w.total_hours():
-            durum = "OPTIMAL"
-            break
-        if iptal():
-            durum = "CANCELLED"
-            break
-        if st == "OPTIMAL" or st in ("INFEASIBLE", "MODEL_INVALID"):
-            break
-        if ust_sinir is not None and en_iyi_saat >= ust_sinir:
-            durum = "OPTIMAL"       # sınır kanıtı: bu kurallarla daha fazlası yok
-            break
-        # Tam çizelge gelmedi. İkinci turdan itibaren karar kullanıcının:
-        # beklemek istiyorsa bir tur daha, istemiyorsa eldeki en iyi sonuç.
-        if callable(ask_continue) and tur >= 2 and en_iyi_saat > 0:
-            try:
-                devam = bool(ask_continue(dict(saat=en_iyi_saat, toplam=w.total_hours(),
-                                               tur=tur, gecen=_t.monotonic() - baslangic,
-                                               durgun=durgun, ust=ust_sinir)))
-            except Exception:
-                devam = False
-            if not devam:
+                # Beklemeyi seçti: tepeye itiş yeni tohumla yeniden denenebilir.
+                fiz_denendi.clear()
+            elif durgun >= 2:
                 durum = "STALLED"
                 break
-        elif durgun >= 2 and en_iyi_saat > 0:
-            durum = "STALLED"
-            break
-        tur_saniye = min(tur_saniye * 2, 60.0)
+        tur_saniye = min(tur_saniye * 1.5, 40.0)
 
     if durum != "OPTIMAL" or en_iyi_saat <= 0:
         return en_iyi_pos, en_iyi_parca, max(en_iyi_saat, 0), durum, tur
