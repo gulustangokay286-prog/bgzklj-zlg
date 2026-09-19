@@ -527,7 +527,15 @@ from PySide6.QtCore import QRect
 # GÜN sınırında ve başlığın bittiği yerde var.
 HDR_BG        = QColor("#FFFFFF")   # başlık zemini: kâğıt
 HDR_DAY_INK   = QColor("#0F172A")
-HDR_PER_INK   = QColor("#64748B")
+HDR_PER_INK   = QColor("#475569")
+# Başlık iki satır: üstte gün adı, altta saat numarası. Saat satırı 19
+# pikseldi ve yazısı 7.5 puntoydu — numaralar sıkışık ve soluk kalıyordu,
+# üstelik her saatin yanına çizilen kısa dikey iz onları iyice kalabalık
+# yapıyordu. Satır yükseldi, yazı büyüdü, izler kalktı: sekiz rakamı
+# ayıran şey artık aralarındaki boşluk.
+HDR_DAY_ROW   = 22
+HDR_PER_ROW   = 22
+HDR_TOTAL_H   = HDR_DAY_ROW + HDR_PER_ROW
 HDR_HAIRLINE  = QColor("#E8EAEF")   # gün içi ayraç — neredeyse görünmez
 HDR_DAY_LINE  = QColor("#C3C9D4")   # gün sınırı — tek belirgin çizgi
 HDR_BASE_LINE = QColor("#D5D9E2")   # başlığın altı
@@ -558,7 +566,7 @@ class AsCTimetableHeader(QHeaderView):
         super().__init__(Qt.Horizontal, parent)
         self.periods = max(1, int(periods))
         self.days_list = days_list or DAYS[:5]
-        self.setFixedHeight(38)
+        self.setFixedHeight(HDR_TOTAL_H)
         self.setSectionResizeMode(QHeaderView.Stretch)
         self.setMinimumSectionSize(0)
         self.sectionResized.connect(lambda *args: self.viewport().update())
@@ -637,16 +645,16 @@ class AsCTimetableHeader(QHeaderView):
             if x_end <= 0 or x_start >= vw:
                 continue
                 
-            day_rect = QRect(x_start, 0, day_w, 19)
+            day_rect = QRect(x_start, 0, day_w, HDR_DAY_ROW)
             painter.setPen(QPen(HDR_DAY_INK))
-            font_day = _header_font(FONT_FAMILY, 8)
+            font_day = _header_font(FONT_FAMILY, 8.6)
             painter.setFont(font_day)
             
             # Keep day label visible and centered in the viewport portion of that day
             vis_left = max(x_start, 0)
             vis_right = min(x_end, vw)
             if vis_right > vis_left:
-                vis_rect = QRect(vis_left, 0, vis_right - vis_left, 19)
+                vis_rect = QRect(vis_left, 0, vis_right - vis_left, HDR_DAY_ROW)
                 if vis_rect.width() >= 20:
                     painter.drawText(vis_rect, Qt.AlignCenter, day_name)
                 elif not day_rect.isEmpty():
@@ -660,25 +668,19 @@ class AsCTimetableHeader(QHeaderView):
                 continue
             period_num = (col_idx % periods) + 1
             
-            period_rect = QRect(x, 19, w, 19)
+            period_rect = QRect(x, HDR_DAY_ROW, w, HDR_PER_ROW)
             state = (getattr(self, "_placement_states", None) or {}).get(col_idx)
             if state:
                 painter.fillRect(period_rect, _HEADER_STATE_COLORS[state])
 
             painter.setPen(QPen(HDR_PER_INK))
-            font_p = _header_font(FONT_FAMILY, 7.5)
-            painter.setFont(font_p)
+            painter.setFont(_header_font(FONT_FAMILY, 8.4))
             painter.drawText(period_rect, Qt.AlignCenter, str(period_num))
 
-            last_in_day = (col_idx + 1) % periods == 0
-            if last_in_day:
-                # Gün sınırı: başlığın tepesinden dibine tek çizgi.
+            if (col_idx + 1) % periods == 0:
+                # Tek çizgi, yalnızca gün sınırında.
                 painter.setPen(QPen(HDR_DAY_LINE, 1))
-                painter.drawLine(x + w - 1, 4, x + w - 1, vh - 4)
-            else:
-                # Gün içi: saatleri ayıran, bakmayınca görünmeyen bir iz.
-                painter.setPen(QPen(HDR_HAIRLINE, 1))
-                painter.drawLine(x + w - 1, 24, x + w - 1, vh - 8)
+                painter.drawLine(x + w - 1, 5, x + w - 1, vh - 5)
 
         painter.setPen(QPen(HDR_BASE_LINE, 1))
         painter.drawLine(0, vh - 1, vw, vh - 1)
