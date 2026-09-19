@@ -1049,12 +1049,13 @@ class AutoScheduleDialog(QDialog):
         # kullanıcı en fazla kaçın mümkün olduğunu görür (sebebi bitince
         # raporda yazar).
         if isinstance(ust, int) and ust < toplam:
-            tavan = (f"Bu kurallarla en fazla {ust}/{toplam} saat mümkün "
-                     f"(kanıtlı); {toplam} bu kurallarla yok. ")
+            tavan = (f"Mevcut kurallar ve zaman tablolarıyla motor en fazla {ust}/{toplam} "
+                     f"saatin yerleşebildiğini hesapladı; hangi kuralın/öğretmenin "
+                     f"{toplam - ust} saati dışarıda bıraktığı bitişte raporda yazar. ")
             if saat >= ust:
-                tavan += "Tavana ulaşıldı. "
+                tavan += "Bu sayıya ulaşıldı. "
             else:
-                tavan += f"Tavana {ust - saat} saat kaldı. "
+                tavan += f"Bu sayıya {ust - saat} saat kaldı. "
         else:
             tavan = ""
         box.setInformativeText(tavan + "Motor son turda ilerleme kaydedemedi. Bir tur daha "
