@@ -897,7 +897,7 @@ class TimetablePrintPreview(QDialog):
             printer.setPageSize(QPageSize(QPageSize.A4))
             printer.setFullPage(True)
             
-            self._paint(printer)
+            self._paint_for_output(printer)
             QMessageBox.information(self, "Başarılı", "PDF başarıyla kaydedildi.")
         except Exception as e:
             QMessageBox.critical(self, "Hata", f"PDF oluşturulamadı:\n{e}")
@@ -915,7 +915,7 @@ class TimetablePrintPreview(QDialog):
             dlg = QPrintDialog(printer, self)
             dlg.setWindowTitle("Yazdır")
             if dlg.exec() == QPrintDialog.Accepted:
-                self._paint(printer)
+                self._paint_for_output(printer)
                 QMessageBox.information(self, "Yazdırıldı", "Yazdırma işlemi yazıcıya başarıyla iletildi.")
         except Exception as e:
             reply = QMessageBox.question(
@@ -939,7 +939,7 @@ class TimetablePrintPreview(QDialog):
             dlg = QPrintDialog(printer, self.parent() or self)
             dlg.setWindowTitle("Yazdır")
             if dlg.exec() == QPrintDialog.Accepted:
-                self._paint(printer)
+                self._paint_for_output(printer)
                 QMessageBox.information(self.parent() or self, "Yazdırıldı", "Yazdırma işlemi yazıcıya başarıyla iletildi.")
                 return True
             return False
@@ -952,6 +952,39 @@ class TimetablePrintPreview(QDialog):
             if reply == QMessageBox.Yes:
                 self._export_pdf()
             return False
+
+    # KAPALI SAAT: EKRANDA İŞARET, KÂĞITTA ZEMİN.
+    #
+    # Kapalı saatler her yerde "✕" ile çiziliyordu. Ekranda doğru: önizleme
+    # bir kontrol aracı, kullanıcı hangi saatlerin kapalı olduğunu ORADA
+    # görmeli. Kâğıtta değil — çarpı, yazdırılmış bir çizelgede "burası
+    # iptal" diye okunur ve elle çizilmiş gibi durur. Çıktıda o hücreler
+    # sessizce gri kalır: boş olduğu görülür, sebebi sorulmaz.
+    PREVIEW_CLOSED_FILL = "#F1F5F9"
+    PRINT_CLOSED_FILL = "#E3E6EB"     # kâğıtta hafif koyu gri
+
+    def _is_printing(self):
+        return bool(getattr(self, "_output_is_print", False))
+
+    def _closed_fill(self):
+        return QColor(self.PRINT_CLOSED_FILL if self._is_printing()
+                      else self.PREVIEW_CLOSED_FILL)
+
+    def _draw_closed_mark(self, painter, rect, font_size):
+        """Önizlemede çarpı; yazdırırken hiçbir şey (zemin zaten söylüyor)."""
+        if self._is_printing():
+            return
+        painter.setFont(make_font(font_size, False))
+        painter.setPen(QPen(QColor("#A0AEC0"), 1))
+        painter.drawText(rect, Qt.AlignCenter, "✕")
+
+    def _paint_for_output(self, printer):
+        """Yazıcıya/PDF'e giden çizim: çarpılar olmadan."""
+        self._output_is_print = True
+        try:
+            self._paint(printer)
+        finally:
+            self._output_is_print = False
 
     def _paint(self, printer):
         painter = QPainter(printer)
@@ -1324,13 +1357,13 @@ class TimetablePrintPreview(QDialog):
                             if f"{d_idx},{p_idx}" in kisit:
                                 is_closed = (kisit[f"{d_idx},{p_idx}"] in (0, False))
 
-                    painter.setBrush(QBrush(QColor("#F1F5F9" if is_closed else "#FFFFFF")))
+                    painter.setBrush(QBrush(self._closed_fill() if is_closed
+                                            else QColor("#FFFFFF")))
                     painter.setPen(QPen(QColor("#000000"), 1.4 if is_single_page else 1.0))
                     painter.drawRect(QRectF(cx, ry, col_w, row_h))
                     if is_closed:
-                        painter.setFont(make_font(13 if is_single_page else 8.0, False))
-                        painter.setPen(QPen(QColor("#A0AEC0"), 1))
-                        painter.drawText(QRectF(cx, ry, col_w, row_h), Qt.AlignCenter, "✕")
+                        self._draw_closed_mark(painter, QRectF(cx, ry, col_w, row_h),
+                                               13 if is_single_page else 8.0)
                     p_idx += 1
 
     def _render_class_lessons_list(self, painter, printer, VW, VH):
@@ -2283,13 +2316,13 @@ class TimetablePrintPreview(QDialog):
                                     if f"{d_idx},{p}" in kisit:
                                         is_closed = (kisit[f"{d_idx},{p}"] in (0, False))
 
-                            painter.setBrush(QBrush(QColor("#F1F5F9" if is_closed else "#FFFFFF")))
+                            painter.setBrush(QBrush(self._closed_fill() if is_closed
+                                                    else QColor("#FFFFFF")))
                             painter.setPen(QPen(QColor("#0F172A"), 0.8))
                             painter.drawRect(QRectF(px, cur_y, period_w, row_h))
                             if is_closed:
-                                painter.setFont(make_font(8.0, False))
-                                painter.setPen(QPen(QColor("#A0AEC0"), 1))
-                                painter.drawText(QRectF(px, cur_y, period_w, row_h), Qt.AlignCenter, "✕")
+                                self._draw_closed_mark(
+                                    painter, QRectF(px, cur_y, period_w, row_h), 8.0)
                             p_offset += 1
                             continue
                             
