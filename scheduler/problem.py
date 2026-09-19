@@ -157,6 +157,12 @@ class Problem:
                 teacher = a.teacher >= 0 and a.teacher == b.teacher
                 if not shared and not teacher:
                     continue
+                # YAPISAL (kuraldan bağımsız): aynı sınıfta aynı DERSİN iki
+                # kartı aynı güne düşüyorsa yan yana olmak zorunda — araya
+                # başka ders giremez ("İngilizce, Paragraf, İngilizce" yok).
+                # CP-SAT'teki _same_lesson_contiguous ile aynı anlam; denetim
+                # de aynı koşulu hata sayar.
+                ayni_ders = bool(shared) and a.subject == b.subject
                 relevant = [r for r in self.rules if r.kind in PAIR_KINDS
                             and r.applies_card(a) and r.applies_card(b)
                             and any(r.applies_class(ci) for ci in shared)]
@@ -194,6 +200,8 @@ class Problem:
                         h = int(bool(af & bf))
                         s = 0
                         bitisik = (ap + a.duration == bp or bp + b.duration == ap)
+                        if ayni_ders and ad == bd and not bitisik:
+                            h = 1
                         for kind, r in checks:
                             # "Aynı ders aynı gün tekrar etmesin": BİTİŞİK iki
                             # kart tekrar değildir, tek bloktur. 1+1 dağılımı
