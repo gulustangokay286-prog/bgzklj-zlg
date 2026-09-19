@@ -46,30 +46,65 @@ class NativeTests(unittest.TestCase):
         r=self.run_valid(d);self.assertTrue(r.complete);self.assertEqual(r.placed_hours,2)
         self.assertFalse(any(x.kind==R.X_SUBJECT_ONCE_DAY for x in r.rules))
 
-    def test_repeat_is_forbidden_even_when_adjacent(self):
+    def test_adjacent_repeat_is_allowed(self):
+        """1+1 YAN YANA gelebilir: bitişik iki kart tekrar değil, tek bloktur.
+
+        Kural gün içinde AYRI AYRI iki oturumu engeller; öğrenci dersi iki saat
+        arka arkaya görüyorsa bu tek oturumdur ve yasak değildir.
+        """
         d=store('1+1',D=1);d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin')]
-        r=self.run_strict(d);self.assertFalse(r.complete);self.assertEqual(r.placed_hours,1)
-        self.assertEqual(r.upper_bound,1)
-        self.assertTrue(validate(r.world,r.rules,[0,1])[0])
+        r=self.run_strict(d);self.assertTrue(r.complete);self.assertEqual(r.placed_hours,2)
+        per=sorted(x['period'] for x in r.placements)
+        self.assertEqual(per[1]-per[0],1,f'kartlar bitişik değil: {per}')
+        self.assertEqual(validate(r.world,r.rules,r.positions)[0],[])
+
+    def test_separate_sessions_on_same_day_still_forbidden(self):
+        """Bitişik olmayan iki kart hâlâ yasak: araya başka ders girerse tekrar olur."""
+        d=store('1+1',D=1,P=4)
+        w=build_world(d);rules,_=compile_rules([rule('Aynı ders aynı gün tekrar etmesin')],w)
+        attach_slots(w,rules)
+        self.assertTrue(validate(w,rules,[0,2])[0], 'araları açık iki kart ihlal sayılmalı')
+        self.assertEqual(validate(w,rules,[0,1])[0], [], 'bitişik iki kart serbest olmalı')
 
     def test_arithmetic_floor_bends_only_the_impossible_group(self):
         # 9A Matematik iki kart, tek gün: kural bu grupta esner ve rapora yazılır.
         # 9B Matematik iki kart, iki günü var: kural orada ESNEMEZ.
+        # Tek gün + 1+1: kartlar BİTİŞİK yerleşir, kural esnemeye gerek kalmaz.
         d=store('1+1',D=1);d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin')]
         r=self.run_valid(d);self.assertTrue(r.complete)
-        self.assertTrue(r.forced_minimums)
+        per=sorted(x['period'] for x in r.placements)
+        self.assertEqual(per[1]-per[0],1)
+        # Üç kart tek güne sığmıyor (bitişik bile olsa gün 4 saat): esneme burada.
+        d3=store('1+1+1',D=1,P=3)
+        d3['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin'),
+                                   rule('Aynı ders art arda gelmesin')]
+        r3=self.run_valid(d3)
+        self.assertTrue(r3.forced_minimums or not r3.complete)
         d2=store('1+1',D=2)
         d2['atamalar'].append(dict(**{'class':'9B'},subject='Matematik',teacher='Öğretmen B',type='1+1'))
         d2['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin')]
         r2=self.run_valid(d2);self.assertTrue(r2.complete);self.assertEqual(r2.forced_minimums,[])
         for cn in ('9A','9B'):
-            self.assertEqual(len({x['day'] for x in r2.placements if x['class']==cn}),2)
+            yer=sorted((x['day'], x['period']) for x in r2.placements if x['class']==cn)
+            # Kural esnemedi: kartlar ya AYRI GÜNLERDE ya da aynı gün BİTİŞİK.
+            if yer[0][0] == yer[1][0]:
+                self.assertEqual(yer[1][1]-yer[0][1], 1, f'{cn}: aynı gün ama bitişik değil {yer}')
+            else:
+                self.assertNotEqual(yer[0][0], yer[1][0])
 
     def test_double_block_counts_as_one_session(self):
+        """2 saatlik blok tek oturumdur; 2+1 aynı güne BİTİŞİK de konabilir."""
         d=store('2+1');d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin')]
         r=self.run_valid(d);self.assertTrue(r.complete)
         self.assertEqual(sorted(x['duration'] for x in r.placements),[1,2])
-        self.assertEqual(len({x['day'] for x in r.placements}),2)
+        by_day={}
+        for x in r.placements:
+            by_day.setdefault(x['day'],[]).append((x['period'],x['duration']))
+        for d_, lst in by_day.items():
+            if len(lst)>1:
+                lst.sort()
+                for (p0,du0),(p1,_) in zip(lst,lst[1:]):
+                    self.assertEqual(p0+du0,p1,f'aynı gündeki kartlar bitişik değil: {lst}')
 
     def test_teacher_rule_in_same_class_only(self):
         d=store('1');d['atamalar'] += [dict(**{'class':cn},subject='Geometri',teacher='Öğretmen A',type='1') for cn in ['9A','9B']]
@@ -81,8 +116,11 @@ class NativeTests(unittest.TestCase):
         d=store('1+1',D=1)
         d['atamalar'].append(dict(**{'class':'9B'},subject='Matematik',teacher='Öğretmen B',type='1+1'))
         d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin',siniflar=['9A'])]
-        r=self.run_strict(d);self.assertEqual(r.placed_hours,3)
+        r=self.run_strict(d);self.assertEqual(r.placed_hours,4)
         self.assertEqual(sum(x['duration'] for x in r.placements if x['class']=='9B'),2)
+        # 9A'nın iki kartı bitişik (kural bunu serbest bırakır), 9B'de kural yok.
+        pa=sorted(x['period'] for x in r.placements if x['class']=='9A')
+        self.assertEqual(pa[1]-pa[0],1)
 
     # ── Ders grupları: "Seçilen dersler aynı ders sayılsın" ──
     def _group_store(self,D=3,P=4):
@@ -109,7 +147,10 @@ class NativeTests(unittest.TestCase):
         # Kuralda yalnızca Mat1 seçili; grup Mat2'yi de kapsama alır.
         d=self._group_store(D=1)
         d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin',dersler=['Mat1']),
-                                  rule('Seçilen dersler aynı ders sayılsın',dersler=['Mat1','Mat2'])]
+                                  rule('Seçilen dersler aynı ders sayılsın',dersler=['Mat1','Mat2']),
+                                  rule('Aynı ders art arda gelmesin',dersler=['Mat1'])]
+        # Grup Mat2'yi de kapsama alır: "art arda gelmesin" ile birlikte ikisi
+        # ne aynı saate bitişik ne de ayrı oturum olarak aynı güne konabilir.
         r=self.run_strict(d);self.assertEqual(r.placed_hours,1)
 
     def test_group_with_single_subject_is_skipped_with_reason(self):
@@ -128,7 +169,10 @@ class NativeTests(unittest.TestCase):
     def test_selected_subjects_in_once_day_rule_are_one_lesson(self):
         d=self._group_store(D=1)
         d['dersler']+= [{'ad':'Fizik'},{'ad':'Kimya'},{'ad':'Tarih'}]
-        d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin',dersler=['Mat1','Mat2'])]
+        d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin',dersler=['Mat1','Mat2']),
+                                  rule('Aynı ders art arda gelmesin',dersler=['Mat1','Mat2'])]
+        # Seçim tek ders sayıldığı için Mat1 ile Mat2 aynı güne ne bitişik
+        # (art arda kuralı) ne ayrı (tekrar kuralı) konabilir: biri açıkta kalır.
         r=self.run_strict(d);self.assertEqual(r.placed_hours,1)
         self.assertTrue(any(x.kind==R.X_SUBJECT_GROUP for x in r.rules))
 
@@ -205,18 +249,19 @@ class NativeTests(unittest.TestCase):
         tekrar etmesin' birlikte kartları güne sığdıramıyorsa tavan toplamın
         altındadır; motor tavana ulaşınca kanıtla durur ve tanı kuralı söyler."""
         from scheduler.daybound import day_bound
-        d=store(parts='1+1+1',D=3,P=4)      # Matematik 3 kart, 3 gün
+        # Tek gün: Matematik ile Geometri aynı güne gelemez, dolayısıyla
+        # ikisinden yalnızca biri yerleşebilir. Tavan toplamın altındadır.
+        d=store(parts='1+1',D=1,P=6)
         d['atamalar'].append(dict(**{'class':'9A'},subject='Geometri',teacher='Öğretmen B',type='1+1'))
-        d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin'),
-                                  rule('İki ders aynı güne gelmesin',dersler=['Matematik','Geometri'])]
-        # 3 Mat kartı 3 ayrı güne, 2 Geometri kartı Mat'ın olmadığı güne: 5 gün gerekir, 3 var.
+        d['planlama_iliskileri']=[rule('İki ders aynı güne gelmesin',dersler=['Matematik','Geometri'])]
         r=self.run_valid(d,optimal_mode=True,azami_saniye=20)
-        self.assertEqual(r.upper_bound,3)
-        self.assertEqual(r.placed_hours,3)
-        self.assertTrue(any('gün-seviyesi kanıt' in x for x in r.warnings),r.warnings)
+        # Gün modeli "aynı ders aynı gün" kısıtını artık kurmaz (bitişiklik
+        # serbest), ama "iki ders aynı güne gelmesin" hâlâ sınırı düşürür.
+        self.assertLess(r.upper_bound,r.total_hours)
+        self.assertEqual(r.placed_hours,r.upper_bound)
         self.assertTrue(any('İki ders aynı güne gelmesin' in x['message'] for x in r.diagnostics),
                         [x['message'] for x in r.diagnostics])
-        self.assertEqual(day_bound(r.world,r.rules,set()),3)
+        self.assertEqual(day_bound(r.world,r.rules,set()),r.upper_bound)
 
     def test_ceiling_is_reached_every_time(self):
         """Tavan bilinince motor ona ulaşır; kurallar tavanı düşürmüyorsa tam çizelge."""
@@ -251,9 +296,10 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(sorted(x['period'] for x in r.placements),[0,2])
 
     def test_validator_rejects_unforced_violation_even_when_bending(self):
-        d=store('1+1',D=2);d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin')]
+        d=store('1+1',D=2,P=4);d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin')]
         w=build_world(d);rules,_=compile_rules(d['planlama_iliskileri'],w);attach_slots(w,rules)
-        errs,_,bent=validate(w,rules,[0,1],bend_rules=True)
+        # Aynı günde ARALARI AÇIK iki kart: iki gün varken bu esnetilmez.
+        errs,_,bent=validate(w,rules,[0,2],bend_rules=True)
         self.assertTrue(errs);self.assertEqual(bent,[])
 
     def test_validator_checks_split_pieces(self):

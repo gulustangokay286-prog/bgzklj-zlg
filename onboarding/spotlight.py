@@ -29,7 +29,7 @@ class SpotlightOverlay(QWidget):
     skip_clicked = Signal()
 
     def __init__(self, host, target, title, text, index=0, total=0,
-                 next_label="Devam", parent=None):
+                 next_label="Devam", parent=None, mandatory=False):
         super().__init__(parent or host)
         self.host = host
         self.target = target
@@ -37,6 +37,9 @@ class SpotlightOverlay(QWidget):
         self._text = text or ""
         self._index = index
         self._total = total
+        # Zorunlu kip: kullanıcı turu atlayamaz (ilk kurulumda ekranı
+        # öğrenmeden geçmesin). "Turu bitir" düğmesi yok, Esc kapatmaz.
+        self._mandatory = bool(mandatory)
         self._phase = 0.0
         self._reveal = 0.0
         self.setAttribute(Qt.WA_TranslucentBackground)
@@ -79,6 +82,7 @@ class SpotlightOverlay(QWidget):
             "QPushButton { background: transparent; color: #64748B; border: none; "
             "padding: 6px 10px; font-size: 12px; } QPushButton:hover { color: #0F172A; }")
         self.btn_skip.clicked.connect(self.skip_clicked.emit)
+        self.btn_skip.setVisible(not self._mandatory)
         row.addWidget(self.btn_skip)
         self.btn_next = QPushButton(next_label, self.card)
         self.btn_next.setCursor(Qt.PointingHandCursor)
@@ -173,7 +177,8 @@ class SpotlightOverlay(QWidget):
     # ── etkileşim ──
     def keyPressEvent(self, e):
         if e.key() == Qt.Key_Escape:
-            self.skip_clicked.emit()
+            if not self._mandatory:
+                self.skip_clicked.emit()
         elif e.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
             self.next_clicked.emit()
         else:
@@ -226,10 +231,11 @@ class TourRunner:
     Hedef bulunamayan adım atlanır — eksik bir düğme yüzünden tur çökmez.
     """
 
-    def __init__(self, host, steps, on_finish=None):
+    def __init__(self, host, steps, on_finish=None, mandatory=False):
         self.host = host
         self.steps = list(steps or [])
         self.on_finish = on_finish
+        self.mandatory = bool(mandatory)
         self.i = -1
         self.overlay = None
 
@@ -270,7 +276,8 @@ class TourRunner:
                 self.overlay = SpotlightOverlay(
                     self.host, target, step.get("title", ""), step.get("text", ""),
                     index=self.i, total=len(self.steps),
-                    next_label=step.get("next", "Devam" if self.i < len(self.steps) - 1 else "Bitir"))
+                    next_label=step.get("next", "Devam" if self.i < len(self.steps) - 1 else "Bitir"),
+                    mandatory=self.mandatory)
                 self.overlay.next_clicked.connect(self._next)
                 self.overlay.skip_clicked.connect(self._finish)
                 self.overlay.start()

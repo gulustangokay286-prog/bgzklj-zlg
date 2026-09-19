@@ -193,10 +193,17 @@ class Problem:
                         bd, bp = divmod(bx, w.P)
                         h = int(bool(af & bf))
                         s = 0
+                        bitisik = (ap + a.duration == bp or bp + b.duration == ap)
                         for kind, r in checks:
-                            hit = ((kind == 0 and ad == bd)
-                                   or (kind == 1 and ad == bd and
-                                       (ap+a.duration == bp or bp+b.duration == ap))
+                            # "Aynı ders aynı gün tekrar etmesin": BİTİŞİK iki
+                            # kart tekrar değildir, tek bloktur. 1+1 dağılımı
+                            # verilmiş bir ders yan yana iki saat olarak
+                            # yerleşebilmeli; kural gün içinde AYRI AYRI iki
+                            # oturumu engeller. (Öğretmen kuralı da aynı.)
+                            ayni_gun_tekrar = (ad == bd and not (
+                                bitisik and r.kind in (R.X_SUBJECT_ONCE_DAY, R.X_TEACHER_ONCE_DAY)))
+                            hit = ((kind == 0 and ayni_gun_tekrar)
+                                   or (kind == 1 and ad == bd and bitisik)
                                    or (kind == 2 and abs(ad-bd) < max(1, r.param)))
                             # Kural yalnızca KENDİ grubu aritmetik olarak
                             # imkânsızsa esner: ders kuralı için (sınıf, aile),

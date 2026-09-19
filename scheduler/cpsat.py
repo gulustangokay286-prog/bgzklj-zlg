@@ -51,6 +51,11 @@ from .build import window_ok, window_breaks
 SAAT = 100_000
 SOFT_WEIGHT = {R.HIGH: 1_000, R.NORMAL: 100, R.LOW: 10}
 SPLIT_PEN = 1          # kesim başına (1. aşama)
+# Sınıfın gününde BOŞLUK (pencere) cezası. Amaç: dersler peş peşe gelsin,
+# aralarda boş saat kalmasın. Ağırlık bir saatin (SAAT) çok altındadır: motor
+# boşluğu kapatmak için ASLA ders feda etmez, ama eşit sayıda saat yerleşen
+# çözümler arasından boşluksuz olanı seçer.
+GAP_PEN = 60
 AVOID_PEN = 1          # "kaçınılacak" hücre başına
 # Aritmetik taban: kart sayısı gün sayısını aşan grupta aynı güne düşen iki
 # kart bitişik değilse (ya da bir güne tabandan fazlası yığılırsa) ödenen
@@ -85,6 +90,7 @@ class _Model:
         self.occ = []            # yerleşimler: dict(i, d, p, dur, v, card)
         self._build_vars(allow_split)
         self._physical()
+        self._compact()
         self._rules()
 
     # ── değişkenler ───────────────────────────────────────────────────────
@@ -172,6 +178,37 @@ class _Model:
                 m.AddAtMostOne(vs)
         self.cls_cell = cls_cell
         self.tch_cell = tch_cell
+
+    # ── sıkıştırma: sınıfın gününde boşluk kalmasın ───────────────────────
+    def _compact(self):
+        """Sınıfın günü içinde dolu saatler ARDIŞIK olsun.
+
+        Çizelgede dersler arasında boş saat (pencere) kalması, öğrencinin okulda
+        boşta beklemesi demektir. Sert kural yapmak çizelgeyi çözümsüz bırakır
+        (öğretmen müsaitliği her zaman ardışık değildir), bu yüzden ceza olarak
+        kurulur: gün içinde kapalı OLMAYAN saatler sırayla dizilir ve "önü boş,
+        kendisi dolu" her geçiş cezalandırılır. Ceza bir saatin ağırlığının çok
+        altındadır — motor boşluk kapatmak için ders feda etmez.
+        """
+        w, m, P = self.w, self.m, self.P
+        for ci in range(len(w.classes)):
+            for d in range(self.D):
+                dolu = []          # (saat, o hücrenin dolu olma göstergesi)
+                for p in range(P):
+                    cell = d * P + p
+                    if (w.class_closed[ci] >> cell) & 1:
+                        continue                    # kapalı saat boşluk sayılmaz
+                    vs = self.cls_cell.get((ci, cell)) or []
+                    if not vs:
+                        continue
+                    u = m.NewBoolVar(f"u{ci}_{cell}")
+                    m.AddMaxEquality(u, vs)
+                    dolu.append(u)
+                # "Boş saatten sonra dolu saat" = pencere. Her geçiş bir ceza.
+                for a, b in zip(dolu, dolu[1:]):
+                    g = m.NewBoolVar(f"gap{ci}_{d}_{id(b)}")
+                    m.Add(b - a <= g)
+                    self.pen.append(GAP_PEN * g)
 
     # ── yardımcılar ───────────────────────────────────────────────────────
     def _cap(self, terms, limit, rule, tag):
@@ -346,7 +383,19 @@ class _Model:
         for (ci, d, res), occs in groups.items():
             forced = (which, ci, res) in self.forced and r.is_hard()
             if not forced:
-                self._cap([o['v'] for o in occs], 1, r, f"{tag}_{ci}_{d}_{res}")
+                # "Aynı gün en fazla bir yerleşim" DEĞİL: bitişik iki yerleşim
+                # tek bloktur ve serbesttir (1+1 yan yana). Yasak olan, gün
+                # içinde AYRI AYRI iki oturum; o yüzden kısıt ikili kurulur:
+                # bitişik olmayan her çift birlikte seçilemez.
+                for x in range(len(occs)):
+                    a = occs[x]
+                    for y in range(x):
+                        b = occs[y]
+                        if a['i'] == b['i']:
+                            continue        # aynı kartın alternatif yerleri
+                        if (a['p'] + a['dur'] == b['p'] or b['p'] + b['dur'] == a['p']):
+                            continue        # bitişik: serbest
+                        self._not_both(a['v'], b['v'], r, f"{tag}_{ci}_{d}_{res}_{x}_{y}")
                 continue
             n_cards = len(cards_of[(ci, res)])
             n_days = max(1, len(days_of[(ci, res)]))

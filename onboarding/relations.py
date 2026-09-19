@@ -146,18 +146,26 @@ def show_group_sheet(dlg):
             "next": "Bitir",
         },
     ]
-    runner = TourRunner(sheet, steps_sheet, on_finish=sheet.reject)
+    runner = TourRunner(sheet, steps_sheet, on_finish=sheet.reject,
+                        mandatory=state.seen("tour:relations:mandatory"))
     sheet._tour = runner
     QTimer.singleShot(240, runner.start)
     sheet.exec()
 
 
-def maybe_run(dlg, force=False):
-    """Ekran ilk kez açıldıysa turu başlatır."""
+def maybe_run(dlg, force=False, mandatory=None):
+    """Ekran ilk kez açıldıysa turu başlatır.
+
+    mandatory=None iken karar duruma bakar: sürüm tanıtımı bu ekranı açtıysa
+    (whatsnew "tour:relations:mandatory" işaretini koyar) tur ATLANAMAZ.
+    """
     if not force and state.seen(KEY):
         return False
+    if mandatory is None:
+        mandatory = state.seen("tour:relations:mandatory")
     try:
-        runner = TourRunner(dlg, steps(dlg), on_finish=lambda: state.mark_seen(KEY))
+        runner = TourRunner(dlg, steps(dlg), on_finish=lambda: state.mark_seen(KEY),
+                            mandatory=bool(mandatory))
         dlg._relations_tour = runner          # referans: GC toplamasın
         QTimer.singleShot(260, runner.start)
         return True

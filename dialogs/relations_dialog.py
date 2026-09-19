@@ -327,15 +327,31 @@ class MultiSelectDialog(QDialog):
 
     # ── grup kipi ──
     def _make_group(self):
-        names = [self._name(self.list_widget.item(i)) for i in range(self.list_widget.count())
-                 if self.list_widget.item(i).isSelected()]
-        names = [n for n in names if not self._group_of(n)]
+        """İşaretli dersleri bir gruba alır ve İŞARETLERİ TEMİZLER.
+
+        Eskiden yalnızca listede VURGULANAN satırlara bakıyordu; kullanıcı ise
+        kutucukları işaretliyordu. "Tümünü Seç" deyip Mat1+Mat2'yi gruplamak
+        isteyen kişi bütün dersleri tek gruba sokuyordu. Artık ölçü işaretli
+        kutulardır (vurgu varsa o öncelikli), ve gruba giren dersler hem
+        işaretten hem vurgudan düşer: ikinci grubu kurarken temiz bir liste
+        kalır.
+        """
+        vurgulu = [self._name(self.list_widget.item(i)) for i in range(self.list_widget.count())
+                   if self.list_widget.item(i).isSelected()]
+        isaretli = [self._name(self.list_widget.item(i)) for i in range(self.list_widget.count())
+                    if self._name(self.list_widget.item(i)) in self.selected]
+        names = [n for n in (vurgulu or isaretli) if not self._group_of(n)]
         if len(names) < 2:
-            QMessageBox.information(self, "Grup", "Grup yapmak için listeden en az iki ders seçin.")
+            QMessageBox.information(
+                self, "Grup",
+                "Grup yapmak için en az iki ders işaretleyin.\n\n"
+                "Örnek: önce Mat1 ile Mat2'yi işaretleyip “Seçilenleri Grup Yap”, "
+                "sonra Türkçe ile Edebiyat'ı işaretleyip yine “Seçilenleri Grup Yap”.")
             return
         self.groups.append(sorted(names))
         for n in names:
             self.selected.discard(n)
+        self.list_widget.clearSelection()
         self._populate_list(self.search_input.text())
         self._refresh_groups()
 

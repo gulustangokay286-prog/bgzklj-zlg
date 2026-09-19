@@ -142,14 +142,14 @@ def _solve(world, rules, forced, seconds, skip=None, open_teachers=(),
                 for ci in c.classes:
                     if r.applies_class(ci) and (ri, ci) not in skip:
                         groups[ci, res].append(c)
-            for (ci, res), cards in groups.items():
-                if (which, ci, res) in forced:
-                    continue            # esas model burada esniyor; biz de kısıtlamayız
-                for d in range(D):
-                    vs = [h[c.cid, d] for c in cards if (c.cid, d) in h]
-                    if len(vs) > 1:
-                        m.Add(sum(used(v, f"o{which}{ci}_{res}_{d}_{k}")
-                                  for k, v in enumerate(vs)) <= 1)
+            # NOT: "aynı ders aynı gün tekrar etmesin" artık BİTİŞİK kartlara
+            # izin veriyor (1+1 yan yana tek bloktur). Bitişiklik gün modelinde
+            # ifade edilemez — saat yok — bu yüzden burada kısıt KURULMAZ.
+            # Sonuç: sınır biraz gevşer ama GEÇERLİ kalır (üst sınırın fazla
+            # sıkı olması, ulaşılabilir bir çözümü imkânsız göstererek motoru
+            # erken durdururdu; gevşek olması yalnızca biraz fazla aramaya
+            # yol açar).
+            continue
         elif r.kind == R.X_PAIR_NOT_SAME_DAY:
             for ci in range(len(w.classes)):
                 if not r.applies_class(ci) or (ri, ci) in skip:

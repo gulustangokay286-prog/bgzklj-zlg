@@ -107,8 +107,11 @@ def validate(world, rules, positions, bend_rules=False, forced=None, pieces=None
                         # Mat2 tek derstir. "İki ders aynı güne gelmesin" ada bakar.
                         same_family=a.family>=0 and a.family==b.family
                         adjacent=(ap+a.duration==bp or bp+b.duration==ap)
-                        bad=((r.kind==R.X_SUBJECT_ONCE_DAY and same_day and same_family)
-                            or (r.kind==R.X_TEACHER_ONCE_DAY and same_day and a.teacher>=0 and a.teacher==b.teacher)
+                        # Bitişik iki kart "tekrar" değil, tek bloktur: 1+1
+                        # dağılımı yan yana yerleşebilir (bkz. problem.py).
+                        bad=((r.kind==R.X_SUBJECT_ONCE_DAY and same_day and same_family and not adjacent)
+                            or (r.kind==R.X_TEACHER_ONCE_DAY and same_day and a.teacher>=0
+                                and a.teacher==b.teacher and not adjacent)
                             or (r.kind==R.X_PAIR_NOT_SAME_DAY and same_day and a.subject!=b.subject)
                             or (r.kind==R.X_HARD_NOT_ADJACENT and same_day and not same_family and adjacent)
                             or (r.kind==R.X_SUBJECT_NOT_ADJACENT and same_day and same_family and adjacent and a.cid!=b.cid)

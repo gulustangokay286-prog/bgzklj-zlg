@@ -36,9 +36,10 @@ def _ribbon_button(win, label_startswith):
 
 
 def _open_relations_with_tour(win):
-    """Planlama İlişkileri ekranını açar ve tanıtım turunu zorla çalıştırır."""
+    """Planlama İlişkileri ekranını açar ve tanıtım turunu ZORUNLU çalıştırır."""
     from . import state as _st
     _st.reset(KEY_RELATIONS)              # tanıtımda her hâlükârda gösterilsin
+    _st.mark_seen("tour:relations:mandatory")
     fn = getattr(win, "_open_relations", None)
     if callable(fn):
         fn()
@@ -116,10 +117,16 @@ PAGES = [
 class WhatsNewDialog(QDialog):
     """Ortada beliren yenilik kartı (çerçevesiz, yumuşak)."""
 
-    def __init__(self, win, version, pages=None):
+    def __init__(self, win, version, pages=None, mandatory=True):
         super().__init__(win)
         self.win = win
         self.version = version
+        # ZORUNLU KİP (varsayılan): kullanıcı tanıtımı atlayamaz. Kurulumdan
+        # sonra programı ilk kez açan kişi, neyin nerede olduğunu görmeden
+        # çizelgeye başlarsa Planlama İlişkileri'ni yanlış kuruyor ve sebebini
+        # bulamıyor. "Şimdilik geç" yok, Esc ve kapatma kutusu çalışmaz;
+        # sayfalar "Devam" ile ilerler ve sonunda kapanır.
+        self.mandatory = bool(mandatory)
         self.pages = list(pages if pages is not None else PAGES)
         self.index = 0
         self._tour_page = None
@@ -174,6 +181,7 @@ class WhatsNewDialog(QDialog):
             "QPushButton { background: transparent; color: #64748B; border: none; padding: 8px 10px; "
             "font-size: 12.5px; } QPushButton:hover { color: #0F172A; }")
         self.btn_skip.clicked.connect(self._finish)
+        self.btn_skip.setVisible(not self.mandatory)
         row.addWidget(self.btn_skip)
         row.addStretch(1)
         self.btn_show = QPushButton("Göster", self.card)
@@ -248,6 +256,7 @@ class WhatsNewDialog(QDialog):
             return
         tgt = step.get("target")
         step["target"] = (lambda t=tgt: t(self.win)) if callable(tgt) else tgt
+        step.setdefault("mandatory", self.mandatory)
         step.setdefault("next", "Anladım")
         after = page.get("after")
         self.hide()
@@ -271,7 +280,7 @@ class WhatsNewDialog(QDialog):
             else:
                 self._finish()
 
-        runner = TourRunner(self.win, [step], on_finish=done)
+        runner = TourRunner(self.win, [step], on_finish=done, mandatory=self.mandatory)
         self._tour_page = runner
         QTimer.singleShot(60, runner.start)
 
@@ -311,7 +320,19 @@ class WhatsNewDialog(QDialog):
             self._filter_on = True
         super().showEvent(e)
 
+    def keyPressEvent(self, e):
+        if self.mandatory and e.key() == Qt.Key_Escape:
+            return                      # zorunlu tanıtım Esc ile kapanmaz
+        super().keyPressEvent(e)
+
     def closeEvent(self, e):
+        # Zorunlu kipte yalnızca "Bitir" kapatır: _finish önce işareti koyar.
+        from . import state as _st
+        if self.mandatory and not _st.seen(f"whatsnew:{self.version}"):
+            e.ignore()
+            self.show()
+            self.raise_()
+            return
         w = self.win.window() if self.win is not None else None
         if w is not None and getattr(self, "_filter_on", False):
             w.removeEventFilter(self)
@@ -319,13 +340,13 @@ class WhatsNewDialog(QDialog):
         super().closeEvent(e)
 
 
-def maybe_show(win, version, force=False):
+def maybe_show(win, version, force=False, mandatory=True):
     """Bu sürümün tanıtımı gösterilmediyse gösterir. True = gösterildi."""
     key = f"whatsnew:{version}"
     if not force and state.seen(key):
         return False
     try:
-        dlg = WhatsNewDialog(win, version)
+        dlg = WhatsNewDialog(win, version, mandatory=mandatory)
         win._whatsnew_dialog = dlg          # referans: GC toplamasın
         dlg.show()
         dlg.raise_()
