@@ -1948,7 +1948,7 @@ class AppleVersionRow(QFrame):
         # için soldan hizalanan her şey basamak basamak kayıyordu.
         if is_active:
             act_lbl = QLabel("Yayında")
-            act_lbl.setFont(bk_ui.font(8.2, QFont.DemiBold))
+            act_lbl.setFont(bk_ui.font(9.0, QFont.DemiBold))
             act_lbl.setStyleSheet("color: #15803D; background: transparent; border: none;")
             act_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
             act_lbl.setToolTip("Kurumun yayındaki çizelgesi")
@@ -1985,12 +1985,14 @@ class AppleVersionRow(QFrame):
             fill_txt, fill_col = f"{unp} saat boşta", "#B45309"
             fill_tip = f"{tot} saatin {unp} saati yerleşemedi."
         fill_lbl = QLabel(fill_txt)
-        fill_lbl.setFont(bk_ui.font(8.2, QFont.Medium if unp else QFont.Normal))
+        fill_lbl.setFont(bk_ui.font(9.0, QFont.Medium if unp else QFont.Normal))
         fill_lbl.setStyleSheet(f"color: {fill_col}; background: transparent; border: none;")
-        # INK_FAINT bu boyutta beyaz zeminde okunmuyordu: etiketler ve
-        # devre dışı metinler için ayrılmış bir ton, okunacak bir bilgi
-        # için değil.
-        fill_lbl.setFixedWidth(96)
+        # Bu üç yazı — durum, yerleşim, tarih — 8.2 puntoda ve INK_FAINT
+        # tonundaydı: ikisi birden, hem küçük hem soluk. O ton ve o boyut
+        # etiketler ve devre dışı metinler içindir; bunlar ise satırın
+        # okunmak üzere orada duran bilgileri. Künyenin bir tık altında,
+        # 9 puntoda ve INK_SOFT'ta.
+        fill_lbl.setFixedWidth(108)
         fill_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         fill_lbl.setToolTip(fill_tip)
         fill_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
@@ -2004,9 +2006,9 @@ class AppleVersionRow(QFrame):
         # güne ait olduğu için tarihin kendisi de tekrar oluyordu. Bugün ve
         # dün adıyla anılıyor, yıl yalnızca başka bir yılsa yazılıyor.
         dt_lbl = QLabel(self._when())
-        dt_lbl.setFont(bk_ui.font(8.2))
+        dt_lbl.setFont(bk_ui.font(9.0))
         dt_lbl.setStyleSheet(f"color: {bk_ui.INK_SOFT}; background: transparent; border: none;")
-        dt_lbl.setFixedWidth(104)
+        dt_lbl.setFixedWidth(116)
         dt_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         dt_lbl.setToolTip("{}  {}  •  {} KB".format(
             version_info.get("date_str", ""), version_info.get("time_str", ""),
