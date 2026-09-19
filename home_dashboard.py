@@ -2318,6 +2318,7 @@ class InstitutionHeader(QWidget):
         actions = QHBoxLayout()
         actions.setContentsMargins(0, 0, 0, 0)
         actions.setSpacing(0)
+        actions.setAlignment(Qt.AlignVCenter)
 
         # Two buttons, one shape, one weight of icon.
         #
@@ -2331,38 +2332,39 @@ class InstitutionHeader(QWidget):
         # Both buttons now share a height, a radius, a font and an icon
         # size, so the pair reads as one control with two settings rather
         # than as two controls that happen to sit together.
-        # İKİ DÜĞME, TEK KONTROL.
+        # HİYERARŞİ, SİMETRİ DEĞİL.
         #
-        # "Yeni Klasör" ile "Yeni Çizelge" aynı işin iki ölçeği: biri kap
-        # açar, biri içine konacak şeyi. Ayrı ayrı durduklarında iki farklı
-        # karar gibi okunuyor, üstelik beyaz düğmenin kalın kenarlığı mavi
-        # düğmenin yanında ikinci bir çerçeve olarak göze batıyordu. Artık
-        # bitişik tek bir hap: sol yarı sessiz, sağ yarı vurgulu; dış köşeler
-        # yuvarlak, iç köşeler düz, aralarında tek bir hairline.
+        # Bu ikisi eşit değil: bu ekran çizelge açmak için var, klasör ise
+        # biriken çizelgeleri toplamak için ara sıra kullanılan bir düzen
+        # işi. Önce ayrı ama eşit ağırlıkta iki düğmeydiler, sonra bitişik
+        # tek bir kontrol — ikisi de aynı hatayı yapıyordu: iki eylemi eşit
+        # gösteriyordu. Birleşik hâlde beyaz yarı, mavi yarının yanında
+        # sönük bir ek gibi duruyordu.
+        #
+        # Şimdi tek bir dolu düğme var — asıl eylem — ve onun solunda
+        # çerçevesiz, ikonlu bir metin: klasör. Zemin yalnızca imleç
+        # üstündeyken beliriyor. Mavi düğme yumuşak bir gölgeyle bandın bir
+        # tık üstünde duruyor; bakışın ilk gittiği yer orası.
         _BTN_H, _ICON = 36, 15
         _btn_font = bk_ui.font(9.4, QFont.DemiBold)
-        _R = 10
 
         self.btn_new_folder = QPushButton("Yeni Klasör")
         self.btn_new_folder.setCursor(Qt.PointingHandCursor)
         self.btn_new_folder.setFixedHeight(_BTN_H)
-        self.btn_new_folder.setFont(_btn_font)
-        self.btn_new_folder.setIcon(QIcon(bk_ui.folder_line_glyph(bk_ui.INK_BODY, _ICON)))
+        self.btn_new_folder.setFont(bk_ui.font(9.2, QFont.Medium))
+        self.btn_new_folder.setIcon(QIcon(bk_ui.folder_line_glyph(bk_ui.INK_SOFT, _ICON)))
         self.btn_new_folder.setIconSize(QSize(_ICON, _ICON))
         self.btn_new_folder.setStyleSheet(f"""
             QPushButton {{
-                background: rgba(255, 255, 255, 0.92); color: {bk_ui.INK};
-                border: 1px solid rgba(15, 23, 42, 0.10);
-                border-right: none;
-                border-top-left-radius: {_R}px; border-bottom-left-radius: {_R}px;
-                border-top-right-radius: 0px; border-bottom-right-radius: 0px;
-                padding: 0px 16px 0px 14px;
+                background: transparent; color: {bk_ui.INK_BODY};
+                border: none; border-radius: 18px; padding: 0px 14px;
             }}
-            QPushButton:hover {{ background: #FFFFFF; }}
-            QPushButton:pressed {{ background: {bk_ui.SURFACE_SUNK}; }}
+            QPushButton:hover {{ background: rgba(255, 255, 255, 0.72); }}
+            QPushButton:pressed {{ background: rgba(255, 255, 255, 0.92); }}
             QPushButton:disabled {{ color: {bk_ui.INK_FAINT}; }}
         """)
         actions.addWidget(self.btn_new_folder)
+        actions.addSpacing(4)
 
         self.btn_primary = QPushButton("Yeni Çizelge")
         self.btn_primary.setCursor(Qt.PointingHandCursor)
@@ -2373,15 +2375,17 @@ class InstitutionHeader(QWidget):
         self.btn_primary.setStyleSheet(f"""
             QPushButton {{
                 background: {bk_ui.BRAND}; color: #FFFFFF;
-                border: 1px solid {bk_ui.BRAND};
-                border-top-right-radius: {_R}px; border-bottom-right-radius: {_R}px;
-                border-top-left-radius: 0px; border-bottom-left-radius: 0px;
-                padding: 0px 18px 0px 14px;
+                border: none; border-radius: 18px; padding: 0px 20px 0px 16px;
             }}
-            QPushButton:hover {{ background: {bk_ui.BRAND_DARK}; border-color: {bk_ui.BRAND_DARK}; }}
-            QPushButton:pressed {{ background: {bk_ui.BRAND_DEEP}; border-color: {bk_ui.BRAND_DEEP}; }}
-            QPushButton:disabled {{ background: #9EB4D8; border-color: #9EB4D8; color: #F0F4FB; }}
+            QPushButton:hover {{ background: {bk_ui.BRAND_DARK}; }}
+            QPushButton:pressed {{ background: {bk_ui.BRAND_DEEP}; }}
+            QPushButton:disabled {{ background: #9EB4D8; color: #F0F4FB; }}
         """)
+        _sh = QGraphicsDropShadowEffect(self.btn_primary)
+        _sh.setBlurRadius(12)
+        _sh.setOffset(0, 2)
+        _sh.setColor(QColor(15, 74, 171, 55))
+        self.btn_primary.setGraphicsEffect(_sh)
         actions.addWidget(self.btn_primary)
 
         top_row.addLayout(actions)
