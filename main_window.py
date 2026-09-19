@@ -2650,6 +2650,56 @@ class MainWindow(QMainWindow):
     def _ask_place_anyway(self, body_html, title="Bu Saate Yerleştirilemez"):
         return ask_place_anyway(self, body_html, title)
 
+    def _fill_block_id_from_origin(self, lesson_info):
+        """Taşınan kartın eksik blok kimliğini kaynak hücreden tamamlar.
+
+        Sürükleme verisi gride yerleşmiş dersten kopyalanıyor ama eski
+        kayıtlarda (ve bazı otomatik yerleşimlerde) block_id boş olabiliyor.
+        O kimlik kartın kendi kaydını tanımanın en sağlam yolu: geometrik
+        eşleştirme ders adının iki yerde aynı biçimde yazılmasına bağlı,
+        kimlik değil.
+        """
+        try:
+            if not lesson_info or not lesson_info.get("is_move"):
+                return
+            if str(lesson_info.get("block_id") or "").strip():
+                return
+            orig_c = int(lesson_info.get("origin_col", -1))
+            if orig_c < 0:
+                return
+            settings = self.data_store.get("settings", {}) or {}
+            periods = int(settings.get("periods", self.data_store.get("ders_saati", 8)) or 8)
+            if periods <= 0:
+                periods = 8
+            o_day, o_per = orig_c // periods, orig_c % periods
+            from auto_scheduler import matches_class, format_tr_name
+            want_cls = (lesson_info.get("class_name") or lesson_info.get("class") or "").strip()
+            want_sub = format_tr_name(lesson_info.get("subject_name")
+                                      or lesson_info.get("subject") or "")
+            for p in self.data_store.get("grid_placements", []) or []:
+                if not isinstance(p, dict):
+                    continue
+                bid = str(p.get("block_id") or "").strip()
+                if not bid:
+                    continue
+                p_day = int(p.get("day") if "day" in p else p.get("col", 0))
+                p_per = int(p.get("period") if "period" in p else p.get("row", 0))
+                p_dur = max(1, int(p.get("duration", 1) or 1))
+                if p_day != o_day or not (p_per <= o_per < p_per + p_dur):
+                    continue
+                p_cls = (p.get("class_name") or p.get("class") or "").strip()
+                p_sub = format_tr_name(p.get("subject_name") or p.get("subject") or "")
+                if want_cls and p_cls and not (matches_class(p_cls, want_cls)
+                                               or matches_class(want_cls, p_cls)
+                                               or p_cls == want_cls):
+                    continue
+                if want_sub and p_sub and p_sub != want_sub:
+                    continue
+                lesson_info["block_id"] = bid
+                return
+        except Exception as exc:
+            print(f"[Drop] blok kimliği tamamlanamadı: {exc}")
+
     def _final_placement_check(self, row, col, lesson_info):
         """Bırakma anında SON doğrulama — sürüklerken görünen renkle aynı kaynak.
 
@@ -2666,6 +2716,15 @@ class MainWindow(QMainWindow):
             lesson = dict(lesson_info or {})
             if pos["class_name"]:
                 lesson.setdefault("class_name", pos["class_name"])
+            # Kartın GELDİĞİ hücre: motor, kimliği olmayan kayıtlarda kendi
+            # kaydını bundan tanıyor (bkz. placement_engine._same_block).
+            o_col = int(lesson.get("origin_col", -1) or -1)
+            if lesson.get("is_move") and o_col >= 0:
+                _st = self.data_store.get("settings", {}) or {}
+                _per = int(_st.get("periods", self.data_store.get("ders_saati", 8)) or 8)
+                if _per > 0:
+                    lesson.setdefault("origin_day", o_col // _per)
+                    lesson.setdefault("origin_period", o_col % _per)
             snapshot = pe.TimetableSnapshot(
                 self.data_store,
                 institution_slug=getattr(self, "institution_slug", None),
@@ -2700,6 +2759,16 @@ class MainWindow(QMainWindow):
         # açınca kullanıcı tek bir sürükleme için dört kez onay veriyordu.
         # Hepsi burada toplanıyor, en sonda bir kez soruluyor.
         blocked_reasons = []
+
+        # Kartın kimliğini ÖNCE tamamla.
+        #
+        # Bir dersi tutup tam aynı yere geri bırakınca "bu saatte zaten ders
+        # var" deniyordu: hedefte bulunan kayıt sürüklenen dersin ta
+        # kendisiydi. Hem aşağıdaki doluluk kontrolü hem de
+        # _final_placement_check kartın kendi kaydını BLOK KİMLİĞİNDEN
+        # tanıyor; kimlik sürükleme verisinde yoksa ders kendi kendine engel
+        # oluyordu. Kimliği kaynak hücredeki kayıttan alıyoruz.
+        self._fill_block_id_from_origin(lesson_info)
 
         verdict = self._final_placement_check(row, col, lesson_info)
         if verdict is not None and verdict.status in (
@@ -2856,7 +2925,18 @@ class MainWindow(QMainWindow):
         orig_day = orig_c // periods if (is_move and orig_c >= 0) else -1
         orig_per = orig_c % periods if (is_move and orig_c >= 0) else -1
 
+        # Sürüklenen kartın KENDİ kaydı hiçbir zaman engel değildir.
+        #
+        # Bir dersi tutup tam aynı yere geri bırakınca "bu saatte zaten ders
+        # var" deniyordu: hedef hücrede bulunan kayıt, sürüklenen dersin ta
+        # kendisiydi. Aşağıdaki geometrik eşleştirme bunu yakalamaya
+        # çalışıyor ama ders adının iki yerde aynı biçimde yazılmış olmasına
+        # bağlı; blok kimliği ise kartın kimliğidir, yazıma bağlı değildir.
+        drag_block_id = str(lesson_info.get("block_id") or "").strip()
+
         def is_origin_placement(p):
+            if drag_block_id and str(p.get("block_id") or "").strip() == drag_block_id:
+                return True
             if not is_move or orig_c < 0:
                 return False
             p_d = int(p.get("day") if "day" in p else p.get("col", 0))

@@ -358,11 +358,39 @@ def groups_intersect(a, b) -> bool:
 
 
 def _same_block(p, candidate) -> bool:
-    """Bu yerleşim, sürüklenen dersin kendisi mi?"""
+    """Bu yerleşim, sürüklenen dersin kendisi mi?
+
+    Kimlik varsa kimlikten. Yoksa GEOMETRİDEN: kartın geldiği hücreyi
+    kaplayan, aynı sınıfa ve aynı derse ait kayıt kartın ta kendisidir.
+
+    Kimliksiz kayıtlar gerçekte var — eski çizelgeler ve bazı otomatik
+    yerleşimler block_id taşımıyor — ve burada "kendisi değil" demek,
+    dersi tutup tam aynı yere geri bırakan kullanıcıya "bu saatte zaten
+    ders var" dedirtiyordu. Kendi kendine çakışan bir ders yoktur.
+    """
     bid = _norm(p.get("block_id"))
     if candidate.block_id and bid:
         return bid == candidate.block_id
-    return False
+    if candidate.source_day is None or candidate.source_period is None:
+        return False
+    try:
+        p_day = int(p.get("day", p.get("col", 0)))
+        p_per = int(p.get("period", p.get("row", 0)))
+        p_dur = max(1, int(p.get("duration", 1) or 1))
+        src_day = int(candidate.source_day)
+        src_per = int(candidate.source_period)
+    except (TypeError, ValueError):
+        return False
+    if p_day != src_day or not (p_per <= src_per < p_per + p_dur):
+        return False
+    p_subject = _norm(p.get("subject_name") or p.get("subject"))
+    if candidate.subject and p_subject and p_subject != candidate.subject:
+        return False
+    p_classes = {class_key(c) for c in lesson_classes(p)}
+    cand_classes = {class_key(c) for c in candidate.classes}
+    if p_classes and cand_classes and not (p_classes & cand_classes):
+        return False
+    return True
 
 
 class TimetableSnapshot:

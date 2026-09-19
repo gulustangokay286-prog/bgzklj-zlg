@@ -244,6 +244,50 @@ def run():
     src = inspect.getsource(DraggableLessonCard._start_standard_drag)
     check("dock kartı ilk hücresinden tutuluyor", "2 * dur" in src, src[:140])
 
+    print("\n[aynı yere geri bırakma hiçbir soru sormaz]")
+    # Bir dersi tutup TAM AYNI yere bırakmak hiçbir şeyi değiştirmez; program
+    # "bu saatte zaten ders var" diye sormamalı — hedefte duran kayıt,
+    # sürüklenen dersin ta kendisidir.
+    asked = []
+    _q, _w = QMessageBox.question, QMessageBox.warning
+    QMessageBox.question = staticmethod(lambda *a, **k: (asked.append(("q", str(a[1:2]))), QMessageBox.Yes)[1])
+    QMessageBox.warning = staticmethod(lambda *a, **k: (asked.append(("w", str(a[1:2]))), QMessageBox.Yes)[1])
+    try:
+        for label, dur, drop_col in (("1 saatlik", 1, 0), ("2 saatlik", 2, 0)):
+            win.data_store = make_store()
+            if dur == 2:
+                win.data_store["grid_placements"] = [
+                    placement(0, 0, "Matematik", "Ahmet Yılmaz", "9A", "blk_mat", 2),
+                    placement(0, 1, "Matematik", "Ahmet Yılmaz", "9A", "blk_mat", 2),
+                ]
+            before = len(win.data_store["grid_placements"])
+            asked.clear()
+            win._on_lesson_dropped(0, drop_col, {
+                "subject_name": "Matematik", "teacher_name": "Ahmet Yılmaz",
+                "class_name": "9A", "duration": dur,
+                "is_move": True, "origin_row": 0, "origin_col": drop_col,
+            })
+            check(f"{label}: aynı yere bırakınca soru yok", not asked, str(asked))
+            check(f"{label}: ders kaybolmadı",
+                  len(win.data_store["grid_placements"]) == before,
+                  f"{before} -> {len(win.data_store['grid_placements'])}")
+
+        # Kimliği taşımayan (eski) kayıtlarda da aynı şey geçerli: blok kimliği
+        # sürükleme verisinde yoksa kaynak hücreden tamamlanır.
+        win.data_store = make_store()
+        for p_item in win.data_store["grid_placements"]:
+            p_item.pop("block_id", None)
+        win.data_store["grid_placements"][0]["block_id"] = "blk_mat"
+        asked.clear()
+        win._on_lesson_dropped(0, 0, {
+            "subject_name": "Matematik", "teacher_name": "Ahmet Yılmaz",
+            "class_name": "9A", "duration": 1,
+            "is_move": True, "origin_row": 0, "origin_col": 0,
+        })
+        check("blok kimliği sürükleme verisinde yokken de soru yok", not asked, str(asked))
+    finally:
+        QMessageBox.question, QMessageBox.warning = _q, _w
+
     win.close()
 
 

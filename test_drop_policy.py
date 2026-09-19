@@ -133,6 +133,41 @@ def run():
     check("mesaj taşmayı/kapalıyı anlatıyor", "kapalı" in r5.explanation.lower(),
           r5.explanation)
 
+    print("\n[kendi kendine çakışma yok] ders tam aynı yere geri bırakılabilir")
+    # Kimlik taşımayan kayıtlar gerçekte var (eski çizelgeler, bazı otomatik
+    # yerleşimler). Motor o zaman kartın kendi kaydını GELDİĞİ hücreden tanır;
+    # tanımazsa kullanıcı dersi yerinden alıp aynı yere bırakınca "bu saatte
+    # zaten ders var" uyarısı alıyordu.
+    same = {"class_name": "9A", "subject_name": "Matematik",
+            "teacher_name": "Ahmet Yılmaz", "duration": 1,
+            "is_move": True, "origin_day": 0, "origin_period": 0}
+    d6 = dict(base, grid_placements=[
+        {"class_name": "9A", "subject_name": "Matematik",
+         "teacher_name": "Ahmet Yılmaz", "day": 0, "period": 0, "duration": 1}])
+    r6 = analyze(d6, same, 0, 0)
+    check("aynı yere geri bırakma -> çakışma yok",
+          not any(c.type == pe.CLASS_COLLISION for c in r6.conflicts),
+          str([c.message for c in r6.conflicts]))
+    check("durum CURRENT", r6.status == pe.CURRENT, r6.status)
+
+    # Ama BAŞKA bir hücreden gelen ders dolu hücreyi hâlâ çakışma görmeli:
+    # kimliksiz kayıtlarda her şeyi "kendisi" saymak, gerçek çakışmaları
+    # gizlerdi.
+    other = dict(same, origin_period=3)
+    r7 = analyze(d6, other, 0, 0)
+    check("başka hücreden gelen ders -> hâlâ çakışma",
+          any(c.type == pe.CLASS_COLLISION for c in r7.conflicts),
+          str([c.message for c in r7.conflicts]))
+
+    # Aynı saatteki BAŞKA sınıfın dersi "kendisi" sayılmamalı.
+    d8 = dict(base, grid_placements=[
+        {"class_name": "9B", "subject_name": "Matematik",
+         "teacher_name": "Ahmet Yılmaz", "day": 0, "period": 0, "duration": 1}])
+    r8 = analyze(d8, same, 0, 0)
+    check("başka sınıfın dersi kendisi sayılmıyor",
+          any(c.type == pe.TEACHER_COLLISION for c in r8.conflicts),
+          str([c.message for c in r8.conflicts]))
+
 
 if __name__ == "__main__":
     try:
