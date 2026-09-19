@@ -103,7 +103,7 @@ class _Model:
                 v = m.NewBoolVar(f"x{i}_{idx}")
                 row.append((idx, v))
                 d, p = divmod(idx, P)
-                self.occ.append(dict(i=i, d=d, p=p, dur=c.duration, v=v, card=c, piece=False))
+                self.occ.append(dict(i=i, d=d, p=p, dur=c.duration, v=v, card=c, piece=False, k=-1))
             su = []
             if allow_split and c.duration >= 2 and c.locked_at is None:
                 for k in range(c.duration):
@@ -121,7 +121,7 @@ class _Model:
                                 continue
                             v = m.NewBoolVar(f"s{i}_{k}_{idx}")
                             us.append((idx, v))
-                            self.occ.append(dict(i=i, d=d, p=p, dur=1, v=v, card=c, piece=True))
+                            self.occ.append(dict(i=i, d=d, p=p, dur=1, v=v, card=c, piece=True, k=k))
                     su.append(us)
             self.xs.append(row)
             if su and all(su):
@@ -211,6 +211,20 @@ class _Model:
                     self.pen.append(GAP_PEN * g)
 
     # ── yardımcılar ───────────────────────────────────────────────────────
+    @staticmethod
+    def _exclusive(a, b):
+        """Aynı kartın iki yerleşimi zaten birbirini dışlıyor mu?
+
+        Bütün blok alternatifleri ve blok-parça çiftleri dışlar (en fazla biri
+        seçilir); bunlar için çift kısıt gereksizdir. Aynı kartın FARKLI
+        parçaları (k ≠ k') ise birlikte seçilir — 2 saatlik dersin 1+1'i.
+        Onlar dışlanmaz: kural çifte uygulanmalı, yoksa iki parça aynı güne
+        ayrı ayrı düşer ve son denetim çizelgeyi reddeder.
+        """
+        if a['i'] != b['i']:
+            return False
+        return not (a['piece'] and b['piece'] and a['k'] != b['k'])
+
     def _cap(self, terms, limit, rule, tag):
         """sum(terms) <= limit — sert kısıt ya da ceza terimi."""
         if not terms:
@@ -391,7 +405,7 @@ class _Model:
                     a = occs[x]
                     for y in range(x):
                         b = occs[y]
-                        if a['i'] == b['i']:
+                        if self._exclusive(a, b):
                             continue        # aynı kartın alternatif yerleri
                         if (a['p'] + a['dur'] == b['p'] or b['p'] + b['dur'] == a['p']):
                             continue        # bitişik: serbest
@@ -408,7 +422,7 @@ class _Model:
                 a = occs[a_ix]
                 for b_ix in range(a_ix):
                     b = occs[b_ix]
-                    if a['i'] == b['i']:
+                    if self._exclusive(a, b):
                         continue
                     adjacent = (a['p'] + a['dur'] == b['p'] or b['p'] + b['dur'] == a['p'])
                     overlap = not (a['p'] + a['dur'] <= b['p'] or b['p'] + b['dur'] <= a['p'])
@@ -813,18 +827,29 @@ def solve_optimal(world, rule_list, referans=None, allow_split=True,
                           durum=st, ust=ust_sinir, gecen=_t.monotonic() - baslangic))
         hedef = w.total_hours() if ust_sinir is None else min(w.total_hours(), ust_sinir)
         deneme = 0
+        # Hedef merdiveni. İlk deneme TEPEYİ ister (kolay veride tavan bir
+        # seferde gelir). Gelmezse eldekinin BİR ÜSTÜ istenir ve her başarıda
+        # bir basamak daha çıkılır (279 → 280 → … → 284): +1 ısıtmalı ve
+        # ucuz, tepeye körlemesine 3×45 sn saldırmak ise 282'de kalıyordu.
+        # +1 bile gelmiyorsa karar kullanıcının ("beklemek ister misin").
+        # INFEASIBLE her zaman kanıttır: tavan o hedefin bir altına iner.
+        target = hedef
         while (en_iyi_saat < hedef and ust_sinir is not None and hedef > max(en_iyi_saat, 0)
-               and deneme < 3 and not iptal()):
+               and not iptal()):
             deneme += 1
             kalan = azami_saniye - (_t.monotonic() - baslangic)
             if kalan <= 1:
                 break
+            target = max(min(target, hedef), en_iyi_saat + 1)
+            tepe = (target == hedef)
             pieces = []
             pos, placed, st = solve_cpsat(
-                w, rule_list, seconds=min(45.0, kalan), workers=workers,
+                w, rule_list, seconds=min(25.0 if tepe else 15.0, kalan), workers=workers,
                 allow_split=allow_split, pieces_out=pieces, log=log, forced=forced,
-                cancelled=cancelled, stop_when_full=True, stop_at_hours=hedef,
-                min_hours=hedef, seed=deneme)
+                cancelled=cancelled, stop_when_full=True, stop_at_hours=target,
+                min_hours=target, seed=deneme,
+                warm_start=None if tepe else ipucu,
+                warm_pieces=None if tepe else ipucu_parca)
             if placed > en_iyi_saat:
                 en_iyi_saat, en_iyi_pos, en_iyi_parca = placed, pos, dict(pieces)
                 ipucu, ipucu_parca = pos, dict(pieces)
@@ -832,11 +857,31 @@ def solve_optimal(world, rule_list, referans=None, allow_split=True,
                 progress(dict(asama=0, tur=deneme, saat=en_iyi_saat, toplam=w.total_hours(),
                               durum=st, ust=ust_sinir, gecen=_t.monotonic() - baslangic))
             if st == "INFEASIBLE":
-                # Saat düzeyinde bu kadar yerleşmiyor: tavan bir saat iner.
-                ust_sinir = hedef - 1
-                hedef = ust_sinir
+                # Bu kadar saat yerleşmiyor — daha fazlası da yerleşmez (kanıt).
+                ust_sinir = target - 1
+                hedef = min(hedef, ust_sinir)
+                target = hedef
                 continue
-            break               # bulundu ya da süre doldu (UNKNOWN)
+            if placed >= target:
+                target = en_iyi_saat + 1        # bir basamak daha
+                continue
+            # UNKNOWN: bu hedef süre içinde bulunamadı.
+            if tepe and en_iyi_saat + 1 < hedef:
+                target = en_iyi_saat + 1        # tepe gelmedi: tırmanmaya geç
+                continue
+            if callable(ask_continue) and en_iyi_saat > 0:
+                try:
+                    devam = bool(ask_continue(dict(saat=en_iyi_saat, toplam=w.total_hours(),
+                                                   tur=deneme, gecen=_t.monotonic() - baslangic,
+                                                   durgun=1, ust=ust_sinir)))
+                except Exception:
+                    devam = False
+                if not devam:
+                    durum = "STALLED"
+                    break
+                target = hedef                  # bekliyor: bir kez daha tepeyi dene
+            elif deneme >= 4:
+                break                           # soran yok: 1. aşamaya geç
     hedef = w.total_hours() if ust_sinir is None else min(w.total_hours(), ust_sinir)
     if en_iyi_saat >= hedef and en_iyi_saat > 0:
         durum = "OPTIMAL"
@@ -851,7 +896,7 @@ def solve_optimal(world, rule_list, referans=None, allow_split=True,
     #     bir tur kazandıracaksa ilk dakikalarda kazandırıyor; 278'de bir
     #     saat beklemek 279 getirmiyor, kullanıcıyı bekletiyor.
     # Tur süresi 30 sn'den başlar ve en fazla 4 dakikaya çıkar.
-    while durum != "OPTIMAL":
+    while durum not in ("OPTIMAL", "STALLED"):
         tur += 1
         if iptal():
             durum = "CANCELLED"
