@@ -1044,41 +1044,39 @@ def _screen_dpr():
 
 
 def institution_3d(name="", colour=None, size=44, dpr=None):
-    """An institution's mark: an isometric building on a base slab.
+    """An institution's mark: a small neoclassical building, drawn in 3-D.
 
-    Built to the shape of a real office/school block: a tall volume on a
-    plinth that overhangs its footprint, banded storeys of glazing on both
-    visible faces, a taller glazed ground floor, and a roof with a
-    recessed deck inside its parapet.
+    A columned portico on a stepped base — the shape a school, a bank or a
+    courthouse takes in every icon set, because the portico is what says
+    "institution" at 30 pixels. What came before was an isometric office
+    block with banded glazing: correct as a building, mute as a sign. It
+    could have been a hotel.
 
-    Three things this drawing has to get right, each of which it got wrong
-    once:
+    Four things this drawing has to get right, three of which the earlier
+    one got wrong first:
 
-    Resolution. The pixmap used to be rasterised at exactly the logical
-    size and handed to a label, so on any hi-DPI screen — every Mac, every
-    Windows machine above 100% scaling — the compositor scaled a 36px
-    bitmap up and the mark looked soft and cheap. It is now drawn at
-    3x supersampling on top of the screen's own device pixel ratio and
-    resolved down with a smooth filter, then tagged with that ratio so Qt
-    lays it out at the right size. Thin isometric seams need the
-    supersampling as much as the DPI: a 1px diagonal rasterised directly
-    is a staircase.
+    Resolution. The pixmap is drawn at 3x supersampling on top of the
+    screen's device pixel ratio and resolved down, then tagged with that
+    ratio. A 1px isometric seam rasterised directly is a staircase.
 
-    Contour. Every face was a flat fill with no edge, so the white variant
-    used on the navy hero collapsed into one white blob — nothing
-    separated roof from wall from glass. Each face now carries a hairline
-    in a dark slate at low alpha, which reads as a soft contour on pale
-    surfaces and as a seam on saturated ones.
+    Contour. Every face carries a hairline in dark slate at low alpha, so
+    the pale variants do not collapse into one white blob.
 
-    Achromatic colours. Tones were derived by scaling saturation, so at
-    saturation zero — pure white — glass, wall and roof all resolved to
-    the same white. A white building now runs on its own value ladder
-    instead, and keeps its glazing.
+    Achromatic colours. Tones used to be derived by scaling saturation, so
+    a white institution resolved to white everywhere. Each tone now names
+    its own grey for that case.
+
+    Roundness. The columns are the whole point, so they are not flat
+    strips: each is filled with a three-stop gradient across its width —
+    shadow, highlight, mid — which is what makes a rectangle read as a
+    cylinder. The colour of the institution lives in the door and the
+    windows; the stone stays stone, so a sidebar of five stays calm.
 
     Earlier attempts, so they are not repeated: four tones lit from the
     top-left with a rooftop flag (mush at 36px); a flat tile with a white
     cut-out (lost the depth the rest of the program is drawn with); a
-    steep-roofed cottage (read as a house, not an institution).
+    steep-roofed cottage (read as a house); an isometric office block with
+    glazed storeys (read as an office).
     """
     if dpr is None:
         dpr = _screen_dpr()
@@ -1103,15 +1101,17 @@ def institution_3d(name="", colour=None, size=44, dpr=None):
         return QColor.fromHsv(h, max(0, min(255, int(sat * sat_mul))),
                               max(0, min(255, int(value))))
 
-    slab_top = tone(0.05, 247, 250)
-    slab_side = tone(0.10, 224, 227)
-    wall_lit = tone(0.07, 253, 255)
-    wall_shade = tone(0.13, 219, 226)
-    roof_rim = tone(0.06, 255, 255)
-    roof_deck = tone(0.16, 233, 238)
-    glass_lit = tone(0.72, val * 1.06, 196)
-    glass_shade = tone(0.84, val * 0.80, 168)
-    entrance = tone(0.88, val * 0.62, 146)
+    step_top   = tone(0.05, 250, 252)
+    step_side  = tone(0.11, 227, 231)
+    stone_lit  = tone(0.04, 253, 255)     # ön cephe, alınlık
+    stone_mid  = tone(0.07, 243, 246)     # sütun gövdesi
+    stone_dark = tone(0.13, 220, 226)     # sağ yan yüz
+    roof_face  = tone(0.09, 238, 242)
+    # Gölge NÖTR: portikonun içi kurumun renginde parlarsa sütunlar onun
+    # önünde erir. Renk kapıda ve pencerelerde toplanır, taş taş kalır.
+    recess     = tone(0.12, 176, 186)
+    glass      = tone(0.72, val * 0.96, 178)
+    door       = tone(0.96, val * 0.70, 128)
 
     SS = 3
     px = max(8, int(round(size * dpr * SS)))
@@ -1121,8 +1121,8 @@ def institution_3d(name="", colour=None, size=44, dpr=None):
     p.setRenderHint(QPainter.Antialiasing)
     u = px / 44.0
 
-    edge = QColor(18, 26, 43, 58)
-    edge_pen = QPen(edge, max(0.75, u * 0.42))
+    edge = QColor(18, 26, 43, 52)
+    edge_pen = QPen(edge, max(0.75, u * 0.40))
     edge_pen.setJoinStyle(Qt.MiterJoin)
 
     def poly(pts, brush, outline=True):
@@ -1135,53 +1135,81 @@ def institution_3d(name="", colour=None, size=44, dpr=None):
         p.setPen(edge_pen if outline else Qt.NoPen)
         p.drawPath(path)
 
-    # ── Base slab ──────────────────────────────────────────────────────
-    SW, SH, SCY, TH = 16.6, 7.2, 33.4, 2.3
-    L = (22 - SW, SCY); B = (22, SCY - SH); R = (22 + SW, SCY); F = (22, SCY + SH)
-    poly([L, F, (F[0], F[1] + TH), (L[0], L[1] + TH)], slab_side)
-    poly([F, R, (R[0], R[1] + TH), (F[0], F[1] + TH)], slab_side)
-    poly([L, B, R, F], slab_top)
+    # ── Basamaklar ─────────────────────────────────────────────────────
+    # Üç kademe, her biri altındakinden dar: binanın yere oturduğu yer.
+    for half_w, half_d, cy, th in ((17.4, 7.2, 31.3, 1.9),
+                                   (15.4, 6.4, 29.7, 1.9),
+                                   (13.7, 5.7, 28.2, 2.0)):
+        L = (22 - half_w, cy); B = (22, cy - half_d)
+        R = (22 + half_w, cy); F = (22, cy + half_d)
+        poly([L, F, (F[0], F[1] + th), (L[0], L[1] + th)], step_side)
+        poly([F, R, (R[0], R[1] + th), (F[0], F[1] + th)], step_side)
+        poly([L, B, R, F], step_top)
 
-    # ── Massing ────────────────────────────────────────────────────────
-    BW, BD, BCY, HGT = 11.3, 5.0, 31.4, 18.2
-    bl = (22 - BW, BCY); bb = (22, BCY - BD)
-    br = (22 + BW, BCY); bf = (22, BCY + BD)
-    tl = (bl[0], bl[1] - HGT); tb = (bb[0], bb[1] - HGT)
-    tr = (br[0], br[1] - HGT); tf = (bf[0], bf[1] - HGT)
+    # ── Gövde ──────────────────────────────────────────────────────────
+    BW, BD, BCY = 12.6, 5.3, 28.2
+    COL_H, ENT_H = 14.2, 2.6
+    TOPY = BCY - COL_H - ENT_H
+    tl = (22 - BW, TOPY); tf = (22, TOPY + BD)
+    tr = (22 + BW, TOPY); tb = (22, TOPY - BD)
+    BOT = COL_H + ENT_H                      # taban, v ekseninde
 
-    poly([bl, bf, tf, tl], wall_lit)
-    poly([bf, br, tr, tf], wall_shade)
-
-    def left_pt(uu, vv):
+    def fpt(uu, vv):
+        """Ön cephe düzlemi: uu soldan öne (tl→tf), vv aşağı."""
         return (tl[0] + uu * BW, tl[1] + uu * BD + vv)
 
-    def right_pt(uu, vv):
+    def rpt(uu, vv):
+        """Sağ yan yüz: uu önden sağa (tf→tr), vv aşağı."""
         return (tf[0] + uu * BW, tf[1] - uu * BD + vv)
 
-    def band(mapper, v0, v1, brush, u0=0.11, u1=0.89):
+    def face(mapper, u0, u1, v0, v1, brush, outline=True):
         poly([mapper(u0, v0), mapper(u1, v0), mapper(u1, v1), mapper(u0, v1)],
-             brush, outline=False)
+             brush, outline)
 
-    # ── Glazing ────────────────────────────────────────────────────────
-    FLOORS, TOP_PAD, PITCH, GLASS_H = 4, 2.5, 3.0, 2.1
-    for i in range(FLOORS):
-        v0 = TOP_PAD + i * PITCH
-        band(left_pt, v0, v0 + GLASS_H, glass_lit)
-        band(right_pt, v0, v0 + GLASS_H, glass_shade)
+    # Sağ yan yüz: duvar + üç dar pencere.
+    face(rpt, 0, 1, ENT_H, BOT, stone_dark)
+    for uu in (0.25, 0.50, 0.75):
+        face(rpt, uu - 0.062, uu + 0.062, ENT_H + 3.4, BOT - 3.6, glass, False)
 
-    ground = TOP_PAD + FLOORS * PITCH + 0.7
-    band(left_pt, ground, ground + 3.2, entrance, 0.15, 0.85)
-    band(right_pt, ground, ground + 3.2, glass_shade, 0.15, 0.85)
+    # Ön cephe: sütunların ARKASI önce — portiko içi gölgede kalır, yoksa
+    # sütunlar bir duvara çizilmiş şeritler gibi durur.
+    face(fpt, 0, 1, ENT_H, BOT, recess)
+    face(fpt, 0.42, 0.58, ENT_H + 4.2, BOT, door, False)
 
-    # ── Roof ───────────────────────────────────────────────────────────
-    poly([tl, tb, tr, tf], roof_rim)
-    k = 0.72
-    poly([
-        (22 + (tl[0] - 22) * k, tb[1] + (tl[1] - tb[1]) * k),
-        (22, tb[1] + 0.9),
-        (22 + (tr[0] - 22) * k, tb[1] + (tr[1] - tb[1]) * k),
-        (22, tf[1] - 0.9),
-    ], roof_deck)
+    # Sütunlar: her biri kendi enine yayılan üç duraklı gradyanla
+    # doldurulur — gölge, ışık, orta ton. Yuvarlaklığı yapan bu.
+    def column(uc, half=0.095):
+        u0, u1 = uc - half, uc + half
+        a, b = fpt(u0, ENT_H), fpt(u1, ENT_H)
+        g = QLinearGradient(a[0] * u, a[1] * u, b[0] * u, b[1] * u)
+        g.setColorAt(0.0, stone_dark)
+        g.setColorAt(0.34, stone_lit)
+        g.setColorAt(1.0, stone_mid)
+        face(fpt, u0, u1, ENT_H, BOT, QBrush(g))
+        # başlık ve taban: gövdeden bir tık geniş iki ince bilezik
+        face(fpt, u0 - 0.028, u1 + 0.028, ENT_H, ENT_H + 0.9, stone_lit, False)
+        face(fpt, u0 - 0.028, u1 + 0.028, BOT - 0.9, BOT, stone_lit, False)
+
+    # Ortadaki açıklık ötekilerden geniş: kapı oradan görünür ve cephe
+    # dört eşit şerit olmaktan çıkar.
+    for uc in (0.10, 0.343, 0.657, 0.90):
+        column(uc)
+
+    # ── Saçak (entablature) ────────────────────────────────────────────
+    face(rpt, 0, 1, 0, ENT_H, roof_face)
+    face(fpt, 0, 1, 0, ENT_H, stone_lit)
+
+    # ── Alınlık ve çatı ────────────────────────────────────────────────
+    apex_f = (22 - BW / 2.0, TOPY + BD / 2.0 - 4.6)
+    apex_b = (22 + BW / 2.0, TOPY - BD / 2.0 - 4.6)
+    poly([tf, tr, apex_b, apex_f], roof_face)        # sağa eğimli çatı
+    poly([tl, tf, apex_f], stone_lit)                # ön alınlık
+    # Alınlığın içindeki yuvarlak pencere. 30 pikselde kaybolur ama
+    # zarar vermez; 44'te binayı tanıdık kılan ayrıntı odur.
+    ox, oy = (tl[0] + tf[0] + apex_f[0]) / 3.0, (tl[1] + tf[1] + apex_f[1]) / 3.0
+    p.setPen(Qt.NoPen)
+    p.setBrush(QBrush(glass))
+    p.drawEllipse(QPointF(ox * u, (oy + 0.3) * u), 1.05 * u, 1.25 * u)
 
     p.end()
 

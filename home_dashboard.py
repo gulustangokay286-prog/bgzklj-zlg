@@ -1660,6 +1660,11 @@ def _folder_colour(name, fallback=None):
 class CollapsibleVersionGroup(QFrame):
     """A collapsible section of version rows with macOS HIG card styling."""
 
+    # Başlık metninin sol kenarı: kenar boşluğu + ikon + aradaki boşluk.
+    # Versiyon satırları da buradan başlar, ikisi tek çizgide dursun.
+    PAD_X, ICON_W, GAP_X = 16, 30, 12
+    TEXT_X = PAD_X + ICON_W + GAP_X
+
     rename_requested = Signal()
     delete_requested = Signal()
     version_dropped = Signal(str, str)  # slug, filename
@@ -1708,8 +1713,8 @@ class CollapsibleVersionGroup(QFrame):
             }}
         """)
         hdr_lay = QHBoxLayout(self.header)
-        hdr_lay.setContentsMargins(16, 8, 16, 8)
-        hdr_lay.setSpacing(12)
+        hdr_lay.setContentsMargins(self.PAD_X, 8, 16, 8)
+        hdr_lay.setSpacing(self.GAP_X)
 
         # One colour for every folder you made; grey for the pile of
         # everything you did not file.
@@ -1722,7 +1727,7 @@ class CollapsibleVersionGroup(QFrame):
             glyph = bk_ui.folder_3d_glyph(accent.name(), 28)
 
         icon_lbl = QLabel()
-        icon_lbl.setFixedSize(30, 30)
+        icon_lbl.setFixedSize(self.ICON_W, 30)
         icon_lbl.setAlignment(Qt.AlignCenter)
         icon_lbl.setPixmap(glyph)
         icon_lbl.setStyleSheet("background: transparent; border: none;")
@@ -1877,6 +1882,9 @@ class CollapsibleVersionGroup(QFrame):
 
 # ── Apple Clean Version Row (macOS Card Layout) ──────────────────────
 
+_CHIP_PAD_X = 8     # künye zemininin yazısından taşan yanal payı
+
+
 class AppleVersionRow(QFrame):
     double_clicked = Signal(str, str)  # slug, filename
     selected = Signal(str)  # filename
@@ -1896,7 +1904,16 @@ class AppleVersionRow(QFrame):
         self.setAcceptDrops(True)
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(44, 4, 16, 4)
+        # Künyedeki YAZI, üstündeki klasör adıyla aynı dikey çizgide
+        # başlar. 44 piksel ne klasörün ikonuyla (16) ne adıyla (58)
+        # hizalıydı; ikisinin arasında, hiçbir şeye ait olmayan bir
+        # girintide duruyordu.
+        #
+        # Hizalanan şey kutunun kenarı değil yazının kendisi: künyenin
+        # zemini yazısının 8 piksel dışına taşar, o yüzden kutuyu 58'e
+        # koymak yazıyı 66'ya itiyor ve iki isim yine tutmuyordu.
+        layout.setContentsMargins(
+            CollapsibleVersionGroup.TEXT_X - _CHIP_PAD_X, 4, 16, 4)
         layout.setSpacing(12)
         
         # Version Title Badge (e.g. v121 or v121  oturan program)
@@ -1911,7 +1928,7 @@ class AppleVersionRow(QFrame):
             background: #F1F3F5;
             color: #1E293B;
             border-radius: 5px;
-            padding: 0 8px;
+            padding: 0 {_CHIP_PAD_X}px;
         """)
         v_title.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         if cname:
@@ -1967,11 +1984,7 @@ class AppleVersionRow(QFrame):
         if tot <= 0:
             fill_txt, fill_col, fill_tip = "Boş çizelge", bk_ui.INK_FAINT, "Bu versiyonda ders yok."
         elif unp == 0:
-            # Sessizlik de bir cevap: "Tam yerleşim" listenin neredeyse her
-            # satırında aynı yazıyordu, yani hiçbir satırı diğerinden
-            # ayırmıyordu. Sütun boş kalıyor ve göz doğrudan sorunlu
-            # satıra gidiyor; bilgi ipucunda duruyor.
-            fill_txt, fill_col, fill_tip = "", bk_ui.INK_FAINT, f"{tot} saatin tamamı yerleşti."
+            fill_txt, fill_col, fill_tip = "Tam yerleşim", bk_ui.INK_FAINT, f"{tot} saatin tamamı yerleşti."
         else:
             fill_txt, fill_col = f"{unp} saat boşta", "#B45309"
             fill_tip = f"{tot} saatin {unp} saati yerleşemedi."
