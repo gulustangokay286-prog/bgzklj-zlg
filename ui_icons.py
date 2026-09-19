@@ -528,6 +528,69 @@ def _building(p, c):
             p.drawRect(QRectF(x, y, 8, 8))
 
 
+def _rosette(p, c):
+    """Rozetin gövdesi: dalgalı kenarlı dolu daire.
+
+    Durum göstergesi olarak düz bir nokta "bir şey var" der ama neyin
+    olduğunu söylemez. Rozet söyler: dalgalı kenar onu nokta kalabalığından
+    ayırır, içine konan glif de durumu okutur. Üç durum da AYNI gövdeyi
+    kullanır; böylece 14 pikselde bile siluet tanıdık kalır, değişen tek şey
+    renk ve içindeki işaret olur.
+    """
+    path = QPainterPath()
+    n, base, amp, steps = 8, 45.0, 3.6, 220
+    for i in range(steps + 1):
+        a = 2 * math.pi * i / steps
+        r = base + amp * math.cos(n * a)
+        x, y = 50 + r * math.cos(a - math.pi / 2), 50 + r * math.sin(a - math.pi / 2)
+        (path.moveTo if i == 0 else path.lineTo)(x, y)
+    path.closeSubpath()
+    _fill(p, c)
+    p.drawPath(path)
+    pen = QPen(QColor("#FFFFFF"), 11)
+    pen.setCapStyle(Qt.RoundCap)
+    pen.setJoinStyle(Qt.RoundJoin)
+    p.setPen(pen)
+    p.setBrush(Qt.NoBrush)
+
+
+def _verified(p, c):
+    """Rozet + tik: her şey yerinde."""
+    _rosette(p, c)
+    p.drawPolyline(_poly((34, 51), (45, 62), (67, 39)))
+
+
+def _verified_sync(p, c):
+    """Rozet + üç nokta: iş sürüyor.
+
+    Burada dönen ok denendi ve 14 pikselde "G" harfine, çift yönlü ok ise
+    duraklat simgesine dönüştü — yani ikisi de yanlış şey söylüyordu.
+    Üç nokta o boyutta okunan tek işaret, ve zaten beklemenin evrensel
+    karşılığı.
+    """
+    _rosette(p, c)
+    p.setPen(Qt.NoPen)
+    _fill(p, "#FFFFFF")
+    for x in (33, 50, 67):
+        p.drawEllipse(QPointF(x, 50), 6.0, 6.0)
+
+
+def _verified_off(p, c):
+    """Rozet + eğik çizgi: bağlantı yok."""
+    _rosette(p, c)
+    p.drawLine(QPointF(36, 64), QPointF(64, 36))
+
+
+def _cloud_off(p, c):
+    """Bulut + üstünde eğik çizgi: bağlantı yok."""
+    _cloud(p, c)
+    pen = QPen(QColor(c), 9)
+    pen.setCapStyle(Qt.RoundCap)
+    p.setPen(pen)
+    p.setBrush(Qt.NoBrush)
+    p.drawLine(QPointF(20, 82), QPointF(82, 20))
+
+
 def _party(p, c):
     _stroke(p, c, 8)
     path = QPainterPath()
@@ -591,6 +654,10 @@ DRAW = {
     "moon": _moon,
     "building": _building,
     "party": _party,
+    "verified": _verified,
+    "verified_sync": _verified_sync,
+    "verified_off": _verified_off,
+    "cloud_off": _cloud_off,
 }
 
 

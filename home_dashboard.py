@@ -26,6 +26,7 @@ TOPBAR_H = 52
 
 import version_store
 import bk_branding
+import ui_icons
 from version import APP_VERSION
 import update_notifications
 from dialogs.faq_dialog import FAQDialog
@@ -2345,26 +2346,37 @@ class InstitutionHeader(QWidget):
         # çerçevesiz, ikonlu bir metin: klasör. Zemin yalnızca imleç
         # üstündeyken beliriyor. Mavi düğme yumuşak bir gölgeyle bandın bir
         # tık üstünde duruyor; bakışın ilk gittiği yer orası.
-        _BTN_H, _ICON = 36, 15
+        # AYNI GÖVDE, FARKLI AĞIRLIK.
+        #
+        # Klasör düğmesi çerçevesizdi: zemini yalnızca imleç üstündeyken
+        # beliriyordu, yani düğme olduğunu ancak dokununca söylüyordu. Bir
+        # eylem, tıklanabilir olduğunu duyurmak için imleci beklememeli.
+        # Zemin artık DURAĞAN hâlin kendisi; imleç geldiğinde bambaşka bir
+        # şey oluyor — kenar kurumun rengine dönüyor, yazı ve ikon da
+        # onunla birlikte renkleniyor, altına yumuşak bir gölge giriyor.
+        # Yani hover artık "biraz daha beyaz" değil, ayrı bir durum.
+        #
+        # İkisi de aynı yükseklikte, aynı yuvarlaklıkta ve _sync_widths ile
+        # aynı genişlikte: iki eşit gövde. Hiyerarşiyi boyut değil DOLGU
+        # taşıyor — biri kurumun rengiyle dolu, diğeri beyaz.
+        _BTN_H, _BTN_R, _ICON = 36, 18, 15
+        _PAD = 18
         _btn_font = bk_ui.font(9.4, QFont.DemiBold)
 
         self.btn_new_folder = QPushButton("Yeni Klasör")
         self.btn_new_folder.setCursor(Qt.PointingHandCursor)
         self.btn_new_folder.setFixedHeight(_BTN_H)
         self.btn_new_folder.setFont(bk_ui.font(9.2, QFont.Medium))
-        self.btn_new_folder.setIcon(QIcon(bk_ui.folder_line_glyph(bk_ui.INK_SOFT, _ICON)))
         self.btn_new_folder.setIconSize(QSize(_ICON, _ICON))
-        self.btn_new_folder.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent; color: {bk_ui.INK_BODY};
-                border: none; border-radius: 18px; padding: 0px 14px;
-            }}
-            QPushButton:hover {{ background: rgba(255, 255, 255, 0.72); }}
-            QPushButton:pressed {{ background: rgba(255, 255, 255, 0.92); }}
-            QPushButton:disabled {{ color: {bk_ui.INK_FAINT}; }}
-        """)
+        self._folder_icon_size = _ICON
+        self._folder_shadow = QGraphicsDropShadowEffect(self.btn_new_folder)
+        self._folder_shadow.setBlurRadius(14)
+        self._folder_shadow.setOffset(0, 3)
+        self._folder_shadow.setColor(QColor(15, 23, 42, 0))   # durağanken görünmez
+        self.btn_new_folder.setGraphicsEffect(self._folder_shadow)
+        self.btn_new_folder.installEventFilter(self)
         actions.addWidget(self.btn_new_folder)
-        actions.addSpacing(4)
+        actions.addSpacing(8)
 
         self.btn_primary = QPushButton("Yeni Çizelge")
         self.btn_primary.setCursor(Qt.PointingHandCursor)
@@ -2372,21 +2384,17 @@ class InstitutionHeader(QWidget):
         self.btn_primary.setFont(_btn_font)
         self.btn_primary.setIcon(QIcon(bk_ui.plus_glyph("#FFFFFF", _ICON)))
         self.btn_primary.setIconSize(QSize(_ICON, _ICON))
-        self.btn_primary.setStyleSheet(f"""
-            QPushButton {{
-                background: {bk_ui.BRAND}; color: #FFFFFF;
-                border: none; border-radius: 18px; padding: 0px 20px 0px 16px;
-            }}
-            QPushButton:hover {{ background: {bk_ui.BRAND_DARK}; }}
-            QPushButton:pressed {{ background: {bk_ui.BRAND_DEEP}; }}
-            QPushButton:disabled {{ background: #9EB4D8; color: #F0F4FB; }}
-        """)
         _sh = QGraphicsDropShadowEffect(self.btn_primary)
         _sh.setBlurRadius(12)
         _sh.setOffset(0, 2)
         _sh.setColor(QColor(15, 74, 171, 55))
         self.btn_primary.setGraphicsEffect(_sh)
+        self._primary_shadow = _sh
         actions.addWidget(self.btn_primary)
+
+        self._btn_metrics = (_BTN_H, _BTN_R, _PAD)
+        self._folder_hover = False
+        self._restyle_primary()     # ikisini birden giydirir ve eşit genişliğe çeker
 
         top_row.addLayout(actions)
         main_lay.addLayout(top_row)
@@ -2416,23 +2424,81 @@ class InstitutionHeader(QWidget):
         flat = bk_ui.flat_tint(self._accent(), 0.16)
         return (flat, flat, flat)
 
+    def _style_folder(self):
+        """Klasör düğmesi: durağanken beyaz, imleç altındayken kurumun rengi.
+
+        Durağan hâl artık hover'ın eski hâli — beyaz kapsül, ince kenar.
+        Hover ise yeni bir şey: kenar ve yazı kurumun rengine döner, gölge
+        açılır. İki durum birbirinin biraz koyusu değil, iki ayrı görüntü.
+        """
+        h, r, pad = self._btn_metrics
+        c = self._accent()
+        edge = QColor(c)
+        edge.setAlpha(110)
+        ink = QColor(c).darker(112).name() if self._folder_hover else bk_ui.INK_BODY
+        self.btn_new_folder.setStyleSheet(f"""
+            QPushButton {{
+                background: #FFFFFF; color: {ink};
+                border: 1px solid {'rgba(%d, %d, %d, 0.45)' % (c.red(), c.green(), c.blue())
+                                   if self._folder_hover else 'rgba(15, 23, 42, 0.10)'};
+                border-radius: {r}px; padding: 0px {pad}px;
+            }}
+            QPushButton:pressed {{ background: {bk_ui.flat_tint(c, 0.10).name()}; }}
+            QPushButton:disabled {{
+                background: rgba(255, 255, 255, 0.55); color: {bk_ui.INK_FAINT};
+                border: 1px solid rgba(15, 23, 42, 0.06);
+            }}
+        """)
+        glyph = c.darker(112).name() if self._folder_hover else bk_ui.INK_SOFT
+        self.btn_new_folder.setIcon(
+            QIcon(bk_ui.folder_line_glyph(glyph, self._folder_icon_size)))
+        self._folder_shadow.setColor(
+            QColor(c.red(), c.green(), c.blue(), 60) if self._folder_hover
+            else QColor(15, 23, 42, 0))
+
+    def eventFilter(self, obj, ev):
+        if obj is getattr(self, "btn_new_folder", None):
+            if ev.type() in (QEvent.Enter, QEvent.Leave):
+                self._folder_hover = (ev.type() == QEvent.Enter)
+                self._style_folder()
+        return super().eventFilter(obj, ev)
+
+    def _sync_widths(self):
+        """İki düğme tek genişlikte. Metinler ("Yeni Klasör" / "Yeni Çizelge")
+        birkaç piksel farkla yazıldığı için, eşitlemezsek gövdeler eşit
+        görünmüyor — fark, yanlışlık gibi okunacak kadar küçük."""
+        for b in (self.btn_new_folder, self.btn_primary):
+            b.setMinimumWidth(0)
+            b.updateGeometry()
+        w = max(self.btn_new_folder.sizeHint().width(),
+                self.btn_primary.sizeHint().width())
+        self.btn_new_folder.setFixedWidth(w)
+        self.btn_primary.setFixedWidth(w)
+
     def _restyle_primary(self):
         """The one filled control on the page takes the institution's own
         colour, like the band behind it and the folders below it. A fixed
         navy button on a green page was the last thing still insisting on
         a palette the rest of the screen had stopped using."""
+        h, r, pad = self._btn_metrics
         c = self._accent()
         hover = QColor(c).darker(115)
         press = QColor(c).darker(132)
         self.btn_primary.setStyleSheet(f"""
             QPushButton {{
                 background: {c.name()}; color: #FFFFFF;
-                border: none; border-radius: {bk_ui.R_CONTROL}px; padding: 0px 20px;
+                border: 1px solid {c.name()};
+                border-radius: {r}px; padding: 0px {pad}px;
             }}
-            QPushButton:hover {{ background: {hover.name()}; }}
-            QPushButton:pressed {{ background: {press.name()}; }}
-            QPushButton:disabled {{ background: #E2E8F0; color: #94A3B8; border: 1px solid #CBD5E1; }}
+            QPushButton:hover {{ background: {hover.name()}; border-color: {hover.name()}; }}
+            QPushButton:pressed {{ background: {press.name()}; border-color: {press.name()}; }}
+            QPushButton:disabled {{
+                background: #E2E8F0; color: #94A3B8; border: 1px solid #CBD5E1;
+            }}
         """)
+        self._primary_shadow.setColor(QColor(c.red(), c.green(), c.blue(), 70))
+        self._style_folder()
+        self._sync_widths()
 
     def set_institution(self, name, meta_text, colour=None):
         self._colour = colour
@@ -3259,27 +3325,44 @@ class SyncCenterLoadingOverlay(QWidget):
 
 
 class SyncStatusButton(QWidget):
-    """Bulut durumu: küçük bir nokta ve soluk bir kelime.
+    """Bulut durumu: bir rozet ve soluk bir kelime.
 
-    Eskiden bütün kelime renkliydi ("Senkronize" yeşil): üst çubuktaki en
-    parlak nesne, hiçbir şey yapmadığında bile dikkat çekiyordu. Durum bilgisi
-    rengi hak eder ama METİN hak etmez — renk 6 piksellik noktada durur,
-    kelime diğer ikincil yazılarla aynı griye iner. Bir sorun olduğunda
-    (eşitleniyor / çevrimdışı) kelime de renklenir; normalde sessizdir.
+    Önce bütün kelime renkliydi ("Senkronize" yeşil): üst çubuktaki en
+    parlak nesne, hiçbir şey olmadığında bile dikkat çekiyordu. Sonra renk
+    6 piksellik bir noktaya indi — sessiz oldu ama bu sefer hiçbir şey
+    söylemiyordu: yeşil nokta "iyi", turuncu nokta "bir şey oluyor" demek
+    için rengin ezberlenmesini bekliyordu, üstelik renk körlüğünde ikisi
+    aynı lekeydi.
+
+    Şimdi yerinde bir ROZET var: dalgalı kenarı onu arayüzdeki noktalardan
+    ayırır, içindeki işaret durumu rengi bilmeden okutur — tik (her şey
+    yerinde), dönen ok (eşitleniyor), eğik çizgi (bağlantı yok). Kelime
+    normalde gridir; bir sorun varsa o da renklenir.
     """
     clicked = Signal()
+
+    BADGE = 14
+    STATES = {
+        "synced":  ("verified",      "#1B74D8"),   # markayla akraba, rozet gibi canlı
+        "syncing": ("verified_sync", "#C9821A"),
+        "offline": ("verified_off",  "#C7392F"),
+    }
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("syncStatusBtn")
         self.setCursor(Qt.PointingHandCursor)
         self.setFixedHeight(24)
-        self._dot = QColor("#2E9E5B")
         self._quiet = True
 
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(14, 2, 8, 2)
-        lay.setSpacing(0)
+        lay.setContentsMargins(7, 2, 9, 2)
+        lay.setSpacing(6)
+
+        self.badge = QLabel()
+        self.badge.setFixedSize(self.BADGE, self.BADGE)
+        self.badge.setStyleSheet("background: transparent; border: none; padding: 0;")
+        lay.addWidget(self.badge, 0, Qt.AlignVCenter)
 
         self.lbl = QLabel("Senkronize")
         self.lbl.setFont(bk_ui.font(8.8, QFont.Medium))
@@ -3291,34 +3374,30 @@ class SyncStatusButton(QWidget):
             QWidget#syncStatusBtn:hover { background: rgba(0, 0, 0, 0.04); }
             QLabel { background: transparent; border: none; padding: 0; }
         """)
+        self.set_synced()
 
-    def _apply(self, text, dot, quiet, tip):
+    def _apply(self, text, state, quiet, tip):
+        name, colour = self.STATES[state]
         self.lbl.setText(text)
-        self._dot = QColor(dot)
         self._quiet = quiet
+        try:
+            self.badge.setPixmap(ui_icons.pixmap(name, self.BADGE, colour))
+        except Exception:
+            self.badge.clear()
         self.lbl.setStyleSheet(
-            f"color: {bk_ui.INK_SOFT if quiet else dot}; background: transparent; "
+            f"color: {bk_ui.INK_SOFT if quiet else colour}; background: transparent; "
             f"border: none; padding: 0;")
         self.setToolTip(tip)
         self.update()
 
     def set_syncing(self, text="Eşitleniyor"):
-        self._apply(text, "#C9821A", False, "Bulut veritabanı eşitleniyor…")
+        self._apply(text, "syncing", False, "Bulut veritabanı eşitleniyor…")
 
     def set_synced(self, text="Senkronize"):
-        self._apply(text, "#2E9E5B", True, "Tüm kurumlar güncel • Yenilemek için tıklayın")
+        self._apply(text, "synced", True, "Tüm kurumlar güncel • Yenilemek için tıklayın")
 
     def set_offline(self, text="Çevrimdışı"):
-        self._apply(text, "#C7392F", False, "Sunucuya ulaşılamıyor (Yerel Mod)")
-
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        p.setPen(Qt.NoPen)
-        p.setBrush(self._dot)
-        p.drawEllipse(QPointF(7.0, self.height() / 2.0), 3.0, 3.0)
-        p.end()
+        self._apply(text, "offline", False, "Sunucuya ulaşılamıyor (Yerel Mod)")
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
