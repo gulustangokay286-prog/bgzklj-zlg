@@ -20,6 +20,10 @@ from PySide6.QtGui import (
     QPainterPath, QLinearGradient, QRadialGradient, QDrag, QCursor, QPolygonF
 )
 
+# Üst çubuğun yüksekliği tek yerde: çubuk da, altındaki renkli bandın üst
+# kenarı da bunu okur (ikisi ayrı sayılarla yazılınca aralarında şerit kalıyordu).
+TOPBAR_H = 52
+
 import version_store
 import bk_branding
 from version import APP_VERSION
@@ -2313,7 +2317,7 @@ class InstitutionHeader(QWidget):
         # Action Buttons
         actions = QHBoxLayout()
         actions.setContentsMargins(0, 0, 0, 0)
-        actions.setSpacing(10)
+        actions.setSpacing(0)
 
         # Two buttons, one shape, one weight of icon.
         #
@@ -2327,19 +2331,57 @@ class InstitutionHeader(QWidget):
         # Both buttons now share a height, a radius, a font and an icon
         # size, so the pair reads as one control with two settings rather
         # than as two controls that happen to sit together.
+        # İKİ DÜĞME, TEK KONTROL.
+        #
+        # "Yeni Klasör" ile "Yeni Çizelge" aynı işin iki ölçeği: biri kap
+        # açar, biri içine konacak şeyi. Ayrı ayrı durduklarında iki farklı
+        # karar gibi okunuyor, üstelik beyaz düğmenin kalın kenarlığı mavi
+        # düğmenin yanında ikinci bir çerçeve olarak göze batıyordu. Artık
+        # bitişik tek bir hap: sol yarı sessiz, sağ yarı vurgulu; dış köşeler
+        # yuvarlak, iç köşeler düz, aralarında tek bir hairline.
         _BTN_H, _ICON = 36, 15
         _btn_font = bk_ui.font(9.4, QFont.DemiBold)
+        _R = 10
 
-        self.btn_new_folder = bk_ui.secondary_button("Yeni Klasör", height=_BTN_H)
+        self.btn_new_folder = QPushButton("Yeni Klasör")
+        self.btn_new_folder.setCursor(Qt.PointingHandCursor)
+        self.btn_new_folder.setFixedHeight(_BTN_H)
+        self.btn_new_folder.setFont(_btn_font)
         self.btn_new_folder.setIcon(QIcon(bk_ui.folder_line_glyph(bk_ui.INK_BODY, _ICON)))
         self.btn_new_folder.setIconSize(QSize(_ICON, _ICON))
-        self.btn_new_folder.setFont(_btn_font)
+        self.btn_new_folder.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(255, 255, 255, 0.92); color: {bk_ui.INK};
+                border: 1px solid rgba(15, 23, 42, 0.10);
+                border-right: none;
+                border-top-left-radius: {_R}px; border-bottom-left-radius: {_R}px;
+                border-top-right-radius: 0px; border-bottom-right-radius: 0px;
+                padding: 0px 16px 0px 14px;
+            }}
+            QPushButton:hover {{ background: #FFFFFF; }}
+            QPushButton:pressed {{ background: {bk_ui.SURFACE_SUNK}; }}
+            QPushButton:disabled {{ color: {bk_ui.INK_FAINT}; }}
+        """)
         actions.addWidget(self.btn_new_folder)
 
-        self.btn_primary = bk_ui.primary_button("Yeni Çizelge", height=_BTN_H)
+        self.btn_primary = QPushButton("Yeni Çizelge")
+        self.btn_primary.setCursor(Qt.PointingHandCursor)
+        self.btn_primary.setFixedHeight(_BTN_H)
+        self.btn_primary.setFont(_btn_font)
         self.btn_primary.setIcon(QIcon(bk_ui.plus_glyph("#FFFFFF", _ICON)))
         self.btn_primary.setIconSize(QSize(_ICON, _ICON))
-        self.btn_primary.setFont(_btn_font)
+        self.btn_primary.setStyleSheet(f"""
+            QPushButton {{
+                background: {bk_ui.BRAND}; color: #FFFFFF;
+                border: 1px solid {bk_ui.BRAND};
+                border-top-right-radius: {_R}px; border-bottom-right-radius: {_R}px;
+                border-top-left-radius: 0px; border-bottom-left-radius: 0px;
+                padding: 0px 18px 0px 14px;
+            }}
+            QPushButton:hover {{ background: {bk_ui.BRAND_DARK}; border-color: {bk_ui.BRAND_DARK}; }}
+            QPushButton:pressed {{ background: {bk_ui.BRAND_DEEP}; border-color: {bk_ui.BRAND_DEEP}; }}
+            QPushButton:disabled {{ background: #9EB4D8; border-color: #9EB4D8; color: #F0F4FB; }}
+        """)
         actions.addWidget(self.btn_primary)
 
         top_row.addLayout(actions)
@@ -3580,7 +3622,13 @@ class HomeDashboard(QWidget):
         p.fillRect(self.rect(), QColor(BG_CANVAS))
 
         hero = getattr(self, "hero", None)
-        x0, y0 = 252, 60
+        # Bandın üst kenarı çubuğun ALT KENARIDIR. Burada 60 sabiti yazılıydı;
+        # çubuk 52 piksele inince aradaki 8 piksel beyaz bir şerit olarak
+        # kaldı ve renkli alan havada duruyormuş gibi göründü. Artık tek
+        # kaynak TOPBAR_H.
+        bar = getattr(self, "top_bar", None)
+        x0 = 252
+        y0 = bar.height() if bar is not None else TOPBAR_H
         w = max(1, self.width() - x0)
         if hero is None or w < 2 or self.height() < y0 + 2:
             p.end()
@@ -3663,7 +3711,8 @@ class HomeDashboard(QWidget):
         # geldiğinde ya da arama odaklandığında beliriyor.
         top_bar = QFrame()
         top_bar.setObjectName("topBar")
-        top_bar.setFixedHeight(52)
+        top_bar.setFixedHeight(TOPBAR_H)
+        self.top_bar = top_bar
         top_bar.setStyleSheet(f"""
             QFrame#topBar {{
                 background: {bk_ui.SURFACE};
@@ -3708,6 +3757,10 @@ class HomeDashboard(QWidget):
         top_layout.addStretch(1)
 
         # ── Orta: arama ──
+        # Yerleşim ortalaması sol/sağ blokların genişliğine bağlıdır ve
+        # kullanıcı adı uzayınca arama kayar. Bu yüzden arama çubuğun
+        # ÇOCUĞU olarak mutlak ortaya konur (resizeEvent'te yeniden
+        # ortalanır), yerleşimde yalnızca yeri ayrılır.
         # Kutu yok. Büyüteç ve yazı doğrudan çubuğun üstünde duruyor; zemin
         # yalnızca imleç üzerindeyken ya da yazarken beliriyor. Arama bu
         # ekranda en çok kullanılan şey, ama kullanılmadığı sürece sessiz.
@@ -3721,7 +3774,10 @@ class HomeDashboard(QWidget):
                 border-radius: 9px;
             }}
         """
-        self.search_shell.setStyleSheet(self._search_css.format(bg="transparent", line="transparent"))
+        # Boşta bile ince bir çizgi taşır: alan tamamen görünmez olunca
+        # nereye yazılacağı belli olmuyordu. Çizgi çok soluk; imleç gelince
+        # ve odaklanınca koyulaşır.
+        self.search_shell.setStyleSheet(self._search_css.format(bg="transparent", line="#E7E7EC"))
         sc_lay = QHBoxLayout(self.search_shell)
         sc_lay.setContentsMargins(9, 0, 9, 0)
         sc_lay.setSpacing(8)
@@ -3762,7 +3818,11 @@ class HomeDashboard(QWidget):
         self.kbd_hint.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         sc_lay.addWidget(self.kbd_hint, 0, Qt.AlignVCenter)
 
-        top_layout.addWidget(self.search_shell)
+        self.search_shell.setParent(top_bar)
+        self.search_shell.raise_()
+        spacer = QWidget()
+        spacer.setFixedWidth(1)
+        top_layout.addWidget(spacer)
         top_layout.addStretch(1)
         top_layout.addSpacing(10)
 
@@ -3771,16 +3831,23 @@ class HomeDashboard(QWidget):
         # altındakinde beliriyor, o da daire biçiminde.
         def _tool(icon_name, tooltip):
             btn = QPushButton()
-            btn.setIcon(QIcon(make_dashboard_icon(icon_name, "#87878F", 16)))
-            btn.setIconSize(QSize(16, 16))
-            btn.setFixedSize(30, 30)
+            # "Yenile" ikonu burada ucu olmayan bir yay olarak çiziliyordu ve
+            # C harfi gibi okunuyordu; ortak ikon setindeki ok uçlu daire
+            # niyeti söylüyor. Diğerleri panonun kendi setinden.
+            if icon_name == "refresh":
+                from ui_icons import pixmap as _uipix
+                btn.setIcon(QIcon(_uipix("refresh", 17, "#5E5E67")))
+            else:
+                btn.setIcon(QIcon(make_dashboard_icon(icon_name, "#5E5E67", 17)))
+            btn.setIconSize(QSize(17, 17))
+            btn.setFixedSize(32, 32)
             btn.setCursor(Qt.PointingHandCursor)
             btn.setFocusPolicy(Qt.NoFocus)
             btn.setToolTip(tooltip)
             btn.setStyleSheet("""
-                QPushButton { background: transparent; border: none; border-radius: 15px; }
-                QPushButton:hover { background: rgba(0, 0, 0, 0.05); }
-                QPushButton:pressed { background: rgba(0, 0, 0, 0.09); }
+                QPushButton { background: transparent; border: none; border-radius: 16px; }
+                QPushButton:hover { background: rgba(0, 0, 0, 0.06); }
+                QPushButton:pressed { background: rgba(0, 0, 0, 0.10); }
                 QPushButton:disabled { background: transparent; }
             """)
             return btn
@@ -3788,7 +3855,7 @@ class HomeDashboard(QWidget):
         tools = QWidget()
         cl_lay = QHBoxLayout(tools)
         cl_lay.setContentsMargins(0, 0, 0, 0)
-        cl_lay.setSpacing(2)
+        cl_lay.setSpacing(4)
 
         self.btn_refresh = _tool("refresh", "Yenile — buluttaki değişiklikleri getir")
         self.btn_refresh.clicked.connect(self._on_manual_refresh)
@@ -3858,6 +3925,7 @@ class HomeDashboard(QWidget):
         _esc = QShortcut(QKeySequence(Qt.Key_Escape), self.search_input)
         _esc.activated.connect(self.search_input.clear)
         self._paint_search(focus=False, hover=False)
+        QTimer.singleShot(0, self._center_search)
 
         root.addWidget(top_bar)
         
@@ -4414,11 +4482,11 @@ class HomeDashboard(QWidget):
         if shell is None:
             return
         if f:
-            shell.setStyleSheet(self._search_css.format(bg="#FFFFFF", line="#DCDCE2"))
+            shell.setStyleSheet(self._search_css.format(bg="#FFFFFF", line="#CFCFD6"))
         elif h:
-            shell.setStyleSheet(self._search_css.format(bg="#F5F5F8", line="transparent"))
+            shell.setStyleSheet(self._search_css.format(bg="#F7F7FA", line="#DCDCE2"))
         else:
-            shell.setStyleSheet(self._search_css.format(bg="transparent", line="transparent"))
+            shell.setStyleSheet(self._search_css.format(bg="transparent", line="#E7E7EC"))
         hint = getattr(self, "kbd_hint", None)
         if hint is not None:
             hint.setVisible(not f)
@@ -4433,8 +4501,25 @@ class HomeDashboard(QWidget):
             self._on_institution_selected(slug)
         self.open_timetable.emit(slug, filename)
 
+    def _center_search(self):
+        """Aramayı üst çubuğun tam ortasına yerleştirir.
+
+        Yerleşim ortalaması sol ve sağ blokların genişliğine bağlıdır;
+        kullanıcı adı uzadıkça arama sola kayıyordu. Burada çubuğun kendi
+        genişliği ölçülüp mutlak merkeze konuyor.
+        """
+        shell = getattr(self, "search_shell", None)
+        bar = getattr(self, "top_bar", None)
+        if shell is None or bar is None:
+            return
+        x = int((bar.width() - shell.width()) / 2)
+        y = int((bar.height() - shell.height()) / 2)
+        shell.move(max(8, x), max(0, y))
+        shell.raise_()
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._center_search()
         ov = getattr(self, "_search_overlay", None)
         if ov and ov.isVisible():
             ov.refresh_backdrop()
