@@ -292,7 +292,16 @@ def set_matrix(entity: dict, name: str, data_store: dict, matrix: list):
     except Exception:
         n_target = name.strip().lower()
 
+    # Aynı ada sahip diğer kayıtlar YALNIZCA AYNI GRUPTA eşitlenir. Eskiden
+    # üç grup birden taranıyordu: bir öğretmenle bir sınıfın (ya da dersliğin)
+    # adı aynı olduğunda birini düzenlemek diğerinin tablosunu da değiştiriyor
+    # ve kullanıcı "ben bunu yapmadım" diyordu.
+    own_group = None
     for grp in ("ogretmenler", "siniflar", "derslikler"):
+        if any(other is entity for other in (data_store.get(grp, []) or [])):
+            own_group = grp
+            break
+    for grp in ([own_group] if own_group else []):
         for other in (data_store.get(grp, []) or []):
             if isinstance(other, dict):
                 o_ad = (other.get("ad") or other.get("name") or "").strip()
@@ -331,6 +340,100 @@ def strip_institution_wrappers(kisitlamalar: dict) -> int:
             kisitlamalar.pop(key, None)
             removed += 1
     return removed
+
+
+# ── Müsaitlik koruması ────────────────────────────────────────────────────
+# Zaman tablosu YALNIZCA kullanıcının Zaman Tablosu / Kısıtlamalar ekranından
+# değişir. Başka hiçbir yol — otomatik planlama, yükleme, senkronizasyon,
+# rapor, sürüm işlemleri — bu veriye dokunamaz. Aşağıdaki iki işlev bunu
+# ölçülebilir hâle getirir: kaydetmeden önce parmak izi karşılaştırılır,
+# yetkisiz bir değişiklik varsa eski hâl geri yazılır ve olay bildirilir.
+def availability_fingerprint(data_store: dict) -> dict:
+    """{(grup, ad): (timeoff, personal_off)} — müsaitliğin tam kopyası."""
+    out = {}
+    if not isinstance(data_store, dict):
+        return out
+    for grp in ("ogretmenler", "siniflar", "derslikler"):
+        for e in data_store.get(grp, []) or []:
+            if not isinstance(e, dict):
+                continue
+            ad = (e.get("ad") or e.get("name") or "").strip()
+            if not ad:
+                continue
+            toff = e.get("timeoff")
+            per = e.get(PERSONAL_KEY)
+            out[(grp, ad)] = ([list(r) for r in toff] if isinstance(toff, list) else None,
+                              [list(r) for r in per] if isinstance(per, list) else None)
+    return out
+
+
+def restore_availability(data_store: dict, snapshot: dict) -> list:
+    """Parmak izinden SAPAN birimleri eski hâline döndürür; adlarını döner.
+
+    Yalnızca snapshot'ta ZATEN VAR OLAN birimlere dokunur: yeni eklenen bir
+    öğretmen ya da sınıf bu korumadan etkilenmez.
+    """
+    if not isinstance(data_store, dict) or not snapshot:
+        return []
+    geri = []
+    for grp in ("ogretmenler", "siniflar", "derslikler"):
+        for e in data_store.get(grp, []) or []:
+            if not isinstance(e, dict):
+                continue
+            ad = (e.get("ad") or e.get("name") or "").strip()
+            key = (grp, ad)
+            if key not in snapshot:
+                continue
+            eski_toff, eski_per = snapshot[key]
+            toff = e.get("timeoff")
+            per = e.get(PERSONAL_KEY)
+            simdi = ([list(r) for r in toff] if isinstance(toff, list) else None,
+                     [list(r) for r in per] if isinstance(per, list) else None)
+            if simdi != (eski_toff, eski_per):
+                if eski_toff is None:
+                    e.pop("timeoff", None)
+                else:
+                    e["timeoff"] = [list(r) for r in eski_toff]
+                if eski_per is None:
+                    e.pop(PERSONAL_KEY, None)
+                else:
+                    e[PERSONAL_KEY] = [list(r) for r in eski_per]
+                geri.append(f"{ad} ({grp})")
+    if geri:
+        # İki gösterim birlikte tutulur; kisitlamalar sözlüğü de eski hâle döner.
+        for grp in ("ogretmenler", "siniflar", "derslikler"):
+            for e in data_store.get(grp, []) or []:
+                if isinstance(e, dict):
+                    ad = (e.get("ad") or e.get("name") or "").strip()
+                    if ad and (grp, ad) in snapshot and isinstance(e.get("timeoff"), list):
+                        kis = data_store.setdefault("kisitlamalar", {})
+                        day_count, periods = grid_dimensions(data_store)
+                        kis[ad] = {f"{d},{p}": _coerce_state(e["timeoff"][d][p])
+                                   for d in range(min(day_count, len(e["timeoff"])))
+                                   for p in range(min(periods, len(e["timeoff"][d])))}
+    return geri
+
+
+def ensure_matrices(data_store: dict) -> int:
+    """Yalnızca timeoff'u OLMAYAN birimlere matris üretir; var olana dokunmaz.
+
+    sync_all bütün birimleri yeniden yazıyordu; yükleme sırasında çağrılınca
+    kullanıcının dosyası açılır açılmaz değişiyor ve ilk kaydetmede bu
+    değişiklik diske gidiyordu. Yükleme artık hiçbir dolu tabloya dokunmaz.
+    """
+    if not isinstance(data_store, dict):
+        return 0
+    n = 0
+    for grp in ("ogretmenler", "siniflar", "derslikler"):
+        for e in data_store.get(grp, []) or []:
+            if not isinstance(e, dict) or (e.get("timeoff") and isinstance(e["timeoff"], list)):
+                continue
+            ad = (e.get("ad") or e.get("name") or "").strip()
+            if not ad:
+                continue
+            set_matrix(e, ad, data_store, get_matrix(e, ad, data_store))
+            n += 1
+    return n
 
 
 def sync_all(data_store: dict):

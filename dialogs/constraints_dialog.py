@@ -332,6 +332,15 @@ class ConstraintsDialog(QDialog):
 
         # Kalan birimlerin iki gösterimini de hizada tut (eski kayıtları onarır).
         self._cs.sync_all(self.data_store)
+        # Müsaitlik meşru olarak değişti: koruma yeni hâli esas alsın.
+        try:
+            _w = self.parent()
+            while _w is not None and not hasattr(_w, "mark_availability_authorized"):
+                _w = _w.parent() if hasattr(_w, "parent") else None
+            if _w is not None:
+                _w.mark_availability_authorized()
+        except Exception:
+            pass
 
         if self.target_type == "ogretmen":
             try:

@@ -7,8 +7,7 @@ from .model import norm_class
 
 def run_worker(worker):
     import constraint_sync
-    from auto_scheduler import (_build_teacher_timeoff_map, _build_cross_institution_map,
-                                _merge_foreign_teacher_slots, norm_teacher, matches_class)
+    from auto_scheduler import _build_teacher_timeoff_map, norm_teacher, matches_class
     data=copy.deepcopy(worker.data_store)
     D,P=constraint_sync.grid_dimensions(data)
     names=[c.get('ad') or c.get('name') for c in data.get('siniflar',[])]
@@ -26,14 +25,13 @@ def run_worker(worker):
                     if n not in selected and any(matches_class(n,m) for m in members):
                         selected.append(n);changed=True
         if not changed: break
-    closed,avoid=_build_teacher_timeoff_map(data,worker.institution_slug,
-                                           include_shared=not worker.ignore_other_institutions)
+    # ÇAPRAZ KURUM MOTORA HİÇ SORULMAZ. Kurumlar bağımsızdır
+    # (constraint_sync.INSTITUTIONS_INDEPENDENT): başka kurumdaki ders,
+    # rezervasyon ya da yayınlanmış kısıt bu çizelgeyi bağlamaz. Eskiden bu
+    # veriler okunup öğretmenin meşguliyetine ekleniyordu; diğer kurumun ESKİ
+    # aktif sürümü yüzünden burada saatler kapalı görünüyordu.
+    closed,avoid=_build_teacher_timeoff_map(data,worker.institution_slug,include_shared=False)
     cross={}
-    if worker.institution_slug and not worker.ignore_other_institutions:
-        cross,_=_build_cross_institution_map(worker.institution_slug)
-        for key,slots in constraint_sync.reserved_by_others(worker.institution_slug).items():
-            cross.setdefault(key,set()).update(slots)
-        cross=_merge_foreign_teacher_slots(data,cross)
     others=[]
     selected_keys={norm_class(n) for n in selected}
     for pl in data.get('grid_placements',[]):
@@ -55,10 +53,13 @@ def run_worker(worker):
     #
     # Doğrusu: kısıtlar çözücüye AYRI bir parametre olarak verilir, kullanıcının
     # verisine yazılmaz. Zaman tablosunu yalnızca kullanıcı değiştirir.
+    # Öğretmenin KENDİ kaydına hiçbir şey yazılmaz — kopyaya bile. Motor
+    # müsaitliği constraint_sync.get_matrix ile okur; buradaki tek iş, aynı
+    # kurumun başka sınıflarındaki yerleşimlerden doğan meşguliyeti AYRI bir
+    # parametre olarak toplamaktır.
     engel={}
     for t in data.get('ogretmenler',[]):
         name=t.get('ad') or t.get('name');key=norm_teacher(name)
-        t['timeoff']=constraint_sync.get_matrix(t,name,data)
         ek=closed.get(key,set()) | cross.get(key,set())
         if ek: engel[name]={(d,p) for d,p in ek if 0<=d<D and 0<=p<P}
     def progress(hours,total,attempt):

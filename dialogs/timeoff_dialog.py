@@ -575,6 +575,15 @@ class TimeoffDialog(QDialog):
         self._cs.set_matrix(self.entity_dict, ent_name, self.data_store, self.timeoff_data)
         self._cs.set_personal(self.entity_dict, ent_name, self.data_store,
                               self.personal_data)
+        # Müsaitlik meşru olarak değişti: koruma yeni hâli esas alsın.
+        try:
+            _w = self.parent()
+            while _w is not None and not hasattr(_w, "mark_availability_authorized"):
+                _w = _w.parent() if hasattr(_w, "parent") else None
+            if _w is not None:
+                _w.mark_availability_authorized()
+        except Exception:
+            pass
 
         try:
             from database import trigger_save_db

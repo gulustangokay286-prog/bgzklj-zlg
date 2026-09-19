@@ -3387,16 +3387,27 @@ class HomeDashboard(QWidget):
             self.version_status_lbl.setText("")
 
     def _on_sync_started(self, stage_msg):
+        """Arka plandan gelen indirme de ORTADA gösterilir.
+
+        Bu sinyal yalnızca gerçekten indirilecek bir şey varken gelir (bkz.
+        CloudSyncWorker: 'diff_found'). Eskiden ortadaki pencere sadece
+        kullanıcı Yenile'ye bastığında açılıyordu; kendiliğinden başlayan
+        senkronizasyon yalnızca sol üstteki küçük yazıda görünüyordu ve
+        kullanıcı veriler değişirken ne olduğunu anlamıyordu.
+        """
         if hasattr(self, "sync_pill"):
             self.sync_pill.set_syncing(stage_msg or "Güncelleniyor...")
-        if getattr(self, "_show_center_overlay_on_sync", False):
-            if hasattr(self, "sync_overlay"):
-                self.sync_overlay.show_started(stage_msg)
+        if hasattr(self, "sync_overlay"):
+            self._show_center_overlay_on_sync = True
+            self.sync_overlay.show_started(stage_msg)
 
     def _on_sync_progress(self, current, total, detail):
         if hasattr(self, "sync_pill"):
             self.sync_pill.set_syncing(f"İndiriliyor ({current}/{total})")
-        if getattr(self, "_show_center_overlay_on_sync", False) or (hasattr(self, "sync_overlay") and self.sync_overlay.isVisible()):
+        if hasattr(self, "sync_overlay"):
+            if not self.sync_overlay.isVisible():
+                self._show_center_overlay_on_sync = True
+                self.sync_overlay.show_started(detail or "Güncellemeler indiriliyor…")
             self.sync_overlay.show_progress(current, total, detail)
 
     def _on_sync_completed(self, changed_count, msg):

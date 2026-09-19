@@ -1230,20 +1230,16 @@ class MainWindow(QMainWindow):
                 if inst_slug:
                     self.data_store.setdefault("settings", {})["institution_slug"] = inst_slug
 
-                # Load global kisitlamalar cleanly (only teacher/class matrices for this institution)
-                from version_store import load_global_kisitlamalar
-                global_k = load_global_kisitlamalar()
-                if global_k:
-                    if "kisitlamalar" not in self.data_store or not isinstance(self.data_store["kisitlamalar"], dict):
-                        self.data_store["kisitlamalar"] = {}
-                    inst_k = global_k.get(inst_slug) if inst_slug and isinstance(global_k.get(inst_slug), dict) else global_k
-                    for k, v in inst_k.items():
-                        if isinstance(v, list):
-                            self.data_store["kisitlamalar"][k] = v
-                        elif isinstance(v, dict):
-                            for tk, tv in v.items():
-                                if isinstance(tv, list):
-                                    self.data_store["kisitlamalar"][tk] = tv
+                # ORTAK KISITLAMA DOSYASI ARTIK OKUNMUYOR.
+                #
+                # Burada ~/.chenki_akademi/global_kisitlamalar.json açılıp içindeki
+                # kayıtlar bu kurumun "kisitlamalar" sözlüğüne yazılıyordu. Kurum
+                # eşleşmesi tutmazsa DOSYANIN TAMAMI (yani başka kurumların ve çok
+                # eski kurulumların kayıtları) yazılıyordu; ardından çalışan
+                # sync_all bunları öğretmenin zaman tablosuna işliyordu. Kullanıcı
+                # hiçbir şey yapmadan, yalnızca çizelgeyi açtığı için saatleri
+                # değişmiş oluyordu. Kurumlar bağımsız olduğu için bu okumanın
+                # meşru bir karşılığı da kalmadı.
 
                 # Clean any accidental institution slugs in kisitlamalar —
                 # yalnızca sarmalayıcıları; birimlerin kendi girdileri kalır
@@ -1253,10 +1249,20 @@ class MainWindow(QMainWindow):
                 if "kisitlamalar" not in self.data_store:
                     self.data_store["kisitlamalar"] = {}
 
-                # Bring the two stored representations of every availability matrix
-                # back into agreement (repairs schedules written by older versions).
-                constraint_sync.sync_all(self.data_store)
+                # YÜKLEME VERİYE DOKUNMAZ. Eskiden sync_all bütün birimlerin
+                # tablosunu yeniden yazıyordu; dosya açılır açılmaz değişiyor ve
+                # ilk kaydetmede bu değişiklik diske gidiyordu. Artık yalnızca
+                # tablosu HİÇ OLMAYAN birime matris üretilir (eski sürümlerden
+                # gelen eksik kayıtların onarımı), dolu hiçbir tabloya
+                # dokunulmaz.
+                uretildi = constraint_sync.ensure_matrices(self.data_store)
+                if uretildi:
+                    print(f"[load_db] {uretildi} birimde eksik zaman tablosu üretildi")
 
+                # MÜSAİTLİK KORUMASI: bu andan sonra zaman tablosunu yalnızca
+                # Zaman Tablosu / Kısıtlamalar ekranları değiştirebilir. Başka
+                # bir yol değiştirirse save_db onu geri alır (bkz. save_db).
+                self._avail_guard = constraint_sync.availability_fingerprint(self.data_store)
                 self.statusBar().showMessage(f"Veriler yüklendi: {load_path}")
             except Exception as e:
                 print("DB Load Error:", e)
@@ -1724,10 +1730,43 @@ class MainWindow(QMainWindow):
 
 
 
+    def mark_availability_authorized(self):
+        """Zaman tablosu meşru olarak değişti: yeni hâli esas al.
+
+        Yalnızca Zaman Tablosu ve Kısıtlamalar ekranları çağırır. Başka her
+        değişiklik save_db tarafından geri alınır.
+        """
+        try:
+            import constraint_sync
+            self._avail_guard = constraint_sync.availability_fingerprint(self.data_store)
+        except Exception:
+            pass
+
+    def _protect_availability(self):
+        """Kaydetmeden önce: yetkisiz müsaitlik değişikliği varsa geri al."""
+        guard = getattr(self, "_avail_guard", None)
+        if not guard:
+            return
+        try:
+            import constraint_sync
+            geri = constraint_sync.restore_availability(self.data_store, guard)
+        except Exception as exc:
+            print(f"[koruma] müsaitlik denetimi çalışmadı: {exc}")
+            return
+        if geri:
+            ad = ", ".join(geri[:4]) + ("…" if len(geri) > 4 else "")
+            print(f"[koruma] Zaman tablosu izinsiz değişmiş, eski hâline döndürüldü: {ad}")
+            try:
+                self.statusBar().showMessage(
+                    f"Zaman tablosu korundu: {ad} için izinsiz değişiklik geri alındı.", 8000)
+            except Exception:
+                pass
+
     def save_db(self, path=None, sync_from_grid=False):
         if getattr(self, "_is_loading", False):
             return
-            
+
+        self._protect_availability()
         import json
         slug = getattr(self, "institution_slug", None)
         ver_fn = getattr(self, "version_filename", None)
