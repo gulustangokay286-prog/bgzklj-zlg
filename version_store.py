@@ -604,7 +604,7 @@ def touch_institution_timestamp(slug: str) -> str:
     """Stamps meta.json with the current time. Returns the display string."""
     meta_path = os.path.join(_base_dir(), slug, "meta.json")
     now = datetime.now()
-    upd_str = now.strftime("%d %b %H:%M")
+    upd_str = f"{now.day:02d} {_TR_MONTHS_SHORT.get(now.month, now.strftime('%b'))} {now:%H:%M}"
     if os.path.exists(meta_path):
         try:
             with open(meta_path, "r", encoding="utf-8") as f:
@@ -659,7 +659,7 @@ def list_institutions():
             if os.path.isdir(ver_dir):
                 ver_count = len([v for v in os.listdir(ver_dir) if v.endswith(".roz")])
                 
-            last_upd_str = meta.get("last_updated_str")
+            last_upd_str = tr_month_text(meta.get("last_updated_str"))
             if not last_upd_str:
                 vers = list_versions(entry, source_filter="all")
                 if vers:
@@ -1855,7 +1855,7 @@ def list_versions(slug: str, source_filter: str = "all") -> list:
             "filepath": filepath,
             "number": num,
             "datetime": dt,
-            "date_str": dt.strftime("%d %b %Y"),
+            "date_str": _tr_date(dt),
             "time_str": dt.strftime("%H:%M:%S"),
             "month_key": dt.strftime("%Y-%m"),
             "month_label": _turkish_month(dt),
@@ -2441,6 +2441,36 @@ def migrate_existing_data():
             continue
 
 # ── Turkish Month Names ──────────────────────────────────────────────
+
+_TR_MONTHS_SHORT = {
+    1: "Oca", 2: "Şub", 3: "Mar", 4: "Nis", 5: "May", 6: "Haz",
+    7: "Tem", 8: "Ağu", 9: "Eyl", 10: "Eki", 11: "Kas", 12: "Ara",
+}
+
+
+_EN_TO_TR_MONTH = {
+    "Jan": "Oca", "Feb": "Şub", "Mar": "Mar", "Apr": "Nis", "May": "May", "Jun": "Haz",
+    "Jul": "Tem", "Aug": "Ağu", "Sep": "Eyl", "Oct": "Eki", "Nov": "Kas", "Dec": "Ara",
+}
+
+
+def tr_month_text(text):
+    """meta.json'da İngilizce ay adıyla damgalanmış eski kayıtları okurken
+    düzeltir. Dosyaya dokunmaz: damga bir dahaki kayıtta zaten Türkçe
+    yazılacak, ama o güne kadar ekranda "12 Sep" görünmesin."""
+    if not text:
+        return text
+    for en, tr in _EN_TO_TR_MONTH.items():
+        if en in text:
+            return text.replace(en, tr)
+    return text
+
+
+def _tr_date(dt: datetime) -> str:
+    """20 Eyl 2026. strftime("%d %b %Y") sistemin diline bakıyordu ve
+    Türkçe kurulumda bile "20 Sep 2026" yazıyordu."""
+    return f"{dt.day:02d} {_TR_MONTHS_SHORT.get(dt.month, dt.strftime('%b'))} {dt.year}"
+
 
 _TR_MONTHS = {
     1: "Ocak", 2: "Şubat", 3: "Mart", 4: "Nisan",

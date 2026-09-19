@@ -1121,7 +1121,7 @@ class AppleInstitutionCard(QFrame):
         t_layout.addWidget(self.name_lbl)
         
         v_count = inst_data.get("version_count", 0)
-        upd = inst_data.get("last_updated_str", "")
+        upd = version_store.tr_month_text(inst_data.get("last_updated_str", ""))
         sub_text = f"{v_count} versiyon" + (f" · {upd}" if upd else "")
         self.sub_lbl = QLabel(sub_text)
         self.sub_lbl.setFont(bk_ui.font(7.8))
@@ -1185,7 +1185,7 @@ class AppleInstitutionCard(QFrame):
         self._selected = is_selected
         self.name_lbl.setText(self.inst_name)
         v_count = inst_data.get("version_count", 0)
-        upd = inst_data.get("last_updated_str", "")
+        upd = version_store.tr_month_text(inst_data.get("last_updated_str", ""))
         self.sub_lbl.setText(f"{v_count} versiyon" + (f" · {upd}" if upd else ""))
         self._update_style()
         
@@ -1920,76 +1920,26 @@ class AppleVersionRow(QFrame):
             v_title.setToolTip("Bu numara başka bir cihazda da kullanılmış.")
         layout.addWidget(v_title)
 
-        # Active Status Indicator (Clean dot, no glowing neon pill)
+        # BİR SATIRDA BİR KUTU YETER.
+        #
+        # Satırda dört kutu vardı: versiyon künyesi, "● Yayında", "✓ Tam
+        # Yerleşim" ve mavi "Aç" düğmesi. Dördü de aynı yüksekliğe, aynı
+        # yuvarlaklığa, kendi kenarlığına ve kendi arka planına sahipti —
+        # yani hiçbiri diğerinden önemli görünmüyordu ve göz her satırda
+        # dört kere duruyordu. Üstelik "✓ Tam Yerleşim" listenin neredeyse
+        # tamamında aynı yazıyordu: herkeste olan bir şey ayırt etmez.
+        #
+        # Kutu artık yalnızca künyede (ona dokunulmadı). Geri kalan her şey
+        # çıplak yazı: durum solda, yerleşim ile tarih sağda, ikisi de sağa
+        # hizalı sabit sütunlarda — künye adları farklı uzunlukta olduğu
+        # için soldan hizalanan her şey basamak basamak kayıyordu.
         if is_active:
-            act_badge = QLabel("● Yayında")
-            act_badge.setFont(bk_ui.font(8.2, QFont.DemiBold))
-            act_badge.setFixedHeight(22)
-            act_badge.setAlignment(Qt.AlignCenter)
-            act_badge.setStyleSheet("""
-                background: #F0FDF4;
-                color: #15803D;
-                border: 1px solid #DCFCE7;
-                padding: 0 8px;
-                border-radius: 5px;
-            """)
-            act_badge.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-            layout.addWidget(act_badge)
-        
-        # Date & Time
-        d_str = version_info.get("date_str", "")
-        t_str = version_info.get("time_str", "")
-        dt_lbl = QLabel(f"{d_str}  {t_str}")
-        dt_lbl.setFont(bk_ui.font(8.4))
-        dt_lbl.setStyleSheet(f"color: {bk_ui.INK_SOFT}; background: transparent; border: none;")
-        dt_lbl.setFixedWidth(130)
-        dt_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        layout.addWidget(dt_lbl)
-        
-        # Stats Badge (Clean subtle slate badge, no AI-slop neon border)
-        tot = version_info.get("total_hours", 0)
-        unp = version_info.get("unplaced_hours", 0)
-        
-        if tot > 0:
-            if unp == 0:
-                stats_badge = QLabel("✓ Tam Yerleşim")
-                stats_badge.setFont(bk_ui.font(8.0, QFont.Medium))
-                stats_badge.setFixedHeight(22)
-                stats_badge.setAlignment(Qt.AlignCenter)
-                stats_badge.setStyleSheet(f"""
-                    background: #F8FAFC;
-                    color: #334155;
-                    border: 1px solid #E2E8F0;
-                    padding: 0 8px;
-                    border-radius: 5px;
-                """)
-            else:
-                stats_badge = QLabel(f"{unp} Boş")
-                stats_badge.setFont(bk_ui.font(8.0, QFont.Medium))
-                stats_badge.setFixedHeight(22)
-                stats_badge.setAlignment(Qt.AlignCenter)
-                stats_badge.setStyleSheet("""
-                    background: #FEF3C7;
-                    color: #92400E;
-                    border: 1px solid #FDE68A;
-                    padding: 0 8px;
-                    border-radius: 5px;
-                """)
-        else:
-            stats_badge = QLabel("Boş Çizelge")
-            stats_badge.setFont(bk_ui.font(8.0, QFont.Medium))
-            stats_badge.setFixedHeight(22)
-            stats_badge.setAlignment(Qt.AlignCenter)
-            stats_badge.setStyleSheet(f"""
-                background: #F8FAFC;
-                color: #94A3B8;
-                border: 1px solid #E2E8F0;
-                padding: 0 8px;
-                border-radius: 5px;
-            """)
-            
-        stats_badge.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        layout.addWidget(stats_badge)
+            act_lbl = QLabel("Yayında")
+            act_lbl.setFont(bk_ui.font(8.2, QFont.DemiBold))
+            act_lbl.setStyleSheet("color: #15803D; background: transparent; border: none;")
+            act_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+            act_lbl.setToolTip("Kurumun yayındaki çizelgesi")
+            layout.addWidget(act_lbl)
         
         # Note snippet: Only display real custom notes from user, hide generic system messages
         note_text = (version_info.get("note") or "").strip()
@@ -2010,31 +1960,68 @@ class AppleVersionRow(QFrame):
             layout.addWidget(note_lbl)
             
         layout.addStretch(1)
-            
-        # File Size
-        size_lbl = QLabel(f"{version_info.get('size_kb', 0)} KB")
-        size_lbl.setFont(bk_ui.font(8.0))
-        size_lbl.setStyleSheet(f"color: {bk_ui.INK_FAINT}; background: transparent; border: none;")
-        size_lbl.setFixedWidth(50)
-        size_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        size_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        layout.addWidget(size_lbl)
-        
-        # Primary Action Button ("Aç")
+
+        # Yerleşim durumu — çıplak yazı, sağa hizalı sabit sütun.
+        tot = version_info.get("total_hours", 0)
+        unp = version_info.get("unplaced_hours", 0)
+        if tot <= 0:
+            fill_txt, fill_col, fill_tip = "Boş çizelge", bk_ui.INK_FAINT, "Bu versiyonda ders yok."
+        elif unp == 0:
+            # Sessizlik de bir cevap: "Tam yerleşim" listenin neredeyse her
+            # satırında aynı yazıyordu, yani hiçbir satırı diğerinden
+            # ayırmıyordu. Sütun boş kalıyor ve göz doğrudan sorunlu
+            # satıra gidiyor; bilgi ipucunda duruyor.
+            fill_txt, fill_col, fill_tip = "", bk_ui.INK_FAINT, f"{tot} saatin tamamı yerleşti."
+        else:
+            fill_txt, fill_col = f"{unp} saat boşta", "#B45309"
+            fill_tip = f"{tot} saatin {unp} saati yerleşemedi."
+        fill_lbl = QLabel(fill_txt)
+        fill_lbl.setFont(bk_ui.font(8.2, QFont.Medium if unp else QFont.Normal))
+        fill_lbl.setStyleSheet(f"color: {fill_col}; background: transparent; border: none;")
+        fill_lbl.setFixedWidth(96)
+        fill_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        fill_lbl.setToolTip(fill_tip)
+        fill_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        layout.addWidget(fill_lbl)
+
+        # Tarih — satırdaki EN SAĞDAKİ yazı.
+        #
+        # "20 Sep 2026  01:06:20" üç sorun taşıyordu: ayı İngilizce yazıyor,
+        # saniyeyi söylüyor (bir çizelgenin 20. saniyede kaydedildiğini
+        # bilmenin kimseye faydası yok) ve bu listede satırların çoğu aynı
+        # güne ait olduğu için tarihin kendisi de tekrar oluyordu. Bugün ve
+        # dün adıyla anılıyor, yıl yalnızca başka bir yılsa yazılıyor.
+        dt_lbl = QLabel(self._when())
+        dt_lbl.setFont(bk_ui.font(8.2))
+        dt_lbl.setStyleSheet(f"color: {bk_ui.INK_SOFT}; background: transparent; border: none;")
+        dt_lbl.setFixedWidth(104)
+        dt_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        dt_lbl.setToolTip("{}  {}  •  {} KB".format(
+            version_info.get("date_str", ""), version_info.get("time_str", ""),
+            version_info.get("size_kb", 0)))
+        dt_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        layout.addWidget(dt_lbl)
+
+        # "Aç" — üst çubuktaki klasör düğmesinin dili: beyaz gövde, ince
+        # kenar, imleç altında kurumun rengi. Dolu mavi düğme yüz satırda
+        # yüz kere tekrarlanınca listenin en gürültülü nesnesi oluyordu ve
+        # hepsi aynı ağırlıkta olduğu için hiçbiri "asıl eylem" demiyordu.
         btn_open = QPushButton("Aç")
-        btn_open.setFont(bk_ui.font(8.6, QFont.DemiBold))
+        btn_open.setFont(bk_ui.font(8.4, QFont.DemiBold))
         btn_open.setCursor(Qt.PointingHandCursor)
         btn_open.setFixedHeight(26)
         btn_open.setStyleSheet(f"""
             QPushButton {{
-                background: {bk_ui.BRAND};
-                color: #FFFFFF;
-                border: none;
-                border-radius: 6px;
-                padding: 0 14px;
+                background: #FFFFFF; color: {bk_ui.INK_BODY};
+                border: 1px solid rgba(15, 23, 42, 0.12);
+                border-radius: 13px; padding: 0 14px;
             }}
             QPushButton:hover {{
-                background: #0062C4;
+                background: {bk_ui.BRAND}; color: #FFFFFF;
+                border-color: {bk_ui.BRAND};
+            }}
+            QPushButton:pressed {{
+                background: {bk_ui.BRAND_DARK}; border-color: {bk_ui.BRAND_DARK};
             }}
         """)
         btn_open.clicked.connect(lambda: self.action_requested.emit("open", self.slug, self.filename))
@@ -2049,6 +2036,23 @@ class AppleVersionRow(QFrame):
         self.customContextMenuRequested.connect(self._context_menu)
         self._update_style()
         
+    def _when(self) -> str:
+        """Bugün 01:06 / Dün 20:32 / 20 Eyl 01:06 / 20 Eyl 2025."""
+        dt = self.version_info.get("datetime")
+        d_str = self.version_info.get("date_str", "")
+        t_str = (self.version_info.get("time_str") or "")[:5]
+        if dt is None:
+            return f"{d_str} {t_str}".strip()
+        today = datetime.now().date()
+        days = (today - dt.date()).days
+        if days == 0:
+            return f"Bugün {t_str}"
+        if days == 1:
+            return f"Dün {t_str}"
+        if dt.year == today.year:
+            return f"{' '.join(d_str.split()[:2])} {t_str}"     # "20 Eyl 01:06"
+        return d_str                                            # "20 Eyl 2025"
+
     def _context_menu(self, pos):
         menu = bk_ui.HeroPopoverMenu(self)
         menu.add_action("Çizelgeyi Aç", bk_ui.folder_glyph(bk_ui.BRAND, 16), on_click=lambda: self.action_requested.emit("open", self.slug, self.filename))
@@ -2299,19 +2303,30 @@ class InstitutionHeader(QWidget):
         self.icon_lbl.hide()
 
         # Text Column
+        #
+        # İki etiket de dikeyde genişleyebildiği için artan yüksekliği
+        # aralarında paylaşıyorlardı: isim tepeye yapışıyor, alt satır
+        # dibe düşüyor, ortada kimseye ait olmayan bir boşluk kalıyordu.
+        # Boşluk artık bloğun ALTINDA ve ÜSTÜNDE; isim ile alt satır
+        # birbirine 2 piksel uzakta, tek bir künye gibi duruyor.
         text_col = QVBoxLayout()
         text_col.setSpacing(2)
         text_col.setContentsMargins(0, 0, 0, 0)
+        text_col.addStretch(1)
 
         self.title = QLabel("Seçili Kurum")
         self.title.setFont(bk_ui.font(18, QFont.DemiBold, spacing=-0.3))
         self.title.setStyleSheet(f"color: {bk_ui.INK}; background: transparent;")
+        self.title.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         text_col.addWidget(self.title)
 
         self.meta = QLabel("")
         self.meta.setFont(bk_ui.font(9.0))
         self.meta.setStyleSheet(f"color: {bk_ui.INK_SOFT}; background: transparent;")
+        self.meta.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         text_col.addWidget(self.meta)
+
+        text_col.addStretch(1)
 
         top_row.addLayout(text_col, 1)
 
@@ -5025,7 +5040,7 @@ class HomeDashboard(QWidget):
         
 
         
-        last_upd = meta.get("last_updated_str")
+        last_upd = version_store.tr_month_text(meta.get("last_updated_str"))
         if not last_upd and versions:
             last_upd = f"{versions[0]['date_str']} {versions[0]['time_str']}"
 
