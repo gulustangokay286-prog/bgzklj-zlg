@@ -3213,7 +3213,14 @@ class SyncCenterLoadingOverlay(QWidget):
 
 
 class SyncStatusButton(QWidget):
-    """Zarif, çerçevesiz, noktasız Apple-style senkronizasyon durum butonu"""
+    """Bulut durumu: küçük bir nokta ve soluk bir kelime.
+
+    Eskiden bütün kelime renkliydi ("Senkronize" yeşil): üst çubuktaki en
+    parlak nesne, hiçbir şey yapmadığında bile dikkat çekiyordu. Durum bilgisi
+    rengi hak eder ama METİN hak etmez — renk 6 piksellik noktada durur,
+    kelime diğer ikincil yazılarla aynı griye iner. Bir sorun olduğunda
+    (eşitleniyor / çevrimdışı) kelime de renklenir; normalde sessizdir.
+    """
     clicked = Signal()
 
     def __init__(self, parent=None):
@@ -3221,49 +3228,51 @@ class SyncStatusButton(QWidget):
         self.setObjectName("syncStatusBtn")
         self.setCursor(Qt.PointingHandCursor)
         self.setFixedHeight(24)
-        
+        self._dot = QColor("#2E9E5B")
+        self._quiet = True
+
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(7, 2, 7, 2)
+        lay.setContentsMargins(14, 2, 8, 2)
         lay.setSpacing(0)
-        
+
         self.lbl = QLabel("Senkronize")
-        self.lbl.setFont(bk_ui.font(9.0, QFont.Medium, spacing=0.15))
-        self.lbl.setStyleSheet("color: #059669; background: transparent; border: none; padding: 0;")
+        self.lbl.setFont(bk_ui.font(8.8, QFont.Medium))
+        self.lbl.setStyleSheet(f"color: {bk_ui.INK_SOFT}; background: transparent; border: none; padding: 0;")
         lay.addWidget(self.lbl, 0, Qt.AlignVCenter)
 
         self.setStyleSheet("""
-            QWidget#syncStatusBtn {
-                background: transparent;
-                border: none;
-                border-radius: 5px;
-            }
-            QWidget#syncStatusBtn:hover {
-                background: rgba(0, 0, 0, 0.05);
-            }
-            QWidget#syncStatusBtn:pressed {
-                background: rgba(0, 0, 0, 0.09);
-            }
-            QLabel {
-                background: transparent;
-                border: none;
-                padding: 0;
-            }
+            QWidget#syncStatusBtn { background: transparent; border: none; border-radius: 6px; }
+            QWidget#syncStatusBtn:hover { background: rgba(0, 0, 0, 0.04); }
+            QLabel { background: transparent; border: none; padding: 0; }
         """)
 
-    def set_syncing(self, text="Eşitleniyor..."):
+    def _apply(self, text, dot, quiet, tip):
         self.lbl.setText(text)
-        self.lbl.setStyleSheet("color: #D97706; background: transparent; border: none; padding: 0;")
-        self.setToolTip("Bulut veritabanı eşitleniyor...")
+        self._dot = QColor(dot)
+        self._quiet = quiet
+        self.lbl.setStyleSheet(
+            f"color: {bk_ui.INK_SOFT if quiet else dot}; background: transparent; "
+            f"border: none; padding: 0;")
+        self.setToolTip(tip)
+        self.update()
+
+    def set_syncing(self, text="Eşitleniyor"):
+        self._apply(text, "#C9821A", False, "Bulut veritabanı eşitleniyor…")
 
     def set_synced(self, text="Senkronize"):
-        self.lbl.setText(text)
-        self.lbl.setStyleSheet("color: #059669; background: transparent; border: none; padding: 0;")
-        self.setToolTip("Tüm kurumlar güncel • Yenilemek için tıklayın")
+        self._apply(text, "#2E9E5B", True, "Tüm kurumlar güncel • Yenilemek için tıklayın")
 
     def set_offline(self, text="Çevrimdışı"):
-        self.lbl.setText(text)
-        self.lbl.setStyleSheet("color: #DC2626; background: transparent; border: none; padding: 0;")
-        self.setToolTip("Sunucuya ulaşılamıyor (Yerel Mod)")
+        self._apply(text, "#C7392F", False, "Sunucuya ulaşılamıyor (Yerel Mod)")
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        p.setBrush(self._dot)
+        p.drawEllipse(QPointF(7.0, self.height() / 2.0), 3.0, 3.0)
+        p.end()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -3642,87 +3651,89 @@ class HomeDashboard(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
         
-        # ── 1. Top Bar ───────────────────────────────────────────────
-        # Three zones and nothing else: where you are, what you are looking
-        # for, and who you are. The previous bar put a page title, a version
-        # pill, a search box, four loose glyphs, a filled button and a
-        # bordered capsule on one 54px line — eight objects of six different
-        # shapes, none grouped. Here the four utilities are one object, and
-        # the search is the widest thing on the bar because it is what this
-        # screen is actually used for.
+        # ── 1. Üst çubuk ─────────────────────────────────────────────
+        #
+        # Çıplak. Üç bilgi var ve üçü de kendi ağırlığında duruyor: nerede
+        # olduğun (durum noktası + sürüm), ne aradığın (arama), kim olduğun
+        # (avatar). Eskiden bu satırda altı ayrı kap vardı — yeşil bir durum
+        # yazısı, dikey bir ayraç, gri bir arama kutusu, çerçeveli bir ⌘K
+        # rozeti, dört ikonu saran gri bir hap ve bir kullanıcı kapsülü.
+        # Hiçbiri tıklanmadan önce bir şey söylemiyordu, ama hepsi yer
+        # kaplıyordu. Burada kaplar kalktı: zeminler yalnızca imleç üzerine
+        # geldiğinde ya da arama odaklandığında beliriyor.
         top_bar = QFrame()
         top_bar.setObjectName("topBar")
-        top_bar.setFixedHeight(60)
+        top_bar.setFixedHeight(52)
         top_bar.setStyleSheet(f"""
             QFrame#topBar {{
                 background: {bk_ui.SURFACE};
                 border: none;
-                border-bottom: 1px solid {bk_ui.HAIRLINE};
+                border-bottom: 1px solid #F0F0F3;
             }}
         """)
 
         top_layout = QHBoxLayout(top_bar)
-        top_layout.setContentsMargins(22, 0, 18, 0)
+        top_layout.setContentsMargins(16, 0, 14, 0)
         top_layout.setSpacing(0)
 
-        # ── Zone 1: where you are (sidebar width 252px - 22px margin - 2px offset = 228px) ─────
+        # ── Sol: durum ve sürüm ──
         title_container = QWidget()
-        title_container.setMinimumWidth(228)
+        title_container.setMinimumWidth(236)
         title_box = QHBoxLayout(title_container)
-        title_box.setSpacing(7)
+        title_box.setSpacing(8)
         title_box.setContentsMargins(0, 0, 0, 0)
 
-        # 1. Senkronize (solda, noktasız zarif durum butonu)
         self.sync_nude = SyncStatusButton()
         self.sync_pill = self.sync_nude
         self.sync_nude.clicked.connect(self._on_manual_refresh)
-        self.sync_nude.setToolTip("Tüm kurumlar güncel • Yenilemek için tıklayın")
         title_box.addWidget(self.sync_nude, 0, Qt.AlignVCenter)
 
-        # 2. Dikey divider (arada)
-        divider = QFrame()
-        divider.setFixedSize(1, 12)
-        divider.setStyleSheet(f"background: {bk_ui.HAIRLINE}; border: none;")
-        title_box.addWidget(divider, 0, Qt.AlignVCenter)
-
-        # 3. Sürüm (sağda)
-        self.version_lbl = QLabel(f"v{APP_VERSION}")
-        self.version_lbl.setFont(bk_ui.font(8.8, QFont.Normal))
-        self.version_lbl.setStyleSheet(f"color: {bk_ui.INK_FAINT}; background: transparent; border: none; padding: 0;")
+        # Sürüm: ayraçsız. İki soluk yazıyı ayırmak için çizgi gerekmez,
+        # boşluk yeter.
+        self.version_lbl = QLabel(APP_VERSION)
+        self.version_lbl.setFont(bk_ui.font(8.6, QFont.Normal))
+        self.version_lbl.setStyleSheet(
+            f"color: #B6B6BD; background: transparent; border: none; padding: 0;")
+        self.version_lbl.setToolTip(f"Chenkron {APP_VERSION}")
         title_box.addWidget(self.version_lbl, 0, Qt.AlignVCenter)
 
         self.version_status_lbl = QLabel("")
         self.version_status_lbl.setFont(bk_ui.font(8.6, QFont.DemiBold))
-        self.version_status_lbl.setStyleSheet(f"color: {bk_ui.WARN}; background: transparent; border: none; padding: 0;")
+        self.version_status_lbl.setStyleSheet(
+            f"color: {bk_ui.WARN}; background: transparent; border: none; padding: 0;")
         title_box.addWidget(self.version_status_lbl, 0, Qt.AlignVCenter)
         title_box.addStretch(1)
         self._start_version_check()
-
         top_layout.addWidget(title_container)
+        top_layout.addStretch(1)
 
-        # ── Zone 2: what you are looking for (Aligned to main content right at sidebar line) ──
+        # ── Orta: arama ──
+        # Kutu yok. Büyüteç ve yazı doğrudan çubuğun üstünde duruyor; zemin
+        # yalnızca imleç üzerindeyken ya da yazarken beliriyor. Arama bu
+        # ekranda en çok kullanılan şey, ama kullanılmadığı sürece sessiz.
         self.search_shell = QFrame()
-        self.search_shell.setFixedSize(500, 38)
+        self.search_shell.setFixedSize(460, 34)
         self.search_shell.setObjectName("searchShell")
-        self.search_shell.setStyleSheet(f"""
+        self._search_css = """
             QFrame#searchShell {{
-                background: {bk_ui.SURFACE_SUNK};
-                border: 1px solid transparent;
-                border-radius: 10px;
+                background: {bg};
+                border: 1px solid {line};
+                border-radius: 9px;
             }}
-        """)
+        """
+        self.search_shell.setStyleSheet(self._search_css.format(bg="transparent", line="transparent"))
         sc_lay = QHBoxLayout(self.search_shell)
-        sc_lay.setContentsMargins(12, 0, 8, 0)
-        sc_lay.setSpacing(9)
+        sc_lay.setContentsMargins(9, 0, 9, 0)
+        sc_lay.setSpacing(8)
 
         search_icon = QLabel()
-        search_icon.setPixmap(bk_ui.search_glyph(bk_ui.INK_FAINT, 15))
-        search_icon.setFixedSize(15, 15)
+        search_icon.setPixmap(bk_ui.search_glyph("#A9A9B2", 14))
+        search_icon.setFixedSize(14, 14)
         search_icon.setStyleSheet("background: transparent; border: none;")
         sc_lay.addWidget(search_icon)
 
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Versiyon, klasör veya kurum ara")
+        self.search_input.setPlaceholderText("Ara")
         self.search_input.setFont(bk_ui.font(10))
         self.search_input.setStyleSheet(f"""
             QLineEdit {{
@@ -3731,56 +3742,52 @@ class HomeDashboard(QWidget):
                 selection-background-color: {bk_ui.BRAND}; selection-color: #FFFFFF;
             }}
         """)
+        # Açılışta odak almaz: çıplak çubuk, program açılır açılmaz beyaz bir
+        # kutuyla başlamasın. Ctrl/⌘+K ve tıklama yine odaklar.
+        self.search_input.setFocusPolicy(Qt.ClickFocus)
+        self.search_input.setToolTip("Versiyon, klasör veya kurum ara")
         self.search_input.textChanged.connect(self._on_search_changed)
         self.search_input.returnPressed.connect(self._activate_search_result)
         self.search_input.installEventFilter(self)
         self.search_shell.installEventFilter(self)
         sc_lay.addWidget(self.search_input, 1)
 
-        # The hint names the key that actually works on THIS platform, and
-        # the shortcut below makes the promise true. A "⌘K" badge on
-        # Windows, or one with no shortcut behind it, is furniture.
+        # Kısayol ipucu: çerçevesiz, yalnızca soluk harfler. Odaklanınca
+        # kaybolur — o an zaten arama kutusundasın.
         _combo = "⌘K" if sys.platform == "darwin" else "Ctrl K"
-        kbd = QLabel(_combo)
-        kbd.setFont(bk_ui.font(8, QFont.DemiBold, spacing=0.4))
-        kbd.setStyleSheet(f"""
-            color: {bk_ui.INK_FAINT}; background: {bk_ui.SURFACE};
-            border: 1px solid {bk_ui.HAIRLINE}; border-radius: 5px;
-            padding: 2px 6px;
-        """)
-        kbd.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        sc_lay.addWidget(kbd, 0, Qt.AlignVCenter)
+        self.kbd_hint = QLabel(_combo)
+        self.kbd_hint.setFont(bk_ui.font(8.2, QFont.Medium, spacing=0.3))
+        self.kbd_hint.setStyleSheet(
+            "color: #C2C2C9; background: transparent; border: none; padding: 0;")
+        self.kbd_hint.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        sc_lay.addWidget(self.kbd_hint, 0, Qt.AlignVCenter)
 
         top_layout.addWidget(self.search_shell)
         top_layout.addStretch(1)
-        top_layout.addSpacing(12)
+        top_layout.addSpacing(10)
 
+        # ── Sağ: araçlar ──
+        # Hap kalktı. Dört ikon kendi başına duruyor; zemin yalnızca imlecin
+        # altındakinde beliriyor, o da daire biçiminde.
         def _tool(icon_name, tooltip):
             btn = QPushButton()
-            btn.setIcon(QIcon(make_dashboard_icon(icon_name, "#5A5A62", 16)))
+            btn.setIcon(QIcon(make_dashboard_icon(icon_name, "#87878F", 16)))
             btn.setIconSize(QSize(16, 16))
-            btn.setFixedSize(34, 30)
+            btn.setFixedSize(30, 30)
             btn.setCursor(Qt.PointingHandCursor)
             btn.setFocusPolicy(Qt.NoFocus)
             btn.setToolTip(tooltip)
-            btn.setStyleSheet(f"""
-                QPushButton {{ background: transparent; border: none; border-radius: 8px; }}
-                QPushButton:hover {{ background: {bk_ui.SURFACE}; }}
-                QPushButton:pressed {{ background: {bk_ui.HAIRLINE}; }}
-                QPushButton:disabled {{ background: transparent; }}
+            btn.setStyleSheet("""
+                QPushButton { background: transparent; border: none; border-radius: 15px; }
+                QPushButton:hover { background: rgba(0, 0, 0, 0.05); }
+                QPushButton:pressed { background: rgba(0, 0, 0, 0.09); }
+                QPushButton:disabled { background: transparent; }
             """)
             return btn
 
-        cluster = QFrame()
-        cluster.setObjectName("toolCluster")
-        cluster.setFixedHeight(36)
-        cluster.setStyleSheet(f"""
-            QFrame#toolCluster {{
-                background: {bk_ui.SURFACE_SUNK}; border: none; border-radius: 10px;
-            }}
-        """)
-        cl_lay = QHBoxLayout(cluster)
-        cl_lay.setContentsMargins(3, 3, 3, 3)
+        tools = QWidget()
+        cl_lay = QHBoxLayout(tools)
+        cl_lay.setContentsMargins(0, 0, 0, 0)
         cl_lay.setSpacing(2)
 
         self.btn_refresh = _tool("refresh", "Yenile — buluttaki değişiklikleri getir")
@@ -3799,22 +3806,22 @@ class HomeDashboard(QWidget):
         btn_bell.clicked.connect(self._on_notifications_clicked)
         cl_lay.addWidget(btn_bell)
 
+        top_layout.addWidget(tools)
+        top_layout.addSpacing(6)
 
-        top_layout.addWidget(cluster)
-        top_layout.addSpacing(12)
-
-        # Identity: no border and no pill. The avatar is already a shape.
+        # ── Sağ: kimlik ──
+        # Avatar zaten bir şekil; etrafına ikinci bir şekil gerekmiyor.
         self.user_capsule = QFrame()
         self.user_capsule.setObjectName("userCapsule")
         self.user_capsule.setCursor(Qt.PointingHandCursor)
-        self.user_capsule.setFixedHeight(36)
-        self.user_capsule.setStyleSheet(f"""
-            QFrame#userCapsule {{ background: transparent; border: none; border-radius: 10px; }}
-            QFrame#userCapsule:hover {{ background: {bk_ui.SURFACE_SUNK}; }}
+        self.user_capsule.setFixedHeight(34)
+        self.user_capsule.setStyleSheet("""
+            QFrame#userCapsule { background: transparent; border: none; border-radius: 17px; }
+            QFrame#userCapsule:hover { background: rgba(0, 0, 0, 0.05); }
         """)
         uc_lay = QHBoxLayout(self.user_capsule)
-        uc_lay.setContentsMargins(5, 0, 10, 0)
-        uc_lay.setSpacing(8)
+        uc_lay.setContentsMargins(4, 0, 9, 0)
+        uc_lay.setSpacing(7)
 
         self.btn_avatar = QPushButton()
         self.btn_avatar.setCursor(Qt.PointingHandCursor)
@@ -3828,14 +3835,15 @@ class HomeDashboard(QWidget):
         uc_lay.addWidget(self.btn_avatar)
 
         self.user_lbl = QLabel(self.display_name)
-        self.user_lbl.setFont(bk_ui.font(9.2, QFont.DemiBold))
-        self.user_lbl.setStyleSheet(f"color: {bk_ui.INK}; background: transparent; border: none;")
+        self.user_lbl.setFont(bk_ui.font(9.0, QFont.Medium))
+        self.user_lbl.setStyleSheet(
+            f"color: {bk_ui.INK_SOFT}; background: transparent; border: none;")
         self.user_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         uc_lay.addWidget(self.user_lbl)
 
         chev = QLabel()
-        chev.setPixmap(bk_ui.chevron_glyph(bk_ui.INK_FAINT, 13, "down"))
-        chev.setFixedSize(13, 13)
+        chev.setPixmap(bk_ui.chevron_glyph("#B6B6BD", 11, "down"))
+        chev.setFixedSize(11, 11)
         chev.setStyleSheet("background: transparent; border: none;")
         chev.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         uc_lay.addWidget(chev, 0, Qt.AlignVCenter)
@@ -3849,6 +3857,7 @@ class HomeDashboard(QWidget):
         _find2.activated.connect(self._focus_search)
         _esc = QShortcut(QKeySequence(Qt.Key_Escape), self.search_input)
         _esc.activated.connect(self.search_input.clear)
+        self._paint_search(focus=False, hover=False)
 
         root.addWidget(top_bar)
         
@@ -4374,12 +4383,45 @@ class HomeDashboard(QWidget):
             elif t in (QEvent.MouseButtonPress, QEvent.FocusIn):
                 if obj is getattr(self, "search_shell", None) and not self.search_input.hasFocus():
                     self.search_input.setFocus()
+                self._paint_search(focus=True)
                 query = self.search_input.text().strip()
                 if query:
                     ov = self._ensure_search_overlay()
                     if not ov.isVisible() or getattr(ov, "_closing", False):
                         self._run_search()
+            elif t == QEvent.FocusOut:
+                self._paint_search(focus=False)
+            elif t == QEvent.Enter:
+                self._paint_search(hover=True)
+            elif t == QEvent.Leave:
+                self._paint_search(hover=False)
         return super().eventFilter(obj, event)
+
+    def _paint_search(self, focus=None, hover=None):
+        """Arama alanının zemini: normalde YOK, imleç ya da odak varken var.
+
+        Çıplak bir çubukta arama kutusu görünmez olmasın diye zemin tamamen
+        kaldırılmadı — yalnızca dokunulduğunda beliriyor. Odaktayken kısayol
+        ipucu da gizleniyor: zaten oradasın.
+        """
+        if focus is not None:
+            self._search_focused = bool(focus)
+        if hover is not None:
+            self._search_hovered = bool(hover)
+        f = getattr(self, "_search_focused", False)
+        h = getattr(self, "_search_hovered", False)
+        shell = getattr(self, "search_shell", None)
+        if shell is None:
+            return
+        if f:
+            shell.setStyleSheet(self._search_css.format(bg="#FFFFFF", line="#DCDCE2"))
+        elif h:
+            shell.setStyleSheet(self._search_css.format(bg="#F5F5F8", line="transparent"))
+        else:
+            shell.setStyleSheet(self._search_css.format(bg="transparent", line="transparent"))
+        hint = getattr(self, "kbd_hint", None)
+        if hint is not None:
+            hint.setVisible(not f)
 
     def _on_search_pick_institution(self, slug):
         self.search_input.clear()
