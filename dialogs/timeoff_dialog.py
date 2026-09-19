@@ -3,10 +3,73 @@ from PySide6.QtWidgets import (
     QTableWidgetItem, QLabel, QMessageBox, QHeaderView, QAbstractItemView, QWidget
 )
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QBrush, QIcon, QFont
+from PySide6.QtGui import QColor, QBrush, QIcon, QFont, QPainter, QPen
 from ui_icons import icon, pixmap
 
 FONT_FAMILY = ".AppleSystemUIFont, SF Pro Text, -apple-system, Helvetica Neue, Segoe UI, sans-serif"
+
+class _DayHeader(QHeaderView):
+    """Gün başlığı: öğretmenin DERSE GELDİĞİ günler gri zeminde.
+
+    Bu ekranda müsaitlik ayarlanırken eksik olan bilgi şuydu: hoca zaten
+    hangi günler okulda? Bir günü kapatmadan önce o gün çizelgede dersi
+    olup olmadığı görünmüyordu, bakmak için başka ekrana geçmek
+    gerekiyordu. Gri zemin bunu söylüyor, altındaki küçük yazı da kaç
+    saat olduğunu.
+
+    Yalnızca burada var: yazdırma önizlemesi ve çıktı bundan etkilenmez,
+    orası çizelgenin kendisini gösterir, bu ise bir ayar ekranı.
+    """
+    BG = QColor("#F8FAFC")
+    BG_BUSY = QColor("#E6E9EF")
+    INK = QColor("#0F172A")
+    INK_SOFT = QColor("#64748B")
+    LINE = QColor("#E2E8F0")
+
+    def __init__(self, days, parent=None):
+        super().__init__(Qt.Horizontal, parent)
+        self._days = list(days or [])
+        self._hours = {}
+        self.setSectionsClickable(True)
+        self.setHighlightSections(False)
+
+    def sizeHint(self):
+        # setFixedHeight yerine sizeHint: tablo, satırlarının nereden
+        # başlayacağını başlığın sizeHint'inden hesaplıyor. Yüksekliği
+        # doğrudan sabitleyince ikisi birbirini tutmuyor ve satır
+        # başlıkları hücrelerin yarım satır üstüne kayıyordu.
+        s = super().sizeHint()
+        s.setHeight(42)
+        return s
+
+    def set_hours(self, hours):
+        self._hours = dict(hours or {})
+        self.viewport().update()
+
+    def paintSection(self, painter, rect, logicalIndex):
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        hrs = int(self._hours.get(logicalIndex, 0) or 0)
+        painter.fillRect(rect, self.BG_BUSY if hrs else self.BG)
+        painter.setPen(QPen(self.LINE, 1))
+        painter.drawLine(rect.left(), rect.bottom(), rect.right(), rect.bottom())
+        painter.drawLine(rect.right(), rect.top() + 6, rect.right(), rect.bottom() - 6)
+
+        name = self._days[logicalIndex] if 0 <= logicalIndex < len(self._days) else ""
+        f = QFont(FONT_FAMILY.split(",")[0].strip(), 9)
+        f.setBold(True)
+        painter.setFont(f)
+        painter.setPen(QPen(self.INK))
+        top = rect.adjusted(0, 4, 0, -(rect.height() // 2) + 2) if hrs else rect
+        painter.drawText(top, Qt.AlignCenter, name)
+        if hrs:
+            f2 = QFont(FONT_FAMILY.split(",")[0].strip(), 8)
+            painter.setFont(f2)
+            painter.setPen(QPen(self.INK_SOFT))
+            painter.drawText(rect.adjusted(0, rect.height() // 2 - 1, 0, -3),
+                             Qt.AlignCenter, f"{hrs} saat derste")
+        painter.restore()
+
 
 class TimeoffDialog(QDialog):
     """
@@ -192,6 +255,9 @@ class TimeoffDialog(QDialog):
         self.table = QTableWidget(self.periods, len(self.days))
         self.table.setVerticalHeaderLabels([f"{i+1}. Ders" for i in range(self.periods)])
         self.table.setHorizontalHeaderLabels(self.days)
+        self._day_header = _DayHeader(self.days, self.table)
+        self.table.setHorizontalHeader(self._day_header)
+        self._day_header.set_hours(self._teaching_hours_by_day())
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setShowGrid(True)
@@ -257,6 +323,9 @@ class TimeoffDialog(QDialog):
         self.lbl_kapali = self._create_legend_item("Kapalı / Kısıtlı (0)", "#E11D48", "#FFF1F2", "#FECDD3")
         bar_layout.addWidget(self.lbl_musait)
         bar_layout.addWidget(self.lbl_kapali)
+        if self.is_teacher and self._teaching_hours_by_day():
+            bar_layout.addWidget(self._create_legend_item(
+                "Gri gün: çizelgede dersi var", "#475569", "#E6E9EF", "#D3D8E0"))
         bar_layout.addStretch(1)
         
         layout.addLayout(bar_layout)
@@ -301,6 +370,39 @@ class TimeoffDialog(QDialog):
         
         layout.addLayout(btn_layout)
         
+    def _teaching_hours_by_day(self):
+        """Bu kişinin çizelgede gün başına kaç saat dersi var.
+
+        Aynı blok gride her saati için bir kayıt olarak durabiliyor ve her
+        kayıt bloğun TOPLAM süresini taşıyor; süreleri toplamak o yüzden
+        iki katı sayardı. Saatler kümede toplanıyor, her (gün, saat) bir
+        kez sayılıyor.
+        """
+        slots = set()
+        if not self.is_teacher:
+            return {}
+        try:
+            from auto_scheduler import format_tr_name
+            want = format_tr_name(self.entity_name)
+            for p in self.data_store.get("grid_placements", []) or []:
+                if not isinstance(p, dict):
+                    continue
+                who = format_tr_name(p.get("teacher_name") or p.get("teacher") or "")
+                if who != want:
+                    continue
+                d = int(p.get("day") if "day" in p else p.get("col", 0))
+                per = int(p.get("period") if "period" in p else p.get("row", 0))
+                dur = max(1, int(p.get("duration", 1) or 1))
+                for off in range(dur):
+                    slots.add((d, per + off))
+        except Exception as exc:
+            print(f"[Zaman tablosu] ders günleri okunamadı: {exc}")
+            return {}
+        out = {}
+        for d, _per in slots:
+            out[d] = out.get(d, 0) + 1
+        return out
+
     def _create_legend_item(self, text, fg, bg, border):
         lbl = QLabel(text)
         lbl.setStyleSheet(f"""
