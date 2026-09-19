@@ -525,7 +525,16 @@ from PySide6.QtCore import QRect
 # tabloda bu, içeriği taşıyan asıl ızgaradan daha görünür bir ikinci
 # ızgara demekti. Ayrımı artık boşluk ve renk yapıyor — çizgi yalnızca
 # GÜN sınırında ve başlığın bittiği yerde var.
-HDR_BG        = QColor("#FFFFFF")   # başlık zemini: kâğıt
+# Başlık bir BANT, kâğıt değil.
+#
+# Kutuları kaldırırken zemini de beyaza çekmiştim ve başlık ortadan
+# kayboldu: gün adı, saat numarası ve sınıf adı, altlarındaki boş
+# hücrelerle aynı yüzeyde duruyordu. Çerçeve ile veri aynı renkse tablo
+# nerede başladığını söylemiyor. Zemin geri geldi ama ızgara olarak
+# değil, tek parça bir bant olarak: gün satırı bir ton koyu, saat satırı
+# ve sınıf sütunu bir ton açık, veri alanı beyaz.
+HDR_BG        = QColor("#F4F6F9")   # saat satırı / sınıf sütunu
+HDR_BG_DAY    = QColor("#E7EBF1")   # gün satırı — bandın üst katı
 HDR_DAY_INK   = QColor("#0F172A")
 HDR_PER_INK   = QColor("#475569")
 # Başlık iki satır: üstte gün adı, altta saat numarası. Saat satırı 19
@@ -536,9 +545,9 @@ HDR_PER_INK   = QColor("#475569")
 HDR_DAY_ROW   = 22
 HDR_PER_ROW   = 22
 HDR_TOTAL_H   = HDR_DAY_ROW + HDR_PER_ROW
-HDR_HAIRLINE  = QColor("#E8EAEF")   # gün içi ayraç — neredeyse görünmez
-HDR_DAY_LINE  = QColor("#C3C9D4")   # gün sınırı — tek belirgin çizgi
-HDR_BASE_LINE = QColor("#D5D9E2")   # başlığın altı
+HDR_HAIRLINE  = QColor("#DFE3EA")   # satır ayracı — neredeyse görünmez
+HDR_DAY_LINE  = QColor("#BFC6D2")   # gün sınırı — tek belirgin çizgi
+HDR_BASE_LINE = QColor("#CFD4DD")   # bandın bittiği yer
 HDR_SEL_TINT  = QColor(15, 74, 171, 20)
 HDR_SEL_INK   = QColor("#0F4AAB")
 HDR_HOVER     = QColor(15, 23, 42, 10)
@@ -616,8 +625,7 @@ class AsCTimetableHeader(QHeaderView):
                     continue
                 rect = QRect(x, 0, w, vh)
                 state = (getattr(self, "_placement_states", None) or {}).get(col_idx)
-                if state:
-                    painter.fillRect(rect, _HEADER_STATE_COLORS[state])
+                painter.fillRect(rect, _HEADER_STATE_COLORS[state] if state else HDR_BG_DAY)
 
                 painter.setPen(QPen(HDR_DAY_INK))
                 painter.setFont(_header_font(FONT_FAMILY, 8.5))
@@ -646,6 +654,7 @@ class AsCTimetableHeader(QHeaderView):
                 continue
                 
             day_rect = QRect(x_start, 0, day_w, HDR_DAY_ROW)
+            painter.fillRect(day_rect, HDR_BG_DAY)
             painter.setPen(QPen(HDR_DAY_INK))
             font_day = _header_font(FONT_FAMILY, 8.6)
             painter.setFont(font_day)
@@ -682,6 +691,12 @@ class AsCTimetableHeader(QHeaderView):
                 painter.setPen(QPen(HDR_DAY_LINE, 1))
                 painter.drawLine(x + w - 1, 5, x + w - 1, vh - 5)
 
+        # Gün satırının sütunlardan artan sağ boşluğu da bandın parçası.
+        if total_sections:
+            x_last = (self.sectionViewportPosition(total_sections - 1)
+                      + self.sectionSize(total_sections - 1))
+            if x_last < vw:
+                painter.fillRect(QRect(x_last, 0, vw - x_last, HDR_DAY_ROW), HDR_BG_DAY)
         painter.setPen(QPen(HDR_BASE_LINE, 1))
         painter.drawLine(0, vh - 1, vw, vh - 1)
             
@@ -858,14 +873,17 @@ class AsCVerticalHeader(QHeaderView):
         # ızgarada beliriyor, başlık sessiz kalıyordu.
         is_active = (logicalIndex == self._active_row)
         is_hover = (logicalIndex == self._hover_row)
-        painter.fillRect(rect, HDR_BG)
+        # Seçili satır BEYAZ: gri bandın içinde öne çıkan şey, veri
+        # alanıyla aynı yüzeye geçmesidir — satır sanki bandı delip
+        # çizelgeye bağlanır.
+        painter.fillRect(rect, QColor("#FFFFFF") if is_active else HDR_BG)
         if is_active:
             painter.fillRect(rect, HDR_SEL_TINT)
         elif is_hover:
             painter.fillRect(rect, HDR_HOVER)
 
         painter.setPen(QPen(HDR_HAIRLINE, 1))
-        painter.drawLine(rect.left() + 10, rect.bottom(), rect.right() - 6, rect.bottom())
+        painter.drawLine(rect.left() + 8, rect.bottom(), rect.right() - 4, rect.bottom())
         painter.setPen(QPen(HDR_BASE_LINE, 1))
         painter.drawLine(rect.right(), rect.top(), rect.right(), rect.bottom())
 
@@ -4107,7 +4125,7 @@ class TimetableGrid(QWidget):
         vh.setDefaultAlignment(Qt.AlignCenter)
         vh.setStyleSheet(f"""
             QHeaderView::section {{
-                background: #FFFFFF;
+                background: #F4F6F9;
                 font-weight: 600;
                 border: none;
                 padding: 1px 6px;
@@ -4134,10 +4152,10 @@ class TimetableGrid(QWidget):
                gradyanlı düğmesi, kâğıt beyazı iki başlığın arasında tek
                gri leke olarak kalıyordu. */
             QTableCornerButton::section {{
-                background: #FFFFFF;
+                background: #E7EBF1;
                 border: none;
-                border-right: 1px solid #D5D9E2;
-                border-bottom: 1px solid #D5D9E2;
+                border-right: 1px solid #CFD4DD;
+                border-bottom: 1px solid #CFD4DD;
             }}
             QScrollBar:vertical {{
                 background: #F8FAFC;
