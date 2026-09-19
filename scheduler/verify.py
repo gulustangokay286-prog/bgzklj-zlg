@@ -52,6 +52,15 @@ def validate(world, rules, positions, bend_rules=False, forced=None, pieces=None
                 errors.append(f"Bölünmüş kartın parça sayısı süresiyle eşleşmiyor: {' + '.join(c.class_names)} · {c.subject_name}")
             for pidx in pieces[i]:
                 placed.append((_replace(c, duration=1, slots=()), int(pidx)))
+            # Aynı güne düşen parçalar yan yana olmalı: araya başka ders giren
+            # bölünme ("Edebiyat, Matematik, Edebiyat") kabul edilmez.
+            gunler=defaultdict(list)
+            for pidx in pieces[i]: gunler[int(pidx)//world.P].append(int(pidx))
+            for d,lst in gunler.items():
+                lst=sorted(lst)
+                if any(b-a!=1 for a,b in zip(lst,lst[1:])):
+                    errors.append(f"Bölünmüş kartın parçaları aynı günde yan yana değil: "
+                                  f"{' + '.join(c.class_names)} · {c.subject_name}, gün {d+1}")
             continue
         placed.append((c, idx))
     for c,idx in placed:
@@ -107,11 +116,14 @@ def validate(world, rules, positions, bend_rules=False, forced=None, pieces=None
                         # Mat2 tek derstir. "İki ders aynı güne gelmesin" ada bakar.
                         same_family=a.family>=0 and a.family==b.family
                         adjacent=(ap+a.duration==bp or bp+b.duration==ap)
-                        # Bitişik iki kart "tekrar" değil, tek bloktur: 1+1
-                        # dağılımı yan yana yerleşebilir (bkz. problem.py).
-                        bad=((r.kind==R.X_SUBJECT_ONCE_DAY and same_day and same_family and not adjacent)
+                        # Bitişik iki kart "tekrar" değil tek bloktur — ama
+                        # YALNIZCA aynı atamanın parçalarıysa (1+1 dağılımı).
+                        # Farklı iki ders ya da ayrı iki atama aynı güne yan
+                        # yana bile gelemez (bkz. cpsat._once_day, problem.py).
+                        blok=adjacent and a.origin==b.origin
+                        bad=((r.kind==R.X_SUBJECT_ONCE_DAY and same_day and same_family and not blok)
                             or (r.kind==R.X_TEACHER_ONCE_DAY and same_day and a.teacher>=0
-                                and a.teacher==b.teacher and not adjacent)
+                                and a.teacher==b.teacher and not blok)
                             or (r.kind==R.X_PAIR_NOT_SAME_DAY and same_day and a.subject!=b.subject)
                             or (r.kind==R.X_HARD_NOT_ADJACENT and same_day and not same_family and adjacent)
                             or (r.kind==R.X_SUBJECT_NOT_ADJACENT and same_day and same_family and adjacent and a.cid!=b.cid)

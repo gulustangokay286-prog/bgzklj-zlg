@@ -146,6 +146,17 @@ class _Model:
                     yer = [sum(idx * v for idx, v in us) for us in su]
                     for k in range(len(yer) - 1):
                         m.Add(yer[k] + 1 <= yer[k + 1]).OnlyEnforceIf(bol)
+                    # Kuraldan BAĞIMSIZ yapısal kısıt: bir kartın iki parçası
+                    # aynı güne düşüyorsa yan yana olmalı. "Edebiyat, Matematik,
+                    # Edebiyat" gibi araya ders giren bölünme yok. Parçalar
+                    # ızgara sırasına dizili olduğu için (yukarıdaki simetri)
+                    # ardışık çiftlerin bitişikliği bütününü bitişik yapar.
+                    for k in range(len(su) - 1):
+                        for ia, va in su[k]:
+                            da = ia // P
+                            for ib, vb in su[k + 1]:
+                                if ib // P == da and ib != ia + 1:
+                                    m.AddBoolOr([va.Not(), vb.Not()])
                     self.splits.append((i, bol, c.duration - 1))
                 else:
                     m.AddAtMostOne(v for _, v in row)
@@ -407,8 +418,13 @@ class _Model:
                         b = occs[y]
                         if self._exclusive(a, b):
                             continue        # aynı kartın alternatif yerleri
-                        if (a['p'] + a['dur'] == b['p'] or b['p'] + b['dur'] == a['p']):
-                            continue        # bitişik: serbest
+                        # Bitişiklik istisnası YALNIZCA aynı atamanın parçaları
+                        # için: 1+1 dağılımı yan yana tek bloktur. Farklı iki
+                        # ders (Edebiyat + Türkçe aynı aile) ya da aynı dersin
+                        # ayrı iki ataması aynı güne HİÇ gelemez — yan yana bile.
+                        if (a['card'].origin == b['card'].origin
+                                and (a['p'] + a['dur'] == b['p'] or b['p'] + b['dur'] == a['p'])):
+                            continue
                         self._not_both(a['v'], b['v'], r, f"{tag}_{ci}_{d}_{res}_{x}_{y}")
                 continue
             n_cards = len(cards_of[(ci, res)])

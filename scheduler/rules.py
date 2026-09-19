@@ -472,6 +472,14 @@ def compile_rules(raw_relations, world, defaults=True) -> tuple:
             rep.skip(label, "en az iki ders seçilmeli; ders seçimi boş olduğu "
                             "için kural hiçbir şeyi kısıtlamıyor")
             continue
+        if kind == X_PAIR_NOT_SAME_DAY and r.teachers:
+            # "İki ders aynı güne gelmesin" sınıfın gününe dair bir kuraldır;
+            # öğretmenle sınırlanamaz. Ekran ders seçilince öğretmenleri
+            # otomatik dolduruyordu; sonra Türkçe'ye başka bir hoca atanınca
+            # o kart filtreden düşüyor, Edebiyat ile aynı güne geliyordu.
+            r.teachers = frozenset()
+            rep.warn(f"{label}: öğretmen filtresi yoksayıldı; kural seçili derslerin "
+                     f"bütün kartlarına uygulanır.")
 
         if kind == X_TIME_WINDOW:
             if not p_start or not p_end:

@@ -200,8 +200,12 @@ class Problem:
                             # verilmiş bir ders yan yana iki saat olarak
                             # yerleşebilmeli; kural gün içinde AYRI AYRI iki
                             # oturumu engeller. (Öğretmen kuralı da aynı.)
+                            # İstisna yalnızca AYNI ATAMANIN kartları için:
+                            # Edebiyat + Türkçe (aynı aile) ya da aynı dersin
+                            # ayrı atamaları yan yana bile aynı güne gelemez.
                             ayni_gun_tekrar = (ad == bd and not (
-                                bitisik and r.kind in (R.X_SUBJECT_ONCE_DAY, R.X_TEACHER_ONCE_DAY)))
+                                bitisik and a.origin == b.origin
+                                and r.kind in (R.X_SUBJECT_ONCE_DAY, R.X_TEACHER_ONCE_DAY)))
                             hit = ((kind == 0 and ayni_gun_tekrar)
                                    or (kind == 1 and ad == bd and bitisik)
                                    or (kind == 2 and abs(ad-bd) < max(1, r.param)))
