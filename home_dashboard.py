@@ -1904,16 +1904,12 @@ class AppleVersionRow(QFrame):
         self.setAcceptDrops(True)
         
         layout = QHBoxLayout(self)
-        # Künyedeki YAZI, üstündeki klasör adıyla aynı dikey çizgide
-        # başlar. 44 piksel ne klasörün ikonuyla (16) ne adıyla (58)
-        # hizalıydı; ikisinin arasında, hiçbir şeye ait olmayan bir
-        # girintide duruyordu.
-        #
-        # Hizalanan şey kutunun kenarı değil yazının kendisi: künyenin
-        # zemini yazısının 8 piksel dışına taşar, o yüzden kutuyu 58'e
-        # koymak yazıyı 66'ya itiyor ve iki isim yine tutmuyordu.
-        layout.setContentsMargins(
-            CollapsibleVersionGroup.TEXT_X - _CHIP_PAD_X, 4, 16, 4)
+        # Künye, üstündeki klasör İKONUYLA aynı dikey çizgide başlar.
+        # 44 piksel ne ikonla (16) ne klasör adıyla (58) hizalıydı;
+        # ikisinin arasında, hiçbir şeye ait olmayan bir girintideydi.
+        # Hizalanan iki nesne de bir kutu — ikon kutusu ve künye kutusu —
+        # o yüzden hizayı kenarları tutuyor.
+        layout.setContentsMargins(CollapsibleVersionGroup.PAD_X, 4, 16, 4)
         layout.setSpacing(12)
         
         # Version Title Badge (e.g. v121 or v121  oturan program)
@@ -1982,15 +1978,18 @@ class AppleVersionRow(QFrame):
         tot = version_info.get("total_hours", 0)
         unp = version_info.get("unplaced_hours", 0)
         if tot <= 0:
-            fill_txt, fill_col, fill_tip = "Boş çizelge", bk_ui.INK_FAINT, "Bu versiyonda ders yok."
+            fill_txt, fill_col, fill_tip = "Boş çizelge", bk_ui.INK_SOFT, "Bu versiyonda ders yok."
         elif unp == 0:
-            fill_txt, fill_col, fill_tip = "Tam yerleşim", bk_ui.INK_FAINT, f"{tot} saatin tamamı yerleşti."
+            fill_txt, fill_col, fill_tip = "Tam yerleşim", bk_ui.INK_SOFT, f"{tot} saatin tamamı yerleşti."
         else:
             fill_txt, fill_col = f"{unp} saat boşta", "#B45309"
             fill_tip = f"{tot} saatin {unp} saati yerleşemedi."
         fill_lbl = QLabel(fill_txt)
         fill_lbl.setFont(bk_ui.font(8.2, QFont.Medium if unp else QFont.Normal))
         fill_lbl.setStyleSheet(f"color: {fill_col}; background: transparent; border: none;")
+        # INK_FAINT bu boyutta beyaz zeminde okunmuyordu: etiketler ve
+        # devre dışı metinler için ayrılmış bir ton, okunacak bir bilgi
+        # için değil.
         fill_lbl.setFixedWidth(96)
         fill_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         fill_lbl.setToolTip(fill_tip)
