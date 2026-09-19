@@ -292,8 +292,11 @@ class NativeTests(unittest.TestCase):
         d=store('2',D=1,P=4);d['siniflar'][0]['timeoff']=[[2,0,2,2]]
         d['planlama_iliskileri']=[rule('X dersi belirli saatlerde kalmalı',period_start=1,period_end=3)]
         r=self.run_valid(d,optimal_mode=True,azami_saniye=20)
-        self.assertTrue(r.complete)
-        self.assertEqual(sorted(x['period'] for x in r.placements),[0,2])
+        # Tek günde 0 ve 2. saat: parçalar bitişik olamaz. Aynı güne düşen
+        # parçalar yan yana olmak zorunda (araya ders giremez), bu yüzden
+        # kart YERLEŞMEZ — sığmazsa sığmasın, bölünerek oturtulmaz.
+        self.assertFalse(r.complete)
+        self.assertEqual(r.placements, [])
 
     def test_validator_rejects_unforced_violation_even_when_bending(self):
         d=store('1+1',D=2,P=4);d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin')]
@@ -303,11 +306,14 @@ class NativeTests(unittest.TestCase):
         self.assertTrue(errs);self.assertEqual(bent,[])
 
     def test_validator_checks_split_pieces(self):
-        d=store('2',D=1,P=4);d['siniflar'][0]['timeoff']=[[2,2,0,2]]
+        d=store('2',D=2,P=4);d['siniflar'][0]['timeoff']=[[2,2,0,2],[2,2,2,2]]
         w=build_world(d);rules,_=compile_rules([],w);attach_slots(w,rules)
         errs,_,_=validate(w,rules,[-1],pieces={0:[1,2]})
         self.assertTrue(any('Kapalı' in e for e in errs))
-        self.assertEqual(validate(w,rules,[-1],pieces={0:[0,3]})[0],[])
+        # Aynı günde araları açık parçalar: HATA (araya ders girmiş bölünme).
+        self.assertTrue(any('yan yana' in e for e in validate(w,rules,[-1],pieces={0:[0,3]})[0]))
+        # Ayrı günlerde iki parça: geçerli.
+        self.assertEqual(validate(w,rules,[-1],pieces={0:[0,5]})[0],[])
 
     def test_unknown_filter_is_error_not_all_classes(self):
         d=store();d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin',siniflar=['Yok'])]

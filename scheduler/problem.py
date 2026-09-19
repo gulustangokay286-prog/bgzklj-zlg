@@ -238,10 +238,15 @@ class Problem:
                                     # günün iki ucuna atıyor ve sonuç, kuralın
                                     # engellemek istediği şeyin ta kendisi
                                     # oluyordu.
+                                    # Aynı güne düşen kartlar araya ders
+                                    # girerek BÖLÜNEMEZ: bitişik değilse bu
+                                    # yerleşim yasaktır (ceza değil). Sığmayan
+                                    # kart açıkta kalır; bağımsız denetim de
+                                    # aynı koşulu hata sayar.
                                     adjacent = (ap + a.duration == bp
                                                 or bp + b.duration == ap)
                                     if not adjacent:
-                                        s += FORCED_WEIGHT
+                                        h = 1
                                 else:
                                     h = 1
                         hard.append(h)
