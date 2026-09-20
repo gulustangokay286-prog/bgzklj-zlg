@@ -2117,7 +2117,7 @@ _CARD_RADIUS = 9.0                 # köşe yumuşaklığının tavanı
 # çizgileri de kayboldu gibi oldu: eskiden her hücrenin kenarı vardı ve
 # ızgara onların toplamıyla görünüyordu. Boş hücrenin çizgisi artık tek
 # başına taşımak zorunda, o yüzden bir ton koyu.
-_PEN_HAIRLINE = QPen(QColor("#BFC7D4"), 1)
+_PEN_HAIRLINE = QPen(QColor("#B3BCCB"), 1)
 _PEN_DAYSEP = QPen(QColor("#C3C9D4"), 1.2)   # başlıktaki gün çizgisiyle aynı ton
 _PEN_SELECTED = QPen(QColor("#0071E3"), 2)
 _CLOSED_MARK = QColor("#A0AEC0")
@@ -3128,8 +3128,12 @@ class DropTableWidget(QTableWidget):
                 nxt = xs[c] + self.columnWidth(c)
             return nxt - xs[c]
 
-        # ── Katman 1: zemin + ızgara ──────────────────────────────────
-        set_pen(_PEN_HAIRLINE)
+        # ── Katman 1: yalnızca zemin ──────────────────────────────────
+        # Izgara buradan alındı: çizgi kartın ALTINDA kalınca, kartın
+        # komşusu olan boş hücrenin kenarı da siliniyordu ve boş bölgeler
+        # çerçevesiz kalıyordu. Artık en sonda, kartların ÜSTÜNDE ve
+        # yalnızca boş hücrelerin kenarında çiziliyor.
+        occupied = set()
         for r in rows:
             y = ys[r]
             h = hs[r]
@@ -3151,11 +3155,10 @@ class DropTableWidget(QTableWidget):
                 # vis None: bir bloğun içindeki hücre. Zemini yine de
                 # temizleniyor ve ızgarası çiziliyor; kart birazdan
                 # üstünü kapatacak.
-                bg = _CELL_CANVAS if (vis is None or vis.filled) else vis.bg
-                fill(x, y, cw, h, bg)
-                cx2 = x + cw - 1
-                line(cx2, y, cx2, y2)
-                line(x, y2, cx2, y2)
+                is_busy = (vis is None or vis.filled)
+                if is_busy:
+                    occupied.add((r, c))
+                fill(x, y, cw, h, _CELL_CANVAS if is_busy else vis.bg)
 
         # ── Katman 2: kartlar, yazı, rozetler, seçim ──────────────────
         for r in rows:
@@ -3211,7 +3214,22 @@ class DropTableWidget(QTableWidget):
                         QRectF(x + _CARD_PAD + 0.5, y + _CARD_PAD + 0.5, sw, sh),
                         srad, srad)
 
-        # ── Katman 3: gün ayraçları ───────────────────────────────────
+        # ── Katman 3: ızgara ve gün ayraçları, EN ÜSTTE ───────────────
+        set_pen(_PEN_HAIRLINE)
+        for r in rows:
+            y = ys[r]
+            y2 = y + hs[r] - 1
+            for c in cols:
+                if (r, c) in occupied:
+                    continue          # dolu hücrede ızgara yok
+                x = xs[c]
+                cw = cell_w(c)
+                if cw <= 0:
+                    continue
+                cx2 = x + cw - 1
+                line(cx2, y, cx2, y2)
+                line(x, y2, cx2, y2)
+
         if periods > 0 and rows:
             set_pen(_PEN_DAYSEP)
             y_top = ys[rows[0]]
