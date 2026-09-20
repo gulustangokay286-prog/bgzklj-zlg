@@ -48,27 +48,152 @@ class Result:
 
 
 def bind_locks(world, placements):
-    """Bind saved blocks to demand cards; never silently discard a requested lock."""
-    used=set()
-    # Combined lessons produce one display row per class. Identical rows refer
-    # to the same atomic card and must not consume another teacher/card.
+    """Bind saved blocks to demand cards; never silently discard a requested lock.
+
+    Split-piece handling
+    --------------------
+    When the engine splits a 2-hour block into two 1-hour pieces, each piece is
+    stored with ``duration: 1`` and ``is_split: True``.  If the user locks the
+    teacher row and resets, these pieces remain in ``grid_placements`` but the
+    *world* still has the original card with ``duration: 2``.  An exact-duration
+    match therefore fails.
+
+    The fix:
+    1. Separate split pieces from whole-block locks.
+    2. Group split pieces by their parent card (``card_id`` or ``block_id``
+       prefix ``cNbK`` → N).
+    3. For each group find the parent card (class/subject/teacher match,
+       ignoring duration) and lock it at the *earliest* piece position.
+    4. For whole-block locks that still fail exact-duration match, retry with
+       a relaxed duration (the stored duration may have changed between saves).
+    5. Never crash; unmatched locks are collected and reported as warnings.
+    """
+    import re
+    used = set()
+    warnings = []
+
+    # ── 1. Partition: split pieces vs normal locks ──────────────────────
+    normal_locks = []
+    split_pieces = []   # (placement, card_id_hint)
     for pl in placements:
-        if not (pl.get('locked') or pl.get('pinned')): continue
-        cn=norm_class(pl.get('class_name') or pl.get('class'))
-        sn=norm_key(pl.get('subject_name') or pl.get('subject'))
-        tn=norm_key(pl.get('teacher_name') or pl.get('teacher'))
-        d=int(pl.get('day',pl.get('col',0)));p=int(pl.get('period',pl.get('row',0)))
-        dur=int(pl.get('duration') or 1);idx=d*world.P+p
-        candidates=[c for c in world.cards if cn in {norm_class(x) for x in c.class_names}
-                    and norm_key(c.subject_name)==sn and norm_key(c.teacher_name)==tn
-                    and c.duration==dur]
-        if any(c.locked_at==idx for c in candidates): continue
-        c=next((c for c in candidates if c.cid not in used),None)
+        if not (pl.get('locked') or pl.get('pinned')):
+            continue
+        if pl.get('is_split'):
+            # Try to extract original card id from block_id (format: "c{cid}b{k}")
+            bid = str(pl.get('block_id') or '')
+            m = re.match(r'c(\d+)b\d+', bid)
+            hint = int(m.group(1)) if m else pl.get('card_id')
+            split_pieces.append((pl, hint))
+        else:
+            normal_locks.append(pl)
+
+    # ── 2. Normal (non-split) locks ─────────────────────────────────────
+    for pl in normal_locks:
+        cn = norm_class(pl.get('class_name') or pl.get('class'))
+        sn = norm_key(pl.get('subject_name') or pl.get('subject'))
+        tn = norm_key(pl.get('teacher_name') or pl.get('teacher'))
+        d = int(pl.get('day', pl.get('col', 0)))
+        p = int(pl.get('period', pl.get('row', 0)))
+        dur = int(pl.get('duration') or 1)
+        idx = d * world.P + p
+
+        # Exact match (class + subject + teacher + duration)
+        candidates = [c for c in world.cards
+                      if cn in {norm_class(x) for x in c.class_names}
+                      and norm_key(c.subject_name) == sn
+                      and norm_key(c.teacher_name) == tn
+                      and c.duration == dur]
+        if any(c.locked_at == idx for c in candidates):
+            continue
+        c = next((c for c in candidates if c.cid not in used), None)
+
+        # Relaxed match: ignore duration (assignment may have been edited)
         if c is None:
-            raise ValueError(f"Kilitli yerleşim atama dağılımıyla eşleşmiyor: {pl.get('class_name') or pl.get('class')} · {pl.get('subject_name') or pl.get('subject')}")
-        if not (0<=d<world.D and 0<=p and p+dur<=world.P):
-            raise ValueError('Kilitli yerleşim gün/saat sınırını aşıyor')
-        c.locked_at=idx;used.add(c.cid)
+            candidates = [c for c in world.cards
+                          if cn in {norm_class(x) for x in c.class_names}
+                          and norm_key(c.subject_name) == sn
+                          and norm_key(c.teacher_name) == tn]
+            if any(c.locked_at == idx for c in candidates):
+                continue
+            c = next((c for c in candidates if c.cid not in used), None)
+
+        if c is None:
+            warnings.append(
+                f"Kilitli yerleşim eşleşemedi (atlandı): "
+                f"{pl.get('class_name') or pl.get('class')} · "
+                f"{pl.get('subject_name') or pl.get('subject')} · "
+                f"{pl.get('teacher_name') or pl.get('teacher')}")
+            continue
+        if not (0 <= d < world.D and 0 <= p and p + c.duration <= world.P):
+            warnings.append(
+                f"Kilitli yerleşim gün/saat sınırını aşıyor (atlandı): "
+                f"{pl.get('class_name') or pl.get('class')} · "
+                f"{pl.get('subject_name') or pl.get('subject')}")
+            continue
+        c.locked_at = idx
+        used.add(c.cid)
+
+    # ── 3. Split pieces: group by parent card, lock the original card ───
+    from collections import defaultdict
+    groups = defaultdict(list)  # key → [(pl, idx)]
+    for pl, hint in split_pieces:
+        cn = norm_class(pl.get('class_name') or pl.get('class'))
+        sn = norm_key(pl.get('subject_name') or pl.get('subject'))
+        tn = norm_key(pl.get('teacher_name') or pl.get('teacher'))
+        d = int(pl.get('day', pl.get('col', 0)))
+        p = int(pl.get('period', pl.get('row', 0)))
+        idx = d * world.P + p
+        key = (cn, sn, tn, hint)  # hint may be None
+        groups[key].append((pl, idx))
+
+    for (cn, sn, tn, hint), pieces in groups.items():
+        # Find parent card (ignore duration — split pieces are always dur=1)
+        candidates = [c for c in world.cards
+                      if cn in {norm_class(x) for x in c.class_names}
+                      and norm_key(c.subject_name) == sn
+                      and norm_key(c.teacher_name) == tn]
+        # Prefer card whose cid matches the hint
+        if hint is not None:
+            preferred = [c for c in candidates if c.cid == hint and c.cid not in used]
+            if not preferred:
+                preferred = [c for c in candidates if c.cid not in used]
+        else:
+            preferred = [c for c in candidates if c.cid not in used]
+        # Already locked at the earliest piece position?
+        earliest_idx = min(idx for _, idx in pieces)
+        if any(c.locked_at == earliest_idx for c in candidates):
+            continue
+        c = preferred[0] if preferred else None
+        if c is None:
+            sample = pieces[0][0]
+            warnings.append(
+                f"Bölünmüş kilitli yerleşim eşleşemedi (atlandı): "
+                f"{sample.get('class_name') or sample.get('class')} · "
+                f"{sample.get('subject_name') or sample.get('subject')}")
+            continue
+        # Lock at earliest piece position
+        d0, p0 = divmod(earliest_idx, world.P)
+        if not (0 <= d0 < world.D and 0 <= p0 and p0 + c.duration <= world.P):
+            # Try each piece individually — maybe one fits
+            locked_any = False
+            for _, pidx in sorted(pieces, key=lambda x: x[1]):
+                dd, pp = divmod(pidx, world.P)
+                if 0 <= dd < world.D and 0 <= pp and pp + c.duration <= world.P:
+                    c.locked_at = pidx
+                    used.add(c.cid)
+                    locked_any = True
+                    break
+            if not locked_any:
+                sample = pieces[0][0]
+                warnings.append(
+                    f"Bölünmüş kilitli yerleşim sınır aşımı (atlandı): "
+                    f"{sample.get('class_name') or sample.get('class')} · "
+                    f"{sample.get('subject_name') or sample.get('subject')}")
+        else:
+            c.locked_at = earliest_idx
+            used.add(c.cid)
+
+    return warnings
 
 
 
@@ -228,9 +353,9 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
                     w.teacher_closed[ti] |= 1 << (d*w.P+p+off)
     locked=[pl for pl in data_store.get('grid_placements',[]) if not only_classes or
             norm_class(pl.get('class_name') or pl.get('class')) in {norm_class(x) for x in only_classes}]
-    bind_locks(w,locked)
+    lock_warnings=bind_locks(w,locked)
     attach_slots(w,rules)
-    res.world=w;res.rules=rules;res.warnings=list(report.warnings)
+    res.world=w;res.rules=rules;res.warnings=list(report.warnings)+(lock_warnings or [])
     res.total_hours=w.total_hours();res.positions=[-1]*len(w.cards)
     res.diagnostics,res.upper_bound=diagnose(w,rules)
     # Aritmetiğin dayattığı gruplar bir kez hesaplanır; her denetim aynı kümeyi
