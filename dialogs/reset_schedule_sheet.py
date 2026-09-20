@@ -47,12 +47,12 @@ class ResetScheduleSheet(QDialog):
         # açılıp kapanırken ekranda siyah kareler kalıyordu. Kart
         # görünümü duruyor; kaybedilen tek şey köşelerin dışındaki
         # saydamlık.
-        self.setAttribute(Qt.WA_TranslucentBackground, False)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAutoFillBackground(False)
         # Pencerenin kendi zemini de açıkça şeffaf: WA_TranslucentBackground
         # tek başına stile bırakılan zemini her platformda temizlemiyor ve
         # kartın etrafında beyaz bir bant kalıyordu.
-        self.setStyleSheet("QDialog { background: #FFFFFF; }")
+        self.setStyleSheet("QDialog { background: transparent; }")
         self.setModal(True)
 
         has_locked = locked_blocks > 0
@@ -71,11 +71,8 @@ class ResetScheduleSheet(QDialog):
                 border-radius: 20px;
             }
         """)
-        shadow = QGraphicsDropShadowEffect(card)
-        shadow.setBlurRadius(34)
-        shadow.setOffset(0, 10)
-        shadow.setColor(QColor(15, 23, 42, 52))
-        card.setGraphicsEffect(shadow)
+        # GÖLGE YOK — macOS'ta opak siyah dikdörtgen olarak boyanıyor
+        # (bkz. timetable_grid.py başındaki not).
         outer.addWidget(card)
 
         lay = QVBoxLayout(card)
@@ -173,13 +170,6 @@ class ResetScheduleSheet(QDialog):
                 }}
                 QPushButton:hover {{ background: {hover}; }}
             """)
-            # Düğmenin gölgesi RENKLİ değil. Kırmızının kendi rengiyle
-            # yayılan bir gölge, gölge gibi değil hâle gibi görünüyordu.
-            sh = QGraphicsDropShadowEffect(b)
-            sh.setBlurRadius(10)
-            sh.setOffset(0, 2)
-            sh.setColor(QColor(15, 23, 42, 45))
-            b.setGraphicsEffect(sh)
             # Qt'nin ölçüsü ikon + yazı + dolgu için kıl payı kalıyor ve son
             # harf kırpılıyordu ("Kalsın" → "Kalsır"). Payı elle veriyoruz.
             b.setMinimumWidth(b.sizeHint().width() + 14)

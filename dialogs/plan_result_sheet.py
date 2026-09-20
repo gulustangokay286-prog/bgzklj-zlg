@@ -169,14 +169,12 @@ class PlanResultSheet(QDialog):
         self._drag_from = None
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint
                             | Qt.NoDropShadowWindowHint)
-        # SAYDAM DEĞİL: macOS'ta çerçevesiz + saydam bir pencere, alfası
-        # çözülemediğinde OPAK SİYAH bir dikdörtgen olarak boyanıyor
-        # (bkz. timetable_grid.py başındaki not). Sayfa arka arkaya
-        # açılıp kapanırken ekranda siyah kareler kalıyordu. Kart
-        # görünümü duruyor; kaybedilen tek şey köşelerin dışındaki
-        # saydamlık.
-        self.setAttribute(Qt.WA_TranslucentBackground, False)
-        self.setStyleSheet("QDialog { background: #FFFFFF; }")
+        # Saydam zemin, ama HİÇBİR gölge yok: ne pencerenin native
+        # gölgesi (NoDropShadowWindowHint) ne de içeride
+        # QGraphicsDropShadowEffect. macOS'ta siyah dikdörtgen olarak
+        # boyanan şey o gölge katmanlarıydı, saydamlığın kendisi değil.
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setStyleSheet("QDialog { background: transparent; }")
         self.setModal(True)
 
         total_hours = max(0, int(total_hours or 0))
@@ -197,11 +195,11 @@ class PlanResultSheet(QDialog):
                 border-radius: 20px;
             }
         """)
-        sh = QGraphicsDropShadowEffect(card)
-        sh.setBlurRadius(34)
-        sh.setOffset(0, 10)
-        sh.setColor(QColor(15, 23, 42, 52))
-        card.setGraphicsEffect(sh)
+        # GÖLGE YOK. timetable_grid.py'nin başındaki not: macOS'ta uygulama
+        # içi QGraphicsDropShadowEffect'ler opak siyah dikdörtgen olarak
+        # boyanıyor ve bu yüzden programdan kaldırılmışlar. Bu sayfalara
+        # geri koymuştum; ekrandaki siyah kareler oradan geliyordu. Kart
+        # kendi kenarlığını çiziyor, kaybedilen bir şey yok.
         outer.addWidget(card)
 
         lay = QVBoxLayout(card)

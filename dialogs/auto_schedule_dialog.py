@@ -896,28 +896,25 @@ class AutoScheduleDialog(QDialog):
         self.setModal(True)
         
         # Clean Apple Sheet Design System
-        # PENCERE SAYDAM DEĞİL.
-        #
-        # Bu sayfa çerçevesiz ve saydam kurulmuştu. Bu dosyanın başındaki
-        # not tam da bunu anlatıyor: macOS'ta çerçevesiz + saydam bir
-        # pencere, alfası çözülemediğinde OPAK SİYAH bir dikdörtgen olarak
-        # boyanıyor. Motor durdurulduğunda pencere yeniden boyutlanıyor
-        # (çalışma ekranı kapanıp parametreler geri geliyor) ve ekranda
-        # kocaman siyah bir kare kalıyordu.
-        #
-        # Diğer sayfalar boyut değiştirmediği için orada sorun çıkmıyor;
-        # burası değiştiriyor. Kart görünümü duruyor, yalnızca pencerenin
-        # kendisi opak.
+        # Çerçevesiz: sistem başlık çubuğu ve onun altındaki gri şerit
+        # kalktı, ekranda yalnızca kartın kendisi duruyor. Saydamlık için
+        # şart olan tek şey, HİÇBİR gölgenin bulunmaması: ne pencerenin
+        # native gölgesi (NoDropShadowWindowHint) ne de içerideki
+        # QGraphicsDropShadowEffect'ler. İkisi de macOS'ta opak siyah
+        # dikdörtgen olarak boyanıyor.
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint
+                            | Qt.NoDropShadowWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
         self._drag_from = None
 
         self.setStyleSheet("""
             QDialog {
-                background: #F2F3F6;
+                background: transparent;
             }
             QFrame#sheetCard {
                 background-color: #FFFFFF;
-                border: 1px solid rgba(15, 23, 42, 0.08);
-                border-radius: 20px;
+                border: 1px solid rgba(15, 23, 42, 0.16);
+                border-radius: 18px;
             }
             QFrame#card {
                 background-color: #FBFCFD;
@@ -1067,11 +1064,9 @@ class AutoScheduleDialog(QDialog):
 
         sheet = QFrame(self)
         sheet.setObjectName("sheetCard")
-        _sh = QGraphicsDropShadowEffect(sheet)
-        _sh.setBlurRadius(34)
-        _sh.setOffset(0, 10)
-        _sh.setColor(QColor(15, 23, 42, 52))
-        sheet.setGraphicsEffect(_sh)
+        # Gölge YOK: macOS'ta uygulama içi gölge efektleri opak siyah
+        # dikdörtgen olarak boyanıyor (bkz. timetable_grid.py başındaki
+        # not) ve ekrandaki siyah kareler buradan geliyordu.
         outer.addWidget(sheet)
 
         root_layout = QVBoxLayout(sheet)
