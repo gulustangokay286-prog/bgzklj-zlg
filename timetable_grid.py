@@ -2122,9 +2122,13 @@ _TEXT_STAMPS = {}
 _MAX_SPAN = 8                      # bir dersin kaplayabileceği en fazla saat
 
 _CELL_CANVAS = QColor("#FFFFFF")   # kartın altında kalan hücre zemini
-_CARD_PAD = 1.5                    # kartın hücre kenarına bıraktığı pay
+_CARD_PAD = 0.75                   # kartın hücre kenarına bıraktığı pay
 _CARD_RADIUS = 9.0                 # köşe yumuşaklığının tavanı
-_PEN_HAIRLINE = QPen(QColor("#CBD5E1"), 1)
+# Dolu hücrelerde ızgara çizilmeyi bıraktıktan sonra boş hücrelerin
+# çizgileri de kayboldu gibi oldu: eskiden her hücrenin kenarı vardı ve
+# ızgara onların toplamıyla görünüyordu. Boş hücrenin çizgisi artık tek
+# başına taşımak zorunda, o yüzden bir ton koyu.
+_PEN_HAIRLINE = QPen(QColor("#BFC7D4"), 1)
 _PEN_DAYSEP = QPen(QColor("#C3C9D4"), 1.2)   # başlıktaki gün çizgisiyle aynı ton
 _PEN_SELECTED = QPen(QColor("#0071E3"), 2)
 _CLOSED_MARK = QColor("#A0AEC0")
@@ -3181,9 +3185,17 @@ class DropTableWidget(QTableWidget):
                     draw_pix(x, y, stamp(vis.text, vis.fg, vis.font_px, w, h))
 
                 if (r, c) in selected:
+                    # Seçim çerçevesi kartın köşesini izler; köşeli bir
+                    # dikdörtgen yuvarlak kartın üstünde kulak gibi
+                    # duruyordu.
                     set_pen(_PEN_SELECTED)
                     painter.setBrush(Qt.NoBrush)
-                    painter.drawRect(x + 1, y + 1, w - 3, h - 3)
+                    sw = w - 2 * _CARD_PAD - 1.0
+                    sh = h - 2 * _CARD_PAD - 1.0
+                    srad = max(4.0, min(_CARD_RADIUS, min(sw, sh) * 0.26))
+                    painter.drawRoundedRect(
+                        QRectF(x + _CARD_PAD + 0.5, y + _CARD_PAD + 0.5, sw, sh),
+                        srad, srad)
 
                 if filled:
                     if vis.text:
