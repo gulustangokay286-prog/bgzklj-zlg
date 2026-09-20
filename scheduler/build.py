@@ -317,6 +317,12 @@ def attach_slots(world, rule_list):
                 fp = world.footprint(d, p, card.duration)
                 if card.locked_at is not None and world.idx(d, p) != card.locked_at:
                     continue
+                # Kilitli kart: kullanıcının açık kararı kısıtları geçersiz kılar.
+                if card.locked_at is not None and world.idx(d, p) == card.locked_at:
+                    if fp == 0:
+                        continue
+                    allowed.append((world.idx(d, p), fp))
+                    continue
                 if fp == 0 or (fp & base_block):
                     continue
                 if window_ok(world, windows, card, p, card.duration):

@@ -401,7 +401,8 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
     res.warnings.extend(x['message'] for x in res.diagnostics)
     for c in w.cards:
         if c.locked_at is not None and not c.slots:
-            raise ValueError(f"Kilitli kart kapalı saate veya planlama kuralına aykırı: {c}")
+            res.warnings.append(f"Kilitli kart kapalı saate veya planlama kuralına aykırı (kilit kaldırıldı): {c}")
+            c.locked_at = None
     # ── OPTİMAL KİP ──
     #
     # "Optimale çıkana kadar durmasın, optimale ulaşınca dursun; uzun sürmesi
