@@ -2122,6 +2122,8 @@ _TEXT_STAMPS = {}
 _MAX_SPAN = 8                      # bir dersin kaplayabileceği en fazla saat
 
 _CELL_CANVAS = QColor("#FFFFFF")   # kartın altında kalan hücre zemini
+_CARD_PAD = 2.5                    # kartın hücre kenarına bıraktığı pay
+_CARD_RADIUS = 8.0                 # köşe yumuşaklığı
 _PEN_HAIRLINE = QPen(QColor("#CBD5E1"), 1)
 _PEN_DAYSEP = QPen(QColor("#C3C9D4"), 1.2)   # başlıktaki gün çizgisiyle aynı ton
 _PEN_SELECTED = QPen(QColor("#0071E3"), 2)
@@ -3144,11 +3146,22 @@ class DropTableWidget(QTableWidget):
                 # başlıyor ve köşeleri yumuşak: ızgaranın ÜSTÜNDE duran
                 # ayrı bir nesne.
                 if filled:
+                    # Kart hücrenin İÇİNE ortalanıyor. Sağ ve alt kenarda
+                    # ızgaranın kendi çizgisi var, sol ve üstte komşunun
+                    # çizgisi; kart her iki yandan aynı payı bırakmazsa
+                    # hücreye oturmamış gibi duruyor — bir piksellik fark
+                    # 36 piksellik bir kutuda görünür.
                     fill(x, y, w, h, _CELL_CANVAS)
                     painter.setPen(Qt.NoPen)
                     painter.setBrush(vis.bg)
+                    cw = w - 2 * _CARD_PAD - 1.0
+                    ch = h - 2 * _CARD_PAD - 1.0
+                    # Yarıçap kısa kenara oranlı: sabit bir değer dar
+                    # hücrede kartı hapa çeviriyor, geniş hücrede ise
+                    # köşeyi sert bırakıyor.
+                    rad = max(3.5, min(_CARD_RADIUS, min(cw, ch) * 0.24))
                     painter.drawRoundedRect(
-                        QRectF(x + 1.0, y + 1.0, w - 2.0, h - 2.0), 5.0, 5.0)
+                        QRectF(x + _CARD_PAD, y + _CARD_PAD, cw, ch), rad, rad)
                 else:
                     fill(x, y, w, h, vis.bg)
 
@@ -3180,9 +3193,9 @@ class DropTableWidget(QTableWidget):
                     # dersin renginin koyusunda yuvarlak bir zemin,
                     # üstünde beyaz kilit.
                     if vis.locked:
-                        draw_pix(x + w - 17, y + 2, self._lock_stamp(vis.bg))
+                        draw_pix(int(x + w - 18), int(y + 4), self._lock_stamp(vis.bg))
                     if vis.combined:
-                        draw_pix(x + 2, y + h - 17, self._combined_stamp(vis.bg))
+                        draw_pix(int(x + 4), int(y + h - 19), self._combined_stamp(vis.bg))
 
     def _badge_stamp(self, name, cell_bg, glyph_colour=None):
         """Hücre köşesine basılan küçük ikon; hücre rengine göre önbellekli.
