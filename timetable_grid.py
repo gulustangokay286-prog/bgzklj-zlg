@@ -7,6 +7,7 @@ import json
 import uuid
 import time
 from PySide6.QtWidgets import (
+    QSpacerItem, QSizePolicy,
     QWidget, QTableWidget, QTableWidgetItem, QHeaderView,
     QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton,
     QAbstractItemView, QFrame, QScrollArea, QMenu, QInputDialog,
@@ -1896,12 +1897,22 @@ class UnplacedLessonsDock(QWidget):
                 # itiyordu. Şimdi iki esneme var ve solda dairenin dengi
                 # kadar boşluk: yazı çubuğun gerçek ortasında duruyor,
                 # daire yine sağ uçta.
-                msg_layout.addSpacing(34)
                 msg_layout.addStretch(1)
                 msg_layout.addWidget(icon_lbl)
                 msg_layout.addWidget(text_lbl)
                 msg_layout.addStretch(1)
+                # Dokun SOLUNDA ders bilgisi paneli duruyor; mesaj yalnızca
+                # dokun içinde ortalanınca ekranın ortasından o panelin
+                # yarısı kadar sağda kalıyordu. Boşluk, dokun ekrandaki
+                # yerine göre hesaplanıp sağa konuyor.
                 msg_layout.addWidget(self._make_add_circle(34))
+                # Boşluk dairenin ARKASINDA: önüne konunca daire çubuğun
+                # dışına itiliyor ve kırpılıyordu. Arkada dururken hem
+                # yazıyı sola kaydırıyor hem daire görünür kalıyor.
+                self._msg_balance = QSpacerItem(0, 0, QSizePolicy.Fixed,
+                                                QSizePolicy.Minimum)
+                msg_layout.addItem(self._msg_balance)
+                QTimer.singleShot(0, self._balance_message)
                 
                 self.container_layout.addWidget(msg_widget, 1)
                 return
@@ -1945,6 +1956,39 @@ class UnplacedLessonsDock(QWidget):
                 self._make_add_circle(32), 0, Qt.AlignVCenter)
         finally:
             self.container.setUpdatesEnabled(True)
+
+    def _balance_message(self):
+        """Boş dok mesajını EKRANIN ortasına getirir.
+
+        Dok, solundaki bilgi panelinden sonra başlıyor; kendi içinde
+        ortalanan bir yazı ekranda o panelin yarısı kadar sağda duruyor.
+        Fark ölçülüp sağ tarafa boşluk olarak ekleniyor, böylece yazı
+        çubuğun değil SAYFANIN ortasında oluyor.
+        """
+        spacer = getattr(self, "_msg_balance", None)
+        if spacer is None:
+            return
+        try:
+            grid = self.parent()
+            while grid is not None and not hasattr(grid, "table"):
+                grid = grid.parent() if hasattr(grid, "parent") else None
+            if grid is None or grid.width() <= 0:
+                return
+            dock_left = self.mapTo(grid, self.rect().topLeft()).x()
+            want = grid.width() / 2.0 - dock_left          # dok içinde hedef merkez
+            have = self.container.width() / 2.0
+            extra = int(max(0.0, (have - want) * 2.0))
+            spacer.changeSize(extra, 0, QSizePolicy.Fixed, QSizePolicy.Minimum)
+            lay = self.container_layout
+            if lay is not None:
+                lay.invalidate()
+                lay.activate()
+        except Exception as exc:
+            print(f"[Dok] mesaj ortalanamadı: {exc}")
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._balance_message()
 
     def _make_add_circle(self, size=34):
         """"Daha fazla ders ekle" — yazı değil, daire.

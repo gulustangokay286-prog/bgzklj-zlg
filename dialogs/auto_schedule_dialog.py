@@ -1038,6 +1038,10 @@ class AutoScheduleDialog(QDialog):
         if not getattr(self, "_centered_once", False):
             self._centered_once = True
             self._center_on(self.parent())
+            # Bir tur sonra TEKRAR: showEvent'te yükseklik hâlâ
+            # kesinleşmemiş oluyor (kartlar gösterilirken layout bir kez
+            # daha çalışıyor) ve pencere ortadan yukarı kayıyordu.
+            QTimer.singleShot(0, lambda: self._center_on(self.parent()))
 
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
