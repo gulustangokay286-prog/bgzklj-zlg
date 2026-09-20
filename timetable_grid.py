@@ -1879,32 +1879,11 @@ class UnplacedLessonsDock(QWidget):
                 msg_layout.addWidget(icon_lbl)
                 msg_layout.addWidget(text_lbl)
                 
-                btn_empty_add = QPushButton("  Daha Fazla Ders Ekle...")
-                btn_empty_add.setIcon(make_grid_action_icon("add_plus", 14, "#0071E3"))
-                btn_empty_add.setCursor(Qt.PointingHandCursor)
-                btn_empty_add.setFixedHeight(28)
-                btn_empty_add.setStyleSheet(f"""
-                    QPushButton {{
-                        background: #FFFFFF;
-                        color: #0F172A;
-                        font-family: {FONT_FAMILY};
-                        font-size: 11px;
-                        font-weight: 600;
-                        padding: 0 14px;
-                        border-radius: 6px;
-                        border: 1px solid #CBD5E1;
-                    }}
-                    QPushButton:hover {{
-                        background: #F1F5F9;
-                        border-color: #0071E3;
-                        color: #0071E3;
-                    }}
-                    QPushButton:pressed {{
-                        background: #E2E8F0;
-                    }}
-                """)
-                btn_empty_add.clicked.connect(self._on_add_more_clicked)
-                msg_layout.addWidget(btn_empty_add)
+                # Yazının hemen bitiminde duran bir düğme cümlenin devamı
+                # gibi okunuyordu. Daire, yazı değil EYLEM olduğunu söyler;
+                # sağ uçta durunca da mesajla yarışmaz.
+                msg_layout.addStretch(1)
+                msg_layout.addWidget(self._make_add_circle(34))
                 
                 self.container_layout.addWidget(msg_widget)
                 return
@@ -1943,34 +1922,39 @@ class UnplacedLessonsDock(QWidget):
                 card.installEventFilter(self)
                 self.container_layout.addWidget(card)
                 
-            btn_inline_add = QPushButton("  Daha Fazla Ders Ekle...")
-            btn_inline_add.setIcon(make_grid_action_icon("add_plus", 13, "#0071E3"))
-            btn_inline_add.setCursor(Qt.PointingHandCursor)
-            btn_inline_add.setFixedHeight(26)
-            btn_inline_add.setStyleSheet(f"""
-                QPushButton {{
-                    background: #FFFFFF;
-                    color: #475569;
-                    font-family: {FONT_FAMILY};
-                    font-size: 10.5px;
-                    font-weight: 600;
-                    padding: 0 10px;
-                    border-radius: 5px;
-                    border: 1px dashed #94A3B8;
-                }}
-                QPushButton:hover {{
-                    background: #F8FAFC;
-                    border-color: #0071E3;
-                    color: #0071E3;
-                }}
-                QPushButton:pressed {{
-                    background: #F1F5F9;
-                }}
-            """)
-            btn_inline_add.clicked.connect(self._on_add_more_clicked)
-            self.container_layout.addWidget(btn_inline_add)
+            # Kartların sonunda aynı daire: sıranın devamı, ama kart değil.
+            self.container_layout.addWidget(
+                self._make_add_circle(32), 0, Qt.AlignVCenter)
         finally:
             self.container.setUpdatesEnabled(True)
+
+    def _make_add_circle(self, size=34):
+        """"Daha fazla ders ekle" — yazı değil, daire.
+
+        Metinli bir düğmeydi ve yanındaki cümlenin devamı gibi okunuyordu
+        ("…ders kalmadı. Daha Fazla Ders Ekle…"). Artık tek bir artı
+        taşıyan bir daire: ne olduğunu ipucu söylüyor, yeri de sabit.
+        """
+        btn = QPushButton()
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setFixedSize(size, size)
+        btn.setIcon(make_grid_action_icon("add_plus", int(size * 0.46), "#FFFFFF"))
+        btn.setToolTip("Daha fazla ders ekle")
+        r = size // 2
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background: #0F4AAB;
+                border: none;
+                border-radius: {r}px;
+            }}
+            QPushButton:hover {{ background: #0C3C8C; }}
+            QPushButton:pressed {{ background: #082B67; }}
+        """)
+        # Gölge YOK: bu dosyanın başındaki nota göre uygulama içi
+        # QGraphicsDropShadowEffect'ler macOS'ta opak siyah dikdörtgen
+        # olarak boyandığı için kaldırılmış. Daire zaten kendini söylüyor.
+        btn.clicked.connect(self._on_add_more_clicked)
+        return btn
 
     def update_list(self, data_store: dict = None, display_mode: str = None):
         if not data_store:

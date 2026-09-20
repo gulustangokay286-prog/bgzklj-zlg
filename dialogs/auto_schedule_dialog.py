@@ -129,6 +129,248 @@ class PlannerArtWidget(QWidget):
         p.end()
 
 
+class _RunScene(QWidget):
+    """Çalışırken izlenen sahne: tablaya sırayla düşen kartlar.
+
+    Beklemenin kendisi kısalmıyor ama boş bir çubuğa bakmakla dolmakta
+    olan bir çizelgeye bakmak aynı şey değil. Sahne döngüsel: sekiz kart
+    yerine oturuyor, sonra sayfa tazeleniyor ve yeniden başlıyor.
+    """
+
+    SLOTS = [(30, 62), (50, 70), (70, 62), (40, 54),
+             (60, 54), (50, 46), (34, 48), (66, 48)]
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(96)
+        self._t = 0.0
+        self._timer = QTimer(self)
+        self._timer.setInterval(40)
+        self._timer.timeout.connect(self._tick)
+
+    def start(self):
+        if not self._timer.isActive():
+            self._timer.start()
+
+    def stop(self):
+        self._timer.stop()
+        self.update()
+
+    def _tick(self):
+        self._t += 0.04
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        w, h = self.width(), self.height()
+        u = h / 100.0
+        ox = w / 2.0 - 50 * u
+
+        def pt(x, y):
+            return QPointF(ox + x * u, y * u)
+
+        def iso(cx, cy, hw, hd):
+            return [pt(cx - hw, cy), pt(cx, cy - hd), pt(cx + hw, cy), pt(cx, cy + hd)]
+
+        def poly(points, colour, outline=True):
+            path = QPainterPath(points[0])
+            for q in points[1:]:
+                path.lineTo(q)
+            path.closeSubpath()
+            p.setBrush(QBrush(colour))
+            p.setPen(QPen(QColor(18, 26, 43, 50), max(0.7, u * 0.5)) if outline else Qt.NoPen)
+            p.drawPath(path)
+
+        # Tabla
+        L, B, R, F = iso(50, 78, 42, 21)
+        th = 5 * u
+        poly([L, F, QPointF(F.x(), F.y() + th), QPointF(L.x(), L.y() + th)], QColor("#C9D2E0"))
+        poly([F, R, QPointF(R.x(), R.y() + th), QPointF(F.x(), F.y() + th)], QColor("#B7C2D4"))
+        poly([L, B, R, F], QColor("#E8EDF5"))
+        p.setPen(QPen(QColor(120, 135, 160, 95), max(0.6, u * 0.35)))
+        for i in range(1, 4):
+            t = i / 4.0
+            p.drawLine(QPointF(L.x() + (B.x() - L.x()) * t, L.y() + (B.y() - L.y()) * t),
+                       QPointF(F.x() + (R.x() - F.x()) * t, F.y() + (R.y() - F.y()) * t))
+            p.drawLine(QPointF(L.x() + (F.x() - L.x()) * t, L.y() + (F.y() - L.y()) * t),
+                       QPointF(B.x() + (R.x() - B.x()) * t, B.y() + (R.y() - B.y()) * t))
+
+        colours = ["#3E6FD4", "#4DA37A", "#E8A33D", "#C9556B",
+                   "#7C5AC8", "#2F9EB5", "#D2793C", "#5E9E45"]
+        CYCLE, STEP = 0.55, 0.55
+        cycle_len = len(self.SLOTS) * STEP + 1.1
+        phase = self._t % cycle_len
+
+        for i, (cx, cy) in enumerate(self.SLOTS):
+            appear = i * STEP
+            k = (phase - appear) / CYCLE
+            if k <= 0:
+                continue
+            drop = max(0.0, 1.0 - min(1.0, k))
+            # Yerine otururken yukarıdan iniyor ve son anda hızlanıyor.
+            dy = -26 * (drop ** 2)
+            alpha = int(255 * min(1.0, k * 2.2))
+            base = QColor(colours[i % len(colours)])
+            base.setAlpha(alpha)
+            side = base.darker(118); side.setAlpha(alpha)
+            front = base.darker(134); front.setAlpha(alpha)
+            l, b, r, f = iso(cx, cy + dy, 9.5, 4.8)
+            cth = 3.0 * u
+            poly([l, f, QPointF(f.x(), f.y() + cth), QPointF(l.x(), l.y() + cth)], side, False)
+            poly([f, r, QPointF(r.x(), r.y() + cth), QPointF(f.x(), f.y() + cth)], front, False)
+            poly([l, b, r, f], base, False)
+        p.end()
+
+
+class PlannerRunPanel(QFrame):
+    """Motor çalışırken görünen ekran.
+
+    Bekleme üç şeyle yönetiliyor:
+
+    1) SAHNE — tablaya kartlar düşüyor. Çubuğa bakmakla dolan bir
+       çizelgeye bakmak aynı şey değil.
+    2) AKIŞ — ilerleme, gerçek yüzdeyi BEKLEMEDEN kıpırdıyor. Motorun ilk
+       haberi saniyeler sonra geliyor; o zamana kadar duran bir çubuk
+       "takıldı" demektir. Gösterilen değer bir eğriyle kendi ilerliyor,
+       gerçek haber geldiğinde ikisinin büyüğü alınıyor. Yani hızlandıran
+       bir şey yok, yalnızca BAŞLADIĞI görünüyor — ve bu doğru: motor
+       gerçekten çalışıyor.
+    3) SÜRE — "yaklaşık 40 saniye" diyor ve geri sayıyor. Bilinmeyen bir
+       bekleme, bilinen bir beklemeden uzun hissettirir.
+    """
+
+    STAGES = [
+        (0.00, "Veriler okunuyor"),
+        (0.08, "Öğretmen müsaitlikleri çözümleniyor"),
+        (0.20, "Kısıtlar modele çevriliyor"),
+        (0.36, "Bloklar yerleştiriliyor"),
+        (0.58, "Çakışmalar gideriliyor"),
+        (0.74, "Boşluklar toplanıyor"),
+        (0.88, "Sonuç iyileştiriliyor"),
+    ]
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("card")
+        self._elapsed = 0.0
+        self._estimate = 45.0
+        self._real = 0.0
+        self._shown = 0.0
+        self._done = False
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(20, 16, 20, 16)
+        lay.setSpacing(0)
+
+        self.scene = _RunScene(self)
+        lay.addWidget(self.scene)
+        lay.addSpacing(10)
+
+        self.lbl_stage = QLabel("Veriler okunuyor")
+        self.lbl_stage.setAlignment(Qt.AlignCenter)
+        self.lbl_stage.setStyleSheet("font-size: 13px; font-weight: 600; color: #0F172A;"
+                                     " background: transparent; border: none;")
+        lay.addWidget(self.lbl_stage)
+        lay.addSpacing(4)
+
+        self.lbl_eta = QLabel("")
+        self.lbl_eta.setAlignment(Qt.AlignCenter)
+        self.lbl_eta.setStyleSheet("font-size: 11.5px; color: #8A8A93;"
+                                   " background: transparent; border: none;")
+        lay.addWidget(self.lbl_eta)
+        lay.addSpacing(12)
+
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        self.bar = AppleProgressBar(self)
+        self.bar.setRange(0, 1000)
+        self.bar.setValue(0)
+        row.addWidget(self.bar, 1)
+        self.lbl_pct = QLabel("0%")
+        self.lbl_pct.setFixedWidth(46)
+        self.lbl_pct.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.lbl_pct.setStyleSheet("font-size: 12.5px; font-weight: 700; color: #0F4AAB;"
+                                   " background: transparent; border: none;")
+        row.addWidget(self.lbl_pct)
+        lay.addLayout(row)
+        lay.addSpacing(10)
+
+        self.lbl_detail = QLabel("")
+        self.lbl_detail.setAlignment(Qt.AlignCenter)
+        self.lbl_detail.setStyleSheet("font-size: 10.5px; color: #9A9AA2;"
+                                      " background: transparent; border: none;")
+        lay.addWidget(self.lbl_detail)
+
+        self._timer = QTimer(self)
+        self._timer.setInterval(50)
+        self._timer.timeout.connect(self._tick)
+
+    # ── dışarıdan ────────────────────────────────────────────────────
+    def start(self, estimate_seconds=45.0):
+        self._elapsed = 0.0
+        self._real = 0.0
+        self._shown = 0.0
+        self._done = False
+        self._estimate = max(6.0, float(estimate_seconds or 45.0))
+        self.scene.start()
+        self._timer.start()
+        self._tick()
+
+    def set_progress(self, pct, detail=""):
+        try:
+            self._real = max(self._real, float(pct))
+        except (TypeError, ValueError):
+            pass
+        if detail:
+            self.lbl_detail.setText(str(detail))
+
+    def finish(self):
+        self._done = True
+        self._real = 100.0
+        self.scene.stop()
+        self._timer.stop()
+        self.bar.setValue(1000)
+        self.lbl_pct.setText("100%")
+        self.lbl_stage.setText("Tamamlandı")
+        self.lbl_eta.setText("")
+
+    # ── içeride ──────────────────────────────────────────────────────
+    def _tick(self):
+        if self._done:
+            return
+        self._elapsed += 0.05
+
+        # Kendi kendine ilerleyen eğri: başta hızlı, sonra yavaşlıyor ve
+        # %94'ü hiç geçmiyor — gerçek bitişi o söyleyecek.
+        t = self._elapsed / (self._estimate * 0.55)
+        curve = 94.0 * (1.0 - math.exp(-t))
+        target = max(curve, self._real)
+        self._shown += (target - self._shown) * 0.12
+        pct = max(0.0, min(100.0, self._shown))
+
+        self.bar.setValue(int(pct * 10))
+        self.lbl_pct.setText(f"{int(pct)}%")
+
+        frac = pct / 100.0
+        stage = self.STAGES[0][1]
+        for edge, name in self.STAGES:
+            if frac >= edge:
+                stage = name
+        self.lbl_stage.setText(stage)
+
+        left = self._estimate - self._elapsed
+        if left > 1.5:
+            if left >= 90:
+                self.lbl_eta.setText(f"yaklaşık {int(round(left / 60))} dakika")
+            else:
+                self.lbl_eta.setText(f"yaklaşık {int(left / 5 + 0.5) * 5} saniye")
+        else:
+            # Tahmini aştıysa saymayı bırakıyor; geri sayımın eksiye
+            # düşmesi "tahmin tutmadı" demenin en kötü yolu.
+            self.lbl_eta.setText("son ayarlamalar yapılıyor")
+
+
 class Apple3DIconWidget(QWidget):
     """Isometric 3D Schedule Core Icon (Pure floating vector, no square background)."""
     def __init__(self, parent=None):
@@ -1002,10 +1244,19 @@ class AutoScheduleDialog(QDialog):
                 widget.hide()
         
         root_layout.addWidget(param_card)
-        
+        self.param_card = param_card
+
+        # Çalışma ekranı: başlatana kadar gizli. Başlatınca parametrelerin
+        # YERİNE geçiyor — o sırada ayar değiştirilemeyeceği için onları
+        # ekranda tutmanın anlamı yok, üstelik sahne yer istiyor.
+        self.run_panel = PlannerRunPanel(self)
+        self.run_panel.setVisible(False)
+        root_layout.addWidget(self.run_panel)
+
         # ═══ 4. SKELETON AWAITING & LIVE PROGRESS CARD ═══
         prog_card = QFrame()
         prog_card.setObjectName("card")
+        self.prog_card = prog_card
         pr_lay = QVBoxLayout(prog_card)
         pr_lay.setContentsMargins(16, 12, 16, 12)
         pr_lay.setSpacing(8)
@@ -1128,6 +1379,30 @@ class AutoScheduleDialog(QDialog):
         self.icon_3d.start_pulse()
         self.skeleton.set_active(True)
         self.skeleton.set_placed_ratio(0.0)
+
+        # Parametreler gidiyor, sahne geliyor. Tahmin ders saatinden
+        # çıkarılıyor; "optimale kadar çalış" açıksa motor kanıt arayana
+        # kadar durmadığı için süre kabaca ikiye katlanıyor.
+        try:
+            _hours = 0
+            for _a in (self.data_store.get("atamalar", []) if self.data_store else []):
+                try:
+                    _hours += int(_a.get("duration", 0) or 0)
+                except (TypeError, ValueError):
+                    pass
+            _est = max(10.0, min(240.0, _hours * 0.16 or 30.0))
+            if getattr(self, "sw_optimal", None) is not None and self.sw_optimal.isChecked():
+                _est *= 2.0
+            self.param_card.setVisible(False)
+            if getattr(self, "prog_card", None) is not None:
+                # Eski ilerleme kartı da gizleniyor: iki ilerleme çubuğu
+                # aynı anda ekrandaysa hangisinin doğru olduğu sorulur.
+                self.prog_card.setVisible(False)
+            self.run_panel.setVisible(True)
+            self.run_panel.start(_est)
+            self.adjustSize()
+        except Exception as exc:
+            print(f"[AUTO] çalışma ekranı açılamadı: {exc}")
         
         # Check the input BEFORE building anything. Without this the run produces a
         # grid with holes and the user cannot tell whether the scheduler gave up or
@@ -1251,10 +1526,41 @@ class AutoScheduleDialog(QDialog):
         self.lbl_val_iter.setText(str(iteration))
         self.lbl_val_conf.setText(str(conflicts))
         self.lbl_val_placed.setText(f"{placed} Saat")
+        panel = getattr(self, "run_panel", None)
+        if panel is not None and panel.isVisible():
+            # Sayaçlar çalışma ekranında tek satırda: rakamların
+            # kıpırdaması da "duruyor mu?" sorusuna cevap veriyor.
+            bits = [f"{placed} saat yerleşti"]
+            if iteration:
+                bits.append(f"{iteration}. tur")
+            if conflicts:
+                bits.append(f"{conflicts} çakışma çözülüyor")
+            panel.lbl_detail.setText("  ·  ".join(bits))
         if conflicts == 0 and placed > 0:
             self.lbl_val_conf.setStyleSheet("color: #34C759; font-weight: bold; font-size: 10px;")
         else:
             self.lbl_val_conf.setStyleSheet("color: #E11D48; font-weight: bold; font-size: 10px;" if conflicts > 3 else "color: #D97706; font-weight: bold; font-size: 10px;")
+
+    def _close_run_panel(self):
+        """Çalışma ekranını kapatır, parametreleri geri getirir.
+
+        Sahne ve sahte akış yalnızca motor çalışırken var; bittiğinde
+        ekran başladığı yere dönüyor ki kullanıcı ayarları görüp yeniden
+        çalıştırabilsin.
+        """
+        panel = getattr(self, "run_panel", None)
+        if panel is None or not panel.isVisible():
+            return
+        try:
+            panel.finish()
+            panel.setVisible(False)
+            if getattr(self, "param_card", None) is not None:
+                self.param_card.setVisible(True)
+            if getattr(self, "prog_card", None) is not None:
+                self.prog_card.setVisible(True)
+            self.adjustSize()
+        except Exception as exc:
+            print(f"[AUTO] çalışma ekranı kapatılamadı: {exc}")
 
     def _on_progress(self, placed, total):
         pct = int((placed / max(1, total)) * 100) if total > 0 else 100
@@ -1263,10 +1569,14 @@ class AutoScheduleDialog(QDialog):
         self.lbl_val_placed.setText(f"{placed} Saat")
         ratio = (placed / float(max(1, total))) if total > 0 else 1.0
         self.skeleton.set_placed_ratio(ratio)
+        panel = getattr(self, "run_panel", None)
+        if panel is not None and panel.isVisible():
+            panel.set_progress(pct, f"{placed} / {total} saat yerleşti" if total else "")
 
     def _on_failed(self, err_msg):
         self.icon_3d.stop_pulse()
         self.skeleton.set_active(False)
+        self._close_run_panel()
         self.btn_start.setEnabled(True)
         self.btn_cancel.setText("Kapat")
         self.lbl_info.setText(f"Hata: {err_msg}")
@@ -1282,6 +1592,7 @@ class AutoScheduleDialog(QDialog):
         self._on_progress(placed, demand)
         self.icon_3d.stop_pulse()
         self.skeleton.set_active(False)
+        self._close_run_panel()
         self.skeleton.set_placed_ratio(placed / max(1, demand))
         
         schedule = result.get("schedule", [])

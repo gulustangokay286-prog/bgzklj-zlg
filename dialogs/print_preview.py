@@ -936,7 +936,6 @@ class TimetablePrintPreview(QDialog):
         """
         if self._expanded:
             self._expanded = False
-            self._set_frameless(False)
             if self._geom_before_full is not None:
                 # restoreGeometry yerine düz dikdörtgen: kaydedilen bayt
                 # dizisi pencere durumunu da (maximized/fullscreen)
@@ -954,36 +953,27 @@ class TimetablePrintPreview(QDialog):
         # pencerenin büyümesi değil, pencerenin ortadan kalkmasıdır.
         # availableGeometry yerine geometry: menü çubuğunun bıraktığı
         # şerit de sayfaya kalıyor.
-        self._set_frameless(True)
         if screen is not None:
-            self.setGeometry(screen.geometry())
+            self.setGeometry(screen.availableGeometry())
         self._expanded = True
         self.btn_full.setText("Küçült")
         self.btn_full.setIcon(make_preview_icon("exitfullscreen", 14, "#334155"))
         self._fit_preview()
 
-    def _set_frameless(self, on):
-        """Çerçeveyi açıp kapatır ve pencereyi geri kazandırır.
-
-        setWindowFlag bir pencerede setParent() çağırıyor: Qt pencereyi
-        gizliyor ve yeniden oluşturuyor. Bu sırada iki şey kayboluyordu —
-        pencere görünürlüğü (show() ile geri geliyor) ve MODAL TUTUŞ. Bu
-        diyalog exec() ile açıldığı için tutuş kaybolunca ortaya şu hâl
-        çıkıyordu: tam ekrandan çıkılıyor, önizleme küçülüyor ama
-        uygulamanın geri kalanı hâlâ kilitli görünüyor — tıklamalar
-        hiçbir yere gitmiyor.
-
-        Bu yüzden kip, görünürlük ve odak elle geri kuruluyor.
-        """
-        modality = self.windowModality()
-        self.setWindowFlag(Qt.FramelessWindowHint, bool(on))
-        self.setWindowModality(modality)
-        self.show()
-        self.raise_()
-        self.activateWindow()
-        # Pencerenin yeniden oluşturulması macOS'ta bir tur sürebiliyor;
-        # odak, olay döngüsü sıradaki turu işledikten sonra da isteniyor.
-        QTimer.singleShot(0, self.activateWindow)
+    # NOT: buradan bir _set_frameless metodu kaldırıldı.
+    #
+    # Tam ekranda başlık çubuğunu gizlemek için setWindowFlag ile
+    # FramelessWindowHint açılıp kapatılıyordu. O çağrı pencerede
+    # setParent() çalıştırıyor: Qt pencereyi yok edip yeniden kuruyor ve
+    # bu sırada exec() ile kurulmuş MODAL TUTUŞ kayboluyor. Sonuç, tam
+    # ekrandan çıkan kullanıcının gördüğü şeydi: önizleme küçülüyor ama
+    # uygulamanın hiçbir yerine tıklanamıyor — pencere hâlâ modal, ama
+    # artık kimse onu yönetmiyor. Kip ve odağı elle geri kurmayı denedim,
+    # macOS'ta yetmedi.
+    #
+    # Pencere bayrakları artık HİÇ değişmiyor: tam ekran, pencereyi
+    # ekranın kullanılabilir alanına yaymaktan ibaret. Başlık çubuğu
+    # duruyor — tıklanamayan bir uygulamaya değer bir kazanç değildi.
 
     def _fit_preview(self):
         """Sayfayı pencereye yeniden sığdırır.
