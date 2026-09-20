@@ -9,7 +9,8 @@ from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QFrame, QSplitter, QInputDialog, QMessageBox,
     QLineEdit, QDialog, QCheckBox, QProgressBar,
-    QMenu, QSizePolicy, QGraphicsDropShadowEffect, QGraphicsOpacityEffect
+    QMenu, QSizePolicy, QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
+    QAbstractButton
 )
 from PySide6.QtCore import (
     Qt, Signal, QSize, QRectF, QPoint, QPointF, QMimeData, QEvent, QTimer,
@@ -1839,7 +1840,7 @@ class CollapsibleVersionGroup(QFrame):
     def _toggle_collapse(self, event):
         if hasattr(event, "pos"):
             child = self.header.childAt(event.pos())
-            if child and isinstance(child, (QPushButton, QAbstractButton)):
+            if child and isinstance(child, QAbstractButton):
                 return
         self._set_collapsed(not self.is_collapsed)
 
@@ -2171,7 +2172,7 @@ class AppleVersionRow(QFrame):
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             child = self.childAt(event.pos())
-            if child and isinstance(child, (QPushButton, QAbstractButton)):
+            if child and isinstance(child, QAbstractButton):
                 super().mousePressEvent(event)
                 return
             self.selected.emit(self.filename)
