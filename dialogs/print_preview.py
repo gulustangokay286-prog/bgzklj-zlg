@@ -72,6 +72,20 @@ def make_preview_icon(name: str, size: int = 14, color_hex: str = "#475569") -> 
         p.drawLine(QPointF(size * 0.3, size * 0.58), QPointF(size * 0.3, size * 0.84))
         p.drawLine(QPointF(size * 0.3, size * 0.84), QPointF(size * 0.7, size * 0.84))
         p.drawLine(QPointF(size * 0.7, size * 0.84), QPointF(size * 0.7, size * 0.58))
+    elif name in ('fullscreen', 'exitfullscreen'):
+        # Dört köşeye giden oklar; çıkışta içe doğru.
+        p.setPen(QPen(c, 1.3, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.setBrush(Qt.NoBrush)
+        out = (name == 'fullscreen')
+        a, b = (0.16, 0.42) if out else (0.42, 0.16)
+        for sx, sy in ((1, 1), (-1, 1), (1, -1), (-1, -1)):
+            cx = size * (a if sx > 0 else 1 - a)
+            cy = size * (a if sy > 0 else 1 - a)
+            ex = size * (b if sx > 0 else 1 - b)
+            ey = size * (b if sy > 0 else 1 - b)
+            p.drawLine(QPointF(cx, cy), QPointF(ex, ey))
+            p.drawLine(QPointF(cx, cy), QPointF(ex, cy))
+            p.drawLine(QPointF(cx, cy), QPointF(cx, ey))
     p.end()
     return QIcon(pix)
 
@@ -743,6 +757,21 @@ class TimetablePrintPreview(QDialog):
             }
         """
         
+        # TAM EKRAN.
+        #
+        # Önizleme, çizelgenin kâğıda nasıl düşeceğini kontrol etmek için
+        # var; pencere içinde sayfa avuç içi kadar kalıyordu ve saat
+        # numaraları okunmuyordu. Bu düğme pencereyi tam ekrana alıp
+        # araç çubuğu dışındaki her şeyi sayfaya bırakıyor. Esc geri
+        # getiriyor.
+        self.btn_full = QPushButton("Tam Ekran")
+        self.btn_full.setIcon(make_preview_icon("fullscreen", 14, "#334155"))
+        self.btn_full.setCursor(Qt.PointingHandCursor)
+        self.btn_full.setStyleSheet(btn_style)
+        self.btn_full.setToolTip("Tam ekran (F11 • çıkmak için Esc)")
+        self.btn_full.clicked.connect(self.toggle_fullscreen)
+        top_bar.addWidget(self.btn_full)
+
         btn_html = QPushButton("HTML Çıktısı")
         btn_html.setIcon(make_preview_icon("html", 14, "#334155"))
         btn_html.setCursor(Qt.PointingHandCursor)
@@ -880,6 +909,32 @@ class TimetablePrintPreview(QDialog):
             QMessageBox.information(self, "Başarılı", "HTML çıktısı kaydedildi.")
         except Exception as e:
             QMessageBox.critical(self, "Hata", f"HTML kaydedilemedi:\n{e}")
+
+    def toggle_fullscreen(self):
+        """Tam ekran ↔ pencere. Düğmenin yazısı hangi durumda olduğunu söyler."""
+        if self.isFullScreen():
+            self.showNormal()
+            if getattr(self, "_geom_before_full", None):
+                self.restoreGeometry(self._geom_before_full)
+            self.btn_full.setText("Tam Ekran")
+            self.btn_full.setIcon(make_preview_icon("fullscreen", 14, "#334155"))
+        else:
+            self._geom_before_full = self.saveGeometry()
+            self.showFullScreen()
+            self.btn_full.setText("Küçült")
+            self.btn_full.setIcon(make_preview_icon("exitfullscreen", 14, "#334155"))
+
+    def keyPressEvent(self, event):
+        # Esc tam ekranı kapatır, pencereyi değil: tam ekrandayken Esc'in
+        # diyaloğu kapatması, kullanıcının "çıkış" beklediği yerde işi
+        # bitirmek olurdu.
+        if event.key() == Qt.Key_Escape and self.isFullScreen():
+            self.toggle_fullscreen()
+            return
+        if event.key() == Qt.Key_F11:
+            self.toggle_fullscreen()
+            return
+        super().keyPressEvent(event)
 
     def _export_pdf(self):
         path, _ = QFileDialog.getSaveFileName(self, "PDF Olarak Kaydet", "Ders_Programi.pdf", "PDF Files (*.pdf)")

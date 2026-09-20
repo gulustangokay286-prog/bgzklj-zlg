@@ -228,93 +228,82 @@ class TimeoffDialog(QDialog):
             self.table.customContextMenuRequested.connect(self._on_context_menu)
         layout.addWidget(self.table, 1)
         
-        # Hızlı Butonlar ve Lejand
-        bar_layout = QHBoxLayout()
-        bar_layout.setSpacing(12)
-        
-        btn_all_open = QPushButton("Tümünü Müsait Yap")
-        btn_all_open.setStyleSheet("""
-            QPushButton {
-                background: #ECFDF5;
-                color: #065F46;
-                border: 1px solid #A7F3D0;
-                padding: 6px 14px;
-                font-weight: 600;
-                font-size: 12px;
-            }
-            QPushButton:hover { background: #D1FAE5; }
-        """)
-        btn_all_open.clicked.connect(self._make_all_open)
-        
-        btn_all_close = QPushButton("Tümünü Kısıtla")
-        btn_all_close.setStyleSheet("""
-            QPushButton {
-                background: #FFF1F2;
-                color: #9F1239;
-                border: 1px solid #FECDD3;
-                padding: 6px 14px;
-                font-weight: 600;
-                font-size: 12px;
-            }
-            QPushButton:hover { background: #FFE4E6; }
-        """)
-        btn_all_close.clicked.connect(self._make_all_close)
-        
-        bar_layout.addWidget(btn_all_open)
-        bar_layout.addWidget(btn_all_close)
-        bar_layout.addSpacing(16)
-        
-        # Lejand (Legend Chips)
-        self.lbl_musait = self._create_legend_item("Müsait (0)", "#059669", "#ECFDF5", "#A7F3D0")
-        self.lbl_kapali = self._create_legend_item("Kapalı / Kısıtlı (0)", "#E11D48", "#FFF1F2", "#FECDD3")
-        bar_layout.addWidget(self.lbl_musait)
-        bar_layout.addWidget(self.lbl_kapali)
+        # TEK SATIR, ÜÇ AĞIRLIK.
+        #
+        # Altta beş ayrı kutu vardı: iki renkli çerçeveli düğme, üç renkli
+        # kapsül, sonra ayrı bir satırda iki düğme daha. Yedi nesnenin
+        # yedisi de kendi zeminine, kenarlığına ve yuvarlaklığına
+        # sahipti — hiçbiri diğerinden önemli görünmüyordu.
+        #
+        # Şimdi hepsi tek satırda ve üç ağırlıkta: toplu eylemler çıplak
+        # yazı, sayaçlar renkli noktalı düz metin, sağda ise tek dolu
+        # düğme. Kaydet düğmesi de hafifledi; bu bir ayar ekranı, kaydetmek
+        # sayfanın en gürültülü nesnesi olmak zorunda değil.
+        bar = QHBoxLayout()
+        bar.setSpacing(6)
+
+        def quick(text, colour, slot):
+            b = QPushButton(text)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setFixedHeight(28)
+            b.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent; color: {colour};
+                    border: none; border-radius: 8px;
+                    padding: 0 10px; font-size: 12px; font-weight: 600;
+                }}
+                QPushButton:hover {{ background: rgba(15, 23, 42, 0.05); }}
+                QPushButton:pressed {{ background: rgba(15, 23, 42, 0.09); }}
+            """)
+            b.clicked.connect(slot)
+            return b
+
+        bar.addWidget(quick("Tümünü müsait yap", "#0F766E", self._make_all_open))
+        bar.addWidget(quick("Tümünü kısıtla", "#9F1239", self._make_all_close))
+        bar.addSpacing(10)
+
+        self.lbl_musait = self._create_legend_item("Müsait (0)", "#059669", "", "")
+        self.lbl_kapali = self._create_legend_item("Kapalı / Kısıtlı (0)", "#E11D48", "", "")
+        bar.addWidget(self.lbl_musait)
+        bar.addWidget(self.lbl_kapali)
         if getattr(self, "_busy_slots", None):
-            bar_layout.addWidget(self._create_legend_item(
-                f"Çizelgede dolu: {len(self._busy_slots)}", "#475569", "#ECEEF2", "#D3D8E0"))
-        bar_layout.addStretch(1)
-        
-        layout.addLayout(bar_layout)
-        
-        self._update_counters()
-        
-        # Alt Butonlar
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(10)
-        btn_layout.addStretch(1)
-        
+            bar.addWidget(self._create_legend_item(
+                f"● Çizelgede dolu: {len(self._busy_slots)}", "#64748B", "", ""))
+        bar.addStretch(1)
+
         btn_cancel = QPushButton("İptal")
+        btn_cancel.setCursor(Qt.PointingHandCursor)
+        btn_cancel.setFixedHeight(30)
         btn_cancel.setStyleSheet("""
             QPushButton {
-                background: #FFFFFF;
-                color: #475569;
-                border: 1px solid #CBD5E1;
-                padding: 8px 20px;
-                min-height: 36px;
-                border-radius: 8px;
+                background: transparent; color: #64748B;
+                border: none; border-radius: 8px;
+                padding: 0 14px; font-size: 12.5px;
             }
-            QPushButton:hover { background: #F8FAFC; color: #1E293B; }
+            QPushButton:hover { background: rgba(15, 23, 42, 0.05); color: #0F172A; }
         """)
         btn_cancel.clicked.connect(self.reject)
-        btn_layout.addWidget(btn_cancel)
-        
-        btn_save = QPushButton("Kaydet ve Uygula")
+        bar.addWidget(btn_cancel)
+
+        btn_save = QPushButton("Kaydet")
+        btn_save.setCursor(Qt.PointingHandCursor)
+        btn_save.setFixedHeight(30)
+        btn_save.setDefault(True)
         btn_save.setStyleSheet("""
             QPushButton {
-                background: #0071E3;
-                color: #FFFFFF;
-                border: none;
-                padding: 8px 24px;
-                min-height: 36px;
-                border-radius: 8px;
-                font-weight: 600;
+                background: #0F4AAB; color: #FFFFFF;
+                border: none; border-radius: 8px;
+                padding: 0 18px; font-size: 12.5px; font-weight: 600;
             }
-            QPushButton:hover { background: #0062C4; }
+            QPushButton:hover { background: #0C3C8C; }
+            QPushButton:pressed { background: #082B67; }
         """)
         btn_save.clicked.connect(self._save_data)
-        btn_layout.addWidget(btn_save)
-        
-        layout.addLayout(btn_layout)
+        bar.addWidget(btn_save)
+
+        layout.addLayout(bar)
+
+        self._update_counters()
         
     def _load_busy_slots(self):
         """Bu kişinin çizelgede DOLU olduğu saatler: {(gün, saat): "9A · Matematik"}.
@@ -405,17 +394,22 @@ class TimeoffDialog(QDialog):
         lay.addLayout(row)
         sheet.exec()
 
-    def _create_legend_item(self, text, fg, bg, border):
+    def _create_legend_item(self, text, fg, bg="", border=""):
+        """Sayaç: kapsül değil, renkli noktalı düz yazı.
+
+        Üç sayaç üç renkli kapsüldü ve alt barın en parlak nesneleriydi;
+        oysa bunlar okunacak sayılar, basılacak düğmeler değil. Renk artık
+        yalnızca baştaki noktada, yazı ikincil gride.
+        """
         lbl = QLabel(text)
         lbl.setStyleSheet(f"""
             QLabel {{
                 color: {fg};
-                background: {bg};
-                border: 1px solid {border};
-                border-radius: 12px;
-                padding: 4px 10px;
+                background: transparent;
+                border: none;
+                padding: 0 6px;
                 font-weight: 600;
-                font-size: 11px;
+                font-size: 11.5px;
             }}
         """)
         return lbl
