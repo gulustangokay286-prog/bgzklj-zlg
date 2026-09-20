@@ -1890,16 +1890,20 @@ class UnplacedLessonsDock(QWidget):
                     text_lbl.setFont(QFont("Segoe UI", 9, QFont.Bold))
                     text_lbl.setStyleSheet("color: #15803D; background: transparent; border: none;")
                     
+                # Mesaj ORTADA, düğme sağda.
+                #
+                # Düğmeyi sağa yaslamak için konan tek esneme, mesajı sola
+                # itiyordu. Şimdi iki esneme var ve solda dairenin dengi
+                # kadar boşluk: yazı çubuğun gerçek ortasında duruyor,
+                # daire yine sağ uçta.
+                msg_layout.addSpacing(34)
+                msg_layout.addStretch(1)
                 msg_layout.addWidget(icon_lbl)
                 msg_layout.addWidget(text_lbl)
-                
-                # Yazının hemen bitiminde duran bir düğme cümlenin devamı
-                # gibi okunuyordu. Daire, yazı değil EYLEM olduğunu söyler;
-                # sağ uçta durunca da mesajla yarışmaz.
                 msg_layout.addStretch(1)
                 msg_layout.addWidget(self._make_add_circle(34))
                 
-                self.container_layout.addWidget(msg_widget)
+                self.container_layout.addWidget(msg_widget, 1)
                 return
 
             self.container_layout.setAlignment(Qt.AlignLeft)
@@ -2144,7 +2148,7 @@ _COMB_BG = QBrush(QColor("#DBEAFE"))
 _COMB_PEN = QPen(QColor("#2563EB"), 1.2)
 _COMB_INK = QColor("#1E40AF")
 _BG_CLOSED = QColor("#F1F5F9")
-_BG_EMPTY = QColor("#F8FAFC")
+_BG_EMPTY = QColor("#FDFEFF")     # boş saat: neredeyse kâğıt
 _BG_FILLED = QColor("#FFFFFF")
 _BG_FALLBACK = QColor("#2563EB")
 
@@ -3197,8 +3201,10 @@ class DropTableWidget(QTableWidget):
                     fill(x, y, w, h, _CELL_CANVAS)
                     painter.setPen(Qt.NoPen)
                     painter.setBrush(vis.bg)
-                    cw = w - 2 * _CARD_PAD
-                    ch = h - 2 * _CARD_PAD
+                    # Hücrenin son pikseli ızgara çizgisine ait; kart onu
+                    # da sayınca aşağı ve sağa yarım piksel kayıyordu.
+                    cw = w - 1 - 2 * _CARD_PAD
+                    ch = h - 1 - 2 * _CARD_PAD
                     # Yarıçap kısa kenara oranlı: sabit bir değer dar
                     # hücrede kartı hapa çeviriyor, geniş hücrede ise
                     # köşeyi sert bırakıyor.
@@ -3221,12 +3227,11 @@ class DropTableWidget(QTableWidget):
                     # duruyordu.
                     set_pen(_PEN_SELECTED)
                     painter.setBrush(Qt.NoBrush)
-                    sw = w - 2 * _CARD_PAD - 1.0
-                    sh = h - 2 * _CARD_PAD - 1.0
+                    sw = w - 1 - 2 * _CARD_PAD
+                    sh = h - 1 - 2 * _CARD_PAD
                     srad = max(4.0, min(_CARD_RADIUS, min(sw, sh) * 0.26))
                     painter.drawRoundedRect(
-                        QRectF(x + _CARD_PAD + 0.5, y + _CARD_PAD + 0.5, sw, sh),
-                        srad, srad)
+                        QRectF(x + _CARD_PAD, y + _CARD_PAD, sw, sh), srad, srad)
 
         # ── Katman 3: ızgara ve gün ayraçları, EN ÜSTTE ───────────────
         set_pen(_PEN_HAIRLINE)
