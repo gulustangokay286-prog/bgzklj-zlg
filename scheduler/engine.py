@@ -233,42 +233,41 @@ def _kayitli_yer(data_store, world, card):
 
 def _bitir(res, w, rules, data_store, completion_first, start):
     """Doğrulama + çizelgenin kurulması. Bütün kipler buradan çıkar."""
-    # Kilitli ama yerleşememiş kartların kilidini kaldır — crash yerine uyarı.
-    for i, c in enumerate(w.cards):
-        if c.locked_at is not None and res.positions[i] < 0:
-            res.warnings.append(f"Kilitli kart yerleşemedi (kilit kaldırıldı): "
-                                f"{' + '.join(c.class_names)} · {c.subject_name}")
-            c.locked_at = None
+    # Kilitli kartlar motora sokulmadı; verify.py'de hata vermemesi için
+    # dünyada kalmış olabilecek kilit işaretlerini temizle.
+    for c in w.cards:
+        c.locked_at = None
     forced=impossible_groups(w) if completion_first else set()
     errors,soft,bent=validate(w,rules,res.positions,bend_rules=completion_first,
                               forced=forced,pieces=getattr(res,'split_pieces',None))
     if errors:
         raise RuntimeError('Çizelge son denetimden geçmedi; sonuç uygulanmadı:\n'+'\n'.join(errors[:12]))
     res.warnings.extend(soft)
-    if res.status!='cancelled':
-        res.status='complete' if res.placed_hours==res.total_hours else 'timeout'
-    # Bu notlar KURAL İHLALİ DEĞİLDİR.
-    #
-    # "Aynı ders aynı gün tekrar etmesin" bir dersin kartlarını ayrı günlere
-    # dağıtmayı ister. Bir dersin kart sayısı, o dersi veren öğretmenin okulda
-    # olduğu gün sayısını aşıyorsa bu istek hiçbir çizelgede karşılanamaz:
-    # 9A Matematik beş saat, bloklar en fazla iki saat olabildiği için en az
-    # üç kart, öğretmen ise haftada iki gün okulda. Üç kartı iki güne koymak
-    # zorunludur; alternatifi dersin hiç yapılmamasıdır.
-    #
-    # Programın ilk motoru da bu kuralı hep böyle uygulamıştı: gün sayısı
-    # yetiyorsa günde bir, yetmiyorsa tavan ceil(kart/gün). Kuralın anlamı
-    # "gün sayısının elverdiği ölçüde en fazla bir kez"dir. Aritmetiğin
-    # dayattığı taban, kuralın ihlali değil uygulanabilir en sıkı hâlidir.
-    #
-    # Bu yüzden bu durumlar ihlal sayılmaz; nerede ve neden oluştuğu rapora
-    # bilgi notu olarak yazılır, kullanıcı isterse öğretmenin gününü açarak
-    # tabanı bire indirir.
     res.forced_minimums=bent
     res.bent_rules=[]
     for b in bent:
         res.warnings.append('ARİTMETİK TABAN — '+b+
                             ' (bu ders için mümkün olan en az tekrar)')
+    # Kilitli yerleşimleri olduğu gibi geri ekle (motor bunlara dokunmadı).
+    for pl in getattr(res, '_locked_placements', []):
+        dur = int(pl.get('duration') or 1)
+        res.placed_hours += dur
+        p_copy = dict(pl)
+        d = int(pl.get('day', pl.get('col', 0)))
+        p = int(pl.get('period', pl.get('row', 0)))
+        cn = pl.get('class_name') or pl.get('class')
+        sn = pl.get('subject_name') or pl.get('subject')
+        tn = pl.get('teacher_name') or pl.get('teacher')
+        p_copy.update({
+            'class_name': cn, 'class': cn,
+            'subject_name': sn, 'subject': sn,
+            'teacher_name': tn, 'teacher': tn,
+            'day': d, 'day_idx': d, 'col': d,
+            'period': p, 'row': p,
+            'duration': dur,
+            'locked': True, 'is_manual': True, 'is_filler': False
+        })
+        res.placements.append(p_copy)
     parcalar=getattr(res,'split_pieces',None) or {}
     for i,(c,idx) in enumerate(zip(w.cards,res.positions)):
         if idx<0 and i in parcalar:
@@ -301,8 +300,10 @@ def _bitir(res, w, rules, data_store, completion_first, start):
                 day=d,day_idx=d,col=d,period=p,row=p,duration=c.duration,
                 is_combined=len(c.classes)>1,combined_classes=list(c.class_names) if len(c.classes)>1 else [],
                 block_id=f'c{c.cid}',card_id=c.cid,assignment_index=c.origin,
-                locked=c.locked_at is not None,is_manual=c.locked_at is not None,is_filler=False,
+                locked=False,is_manual=False,is_filler=False,
                 color=original.get('color') or original.get('renk')))
+    if res.status!='cancelled':
+        res.status='complete' if res.placed_hours==res.total_hours else 'timeout'
     if res.complete:
         res.status='complete'
         # Tanı, kuralların DELİNEMEZ olduğu varsayımıyla bir üst sınır
@@ -357,38 +358,86 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
             for off in range(int(pl.get('duration') or 1)):
                 if 0<=d<w.D and 0<=p+off<w.P:
                     w.teacher_closed[ti] |= 1 << (d*w.P+p+off)
-    locked=[pl for pl in data_store.get('grid_placements',[]) if not only_classes or
-            norm_class(pl.get('class_name') or pl.get('class')) in {norm_class(x) for x in only_classes}]
-    lock_warnings=bind_locks(w,locked)
-    attach_slots(w,rules)
-    res.world=w;res.rules=rules;res.warnings=list(report.warnings)+(lock_warnings or [])
-    res.total_hours=w.total_hours();res.positions=[-1]*len(w.cards)
+    # ── KİLİTLİ YERLEŞİMLER ──
+    # Kilitli dersler motora GİRMEZ. Olduğu yerde kalır:
+    # 1) Saatleri meşgul olarak işaretlenir (başka ders konmaz)
+    # 2) Eşleşen kart aramadan çıkarılır (çift yerleşim olmasın)
+    # 3) Sonuçta oldukları gibi geri eklenir
+    all_grid = data_store.get('grid_placements', [])
+    locked_pls = [pl for pl in all_grid if isinstance(pl, dict)
+                  and (pl.get('locked') in (True, 'True', 'true', 1, '1') or
+                       pl.get('pinned') in (True, 'True', 'true', 1, '1'))
+                  and (not only_classes or
+                       norm_class(pl.get('class_name') or pl.get('class'))
+                       in {norm_class(x) for x in only_classes})]
+    teachers_idx = {norm_key(n): i for i, n in enumerate(w.teachers)}
+    classes_idx = {norm_class(n): i for i, n in enumerate(w.classes)}
+    neutralized_cids = set()
+    # 1) Mark locked slots as busy
+    for pl in locked_pls:
+        tn = norm_key(pl.get('teacher_name') or pl.get('teacher'))
+        cn = norm_class(pl.get('class_name') or pl.get('class'))
+        ti = teachers_idx.get(tn)
+        ci = classes_idx.get(cn)
+        d = int(pl.get('day', pl.get('col', 0)))
+        p = int(pl.get('period', pl.get('row', 0)))
+        dur = int(pl.get('duration') or 1)
+        for off in range(dur):
+            cell = d * w.P + p + off
+            if 0 <= cell < w.D * w.P:
+                if ti is not None: w.teacher_closed[ti] |= 1 << cell
+                if ci is not None: w.class_closed[ci] |= 1 << cell
+    # 2) Deduplicate (combined lessons have one entry per class)
+    seen_inst = set()
+    unique_locked = []
+    for pl in locked_pls:
+        sn = norm_key(pl.get('subject_name') or pl.get('subject'))
+        tn = norm_key(pl.get('teacher_name') or pl.get('teacher'))
+        cn = norm_class(pl.get('class_name') or pl.get('class'))
+        d = int(pl.get('day', pl.get('col', 0)))
+        p = int(pl.get('period', pl.get('row', 0)))
+        is_comb = bool(pl.get('is_combined')) or bool(pl.get('combined_classes'))
+        key = ('_comb_', sn, tn, d, p) if is_comb else (cn, sn, tn, d, p)
+        if key not in seen_inst:
+            seen_inst.add(key)
+            unique_locked.append(pl)
+    # 3) Find and remove matching world cards (or reduce duration)
+    for pl in unique_locked:
+        cn = norm_class(pl.get('class_name') or pl.get('class'))
+        sn = norm_key(pl.get('subject_name') or pl.get('subject'))
+        tn = norm_key(pl.get('teacher_name') or pl.get('teacher'))
+        needed_dur = int(pl.get('duration') or 1)
+        while needed_dur > 0:
+            candidates = [c for c in w.cards
+                          if cn in {norm_class(x) for x in c.class_names}
+                          and norm_key(c.subject_name) == sn
+                          and norm_key(c.teacher_name) == tn
+                          and c.cid not in neutralized_cids]
+            if not candidates:
+                break
+            exact = [c for c in candidates if c.duration == needed_dur]
+            chosen = exact[0] if exact else candidates[0]
+            if chosen.duration <= needed_dur:
+                needed_dur -= chosen.duration
+                neutralized_cids.add(chosen.cid)
+            else:
+                chosen.duration -= needed_dur
+                needed_dur = 0
+    if neutralized_cids:
+        w.cards = [c for c in w.cards if c.cid not in neutralized_cids]
+        for new_id, c in enumerate(w.cards):
+            c.cid = new_id
+    # Store for _bitir
+    res._locked_placements = locked_pls
+    locked_hours = sum(int(pl.get('duration') or 1) for pl in locked_pls)
+    attach_slots(w, rules)
+    res.world = w; res.rules = rules; res.warnings = list(report.warnings)
+    res.total_hours = w.total_hours() + locked_hours; res.positions = [-1] * len(w.cards)
     res.diagnostics,res.upper_bound=diagnose(w,rules)
     # Aritmetiğin dayattığı gruplar bir kez hesaplanır; her denetim aynı kümeyi
     # kullanır. Tamamlanma öncelikli kip kapalıysa hiçbir grup esnemez.
     forced=impossible_groups(w) if completion_first else set()
-    # diagnose(), kuralların DELİNEMEZ olduğunu varsayarak bir üst sınır
-    # hesaplar: v188'de 9A Matematik'in üç kartı iki güne sığmadığı için bu
-    # sınır 284 çıkar. Bu sayı tanı olarak doğrudur ama ARAMA HEDEFİ olarak
-    # yanlıştır: tamamlanma öncelikli kipte o kural, tam olarak bu grup için
-    # ve gereken en az ölçüde esneyebilir, dolayısıyla 285 ulaşılabilir.
-    #
-    # Sınır hedef olarak kullanıldığında çekirdek 284'e varınca "bitti" deyip
-    # duruyordu; son saat, aranmadığı için değil, aranmasına izin verilmediği
-    # için boş kalıyordu. Rapor eski sınırı göstermeye devam eder, arama ise
-    # gerçek hedefi kovalar.
-    search_target=res.total_hours if completion_first else res.upper_bound
-    # GÜN-SEVİYESİ KANIT (bkz. daybound.py). Kartları güne atayan küçük bir
-    # model, esas modelin gevşetilmiş hâlidir; verdiği sayı geçerli bir üst
-    # sınırdır ve saniyenin altında gelir. Boğaziçi v212'de "Mat1+Mat2 aynı
-    # güne gelmesin" kuralıyla tavan 285 değil 284'tü; saat-seviyesi CP-SAT
-    # bunu dakikalarca kanıtlayamıyor, 282-284 arasında tur atıyordu. Sınır
-    # bilinince motor ona ulaştığı an durur ve rapor SEBEBİ söyler: hangi
-    # kural, hangi sınıflar, hangi öğretmenin tablosu.
-    #
-    # Esnetilen (aritmetik-imkânsız) gruplar gevşetmede de serbesttir; bu
-    # yüzden sınır, tamamlanma öncelikli kipte de arama hedefi olarak
-    # güvenlidir — diagnose()'un sınırından farklı olarak.
+    search_target=w.total_hours() if completion_first else res.upper_bound
     gun_ust=None
     if w.cards:
         try:
@@ -397,7 +446,7 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
         except Exception as exc:
             res.warnings.append(f"Gün-seviyesi sınır hesaplanamadı: {exc}")
     if gun_ust is not None:
-        if gun_ust<min(res.total_hours,res.upper_bound):
+        if gun_ust<min(w.total_hours(),res.upper_bound):
             try:
                 res.diagnostics.extend(explain_day_bound(w,rules,forced,gun_ust,seconds=5.0))
             except Exception as exc:
@@ -429,7 +478,7 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
         def _ilerle(rec):
             res.diagnostics = res.diagnostics
             if callable(progress):
-                progress(rec.get('saat', 0), res.total_hours, rec.get('tur', 1))
+                progress(rec.get('saat', 0) + locked_hours, res.total_hours, rec.get('tur', 1))
         pos, parcalar, placed, durum, tur = solve_optimal(
             w, rules, referans=mevcut, allow_split=allow_split,
             azami_saniye=azami_saniye, progress=_ilerle, cancelled=cancelled,
@@ -482,14 +531,14 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
             res.warnings.append(f"Saat düzeyi tanı çalışmadı: {exc}")
         if durum == 'STALLED':
             aciklama = "iki tur üst üste ilerleme olmadı, daha fazla beklenmedi"
-        elif durum == 'OPTIMAL' and placed < res.total_hours:
+        elif durum == 'OPTIMAL' and placed < w.total_hours():
             aciklama = ("bu kurallarla daha fazlası mümkün değil (gün-seviyesi kanıt)"
                         if gun_ust is not None and placed >= gun_ust
                         else "bu kurallar ve zaman tablolarıyla daha fazlası mümkün değil (CP-SAT kanıtı)")
         else:
             aciklama = f"CP-SAT {durum}"
         res.warnings.append(
-            f"Optimal kip: {tur} tur, {placed}/{res.total_hours} saat, {aciklama}."
+            f"Optimal kip: {tur} tur, {placed + locked_hours}/{res.total_hours} saat, {aciklama}."
             + (f" {len(parcalar)} blok parçalara bölündü." if parcalar else ""))
         return _bitir(res, w, rules, data_store, completion_first, start)
 
@@ -532,7 +581,7 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
         cp_is.join(min(0.6,max(0.2,time_budget*0.25)))
         if 'r' in cp_sonuc:
             pos0,placed0,durum0,parca0=cp_sonuc['r']
-            if placed0>=res.total_hours:
+            if placed0>=w.total_hours():
                 hata0,_,_=validate(w,rules,pos0,bend_rules=completion_first,forced=forced,pieces=parca0)
                 if not hata0:
                     res.positions=pos0; res.split_pieces=parca0; cozuldu=True
@@ -543,7 +592,7 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
 
     if w.cards and not cozuldu:
         def on_progress(rec):
-            if callable(progress): progress(rec['hours'],res.total_hours,rec['restarts']+1)
+            if callable(progress): progress(rec['hours'] + locked_hours, res.total_hours, rec['restarts']+1)
         # A proved day-capacity deficit gives a candidate set of absent cards.
         # Try that subset first. It is only a search seed, never a change to the
         # assignment data. If it cannot reach the bound, reopen all cards.
@@ -558,7 +607,7 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
         # anda o kart yerleşebilir hâle gelir ve devre dışı bırakılmış olması
         # çizelgeyi kendi kendine eksik bırakır.
         if (not completion_first and omitted
-                and sum(w.cards[i].duration*len(w.cards[i].classes) for i in omitted)==res.total_hours-res.upper_bound):
+                and sum(w.cards[i].duration*len(w.cards[i].classes) for i in omitted)==w.total_hours()-res.upper_bound):
             trial=copy.deepcopy(w)
             for i in omitted: trial.cards[i].slots=()
         problem=Problem(trial,rules,completion_first=completion_first)

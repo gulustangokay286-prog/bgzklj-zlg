@@ -37,7 +37,7 @@ hidden_modules = [
     # onları kendiliğinden bulamıyor ve kurulumda "modül yok" hatası
     # veriyorlardı.
     'window_log', 'ui_icons', 'assistant', 'assistant.agent', 'assistant.actions',
-    'assistant.gemini', 'assistant.tools', 'assistant.widget', 'assistant.config',
+    'assistant.gemini', 'assistant.tools', 'assistant.widget', 'assistant.config', 'assistant.secrets',
     'onboarding', 'onboarding.state', 'onboarding.spotlight', 'onboarding.whatsnew',
     'onboarding.relations',
     'dialogs.notice_sheet', 'dialogs.plan_result_sheet', 'dialogs.reset_schedule_sheet',
@@ -59,6 +59,7 @@ candidate_datas = [
     ('dialogs', 'dialogs'),
     ('resources', 'resources'),
     ('data', 'data'),
+    ('assistant', 'assistant'),
     ('icon.ico', '.'),
     ('icon.png', '.'),
     ('app_icon.ico', '.'),

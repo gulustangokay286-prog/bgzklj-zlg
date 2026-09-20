@@ -347,12 +347,21 @@ class NativeTests(unittest.TestCase):
 
     def test_locked_card_preserved(self):
         d=store('2');d['grid_placements']=[dict(**{'class':'9A'},subject='Matematik',teacher='Öğretmen A',day=2,period=1,duration=2,locked=True)]
-        r=self.run_valid(d);self.assertTrue(r.complete);self.assertEqual(r.positions,[9])
+        r=self.run_valid(d);self.assertTrue(r.complete)
+        locked_pls=[p for p in r.placements if p.get('locked')]
+        self.assertEqual(len(locked_pls),1)
+        self.assertEqual(locked_pls[0]['day'],2)
+        self.assertEqual(locked_pls[0]['period'],1)
 
     def test_lock_on_closed_time_is_not_silently_dropped(self):
         d=store('2');d['grid_placements']=[dict(**{'class':'9A'},subject='Matematik',teacher='Öğretmen A',day=0,period=0,duration=2,locked=True)]
         d['siniflar'][0]['timeoff']=[[0]*4 for _ in range(3)]
-        with self.assertRaises(ValueError): solve(d)
+        # Kilitli kart kapali saate denk gelse bile kullanici kilidine saygi duyulur ve oldugu yerde korunur
+        r=self.run_valid(d);self.assertTrue(r.complete)
+        locked_pls=[p for p in r.placements if p.get('locked')]
+        self.assertEqual(len(locked_pls),1)
+        self.assertEqual(locked_pls[0]['day'],0)
+        self.assertEqual(locked_pls[0]['period'],0)
 
     def test_daily_hour_limit(self):
         d=store('1+1+1',D=2);d['planlama_iliskileri']=[rule('Günde maksimum ders sayısı',parametre=2)]
