@@ -35,14 +35,27 @@ class ResetScheduleSheet(QDialog):
         super().__init__(parent)
         self.choice = CANCEL
         self._drag_from = None
-        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground)
+        # NoDropShadowWindowHint şart: çerçevesiz saydam bir pencereye
+        # macOS kendi pencere gölgesini de ekliyordu. Kartın kendi gölgesi
+        # zaten var, ikisi üst üste binince kartın etrafında ikinci bir
+        # pencere varmış gibi duran gri bir kenar çıkıyordu.
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint
+                            | Qt.NoDropShadowWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        self.setAutoFillBackground(False)
+        # Pencerenin kendi zemini de açıkça şeffaf: WA_TranslucentBackground
+        # tek başına stile bırakılan zemini her platformda temizlemiyor ve
+        # kartın etrafında beyaz bir bant kalıyordu.
+        self.setStyleSheet("QDialog { background: transparent; }")
         self.setModal(True)
 
         has_locked = locked_blocks > 0
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(22, 20, 22, 22)
+        # Kenar payı yalnızca kartın gölgesi için: dar tutuluyor, yoksa
+        # şeffaf alan pencere kenarı gibi okunuyor.
+        outer.setContentsMargins(16, 14, 16, 16)
 
         card = QFrame(self)
         card.setObjectName("resetCard")
@@ -54,9 +67,9 @@ class ResetScheduleSheet(QDialog):
             }
         """)
         shadow = QGraphicsDropShadowEffect(card)
-        shadow.setBlurRadius(48)
-        shadow.setOffset(0, 16)
-        shadow.setColor(QColor(15, 23, 42, 60))
+        shadow.setBlurRadius(34)
+        shadow.setOffset(0, 10)
+        shadow.setColor(QColor(15, 23, 42, 52))
         card.setGraphicsEffect(shadow)
         outer.addWidget(card)
 
@@ -155,11 +168,12 @@ class ResetScheduleSheet(QDialog):
                 }}
                 QPushButton:hover {{ background: {hover}; }}
             """)
+            # Düğmenin gölgesi RENKLİ değil. Kırmızının kendi rengiyle
+            # yayılan bir gölge, gölge gibi değil hâle gibi görünüyordu.
             sh = QGraphicsDropShadowEffect(b)
-            sh.setBlurRadius(14)
-            sh.setOffset(0, 3)
-            c = QColor(colour)
-            sh.setColor(QColor(c.red(), c.green(), c.blue(), 80))
+            sh.setBlurRadius(10)
+            sh.setOffset(0, 2)
+            sh.setColor(QColor(15, 23, 42, 45))
             b.setGraphicsEffect(sh)
             # Qt'nin ölçüsü ikon + yazı + dolgu için kıl payı kalıyor ve son
             # harf kırpılıyordu ("Kalsın" → "Kalsır"). Payı elle veriyoruz.
@@ -222,12 +236,32 @@ class ResetScheduleSheet(QDialog):
     def ask(cls, parent, locked_blocks=0, locked_hours=0, total_hours=0):
         """Sheet'i gösterir, seçimi döndürür: CANCEL / KEEP_LOCKED / CLEAR_ALL."""
         dlg = cls(locked_blocks, locked_hours, total_hours, parent)
-        if parent is not None:
-            try:
-                c = parent.frameGeometry().center()
-                dlg.adjustSize()
-                dlg.move(c - QPoint(dlg.width() // 2, dlg.height() // 2))
-            except Exception:
-                pass
+        dlg._center_on(parent)
         dlg.exec()
         return dlg.choice
+
+    def _center_on(self, parent):
+        """Pencerenin ORTASINA yerleşir; pencere yoksa ekranın ortasına.
+
+        Boyut önce kesinleşmeli: adjustSize çağrılmadan width() hâlâ
+        varsayılan değeri döndürüyor ve sayfa merkezden kayıyordu —
+        pencere küçükken fark büyüyor.
+        """
+        from PySide6.QtWidgets import QApplication
+        self.adjustSize()
+        size = self.size()
+        ref = None
+        if parent is not None:
+            try:
+                win = parent.window()
+                if win is not None and win.isVisible():
+                    ref = win.frameGeometry()
+            except Exception:
+                ref = None
+        if ref is None:
+            screen = (QApplication.screenAt(self.pos())
+                      or QApplication.primaryScreen())
+            if screen is None:
+                return
+            ref = screen.availableGeometry()
+        self.move(ref.center() - QPoint(size.width() // 2, size.height() // 2))
