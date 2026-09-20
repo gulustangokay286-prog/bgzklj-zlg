@@ -3240,19 +3240,9 @@ class DropTableWidget(QTableWidget):
                 cw = cell_w(c)
                 if cw <= 0:
                     continue
-                # DÖRT KENAR, İKİ DEĞİL.
-                #
-                # Yalnızca sağ ve alt kenar çiziliyordu; bir hücrenin sol
-                # kenarı, solundaki hücrenin sağ kenarıydı. Solunda kart
-                # varsa o kenar hiç çizilmiyor ve boş hücre açık tarafta
-                # sınırsız kalıyordu. Boş hücre artık kendi çerçevesini
-                # kendisi çiziyor; iki kart yan yanayken aralarında yine
-                # çizgi olmuyor, çünkü ikisi de dolu.
                 cx2 = x + cw - 1
                 line(cx2, y, cx2, y2)
                 line(x, y2, cx2, y2)
-                line(x, y, x, y2)
-                line(x, y, cx2, y)
 
         if periods > 0 and rows:
             set_pen(_PEN_DAYSEP)
