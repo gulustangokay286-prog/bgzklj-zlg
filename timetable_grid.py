@@ -727,6 +727,37 @@ class AsCVerticalHeader(QHeaderView):
         self._active_row = -1
         self._hover_row = -1
         self.setMouseTracking(True)
+        # Satırın tamamını kilitlemek buradan: bir öğretmenin (ya da
+        # sınıfın) oturmuş çizelgesini, motor bir daha oynatmasın diye
+        # tek hamlede sabitlemek. Ders ders kilitlemek 30 tıklamaydı.
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._row_context_menu)
+
+    def _grid(self):
+        table = self.parent()
+        return table.parent() if table is not None else None
+
+    def _row_context_menu(self, pos):
+        row = self.logicalIndexAt(pos)
+        grid = self._grid()
+        if row < 0 or grid is None or not hasattr(grid, "row_entity"):
+            return
+        kind, name = grid.row_entity(row)
+        if not name:
+            return
+        total, locked = grid.row_lock_counts(row)
+        if total <= 0:
+            return
+        label = "Öğretmenin" if kind == "teacher" else "Sınıfın"
+        menu = QMenu(self)
+        if locked < total:
+            act = menu.addAction(f"{label} çizelgesini kilitle  ({total} ders)")
+            act.triggered.connect(lambda: grid.set_row_locked(row, True))
+        if locked > 0:
+            act2 = menu.addAction(f"{label} kilidini aç  ({locked} kilitli)")
+            act2.triggered.connect(lambda: grid.set_row_locked(row, False))
+        if menu.actions():
+            menu.exec(self.mapToGlobal(pos))
 
     def set_active_row(self, row):
         """Seçili sınıf/öğretmen satırı. Gridde bir hücre seçmek de buraya düşer."""
@@ -4660,6 +4691,87 @@ class TimetableGrid(QWidget):
         for off in range(duration):
             self._placed_lessons[(row, col + off)] = info_dict
             
+    # ── SATIR KİLİDİ ─────────────────────────────────────────────────
+    #
+    # Bir öğretmenin çizelgesi oturduğunda, motorun bir daha ona
+    # dokunmaması isteniyor. Ders ders kilitlemek otuz tıklamaydı; satır
+    # başlığına sağ tıklamak bir.
+
+    def _store(self):
+        win = self.window()
+        if not hasattr(win, "data_store") and hasattr(win, "parent"):
+            p = win.parent()
+            if p is not None and hasattr(p, "data_store"):
+                win = p
+        return getattr(win, "data_store", None), win
+
+    def row_entity(self, row):
+        """(tür, ad): satır hangi öğretmene ya da sınıfa ait."""
+        if getattr(self, "current_view_mode", "classes") == "classes":
+            lst = list(getattr(self, "class_list", []) or [])
+            kind = "class"
+        else:
+            lst = list(getattr(self, "teacher_list", []) or [])
+            kind = "teacher"
+        return (kind, lst[row]) if 0 <= row < len(lst) else (kind, "")
+
+    def _row_placements(self, row):
+        store, _win = self._store()
+        kind, name = self.row_entity(row)
+        if not store or not name:
+            return []
+        out = []
+        for p in store.get("grid_placements", []) or []:
+            if not isinstance(p, dict):
+                continue
+            if kind == "teacher":
+                who = p.get("teacher_name") or p.get("teacher") or ""
+                if format_tr_name(who) == format_tr_name(name):
+                    out.append(p)
+            else:
+                cls = (p.get("class_name") or p.get("class") or "").strip()
+                if matches_class(cls, name) or matches_class(name, cls) or cls == name:
+                    out.append(p)
+        return out
+
+    def row_lock_counts(self, row):
+        """(o satırdaki ders sayısı, bunların kaçı kilitli)."""
+        items = self._row_placements(row)
+        locked = sum(1 for p in items if p.get("locked") or p.get("is_locked"))
+        return len(items), locked
+
+    def set_row_locked(self, row, locked):
+        """Satırdaki bütün dersleri kilitler ya da kilidini açar."""
+        store, win = self._store()
+        items = self._row_placements(row)
+        if not store or not items:
+            return 0
+        for p in items:
+            p["locked"] = bool(locked)
+            if "is_locked" in p:
+                p["is_locked"] = bool(locked)
+        # Aynı ders auto_schedule_results içinde de duruyor olabilir;
+        # ikisi ayrışırsa motor kilidi görmez.
+        blocks = {str(p.get("block_id") or "") for p in items if p.get("block_id")}
+        for p in store.get("auto_schedule_results", []) or []:
+            if isinstance(p, dict) and str(p.get("block_id") or "") in blocks:
+                p["locked"] = bool(locked)
+        kind, name = self.row_entity(row)
+        if hasattr(win, "mark_dirty"):
+            win.mark_dirty()
+        if hasattr(win, "save_db"):
+            win.save_db(sync_from_grid=False)
+        if hasattr(win, "_refresh_grid"):
+            win._refresh_grid()
+        if hasattr(win, "statusBar"):
+            try:
+                win.statusBar().showMessage(
+                    f"{name}: {len(items)} ders "
+                    + ("kilitlendi." if locked else "kilidi açıldı."), 4000)
+            except Exception:
+                pass
+        return len(items)
+
     def get_placed_lessons(self):
         """Return dict of placed lessons for printing"""
         return self._placed_lessons

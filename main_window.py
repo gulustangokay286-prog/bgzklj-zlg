@@ -1296,6 +1296,36 @@ class MainWindow(QMainWindow):
     def mark_dirty(self):
         self._is_dirty = True
 
+    def _content_changed(self) -> bool:
+        """Çizelge AÇILDIĞINDAN BERİ gerçekten değişti mi?
+
+        Çıkışta kayıt penceresinin açılıp açılmayacağına bu karar veriyor.
+        Önce yalnızca _is_dirty bayrağına bakılıyordu; o bayrak "bir şey
+        yapıldı" demek için konuyor ama yapılan şeyin veriyi değiştirmesi
+        şart değil — bir dersi tutup aynı yere bırakmak, bir sheet'i açıp
+        hiçbir şeye dokunmadan kapatmak gibi. Kullanıcı hiçbir şey
+        değiştirmediğini bildiği hâlde kayıt penceresiyle karşılaşıyordu.
+
+        İçerik damgası gerçeği söyler: veri açılıştaki hâlindeyse kaydedecek
+        bir şey yoktur. Damga yoksa (hiç hesaplanamadıysa) eski davranışa,
+        bayrağa düşülüyor — soruyu kaçırmaktansa fazladan sormak yeğdir.
+        """
+        initial = getattr(self, "_initial_hash", "")
+        if not initial:
+            return bool(getattr(self, "_is_dirty", False))
+        current = self._calc_data_hash()
+        if not current:
+            return bool(getattr(self, "_is_dirty", False))
+        return current != initial
+
+    def _mark_saved(self):
+        """Kaydedilen hâl yeni taban: bundan sonraki karşılaştırma buna göre."""
+        self._is_dirty = False
+        try:
+            self._initial_hash = self._calc_data_hash()
+        except Exception:
+            pass
+
     def is_dirty(self) -> bool:
         if getattr(self, "_is_dirty", False):
             return True
@@ -3595,7 +3625,7 @@ class MainWindow(QMainWindow):
         current_folder_id = version_store.get_version_folder_id(slug, ver_fn) if ver_fn else None
         has_existing_version = bool(ver_fn)
 
-        if not force and not getattr(self, "_is_dirty", False):
+        if not force and not self._content_changed():
             try:
                 if ver_fn:
                     if not version_store.update_version_in_place(slug, ver_fn, self.data_store):
@@ -3700,7 +3730,7 @@ class MainWindow(QMainWindow):
                 self.db_path = self.current_roz_path
                 version_store.set_active_version(slug, new_vf)
                 version_store.touch_institution_timestamp(slug)
-                self._is_dirty = False
+                self._mark_saved()
                 self._update_header_title()
                 dst_name = version_store.get_folder_name(slug, folder_id)
                 self.statusBar().showMessage(f"Çizelge '{dst_name}' klasörüne yeni bir versiyon olarak kopyalandı.", 4000)
@@ -3723,7 +3753,7 @@ class MainWindow(QMainWindow):
                     self.db_path = self.current_roz_path
                     version_store.set_active_version(slug, new_vf)
                 version_store.touch_institution_timestamp(slug)
-                self._is_dirty = False
+                self._mark_saved()
                 self._update_header_title()
                 dst_name = version_store.get_folder_name(slug, folder_id)
                 self.statusBar().showMessage(f"Çizelge '{dst_name}' klasörüne taşındı.", 4000)
@@ -3738,7 +3768,7 @@ class MainWindow(QMainWindow):
                 self.db_path = self.current_roz_path
                 version_store.set_active_version(slug, new_vf)
                 version_store.touch_institution_timestamp(slug)
-                self._is_dirty = False
+                self._mark_saved()
                 self._update_header_title()
         except Exception as e:
             print(f"[SAVE] New version save error: {e}")
@@ -4669,23 +4699,75 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Bulut Tabanlı Planlama", "Bulut tabanlı planlama modülünü kullanabilmek için aktif bir Dijisa hesabı gereklidir.")
 
     def _act_clear_schedule(self):
-        r = QMessageBox.question(
-            self, "Çizelgeyi Sıfırla / Temizle",
-            "Tüm sınıflar ve öğretmenler için yerleştirilmiş derslerin TAMAMI çizelgeden kaldırılacak.\nEmin misiniz?",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        if r == QMessageBox.Yes:
-            self._push_undo_state()
+        """Çizelgeyi sıfırla — KİLİTLİ dersler ayrı bir soru.
+
+        Kilit, "bunu yerinde bırak" demektir; sıfırlama ise "hepsini
+        kaldır". İkisi çakıştığında program kendi başına karar vermemeli:
+        kilitli ders varsa kaç tane olduğu söylenip ayrıca soruluyor.
+        "Kilitliler kalsın" denince yalnızca kilitsizler siliniyor, kilitli
+        bloklar yerinde duruyor.
+        """
+        placements = [p for p in (self.data_store.get("grid_placements") or [])
+                      if isinstance(p, dict)]
+        locked = [p for p in placements if p.get("locked") or p.get("is_locked")]
+
+        if not locked:
+            r = QMessageBox.question(
+                self, "Çizelgeyi Sıfırla / Temizle",
+                "Tüm sınıflar ve öğretmenler için yerleştirilmiş derslerin TAMAMI "
+                "çizelgeden kaldırılacak.\nEmin misiniz?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if r != QMessageBox.Yes:
+                return
+            keep_locked = False
+        else:
+            blocks = {str(p.get("block_id") or id(p)) for p in locked}
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Question)
+            box.setWindowTitle("Çizelgeyi Sıfırla / Temizle")
+            box.setText("Çizelgedeki dersler kaldırılacak.")
+            box.setInformativeText(
+                f"Bu çizelgede <b>{len(blocks)} kilitli ders</b> var "
+                f"({len(locked)} saat).<br><br>"
+                "Kilitli dersler de kaldırılsın mı?")
+            box.setTextFormat(Qt.RichText)
+            btn_keep = box.addButton("Kilitliler Kalsın", QMessageBox.AcceptRole)
+            btn_all = box.addButton("Hepsini Kaldır", QMessageBox.DestructiveRole)
+            btn_cancel = box.addButton("Vazgeç", QMessageBox.RejectRole)
+            box.setDefaultButton(btn_keep)
+            box.exec()
+            clicked = box.clickedButton()
+            if clicked is btn_cancel or clicked is None:
+                return
+            keep_locked = (clicked is btn_keep)
+
+        self._push_undo_state()
+
+        if keep_locked:
+            kept_ids = {id(p) for p in locked}
+            self.data_store["grid_placements"] = [p for p in placements if id(p) in kept_ids]
+            kept_blocks = {str(p.get("block_id") or "") for p in locked if p.get("block_id")}
+            self.data_store["auto_schedule_results"] = [
+                p for p in (self.data_store.get("auto_schedule_results") or [])
+                if isinstance(p, dict) and str(p.get("block_id") or "") in kept_blocks
+            ]
+        else:
             self.data_store["grid_placements"] = []
             self.data_store["auto_schedule_results"] = []
-            self.data_store["yerlesim"] = {}
-            self.data_store["loose_unplaced_cards"] = []
-            self.data_store["manual_unplaced_cards"] = []
-            if hasattr(self, "_grid"):
-                self._grid.clear_grid()
-            self.mark_dirty()
-            self.save_db(sync_from_grid=False)
-            self._refresh_grid()
+
+        self.data_store["yerlesim"] = {}
+        self.data_store["loose_unplaced_cards"] = []
+        self.data_store["manual_unplaced_cards"] = []
+        if hasattr(self, "_grid"):
+            self._grid.clear_grid()
+        self.mark_dirty()
+        self.save_db(sync_from_grid=False)
+        self._refresh_grid()
+        if keep_locked:
+            self.statusBar().showMessage(
+                f"Çizelge sıfırlandı — {len(locked)} saatlik kilitli ders yerinde bırakıldı.", 6000)
+        else:
             self.statusBar().showMessage("Tüm çizelge dersleri başarıyla sıfırlandı.")
 
     def _open_extracted(self, dialog_id):
