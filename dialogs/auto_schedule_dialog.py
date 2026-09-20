@@ -1814,6 +1814,20 @@ class AutoScheduleDialog(QDialog):
         self.accept()
     
     def accept(self):
+        """Sonucu kapat ve gerekiyorsa TEK bir uyarı göster.
+
+        Burası bir kez çalışmak zorunda. Motor durdurulduğunda bitiş
+        sinyali birden fazla kez gelebiliyor ve her gelişinde bu metot
+        yeniden çalışıp yeni bir uyarı penceresi açıyordu: kullanıcı
+        "Durdur ve Kaydet" dedikten sonra ekranda arka arkaya onlarca
+        pencere beliriyordu. Uyarı metinleri uzun olduğu için o pencereler
+        960x632 boyutunda açılıyor ve içerikleri boyanmadan kapkara
+        görünüyordu.
+        """
+        if getattr(self, "_accept_done", False):
+            return
+        self._accept_done = True
+
         violations = getattr(self, "_pending_violations", [])
         summary = getattr(self, "_result_summary", {})
         total_hrs = summary.get("total_hrs", 0)
@@ -1840,17 +1854,31 @@ class AutoScheduleDialog(QDialog):
                 viol_teachers.add(t)
                 viol_details.append(f"• {t} → {c} {s} ({d_name} {p_num}. saat)")
             
-            msg = (f"Çizelge oluşturuldu! ({total_hrs}/{target_hrs} saat yerleştirildi)\n\n"
-                   f"{len(violations)} adet öğretmen kısıtlaması "
-                   f"(izinli gün/saat) yoksayıldı ve devam edildi.\n\n"
-                   f"Etkilenen öğretmenler: {', '.join(sorted(unassigned if 'unassigned' in locals() else viol_teachers))}\n\n"
-                   + "\n".join(viol_details[:10]))
+            # Kısa gövde, uzun liste AYRINTIDA.
+            #
+            # Onbeş ihlal satırını doğrudan metne koymak kutuyu 960x632
+            # yapıyordu; o boyutta bir mesaj kutusu, içeriği boyanmadan
+            # önce ekranda kara bir dikdörtgen olarak duruyor. Gövde artık
+            # üç satır; dökümü isteyen "Ayrıntılar"a basıyor.
+            msg = (f"Çizelge oluşturuldu: {total_hrs}/{target_hrs} saat yerleşti.\n\n"
+                   f"{len(violations)} saatte öğretmen kısıtlaması (izinli gün/saat) "
+                   f"yoksayıldı.\n\n"
+                   f"Etkilenen öğretmenler: {', '.join(sorted(viol_teachers))}")
+            detail = "\n".join(viol_details)
             if len(violations) > 15:
-                msg += f"\n... ve {len(violations) - 15} adet daha."
-            msg += "\n\nBu dersleri öğretmenler görünümünden manuel olarak kontrol edip düzeltmeniz önerilir."
-            
+                detail += f"\n… ve {len(violations) - 15} adet daha."
+            detail += ("\n\nBu dersleri öğretmenler görünümünden kontrol edip "
+                       "düzeltmeniz önerilir.")
+
             def show_warning():
-                QMessageBox.warning(parent, "Kısıtlama Bildirimi", msg, QMessageBox.Ok)
+                box = QMessageBox(parent)
+                box.setIcon(QMessageBox.Warning)
+                box.setWindowTitle("Kısıtlama Bildirimi")
+                box.setText("Kısıtlamalar yoksayıldı")
+                box.setInformativeText(msg)
+                box.setDetailedText(detail)
+                box.setStandardButtons(QMessageBox.Ok)
+                box.exec()
             QTimer.singleShot(100, show_warning)
         elif parent and summary.get("teacher_clashes"):
             # Independent mode was on: the grid is fuller, but only because teachers
