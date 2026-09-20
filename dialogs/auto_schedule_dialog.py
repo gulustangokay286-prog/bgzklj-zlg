@@ -1813,6 +1813,30 @@ class AutoScheduleDialog(QDialog):
         
         self.accept()
     
+    @staticmethod
+    def _long_warning(parent, title, headline, body, detail,
+                      icon=QMessageBox.Warning):
+        """Uzun metinli uyarıları EKRANA SIĞAN bir kutuda gösterir.
+
+        QMessageBox metnini olduğu gibi kabul eder ve yüksekliğini ona
+        göre büyütür: yüzlerce satırlık bir teşhis listesi verildiğinde
+        pencere 21.535 piksel yüksekliğinde açılıyordu. Ekranda bunun
+        görünen hâli, içeriği boyanmamış kapkara bir dikdörtgendi.
+
+        Gövde birkaç satırla sınırlı; dökümün tamamı "Ayrıntılar"
+        bölümünde, kendi kaydırma çubuğuyla duruyor.
+        """
+        box = QMessageBox(parent)
+        box.setIcon(icon)
+        box.setWindowTitle(title)
+        box.setText(headline)
+        if body:
+            box.setInformativeText(body)
+        if detail:
+            box.setDetailedText(detail)
+        box.setStandardButtons(QMessageBox.Ok)
+        box.exec()
+
     def accept(self):
         """Sonucu kapat ve gerekiyorsa TEK bir uyarı göster.
 
@@ -1838,9 +1862,12 @@ class AutoScheduleDialog(QDialog):
 
         complete = target_hrs > 0 and total_hrs >= target_hrs
         if parent and summary.get("diagnostics") and not complete:
-            message = f"{total_hrs}/{target_hrs} saat yerleşti. Aktif kurallar korundu.\n\n" + "\n\n".join(
-                x["message"] for x in summary["diagnostics"])
-            QMessageBox.warning(parent, "Planlama kısıtları", message)
+            diags = summary["diagnostics"]
+            detail = "\n\n".join(x["message"] for x in diags)
+            body = (f"{total_hrs}/{target_hrs} saat yerleşti. Aktif kurallar korundu.\n\n"
+                    f"{len(diags)} maddelik teşhis var; tamamı Ayrıntılar'da.")
+            self._long_warning(parent, "Planlama kısıtları",
+                               "Bazı saatler yerleşemedi", body, detail)
         elif parent and violations:
             days_tr = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
             viol_teachers = set()
@@ -1870,16 +1897,8 @@ class AutoScheduleDialog(QDialog):
             detail += ("\n\nBu dersleri öğretmenler görünümünden kontrol edip "
                        "düzeltmeniz önerilir.")
 
-            def show_warning():
-                box = QMessageBox(parent)
-                box.setIcon(QMessageBox.Warning)
-                box.setWindowTitle("Kısıtlama Bildirimi")
-                box.setText("Kısıtlamalar yoksayıldı")
-                box.setInformativeText(msg)
-                box.setDetailedText(detail)
-                box.setStandardButtons(QMessageBox.Ok)
-                box.exec()
-            QTimer.singleShot(100, show_warning)
+            QTimer.singleShot(100, lambda: self._long_warning(
+                parent, "Kısıtlama Bildirimi", "Kısıtlamalar yoksayıldı", msg, detail))
         elif parent and summary.get("teacher_clashes"):
             # Independent mode was on: the grid is fuller, but only because teachers
             # were allowed to be in two places at once. Say so plainly and list them,
@@ -1917,9 +1936,12 @@ class AutoScheduleDialog(QDialog):
             ]
             msg = "\n".join(lines)
 
-            def show_clashes():
-                QMessageBox.warning(parent, "Öğretmen Çakışmaları Var", msg, QMessageBox.Ok)
-            QTimer.singleShot(100, show_clashes)
+            # İlk satırlar gövdede, dökümün tamamı Ayrıntılar'da: uzun
+            # listeyi doğrudan metne koymak pencereyi ekrandan taşırıyor.
+            head = "\n".join(lines[:6])
+            QTimer.singleShot(100, lambda: self._long_warning(
+                parent, "Öğretmen Çakışmaları Var", "Öğretmen çakışması var",
+                head, msg))
         elif parent and total_hrs < target_hrs and summary.get("unplaced_summary"):
             # The week did not fill and we know exactly why. Without this the user is
             # left staring at empty cells with no way to tell whether the scheduler
@@ -2001,9 +2023,10 @@ class AutoScheduleDialog(QDialog):
             ]
             msg = "\n".join(lines)
 
-            def show_capacity():
-                QMessageBox.information(parent, "Çizelge Neden Dolmadı?", msg, QMessageBox.Ok)
-            QTimer.singleShot(100, show_capacity)
+            head = "\n".join(lines[:6])
+            QTimer.singleShot(100, lambda: self._long_warning(
+                parent, "Çizelge Neden Dolmadı?", "Çizelge neden dolmadı",
+                head, msg, icon=QMessageBox.Information))
         elif parent and total_hrs > 0:
             if hasattr(parent, "statusBar"):
                 parent.statusBar().showMessage(f"Otomatik çizelge oluşturuldu! ({total_hrs}/{target_hrs} saat yerleştirildi)", 5000)
