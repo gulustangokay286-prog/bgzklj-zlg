@@ -266,8 +266,16 @@ class SaveLocationDialog(QDialog):
     """
 
     def __init__(self, slug: str, current_folder_id=None, parent=None,
-                 version_num: int = 1, initial_custom_name: str = "", initial_note: str = ""):
+                 version_num: int = 1, initial_custom_name: str = "", initial_note: str = "",
+                 allow_discard: bool = False):
         super().__init__(parent)
+        # Bu pencere iki farklı soruyla açılıyor: "Kaydet"e basıldığında
+        # (nereye kaydedeyim?) ve çıkarken (kaydedeyim mi?). İkincisinde
+        # üçüncü bir cevap var: kaydetme. allow_discard yalnızca o
+        # durumda açılır — "Kaydet" düğmesinden gelen kullanıcıya
+        # "kaydetme" seçeneği sunmak saçma olurdu.
+        self.allow_discard = bool(allow_discard)
+        self.discarded = False
         self.slug = slug
         self.current_folder_id = current_folder_id
         self.selected_folder_id = current_folder_id
@@ -603,6 +611,35 @@ class SaveLocationDialog(QDialog):
         # Bottom buttons (Silindirik / Pill)
         btn_box = QHBoxLayout()
         btn_box.setSpacing(12)
+
+        if self.allow_discard:
+            # SOLDA, ÇERÇEVESİZ, TEK BAŞINA.
+            #
+            # Geri dönüşü olmayan seçenek, kaydetme düğmesinin yanında
+            # aynı ağırlıkta durmamalı: yan yana iki kapsülden birine
+            # yanlışlıkla basmak bir günlük işi siler. Bu yüzden karşı
+            # tarafta ve çıplak duruyor; rengi ne yaptığını söylüyor.
+            btn_discard = QPushButton("Kaydetmeden Çık")
+            btn_discard.setFixedHeight(36)
+            btn_discard.setCursor(Qt.PointingHandCursor)
+            btn_discard.setToolTip("Bu çizelgede yaptığınız değişiklikler kaydedilmez.")
+            btn_discard.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    color: #B91C1C;
+                    border: none;
+                    border-radius: 18px;
+                    padding: 0 16px;
+                    font-weight: 600;
+                    font-size: 12px;
+                    font-family: {FONT_FAMILY};
+                }}
+                QPushButton:hover {{ background: #FEF2F2; color: #991B1B; }}
+                QPushButton:pressed {{ background: #FEE2E2; }}
+            """)
+            btn_discard.clicked.connect(self._on_discard)
+            btn_box.addWidget(btn_discard)
+
         btn_box.addStretch()
 
         btn_cancel = QPushButton("Vazgeç")
@@ -647,6 +684,19 @@ class SaveLocationDialog(QDialog):
         outer.addWidget(container)
 
         self._reload_rows()
+
+    def _on_discard(self):
+        """Değişiklikleri atarak çık — önce bir kez sorulur."""
+        from PySide6.QtWidgets import QMessageBox
+        ret = QMessageBox.warning(
+            self, "Kaydetmeden çıkılsın mı?",
+            "Bu çizelgede yaptığınız değişiklikler <b>kaydedilmeyecek</b>.<br><br>"
+            "Çizelge en son kaydedilen hâline döner.",
+            QMessageBox.Discard | QMessageBox.Cancel, QMessageBox.Cancel)
+        if ret != QMessageBox.Discard:
+            return
+        self.discarded = True
+        self.reject()
 
     def _update_btn_states(self):
         # Name button style
@@ -781,16 +831,22 @@ class SaveLocationDialog(QDialog):
 
     @classmethod
     def choose(cls, parent, slug: str, current_folder_id=None, has_existing_version=False,
-               version_num: int = 1, initial_custom_name: str = "", initial_note: str = ""):
+               version_num: int = 1, initial_custom_name: str = "", initial_note: str = "",
+               allow_discard: bool = False):
         """Shows the dialog. Returns (target_folder_id, action, custom_name, note, cancelled: bool).
         action can be:
           - 'save': standard save in current/same folder
           - 'copy': copy to target folder as new version (+1 version number), keep previous version
           - 'move': move existing version to target folder
+          - 'discard': kullanıcı kaydetmeden çıkmayı seçti (allow_discard ile)
         """
         dlg = cls(slug, current_folder_id=current_folder_id, parent=parent,
-                  version_num=version_num, initial_custom_name=initial_custom_name, initial_note=initial_note)
+                  version_num=version_num, initial_custom_name=initial_custom_name,
+                  initial_note=initial_note, allow_discard=allow_discard)
         result = dlg.exec()
+        if getattr(dlg, "discarded", False):
+            # İptal DEĞİL: çağıran işine devam etsin, ama hiçbir şey yazmasın.
+            return None, "discard", "", "", False
         if result != QDialog.Accepted:
             return None, None, "", "", True
 

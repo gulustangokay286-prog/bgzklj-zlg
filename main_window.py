@@ -666,7 +666,7 @@ class MainWindow(QMainWindow):
         # 1. If there are unsaved changes, ask which folder to save the new version
         # into (same picker as "Kaydet" / "Ana Sayfa") — cancelling the picker aborts
         # the close instead of quietly discarding the choice.
-        if not self._save_new_version_with_folder_picker("", force=False):
+        if not self._save_new_version_with_folder_picker("", force=False, allow_discard=True):
             event.ignore()
             return
 
@@ -1176,6 +1176,10 @@ class MainWindow(QMainWindow):
 
     def load_db(self, path=None):
         self._is_loading = True
+        # Yeni bir çizelge açılıyor: "kaydetmeden çık" kararı bir önceki
+        # dosyaya aitti. Bayrak burada sıfırlanmazsa bu pencerede bir daha
+        # HİÇBİR ŞEY kaydedilmezdi.
+        self._discard_changes = False
         # Bir geçmiş yığını TEK bir dosyaya aittir. Başka bir kurum açıldığında
         # önceki dosyanın anlık görüntüleri duruyordu; ilk Ctrl+Z başka bir
         # okulun çizelgesini bunun üzerine yapıştırıp diske yazıyordu.
@@ -1764,6 +1768,11 @@ class MainWindow(QMainWindow):
 
     def save_db(self, path=None, sync_from_grid=False):
         if getattr(self, "_is_loading", False):
+            return
+        # "Kaydetmeden çık" dendiyse yazma yolları kapalı: kapanış
+        # sırasında çağrılan otomatik kayıtlar, atılan değişiklikleri
+        # sessizce geri yazardı.
+        if getattr(self, "_discard_changes", False):
             return
 
         self._protect_availability()
@@ -3558,7 +3567,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Chenkron Ders Dağıtım ve Yönetim Sistemi")
 
     # ── Actions ───────────────────────────────────────────────────────────────
-    def _save_new_version_with_folder_picker(self, note, force=False):
+    def _save_new_version_with_folder_picker(self, note, force=False, allow_discard=False):
         """Saves the current schedule, first asking (via a modal dialog) which folder the
         new version should go into — used by "Kaydet", "Ana Sayfa", and app-close.
 
@@ -3571,6 +3580,12 @@ class MainWindow(QMainWindow):
         ("Kaydet" button), a brand new version is always created and the picker always
         appears, matching the button's existing "always saves" behavior.
         """
+        # Kullanıcı bu oturumda "kaydetmeden çık" dedi: bundan sonra hiçbir
+        # yol diske yazmaz, yoksa atılan değişiklikler bir sonraki otomatik
+        # kayıtla geri gelirdi.
+        if getattr(self, "_discard_changes", False):
+            return True
+
         slug = getattr(self, "institution_slug", None)
         if not slug:
             return True
@@ -3627,9 +3642,19 @@ class MainWindow(QMainWindow):
             version_num=preview_ver_num,
             initial_custom_name=existing_cname,
             initial_note=existing_note,
+            allow_discard=bool(allow_discard),
         )
         if cancelled:
             return False
+        if action == "discard":
+            # Bellekteki değişiklikler atılıyor: diskteki sürüm neyse o
+            # kalır. Bayrak, çıkış yolundaki sonraki otomatik kayıtları da
+            # susturuyor — "kaydetmeden çık" ancak hiçbir şey yazılmazsa
+            # doğru olur.
+            self._discard_changes = True
+            self._is_dirty = False
+            self.statusBar().showMessage("Değişiklikler kaydedilmedi.", 5000)
+            return True
 
         # Only use custom note if explicitly entered; no dummy clutter text!
         final_note = (note_from_dlg or "").strip()
@@ -3720,8 +3745,13 @@ class MainWindow(QMainWindow):
         return True
 
     def _go_home(self):
-        """Return to the Home Dashboard."""
-        if not self._save_new_version_with_folder_picker("", force=False):
+        """Return to the Home Dashboard.
+
+        Kaydetmek zorunlu değil: çıkış penceresinde "Kaydetmeden Çık" da
+        var. Kaydetmemek geri alınamayan bir karar olduğu için ayrıca bir
+        kez soruluyor ve seçildiğinde bu oturumda hiçbir yol diske yazmaz.
+        """
+        if not self._save_new_version_with_folder_picker("", force=False, allow_discard=True):
             return  # user cancelled the folder picker — stay in the editor
         if callable(self.go_home_requested):
             from PySide6.QtCore import QTimer
