@@ -6,11 +6,12 @@ import os
 import json
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QComboBox, QFileDialog, QMessageBox,
-    QStyledItemDelegate, QStyleOptionViewItem, QFrame, QStyle, QScrollArea, QWidget
+    QStyledItemDelegate, QStyleOptionViewItem, QFrame, QStyle, QScrollArea, QWidget,
+    QApplication
 )
 from PySide6.QtPrintSupport import QPrintPreviewWidget, QPrinter
 from PySide6.QtGui import QPainter, QPen, QFont, QColor, QPageLayout, QBrush, QPageSize, QPainterPath, QPixmap, QIcon
-from PySide6.QtCore import Qt, QRectF, QPointF, QSize, Signal
+from PySide6.QtCore import Qt, QRect, QRectF, QPointF, QSize, Signal
 from auto_scheduler import matches_class
 from ui_icons import icon, pixmap
 import lesson_hours
@@ -672,6 +673,18 @@ class TimetablePrintPreview(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Baskı Ön İzleme ve PDF Raporu")
         self.resize(1050, 780)
+        # Tam ekranı yalnızca araç çubuğundaki düğme yönetir. Sistemin
+        # kendi düğmeleri (macOS'taki yeşil daire, Windows'taki büyüt)
+        # pencereyi işletim sisteminin tam ekran kipine sokuyor; orada
+        # "çık" komutu bizim düğmemizden geçmiyor ve uygulamanın tamamını
+        # etkiliyordu. Bu iki ipucu kapalı: büyütme buradan işler.
+        self.setWindowFlag(Qt.WindowMaximizeButtonHint, False)
+        try:
+            self.setWindowFlag(Qt.WindowFullscreenButtonHint, False)
+        except Exception:
+            pass          # yalnızca macOS'ta var
+        self._geom_before_full = None
+        self._expanded = False
         
         self.data_store = data_store or {}
         self.placed_lessons = placed_lessons or {}
@@ -911,24 +924,40 @@ class TimetablePrintPreview(QDialog):
             QMessageBox.critical(self, "Hata", f"HTML kaydedilemedi:\n{e}")
 
     def toggle_fullscreen(self):
-        """Tam ekran ↔ pencere. Düğmenin yazısı hangi durumda olduğunu söyler."""
-        if self.isFullScreen():
-            self.showNormal()
-            if getattr(self, "_geom_before_full", None):
-                self.restoreGeometry(self._geom_before_full)
+        """Ekranı kaplar ↔ eski boyutuna döner.
+
+        showFullScreen() KULLANILMIYOR. O çağrı pencereyi işletim
+        sisteminin tam ekran kipine sokuyor — macOS'ta kendi alanına
+        taşıyor — ve oradan çıkmak uygulamanın tamamını tam ekrandan
+        çıkarıyordu: kullanıcı önizlemeyi küçültmek isterken bütün program
+        pencereden çıkıyordu. Burada yapılan şey daha basit ve yalnızca bu
+        pencereyi ilgilendiriyor: pencere ekranın kullanılabilir alanı
+        kadar büyütülüyor, geri dönerken eski geometrisine konuyor.
+        """
+        if self._expanded:
+            self._expanded = False
+            if self._geom_before_full is not None:
+                # restoreGeometry yerine düz dikdörtgen: kaydedilen bayt
+                # dizisi pencere durumunu da (maximized/fullscreen)
+                # taşıyor ve geri yüklerken o durumu da geri getiriyor.
+                # Burada istenen tek şey eski konum ve boyut.
+                self.setGeometry(self._geom_before_full)
             self.btn_full.setText("Tam Ekran")
             self.btn_full.setIcon(make_preview_icon("fullscreen", 14, "#334155"))
-        else:
-            self._geom_before_full = self.saveGeometry()
-            self.showFullScreen()
-            self.btn_full.setText("Küçült")
-            self.btn_full.setIcon(make_preview_icon("exitfullscreen", 14, "#334155"))
+            return
+
+        self._geom_before_full = QRect(self.geometry())
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is not None:
+            self.setGeometry(screen.availableGeometry())
+        self._expanded = True
+        self.btn_full.setText("Küçült")
+        self.btn_full.setIcon(make_preview_icon("exitfullscreen", 14, "#334155"))
 
     def keyPressEvent(self, event):
-        # Esc tam ekranı kapatır, pencereyi değil: tam ekrandayken Esc'in
-        # diyaloğu kapatması, kullanıcının "çıkış" beklediği yerde işi
-        # bitirmek olurdu.
-        if event.key() == Qt.Key_Escape and self.isFullScreen():
+        # Esc büyütmeyi geri alır, pencereyi kapatmaz: kullanıcının
+        # "çıkış" beklediği yerde işi bitirmek olurdu.
+        if event.key() == Qt.Key_Escape and self._expanded:
             self.toggle_fullscreen()
             return
         if event.key() == Qt.Key_F11:
