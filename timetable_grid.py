@@ -1897,21 +1897,27 @@ class UnplacedLessonsDock(QWidget):
                 # itiyordu. Şimdi iki esneme var ve solda dairenin dengi
                 # kadar boşluk: yazı çubuğun gerçek ortasında duruyor,
                 # daire yine sağ uçta.
-                msg_layout.addStretch(1)
+                # Sol boşluk ESNEK DEĞİL, hesaplanmış.
+                #
+                # İki esneme ile ortalamak burada tutmuyordu: sağa konan
+                # denge boşluğu çubuğu doldurunca esnemeler sıfırlanıyor
+                # ve yazı bir yerden sonra kaymayı bırakıyordu. Soldaki
+                # boşluk artık doğrudan hesaplanan bir değer (bkz.
+                # _balance_message), sağdaki esneme geri kalanı yutuyor.
+                self._msg_lead = QSpacerItem(0, 0, QSizePolicy.Fixed,
+                                             QSizePolicy.Minimum)
+                self._msg_layout = msg_layout
+                msg_layout.addItem(self._msg_lead)
                 msg_layout.addWidget(icon_lbl)
                 msg_layout.addWidget(text_lbl)
+                self._msg_text = text_lbl
+                self._msg_icon = icon_lbl
                 msg_layout.addStretch(1)
                 # Dokun SOLUNDA ders bilgisi paneli duruyor; mesaj yalnızca
                 # dokun içinde ortalanınca ekranın ortasından o panelin
                 # yarısı kadar sağda kalıyordu. Boşluk, dokun ekrandaki
                 # yerine göre hesaplanıp sağa konuyor.
                 msg_layout.addWidget(self._make_add_circle(34))
-                # Boşluk dairenin ARKASINDA: önüne konunca daire çubuğun
-                # dışına itiliyor ve kırpılıyordu. Arkada dururken hem
-                # yazıyı sola kaydırıyor hem daire görünür kalıyor.
-                self._msg_balance = QSpacerItem(0, 0, QSizePolicy.Fixed,
-                                                QSizePolicy.Minimum)
-                msg_layout.addItem(self._msg_balance)
                 QTimer.singleShot(0, self._balance_message)
                 
                 self.container_layout.addWidget(msg_widget, 1)
@@ -1965,8 +1971,10 @@ class UnplacedLessonsDock(QWidget):
         Fark ölçülüp sağ tarafa boşluk olarak ekleniyor, böylece yazı
         çubuğun değil SAYFANIN ortasında oluyor.
         """
-        spacer = getattr(self, "_msg_balance", None)
-        if spacer is None:
+        lead = getattr(self, "_msg_lead", None)
+        text = getattr(self, "_msg_text", None)
+        icon = getattr(self, "_msg_icon", None)
+        if lead is None or text is None:
             return
         try:
             grid = self.parent()
@@ -1974,15 +1982,35 @@ class UnplacedLessonsDock(QWidget):
                 grid = grid.parent() if hasattr(grid, "parent") else None
             if grid is None or grid.width() <= 0:
                 return
+            # Yazı bloğunun sayfadaki hedef merkezi: ortanın 30 piksel
+            # solu. Dokun kendi sol kenarı çıkarılınca hedef, dokun iç
+            # koordinatına dönüyor.
             dock_left = self.mapTo(grid, self.rect().topLeft()).x()
-            want = grid.width() / 2.0 - dock_left          # dok içinde hedef merkez
-            have = self.container.width() / 2.0
-            extra = int(max(0.0, (have - want) * 2.0))
-            spacer.changeSize(extra, 0, QSizePolicy.Fixed, QSizePolicy.Minimum)
-            lay = self.container_layout
-            if lay is not None:
-                lay.invalidate()
-                lay.activate()
+            want_center = grid.width() / 2.0 - 30 - dock_left
+            block = text.sizeHint().width() + (icon.width() if icon else 0) + 8
+            left = int(max(0.0, want_center - block / 2.0))
+
+            # Boşluk MESAJIN kendi düzeninde; container'ınkini yenilemek
+            # hiçbir şeye yaramıyordu — değişiklik ekrana hiç yansımıyordu.
+            lay = getattr(self, "_msg_layout", None)
+
+            def apply(value):
+                lead.changeSize(max(0, int(value)), 0,
+                                QSizePolicy.Fixed, QSizePolicy.Minimum)
+                if lay is not None:
+                    lay.invalidate()
+                    lay.activate()
+
+            apply(left)
+            # Hesap ile gerçek konum arasında sabit bir fark kalıyor
+            # (ikonun ve yazının gerçek genişlikleri sizeHint'ten sapıyor).
+            # Sihirli bir sayı eklemek yerine sonuç ÖLÇÜLÜP fark
+            # kapatılıyor; böylece yazı ne kadar uzun olursa olsun aynı
+            # yere oturuyor.
+            here = text.mapTo(grid, text.rect().topLeft()).x() + text.width() / 2.0
+            drift = here - (grid.width() / 2.0 - 30)
+            if abs(drift) > 2:
+                apply(left - drift)
         except Exception as exc:
             print(f"[Dok] mesaj ortalanamadı: {exc}")
 

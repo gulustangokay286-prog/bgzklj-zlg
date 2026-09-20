@@ -896,19 +896,23 @@ class AutoScheduleDialog(QDialog):
         self.setModal(True)
         
         # Clean Apple Sheet Design System
-        # Çizelge sıfırlama sayfasıyla aynı kabuk: çerçevesiz, saydam
-        # zemin, içeride tek bir kart. Sistem başlık çubuğu ve sistem
-        # gölgesi yok — ikisi de kartın kendi gölgesiyle çakışıyor ve
-        # etrafında ikinci bir pencere varmış gibi duruyordu.
-        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint
-                            | Qt.NoDropShadowWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        # PENCERE SAYDAM DEĞİL.
+        #
+        # Bu sayfa çerçevesiz ve saydam kurulmuştu. Bu dosyanın başındaki
+        # not tam da bunu anlatıyor: macOS'ta çerçevesiz + saydam bir
+        # pencere, alfası çözülemediğinde OPAK SİYAH bir dikdörtgen olarak
+        # boyanıyor. Motor durdurulduğunda pencere yeniden boyutlanıyor
+        # (çalışma ekranı kapanıp parametreler geri geliyor) ve ekranda
+        # kocaman siyah bir kare kalıyordu.
+        #
+        # Diğer sayfalar boyut değiştirmediği için orada sorun çıkmıyor;
+        # burası değiştiriyor. Kart görünümü duruyor, yalnızca pencerenin
+        # kendisi opak.
         self._drag_from = None
 
         self.setStyleSheet("""
             QDialog {
-                background: transparent;
+                background: #F2F3F6;
             }
             QFrame#sheetCard {
                 background-color: #FFFFFF;
