@@ -1445,6 +1445,9 @@ class AutoScheduleDialog(QDialog):
             self.run_panel.setVisible(True)
             self.run_panel.start(_est)
             self.adjustSize()
+            # Boyut değişti: pencere eski yerinde kalırsa ekranın ortasından
+            # yukarı kayıyor. Her boyut değişiminden sonra yeniden ortalanıyor.
+            self._center_on(self.parent())
         except Exception as exc:
             print(f"[AUTO] çalışma ekranı açılamadı: {exc}")
         
@@ -1630,6 +1633,7 @@ class AutoScheduleDialog(QDialog):
             if getattr(self, "prog_card", None) is not None:
                 self.prog_card.setVisible(True)
             self.adjustSize()
+            self._center_on(self.parent())
         except Exception as exc:
             print(f"[AUTO] çalışma ekranı kapatılamadı: {exc}")
 
@@ -1826,16 +1830,10 @@ class AutoScheduleDialog(QDialog):
         Gövde birkaç satırla sınırlı; dökümün tamamı "Ayrıntılar"
         bölümünde, kendi kaydırma çubuğuyla duruyor.
         """
-        box = QMessageBox(parent)
-        box.setIcon(icon)
-        box.setWindowTitle(title)
-        box.setText(headline)
-        if body:
-            box.setInformativeText(body)
-        if detail:
-            box.setDetailedText(detail)
-        box.setStandardButtons(QMessageBox.Ok)
-        box.exec()
+        from dialogs.notice_sheet import NoticeSheet
+        NoticeSheet.show_notice(
+            parent, headline, body, detail,
+            kind="info" if icon == QMessageBox.Information else "warn")
 
     def accept(self):
         """Sonucu kapat ve gerekiyorsa TEK bir uyarı göster.
