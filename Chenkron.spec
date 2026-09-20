@@ -74,17 +74,6 @@ candidate_datas = [
     ('bk_shield_clean.png', '.'),
     ('bk_lockup.png', '.'),
     ('bk_dashboard_brand.png', '.'),
-    # C++ PLANLAMA MOTORU.
-    #
-    # Bu klasör pakete girmediği için Windows kurulumunda motor
-    # bulunamıyor ve otomatik planlayıcı hiç açılmıyordu. Derlenmiş ikili
-    # (chenkron-scheduler[.exe]) ve kaynağı buradan gidiyor; kaynağın da
-    # gitmesi, ikili yoksa makinede derleyebilmek için.
-    ('scheduler/native', 'scheduler/native'),
-    # Asistan ve tanıtım paketleri: modül olarak gizli içe aktarılıyorlar
-    # ama veri dosyaları (ikon, metin) yanlarında gitmeli.
-    ('assistant', 'assistant'),
-    ('onboarding', 'onboarding'),
 ]
 
 app_datas = []
@@ -101,10 +90,16 @@ from PyInstaller.utils.hooks import collect_all
 
 datas_ortools, binaries_ortools, hiddenimports_ortools = collect_all('ortools')
 
+# C++ motoru İKİLİ olarak gider (datas değil): platforma ait olan
+# dosya seçilir, macOS ikilisi Windows paketine girmez.
 native_filename = 'chenkron-scheduler.exe' if sys.platform == 'win32' else 'chenkron-scheduler'
 native_path = os.path.join(HERE, 'scheduler', 'native', native_filename)
 if not os.path.isfile(native_path):
-    raise SystemExit('Önce python tools/build_scheduler.py ile C++ motorunu derleyin.')
+    raise SystemExit(
+        f"{native_filename} bulunamadı. Bu platformda C++ motorunu derleyin:\n"
+        f"    python tools/build_scheduler.py\n"
+        f"(Motor olmadan da paketlenmek istenirse bu kontrolü kaldırın; "
+        f"planlayıcı o zaman CP-SAT ile çalışır.)")
 
 pathex_list = [HERE]
 if os.path.isdir(RELEASE_SYSTEM):
