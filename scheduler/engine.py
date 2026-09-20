@@ -233,6 +233,12 @@ def _kayitli_yer(data_store, world, card):
 
 def _bitir(res, w, rules, data_store, completion_first, start):
     """Doğrulama + çizelgenin kurulması. Bütün kipler buradan çıkar."""
+    # Kilitli ama yerleşememiş kartların kilidini kaldır — crash yerine uyarı.
+    for i, c in enumerate(w.cards):
+        if c.locked_at is not None and res.positions[i] < 0:
+            res.warnings.append(f"Kilitli kart yerleşemedi (kilit kaldırıldı): "
+                                f"{' + '.join(c.class_names)} · {c.subject_name}")
+            c.locked_at = None
     forced=impossible_groups(w) if completion_first else set()
     errors,soft,bent=validate(w,rules,res.positions,bend_rules=completion_first,
                               forced=forced,pieces=getattr(res,'split_pieces',None))
