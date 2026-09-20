@@ -4711,36 +4711,15 @@ class MainWindow(QMainWindow):
                       if isinstance(p, dict)]
         locked = [p for p in placements if p.get("locked") or p.get("is_locked")]
 
-        if not locked:
-            r = QMessageBox.question(
-                self, "Çizelgeyi Sıfırla / Temizle",
-                "Tüm sınıflar ve öğretmenler için yerleştirilmiş derslerin TAMAMI "
-                "çizelgeden kaldırılacak.\nEmin misiniz?",
-                QMessageBox.Yes | QMessageBox.No
-            )
-            if r != QMessageBox.Yes:
-                return
-            keep_locked = False
-        else:
-            blocks = {str(p.get("block_id") or id(p)) for p in locked}
-            box = QMessageBox(self)
-            box.setIcon(QMessageBox.Question)
-            box.setWindowTitle("Çizelgeyi Sıfırla / Temizle")
-            box.setText("Çizelgedeki dersler kaldırılacak.")
-            box.setInformativeText(
-                f"Bu çizelgede <b>{len(blocks)} kilitli ders</b> var "
-                f"({len(locked)} saat).<br><br>"
-                "Kilitli dersler de kaldırılsın mı?")
-            box.setTextFormat(Qt.RichText)
-            btn_keep = box.addButton("Kilitliler Kalsın", QMessageBox.AcceptRole)
-            btn_all = box.addButton("Hepsini Kaldır", QMessageBox.DestructiveRole)
-            btn_cancel = box.addButton("Vazgeç", QMessageBox.RejectRole)
-            box.setDefaultButton(btn_keep)
-            box.exec()
-            clicked = box.clickedButton()
-            if clicked is btn_cancel or clicked is None:
-                return
-            keep_locked = (clicked is btn_keep)
+        blocks = {str(p.get("block_id") or id(p)) for p in locked}
+        from dialogs.reset_schedule_sheet import (
+            ResetScheduleSheet, CANCEL, KEEP_LOCKED)
+        choice = ResetScheduleSheet.ask(
+            self, locked_blocks=len(blocks), locked_hours=len(locked),
+            total_hours=len(placements))
+        if choice == CANCEL:
+            return
+        keep_locked = (choice == KEEP_LOCKED)
 
         self._push_undo_state()
 

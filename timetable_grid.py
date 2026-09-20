@@ -3996,9 +3996,93 @@ class DropTableWidget(QTableWidget):
                             if hasattr(win, "_refresh_tree"):
                                 win._refresh_tree()
         else:
-            act_add = menu.addAction(make_context_icon("plus", "#B0BEC5", "#546E7A"), "Ders Ekle (Aşağıdan Sürükle)")
-            act_block = menu.addAction(make_context_icon("lock", "#B0BEC5", "#546E7A"), "Bu Slotu Kilitle")
-            menu.exec_(self.viewport().mapToGlobal(pos))
+            # BOŞ HÜCRE MENÜSÜ.
+            #
+            # Burada Qt'nin sistem menüsü açılıyordu ve iki satır
+            # taşıyordu: "Ders Ekle (Aşağıdan Sürükle)" — bir eylem değil,
+            # talimat — ve "Bu Slotu Kilitle". İkisinin de bağlı bir işi
+            # yoktu: menü exec ediliyor, sonucu hiçbir yere bakılmıyordu.
+            # Tıklayınca hiçbir şey olmuyordu.
+            #
+            # Artık tek bir gerçek iş var: bu saati o sınıfa/öğretmene
+            # kapatmak (ya da kapalıysa açmak). Kilit değil kapatma,
+            # çünkü boş bir saatte kilitlenecek ders yok — "burayı
+            # kullanma" demek isteniyor.
+            self._empty_cell_menu(row, col, pos)
+
+    def _empty_cell_menu(self, row, col, pos):
+        grid = self.parent()
+        win = self.window()
+        if not hasattr(win, "data_store") and hasattr(win, "parent"):
+            pw = win.parent()
+            if pw is not None and hasattr(pw, "data_store"):
+                win = pw
+        store = getattr(win, "data_store", None)
+        if store is None or grid is None or not hasattr(grid, "row_entity"):
+            return
+        kind, name = grid.row_entity(row)
+        if not name:
+            return
+
+        periods = getattr(grid, "_periods", 8) or 8
+        day, period = col // periods, col % periods
+
+        group = "ogretmenler" if kind == "teacher" else "siniflar"
+        entity = None
+        for e in store.get(group, []) or []:
+            if not isinstance(e, dict):
+                continue
+            ad = (e.get("ad") or "").strip()
+            if kind == "teacher":
+                if format_tr_name(ad) == format_tr_name(name):
+                    entity = e
+                    break
+            elif matches_class(ad, name) or matches_class(name, ad) or ad == name:
+                entity = e
+                break
+        if entity is None:
+            return
+
+        try:
+            import constraint_sync
+            matrix = constraint_sync.get_matrix(entity, name, store)
+            is_closed = int(matrix[day][period]) == 0
+        except Exception as exc:
+            print(f"[Grid] saat durumu okunamadı: {exc}")
+            return
+
+        def toggle(close):
+            try:
+                import constraint_sync
+                m = constraint_sync.get_matrix(entity, name, store)
+                m[day][period] = 0 if close else 2
+                constraint_sync.set_matrix(entity, name, store, m)
+            except Exception as e:
+                print(f"[Grid] saat durumu yazılamadı: {e}")
+                return
+            if hasattr(win, "mark_dirty"):
+                win.mark_dirty()
+            if hasattr(win, "save_db"):
+                win.save_db(sync_from_grid=False)
+            if hasattr(win, "_refresh_grid"):
+                win._refresh_grid()
+            if hasattr(win, "statusBar"):
+                try:
+                    day_name = DAYS[day] if 0 <= day < len(DAYS) else f"{day+1}. gün"
+                    win.statusBar().showMessage(
+                        f"{name} — {day_name} {period+1}. saat "
+                        + ("kapatıldı." if close else "açıldı."), 4000)
+                except Exception:
+                    pass
+
+        menu = bk_ui.HeroPopoverMenu(self)
+        if is_closed:
+            menu.add_action("Bu saati aç", ui_icons.pixmap("unlock", 16, "#0F4AAB"),
+                            on_click=lambda: toggle(False))
+        else:
+            menu.add_action("Bu saati kapat", ui_icons.pixmap("lock", 16, "#0F4AAB"),
+                            on_click=lambda: toggle(True))
+        menu.popup_at(self.viewport().mapToGlobal(pos))
 
     def _set_span(self, row, col, span):
         """Change span of existing cell, automatically shifting any displaced lessons down!"""

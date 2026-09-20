@@ -1221,6 +1221,105 @@ def institution_3d(name="", colour=None, size=44, dpr=None):
     return out
 
 
+def reset_schedule_3d(size=72, dpr=None):
+    """Sıfırlama sorusunun resmi: izometrik bir çizelge tablası, üstünde
+    kartlar — ikisi havalanıp dağılıyor, biri kilitli olduğu için yerinde.
+
+    Sorunun kendisi bu: "hepsi mi gitsin, kilitli olan kalsın mı?" Bir
+    soru işareti ya da çöp kutusu bunu anlatmıyor; kalkan kartlarla
+    yerinde duran kilitli kart anlatıyor.
+    """
+    if dpr is None:
+        dpr = _screen_dpr()
+    dpr = max(1.0, float(dpr))
+
+    SS = 3
+    px = max(16, int(round(size * dpr * SS)))
+    pix = QPixmap(px, px)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    u = px / 100.0
+
+    edge = QPen(QColor(18, 26, 43, 55), max(0.8, u * 0.5))
+    edge.setJoinStyle(Qt.MiterJoin)
+
+    def poly(pts, brush, outline=True):
+        path = QPainterPath()
+        path.moveTo(pts[0][0] * u, pts[0][1] * u)
+        for x, y in pts[1:]:
+            path.lineTo(x * u, y * u)
+        path.closeSubpath()
+        p.setBrush(brush)
+        p.setPen(edge if outline else Qt.NoPen)
+        p.drawPath(path)
+
+    def iso(cx, cy, hw, hd):
+        return ((cx - hw, cy), (cx, cy - hd), (cx + hw, cy), (cx, cy + hd))
+
+    # ── Tabla: kalın bir plaka, üstünde ızgara çizgileri ──────────────
+    CX, CY, HW, HD, TH = 50.0, 70.0, 40.0, 20.0, 5.0
+    L, B, R, F = iso(CX, CY, HW, HD)
+    poly([L, F, (F[0], F[1] + TH), (L[0], L[1] + TH)], QBrush(QColor("#C9D2E0")))
+    poly([F, R, (R[0], R[1] + TH), (F[0], F[1] + TH)], QBrush(QColor("#B7C2D4")))
+    poly([L, B, R, F], QBrush(QColor("#E8EDF5")))
+
+    p.setPen(QPen(QColor(120, 135, 160, 110), max(0.6, u * 0.35)))
+    for i in range(1, 4):
+        t = i / 4.0
+        p.drawLine(QPointF((L[0] + (B[0] - L[0]) * t) * u, (L[1] + (B[1] - L[1]) * t) * u),
+                   QPointF((F[0] + (R[0] - F[0]) * t) * u, (F[1] + (R[1] - F[1]) * t) * u))
+        p.drawLine(QPointF((L[0] + (F[0] - L[0]) * t) * u, (L[1] + (F[1] - L[1]) * t) * u),
+                   QPointF((B[0] + (R[0] - B[0]) * t) * u, (B[1] + (R[1] - B[1]) * t) * u))
+
+    # ── Kart: izometrik ince blok ─────────────────────────────────────
+    def card(cx, cy, colour, hw=13.0, hd=6.5, th=3.4, alpha=255):
+        top = QColor(colour); top.setAlpha(alpha)
+        side = QColor(colour).darker(118); side.setAlpha(alpha)
+        front = QColor(colour).darker(134); front.setAlpha(alpha)
+        l, b, r, f = iso(cx, cy, hw, hd)
+        poly([l, f, (f[0], f[1] + th), (l[0], l[1] + th)], QBrush(side), alpha > 200)
+        poly([f, r, (r[0], r[1] + th), (f[0], f[1] + th)], QBrush(front), alpha > 200)
+        poly([l, b, r, f], QBrush(top), alpha > 200)
+        return (cx, cy)
+
+    # Havalanan iki kart: yukarı çıktıkça soluyor ve küçülüyor.
+    card(24, 30, QColor("#7FA6E8"), hw=10.5, hd=5.2, th=2.6, alpha=110)
+    card(72, 22, QColor("#8ED0A8"), hw=12.0, hd=6.0, th=3.0, alpha=155)
+
+    # Yerinde duran kart — kilitli olan.
+    cx, cy = card(48, 62, QColor("#3E6FD4"))
+
+    # Kilit kartın ÜSTÜNDE durur: yerinde kalmasının sebebi o.
+    lx, ly = cx + 1.0, cy - 13.0
+    p.setPen(Qt.NoPen)
+    p.setBrush(QBrush(QColor(20, 30, 50, 60)))
+    p.drawEllipse(QPointF(lx * u, (ly + 9.5) * u), 7.0 * u, 3.0 * u)   # gölge
+    body = QColor("#F4B740")
+    p.setBrush(QBrush(body))
+    p.setPen(QPen(QColor("#B7810F"), max(0.7, u * 0.45)))
+    p.drawRoundedRect(QRectF((lx - 6.2) * u, (ly - 1.0) * u, 12.4 * u, 9.6 * u),
+                      2.2 * u, 2.2 * u)
+    shackle = QPen(QColor("#D79B1C"), max(1.4, u * 1.7))
+    shackle.setCapStyle(Qt.RoundCap)
+    p.setPen(shackle)
+    p.setBrush(Qt.NoBrush)
+    path = QPainterPath()
+    path.arcMoveTo(QRectF((lx - 4.2) * u, (ly - 7.4) * u, 8.4 * u, 8.4 * u), 0)
+    path.arcTo(QRectF((lx - 4.2) * u, (ly - 7.4) * u, 8.4 * u, 8.4 * u), 0, 180)
+    p.drawPath(path)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QBrush(QColor("#7C5708")))
+    p.drawEllipse(QPointF(lx * u, (ly + 3.4) * u), 1.5 * u, 1.5 * u)
+
+    p.end()
+    out = QPixmap.fromImage(
+        pix.toImage().scaled(int(round(size * dpr)), int(round(size * dpr)),
+                             Qt.KeepAspectRatio, Qt.SmoothTransformation))
+    out.setDevicePixelRatio(dpr)
+    return out
+
+
 def institution_tile(name="", colour=None, size=40, radius=None):
     """An institution's mark: a tile in the school's own colour with a flat
     white school cut out of it.
