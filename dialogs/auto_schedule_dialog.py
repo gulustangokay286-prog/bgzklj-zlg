@@ -78,7 +78,9 @@ class PlannerArtWidget(QWidget):
         super().__init__(parent)
         self._pix = bk_ui.autoplan_3d(size)
         self._size = size
-        self.setFixedHeight(size + 10)
+        # Resmin TAMAMI sığmalı: yükseklik kısıldığında tablanın alt
+        # kenarı kesiliyor ve bina duvara gömülmüş gibi duruyordu.
+        self.setFixedHeight(size + 18)
         self.setMinimumWidth(size + 24)
         self._phase = 0.0
         self._active = False
@@ -110,21 +112,13 @@ class PlannerArtWidget(QWidget):
         px = self._pix
         pw = px.width() / px.devicePixelRatio()
         ph = px.height() / px.devicePixelRatio()
-        x, y = (w - pw) / 2.0, (h - ph) / 2.0 + 2
+        x, y = (w - pw) / 2.0, (h - ph) / 2.0
 
-        if self._active:
-            # Işık tablanın altında: resmin kendisini soldurmadan
-            # "çalışıyor" diyor.
-            pulse = 0.5 + 0.5 * math.sin(self._phase)
-            rad = QRadialGradient(w / 2.0, y + ph * 0.78, pw * 0.62)
-            rad.setColorAt(0.0, QColor(15, 74, 171, int(52 + 38 * pulse)))
-            rad.setColorAt(0.55, QColor(15, 74, 171, int(18 + 14 * pulse)))
-            rad.setColorAt(1.0, QColor(15, 74, 171, 0))
-            p.setBrush(QBrush(rad))
-            p.setPen(Qt.NoPen)
-            p.drawEllipse(QRectF(w / 2.0 - pw * 0.62, y + ph * 0.42,
-                                 pw * 1.24, ph * 0.78))
-
+        # Işık KALDIRILDI. Resmin arkasında nefes alan halka, başlıkta
+        # bulanık bir leke olarak duruyordu: ne "çalışıyor" diyordu ne de
+        # resme bir şey katıyordu — çalıştığını zaten altındaki sahne ve
+        # akan çubuk söylüyor. start_pulse/stop_pulse duruyor çünkü
+        # çağrılıyorlar; artık yalnızca durumu tutuyorlar.
         p.drawPixmap(QPointF(x, y), px)
         p.end()
 
@@ -142,7 +136,10 @@ class _RunScene(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(96)
+        # 100 birimlik çizimin en alt noktası tablanın kalınlığıyla
+        # birlikte 104'e iniyor; yükseklik ona göre veriliyor, yoksa
+        # tablanın ön yüzü kırpılıyor.
+        self.setFixedHeight(108)
         self._t = 0.0
         self._timer = QTimer(self)
         self._timer.setInterval(40)
@@ -164,7 +161,7 @@ class _RunScene(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         w, h = self.width(), self.height()
-        u = h / 100.0
+        u = h / 108.0
         ox = w / 2.0 - 50 * u
 
         def pt(x, y):
@@ -359,16 +356,29 @@ class PlannerRunPanel(QFrame):
                 stage = name
         self.lbl_stage.setText(stage)
 
-        left = self._estimate - self._elapsed
-        if left > 1.5:
+        # SÜRE, GEÇEN ZAMANDAN DEĞİL YÜZDEDEN.
+        #
+        # Geri sayım baştaki tahmine bağlıydı: yüzde bir anda 90'a
+        # çıktığında ekran hâlâ "yaklaşık 40 saniye" diyordu. Şimdi kalan
+        # süre, o ana kadar geçen sürenin yüzdeye oranından çıkıyor —
+        # gerçekten ne kadar kaldığının en iyi tahmini bu. Yüzde yeterince
+        # ilerlediyse sayı bırakılıp söz söyleniyor.
+        if pct >= 92:
+            self.lbl_eta.setText("bitmek üzere")
+        elif pct >= 78:
+            self.lbl_eta.setText("az kaldı")
+        else:
+            if pct > 6:
+                left = self._elapsed * (100.0 - pct) / pct
+                left = min(left, self._estimate * 2.0)
+            else:
+                left = self._estimate
             if left >= 90:
                 self.lbl_eta.setText(f"yaklaşık {int(round(left / 60))} dakika")
-            else:
+            elif left >= 8:
                 self.lbl_eta.setText(f"yaklaşık {int(left / 5 + 0.5) * 5} saniye")
-        else:
-            # Tahmini aştıysa saymayı bırakıyor; geri sayımın eksiye
-            # düşmesi "tahmin tutmadı" demenin en kötü yolu.
-            self.lbl_eta.setText("son ayarlamalar yapılıyor")
+            else:
+                self.lbl_eta.setText("birkaç saniye")
 
 
 class Apple3DIconWidget(QWidget):
