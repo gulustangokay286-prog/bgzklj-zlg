@@ -412,7 +412,17 @@ def main():
     database.init_db()
 
     app = QApplication(sys.argv)
-    
+
+    # Pencere günlüğü: ekranda beliren ama içeriği boyanmamış kara
+    # pencerelerin kim olduğunu söyleyen tek kaynak. Hiçbir şeyi
+    # değiştirmez, yalnızca ~/.chenki_akademi/pencere_gunlugu.txt dosyasına
+    # yazar.
+    try:
+        import window_log
+        window_log.install(app)
+    except Exception as _wl_exc:
+        print(f"[window_log] kurulamadı: {_wl_exc}")
+
     # Force light mode
     app.setStyle("Fusion")
     
