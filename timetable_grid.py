@@ -2122,8 +2122,8 @@ _TEXT_STAMPS = {}
 _MAX_SPAN = 8                      # bir dersin kaplayabileceği en fazla saat
 
 _CELL_CANVAS = QColor("#FFFFFF")   # kartın altında kalan hücre zemini
-_CARD_PAD = 2.5                    # kartın hücre kenarına bıraktığı pay
-_CARD_RADIUS = 8.0                 # köşe yumuşaklığı
+_CARD_PAD = 1.5                    # kartın hücre kenarına bıraktığı pay
+_CARD_RADIUS = 9.0                 # köşe yumuşaklığının tavanı
 _PEN_HAIRLINE = QPen(QColor("#CBD5E1"), 1)
 _PEN_DAYSEP = QPen(QColor("#C3C9D4"), 1.2)   # başlıktaki gün çizgisiyle aynı ton
 _PEN_SELECTED = QPen(QColor("#0071E3"), 2)
@@ -3146,29 +3146,33 @@ class DropTableWidget(QTableWidget):
                 # başlıyor ve köşeleri yumuşak: ızgaranın ÜSTÜNDE duran
                 # ayrı bir nesne.
                 if filled:
-                    # Kart hücrenin İÇİNE ortalanıyor. Sağ ve alt kenarda
-                    # ızgaranın kendi çizgisi var, sol ve üstte komşunun
-                    # çizgisi; kart her iki yandan aynı payı bırakmazsa
-                    # hücreye oturmamış gibi duruyor — bir piksellik fark
-                    # 36 piksellik bir kutuda görünür.
+                    # DOLU HÜCREDE IZGARA YOK.
+                    #
+                    # Kart, altındaki boş hücrenin YERİNE geçiyor: hücre
+                    # zemini temizleniyor, kenar çizgileri hiç çizilmiyor.
+                    # Önce kart çiziliyor ama ızgara da altından devam
+                    # ediyordu; kartın köşesinde iki dik çizginin ucu
+                    # kalıyor ve yumuşak köşe sert bir köşenin içinde
+                    # duruyordu. Bir şey koyulan yerde boş ızgara kaybolur.
                     fill(x, y, w, h, _CELL_CANVAS)
                     painter.setPen(Qt.NoPen)
                     painter.setBrush(vis.bg)
-                    cw = w - 2 * _CARD_PAD - 1.0
-                    ch = h - 2 * _CARD_PAD - 1.0
+                    cw = w - 2 * _CARD_PAD
+                    ch = h - 2 * _CARD_PAD
                     # Yarıçap kısa kenara oranlı: sabit bir değer dar
                     # hücrede kartı hapa çeviriyor, geniş hücrede ise
                     # köşeyi sert bırakıyor.
-                    rad = max(3.5, min(_CARD_RADIUS, min(cw, ch) * 0.24))
+                    rad = max(4.0, min(_CARD_RADIUS, min(cw, ch) * 0.26))
                     painter.drawRoundedRect(
                         QRectF(x + _CARD_PAD, y + _CARD_PAD, cw, ch), rad, rad)
                 else:
                     fill(x, y, w, h, vis.bg)
+                    set_pen(_PEN_HAIRLINE)
+                    line(x2, y, x2, y2)
+                    line(x, y2, x2, y2)
 
-                set_pen(_PEN_HAIRLINE)
-                line(x2, y, x2, y2)
-                line(x, y2, x2, y2)
-
+                # Gün sınırı yapısal: dolu hücrede de duruyor, ama kartın
+                # dışından geçiyor.
                 if periods > 0 and (c + 1) % periods == 0:
                     set_pen(_PEN_DAYSEP)
                     line(x2, y, x2, y2)
