@@ -2105,7 +2105,12 @@ _LIVE_TABLES = weakref.WeakSet()
 _TEXT_STAMPS = {}
 _MAX_SPAN = 8                      # bir dersin kaplayabileceği en fazla saat
 
-_CELL_CANVAS = QColor("#FFFFFF")   # kartın altında kalan hücre zemini
+# Kartın ALTINDA kalan zemin, kapalı saatlerin grisiyle aynı ton. Beyazdı
+# ve kartlar arasındaki 1.5 piksellik pay boş hücrelerden daha parlak
+# kalıyordu: dolu bölgeler, boş olanlardan daha AÇIK görünüyordu. Boş
+# hücreler kendi rengini koruyor (_BG_EMPTY), değişen yalnızca kartların
+# arkası.
+_CELL_CANVAS = QColor("#F1F5F9")
 _CARD_PAD = 0.75                   # kartın hücre kenarına bıraktığı pay
 _CARD_RADIUS = 9.0                 # köşe yumuşaklığının tavanı
 # Dolu hücrelerde ızgara çizilmeyi bıraktıktan sonra boş hücrelerin
