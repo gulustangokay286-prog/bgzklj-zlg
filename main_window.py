@@ -4607,20 +4607,16 @@ class MainWindow(QMainWindow):
         understaffed = report.get("understaffed_slots") or []
         unplaced = report.get("unplaced_summary") or []
 
+        from dialogs.plan_result_sheet import PlanResultSheet
+
         if not understaffed and not unplaced:
-            QMessageBox.information(
-                self, "Otomatik Planlama Tamamlandı",
-                f"Otomatik planlama tamamlandı.<br><br>"
-                f"Toplam <b>{total_hours} ders saati</b> haftalık çizelgeye eksiksiz yerleştirildi."
-            )
+            PlanResultSheet.show_result(self, total_hours=total_hours,
+                                        unplaced_hours=0)
             return
 
-        parts = [
- "Otomatik planlama tamamlandı.<br>",
-            f"Çizelgeye <b>{total_hours} ders saati</b> yerleştirildi.<br><br>",
- "<b>Bazı saatler boş kaldı.</b> Sebep, planlayıcının yetersizliği değil; "
-            "o saatlerde <b>ders verebilecek öğretmen bulunmaması</b>:<br><br>",
-        ]
+        # Ayrıntı tablosu artık sayfanın İÇİNDE, istendiğinde açılan bir
+        # bölümde duruyor: sonuç iki satırda söyleniyor, sebepler bekliyor.
+        parts = []
 
         if understaffed:
             parts.append("<b>Öğretmen yetersizliği olan saatler</b><br>")
@@ -4663,12 +4659,12 @@ class MainWindow(QMainWindow):
             "• Boş kalan hücrelere dersleri elle sürükleyin."
         )
 
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Information)
-        box.setWindowTitle("Otomatik Planlama Tamamlandı")
-        box.setTextFormat(Qt.RichText)
-        box.setText("".join(parts))
-        box.exec()
+        unplaced_hours = sum(int(u.get("hours", 0) or 0) for u in unplaced)
+        if not unplaced_hours and understaffed:
+            unplaced_hours = sum(int(u.get("shortfall", 0) or 0) for u in understaffed)
+        PlanResultSheet.show_result(self, total_hours=total_hours,
+                                    unplaced_hours=unplaced_hours,
+                                    details_html="".join(parts))
 
     def _act_statistics(self):
         from dialogs.statistics_dialog import StatisticsDialog
