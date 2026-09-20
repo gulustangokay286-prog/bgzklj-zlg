@@ -896,25 +896,31 @@ class AutoScheduleDialog(QDialog):
         self.setModal(True)
         
         # Clean Apple Sheet Design System
-        # Çerçevesiz: sistem başlık çubuğu ve onun altındaki gri şerit
-        # kalktı, ekranda yalnızca kartın kendisi duruyor. Saydamlık için
-        # şart olan tek şey, HİÇBİR gölgenin bulunmaması: ne pencerenin
-        # native gölgesi (NoDropShadowWindowHint) ne de içerideki
-        # QGraphicsDropShadowEffect'ler. İkisi de macOS'ta opak siyah
-        # dikdörtgen olarak boyanıyor.
+        # ÇERÇEVESİZ AMA SAYDAM DEĞİL.
+        #
+        # Saydam pencere, İÇERİĞİ HENÜZ BOYANMADIĞI anda siyah görünüyor.
+        # Motor çalışırken ya da durdurulurken arayüz iş parçacığı kısa
+        # süre bloklanıyor; o aralıkta açılan/boyutlanan saydam pencere
+        # ekranda kapkara bir dikdörtgen olarak kalıyor — arka arkaya
+        # açılınca da bir sürü kara dikdörtgen. Opak bir pencere aynı
+        # durumda beyaz kalır, yani en kötü ihtimalle boş görünür.
+        #
+        # Çerçevesizlik duruyor: sistem başlık çubuğu ve altındaki gri
+        # şerit yok, ekranda yalnızca kartın kendisi var.
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint
                             | Qt.NoDropShadowWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WA_TranslucentBackground, False)
+        self.setAutoFillBackground(True)
         self._drag_from = None
 
         self.setStyleSheet("""
             QDialog {
-                background: transparent;
+                background: #FFFFFF;
             }
             QFrame#sheetCard {
                 background-color: #FFFFFF;
-                border: 1px solid rgba(15, 23, 42, 0.16);
-                border-radius: 18px;
+                border: none;
+                border-radius: 0px;
             }
             QFrame#card {
                 background-color: #FBFCFD;
@@ -1059,8 +1065,10 @@ class AutoScheduleDialog(QDialog):
         super().mouseReleaseEvent(e)
 
     def _build_ui(self):
+        # Pencere KARTIN KENDİSİ: saydam kenar payı kalmadığı için
+        # dışarıda boşluk bırakmanın anlamı yok.
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(16, 14, 16, 16)
+        outer.setContentsMargins(0, 0, 0, 0)
 
         sheet = QFrame(self)
         sheet.setObjectName("sheetCard")

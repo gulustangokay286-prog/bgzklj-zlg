@@ -173,8 +173,10 @@ class PlanResultSheet(QDialog):
         # gölgesi (NoDropShadowWindowHint) ne de içeride
         # QGraphicsDropShadowEffect. macOS'ta siyah dikdörtgen olarak
         # boyanan şey o gölge katmanlarıydı, saydamlığın kendisi değil.
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setStyleSheet("QDialog { background: transparent; }")
+        # Saydam değil: boyanmamış saydam pencere siyah görünüyor
+        self.setAttribute(Qt.WA_TranslucentBackground, False)
+        self.setAutoFillBackground(True)
+        self.setStyleSheet("QDialog { background: #FFFFFF; }")
         self.setModal(True)
 
         total_hours = max(0, int(total_hours or 0))
@@ -184,15 +186,15 @@ class PlanResultSheet(QDialog):
         full = unplaced_hours == 0
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(16, 14, 16, 16)
+        outer.setContentsMargins(0, 0, 0, 0)
 
         card = QFrame(self)
         card.setObjectName("resultCard")
         card.setStyleSheet("""
             #resultCard {
                 background: #FFFFFF;
-                border: 1px solid rgba(15, 23, 42, 0.08);
-                border-radius: 20px;
+                border: none;
+                border-radius: 0px;
             }
         """)
         # GÖLGE YOK. timetable_grid.py'nin başındaki not: macOS'ta uygulama

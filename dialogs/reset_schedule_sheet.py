@@ -47,12 +47,14 @@ class ResetScheduleSheet(QDialog):
         # açılıp kapanırken ekranda siyah kareler kalıyordu. Kart
         # görünümü duruyor; kaybedilen tek şey köşelerin dışındaki
         # saydamlık.
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        # Saydam değil: boyanmamış saydam pencere siyah görünüyor
+        self.setAttribute(Qt.WA_TranslucentBackground, False)
+        self.setAutoFillBackground(True)
         self.setAutoFillBackground(False)
         # Pencerenin kendi zemini de açıkça şeffaf: WA_TranslucentBackground
         # tek başına stile bırakılan zemini her platformda temizlemiyor ve
         # kartın etrafında beyaz bir bant kalıyordu.
-        self.setStyleSheet("QDialog { background: transparent; }")
+        self.setStyleSheet("QDialog { background: #FFFFFF; }")
         self.setModal(True)
 
         has_locked = locked_blocks > 0
@@ -60,15 +62,15 @@ class ResetScheduleSheet(QDialog):
         outer = QVBoxLayout(self)
         # Kenar payı yalnızca kartın gölgesi için: dar tutuluyor, yoksa
         # şeffaf alan pencere kenarı gibi okunuyor.
-        outer.setContentsMargins(16, 14, 16, 16)
+        outer.setContentsMargins(0, 0, 0, 0)
 
         card = QFrame(self)
         card.setObjectName("resetCard")
         card.setStyleSheet("""
             #resetCard {
                 background: #FFFFFF;
-                border: 1px solid rgba(15, 23, 42, 0.08);
-                border-radius: 20px;
+                border: none;
+                border-radius: 0px;
             }
         """)
         # GÖLGE YOK — macOS'ta opak siyah dikdörtgen olarak boyanıyor
