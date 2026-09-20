@@ -1594,8 +1594,22 @@ class DraggableLessonCard(QWidget):
             if win:
                 if hasattr(win, "save_db"): win.save_db()
                 if hasattr(win, "_refresh_tree"): win._refresh_tree()
+                if hasattr(win, "_refresh_grid"): win._refresh_grid()
                 if hasattr(win, "_refresh_unplaced_lessons"):
-                    win._refresh_unplaced_lessons()
+                    # Dok KARTIN kendi varlığıyla yenileniyor.
+                    #
+                    # Parametresiz çağrılıyordu: hedef verilmeyince dok onu
+                    # ızgaradaki seçimden çıkarmaya çalışıyor, dok kartına
+                    # sağ tıklarken ızgarada seçili hücre olmadığı için
+                    # çıkaramıyor ve boş kalıyordu. "İkiye Böl" dedikten
+                    # sonra dersin kaybolmasının sebebi buydu — ders
+                    # yerindeydi, dok onu göstermiyordu.
+                    grid = self.parent()
+                    while grid is not None and not hasattr(grid, "current_view_mode"):
+                        grid = grid.parent() if hasattr(grid, "parent") else None
+                    mode = getattr(grid, "current_view_mode", "classes") if grid else "classes"
+                    ent = (self.class_name if mode == "classes" else self.teacher) or None
+                    win._refresh_unplaced_lessons(ent)
                 if hasattr(win, "statusBar") and win.statusBar():
                     win.statusBar().showMessage(f"'{self.subject_name}' dersi {'+'.join(map(str, parts))} yapısına dönüştürüldü ({sum(parts)} saat).", 4000)
 
@@ -3226,9 +3240,19 @@ class DropTableWidget(QTableWidget):
                 cw = cell_w(c)
                 if cw <= 0:
                     continue
+                # DÖRT KENAR, İKİ DEĞİL.
+                #
+                # Yalnızca sağ ve alt kenar çiziliyordu; bir hücrenin sol
+                # kenarı, solundaki hücrenin sağ kenarıydı. Solunda kart
+                # varsa o kenar hiç çizilmiyor ve boş hücre açık tarafta
+                # sınırsız kalıyordu. Boş hücre artık kendi çerçevesini
+                # kendisi çiziyor; iki kart yan yanayken aralarında yine
+                # çizgi olmuyor, çünkü ikisi de dolu.
                 cx2 = x + cw - 1
                 line(cx2, y, cx2, y2)
                 line(x, y2, cx2, y2)
+                line(x, y, x, y2)
+                line(x, y, cx2, y)
 
         if periods > 0 and rows:
             set_pen(_PEN_DAYSEP)

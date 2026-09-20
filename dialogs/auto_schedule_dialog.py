@@ -1030,6 +1030,15 @@ class AutoScheduleDialog(QDialog):
             ref = screen.availableGeometry()
         self.move(ref.center() - QPoint(self.width() // 2, self.height() // 2))
 
+    def showEvent(self, e):
+        # Boyut __init__'te kesinleşmiyor: kartlar gösterilince yükseklik
+        # değişiyor ve pencere ortadan yukarı kayıyordu. Görünürken bir
+        # kez daha ortalanıyor.
+        super().showEvent(e)
+        if not getattr(self, "_centered_once", False):
+            self._centered_once = True
+            self._center_on(self.parent())
+
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
             self._drag_from = e.globalPosition().toPoint() - self.frameGeometry().topLeft()
