@@ -1986,7 +1986,7 @@ class UnplacedLessonsDock(QWidget):
             # solu. Dokun kendi sol kenarı çıkarılınca hedef, dokun iç
             # koordinatına dönüyor.
             dock_left = self.mapTo(grid, self.rect().topLeft()).x()
-            want_center = grid.width() / 2.0 - 30 - dock_left
+            want_center = grid.width() / 2.0 - 20 - dock_left
             block = text.sizeHint().width() + (icon.width() if icon else 0) + 8
             left = int(max(0.0, want_center - block / 2.0))
 
@@ -2008,7 +2008,7 @@ class UnplacedLessonsDock(QWidget):
             # kapatılıyor; böylece yazı ne kadar uzun olursa olsun aynı
             # yere oturuyor.
             here = text.mapTo(grid, text.rect().topLeft()).x() + text.width() / 2.0
-            drift = here - (grid.width() / 2.0 - 30)
+            drift = here - (grid.width() / 2.0 - 20)
             if abs(drift) > 2:
                 apply(left - drift)
         except Exception as exc:

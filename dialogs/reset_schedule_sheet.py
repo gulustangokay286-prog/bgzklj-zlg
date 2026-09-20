@@ -41,13 +41,18 @@ class ResetScheduleSheet(QDialog):
         # pencere varmış gibi duran gri bir kenar çıkıyordu.
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint
                             | Qt.NoDropShadowWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        # SAYDAM DEĞİL: macOS'ta çerçevesiz + saydam bir pencere, alfası
+        # çözülemediğinde OPAK SİYAH bir dikdörtgen olarak boyanıyor
+        # (bkz. timetable_grid.py başındaki not). Sayfa arka arkaya
+        # açılıp kapanırken ekranda siyah kareler kalıyordu. Kart
+        # görünümü duruyor; kaybedilen tek şey köşelerin dışındaki
+        # saydamlık.
+        self.setAttribute(Qt.WA_TranslucentBackground, False)
         self.setAutoFillBackground(False)
         # Pencerenin kendi zemini de açıkça şeffaf: WA_TranslucentBackground
         # tek başına stile bırakılan zemini her platformda temizlemiyor ve
         # kartın etrafında beyaz bir bant kalıyordu.
-        self.setStyleSheet("QDialog { background: transparent; }")
+        self.setStyleSheet("QDialog { background: #FFFFFF; }")
         self.setModal(True)
 
         has_locked = locked_blocks > 0

@@ -80,8 +80,8 @@ class PlannerArtWidget(QWidget):
         self._size = size
         # Resmin TAMAMI sığmalı: yükseklik kısıldığında tablanın alt
         # kenarı kesiliyor ve bina duvara gömülmüş gibi duruyordu.
-        self.setFixedHeight(size + 18)
-        self.setMinimumWidth(size + 24)
+        self.setFixedHeight(size + 12)
+        self.setFixedWidth(size + 12)
         self._phase = 0.0
         self._active = False
         self._timer = QTimer(self)
@@ -1078,26 +1078,33 @@ class AutoScheduleDialog(QDialog):
         root_layout.setContentsMargins(24, 22, 24, 20)
         root_layout.setSpacing(13)
 
-        # ═══ BAŞLIK: 3B resim üstte, yazı ortada ═══
+        # ═══ BAŞLIK ═══
         #
-        # Önce solda küçük bir kutu ikonu ve yanında iki satır vardı.
-        # Sıfırlama sayfasıyla aynı dil: resim ortada ve büyük, çünkü
-        # anlatacağı bir şey var — kartlar tablaya sırayla oturuyor.
-        self.icon_3d = PlannerArtWidget(84, self)
-        root_layout.addWidget(self.icon_3d)
+        # Resim bir ara ortaya alınıp büyütülmüştü; sayfa o yüzden bir
+        # ekran boyu uzadı. Eski düzenine döndü: resim solda küçük,
+        # yanında iki satır. Sayfanın işi ayarları göstermek, resim
+        # sergilemek değil.
+        header_lay = QHBoxLayout()
+        header_lay.setContentsMargins(2, 0, 2, 2)
+        header_lay.setSpacing(12)
+
+        self.icon_3d = PlannerArtWidget(46, self)
+        header_lay.addWidget(self.icon_3d, 0, Qt.AlignVCenter)
+
+        title_col = QVBoxLayout()
+        title_col.setSpacing(1)
+        title_col.setContentsMargins(0, 0, 0, 0)
 
         lbl_title = QLabel("Otomatik Ders Programı")
-        lbl_title.setAlignment(Qt.AlignCenter)
-        lbl_title.setStyleSheet("font-size: 17px; font-weight: 700; color: #0F172A;"
+        lbl_title.setStyleSheet("font-size: 16px; font-weight: 700; color: #0F172A;"
                                 " letter-spacing: -0.3px; background: transparent; border: none;")
-        root_layout.addWidget(lbl_title)
-
         lbl_sub = QLabel("Chenkron Optimizasyon Motoru")
-        lbl_sub.setAlignment(Qt.AlignCenter)
         lbl_sub.setStyleSheet("color: #8A8A93; font-size: 11.5px;"
                               " background: transparent; border: none;")
-        root_layout.addWidget(lbl_sub)
-        root_layout.addSpacing(2)
+        title_col.addWidget(lbl_title)
+        title_col.addWidget(lbl_sub)
+        header_lay.addLayout(title_col, 1)
+        root_layout.addLayout(header_lay)
         
         # ═══ 2. PARAMETERS CARD ═══
         param_card = QFrame()

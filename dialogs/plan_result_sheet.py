@@ -169,9 +169,14 @@ class PlanResultSheet(QDialog):
         self._drag_from = None
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint
                             | Qt.NoDropShadowWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setAttribute(Qt.WA_NoSystemBackground, True)
-        self.setStyleSheet("QDialog { background: transparent; }")
+        # SAYDAM DEĞİL: macOS'ta çerçevesiz + saydam bir pencere, alfası
+        # çözülemediğinde OPAK SİYAH bir dikdörtgen olarak boyanıyor
+        # (bkz. timetable_grid.py başındaki not). Sayfa arka arkaya
+        # açılıp kapanırken ekranda siyah kareler kalıyordu. Kart
+        # görünümü duruyor; kaybedilen tek şey köşelerin dışındaki
+        # saydamlık.
+        self.setAttribute(Qt.WA_TranslucentBackground, False)
+        self.setStyleSheet("QDialog { background: #FFFFFF; }")
         self.setModal(True)
 
         total_hours = max(0, int(total_hours or 0))
