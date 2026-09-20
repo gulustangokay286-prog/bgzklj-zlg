@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QMimeData, Signal, QByteArray, QRect, QRectF, QTimer, QPoint, QPointF, QEvent, QSize
 from PySide6.QtGui import QFont, QColor, QBrush, QDrag, QPainter, QPixmap, QAction, QPen, QLinearGradient, QIcon, QPainterPath, QCursor, QFontMetrics
 from auto_scheduler import matches_class, format_tr_name
+import bk_ui
+import ui_icons
 
 FONT_FAMILY = ".AppleSystemUIFont, SF Pro Text, Helvetica Neue, Segoe UI, sans-serif"
 
@@ -738,6 +740,14 @@ class AsCVerticalHeader(QHeaderView):
         return table.parent() if table is not None else None
 
     def _row_context_menu(self, pos):
+        """Satır menüsü — uygulamanın kendi popover'ı, satırın hizasında.
+
+        Qt'nin sistem menüsü kullanılıyordu: adın üstünde beyaz boş bir
+        kutu olarak açılıyor, yazısı zemine karışıyor ve imleç neredeyse
+        oraya, satırla ilgisiz bir yere düşüyordu. Bu menü programın
+        başka yerlerinde kullanılan kartın aynısı ve SATIRIN sağ
+        kenarından açılıyor: hangi satıra ait olduğu yerinden belli.
+        """
         row = self.logicalIndexAt(pos)
         grid = self._grid()
         if row < 0 or grid is None or not hasattr(grid, "row_entity"):
@@ -748,16 +758,22 @@ class AsCVerticalHeader(QHeaderView):
         total, locked = grid.row_lock_counts(row)
         if total <= 0:
             return
-        label = "Öğretmenin" if kind == "teacher" else "Sınıfın"
-        menu = QMenu(self)
+
+        who = "Öğretmenin" if kind == "teacher" else "Sınıfın"
+        menu = bk_ui.HeroPopoverMenu(self)
         if locked < total:
-            act = menu.addAction(f"{label} çizelgesini kilitle  ({total} ders)")
-            act.triggered.connect(lambda: grid.set_row_locked(row, True))
+            menu.add_action(f"{who} çizelgesini kilitle",
+                            ui_icons.pixmap("lock", 16, "#0F4AAB"),
+                            on_click=lambda: grid.set_row_locked(row, True),
+                            shortcut=f"{total} ders")
         if locked > 0:
-            act2 = menu.addAction(f"{label} kilidini aç  ({locked} kilitli)")
-            act2.triggered.connect(lambda: grid.set_row_locked(row, False))
-        if menu.actions():
-            menu.exec(self.mapToGlobal(pos))
+            menu.add_action(f"{who} kilidini aç",
+                            ui_icons.pixmap("unlock", 16, bk_ui.INK_SOFT),
+                            on_click=lambda: grid.set_row_locked(row, False),
+                            shortcut=f"{locked} kilitli")
+        # Satırın dikey ortasından, başlığın sağ kenarından açılıyor.
+        y = self.sectionViewportPosition(row) + self.sectionSize(row) // 2
+        menu.popup_at(self.mapToGlobal(QPoint(self.width() - 6, y)))
 
     def set_active_row(self, row):
         """Seçili sınıf/öğretmen satırı. Gridde bir hücre seçmek de buraya düşer."""
@@ -3138,22 +3154,64 @@ class DropTableWidget(QTableWidget):
                 if filled:
                     if vis.text:
                         draw_pix(x, y, stamp(vis.text, vis.fg, vis.font_px, w, h))
+                    # KİLİT: KUTU DEĞİL, KİLİT.
+                    #
+                    # Burada turuncu yuvarlatılmış bir kare çizilip içine
+                    # BOŞ bir metin yazılıyordu — glif bir ara kaldırılmış
+                    # ama kutusu kalmış. Ekranda anlamı olmayan turuncu
+                    # bir leke duruyordu. Artık kilidin kendisi çiziliyor:
+                    # dersin renginin koyusunda yuvarlak bir zemin,
+                    # üstünde beyaz kilit.
                     if vis.locked:
-                        badge = QRectF(x + 0.5, y + 0.5, 12, 12)
-                        painter.setBrush(_LOCK_BG)
-                        set_pen(_LOCK_PEN)
-                        painter.drawRoundedRect(badge, 2.5, 2.5)
-                        painter.setFont(_cell_font(6.5))
-                        set_pen(_LOCK_INK)
-                        painter.drawText(badge, Qt.AlignCenter, "")
+                        draw_pix(x + w - 17, y + 2, self._lock_stamp(vis.bg))
                     if vis.combined:
-                        badge = QRectF(x + w - 17, y + 1, 16, 16)
-                        painter.setBrush(_COMB_BG)
-                        set_pen(_COMB_PEN)
-                        painter.drawRoundedRect(badge, 3, 3)
-                        painter.setFont(_emoji_font(9))
-                        set_pen(_COMB_INK)
-                        painter.drawText(badge, Qt.AlignCenter, "")
+                        draw_pix(x + 2, y + h - 17, self._combined_stamp(vis.bg))
+
+    def _badge_stamp(self, name, cell_bg, glyph_colour=None):
+        """Hücre köşesine basılan küçük ikon; hücre rengine göre önbellekli.
+
+        Her boyamada ikon yeniden üretilmesin diye (kırk sütun × on satır)
+        sonuç hücre rengine göre saklanıyor.
+        """
+        dpr = self.devicePixelRatioF()
+        base = QColor(cell_bg) if cell_bg else QColor("#64748B")
+        key = (name, base.rgb(), dpr)
+        cache = getattr(self, "_badge_stamps", None)
+        if cache is None:
+            cache = self._badge_stamps = {}
+        pm = cache.get(key)
+        if pm is not None:
+            return pm
+
+        size = 15
+        pm = QPixmap(int(size * dpr), int(size * dpr))
+        pm.setDevicePixelRatio(dpr)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        disc = base.darker(165)
+        disc.setAlpha(245)
+        p.setBrush(QBrush(disc))
+        p.setPen(QPen(QColor(255, 255, 255, 190), 1))
+        p.drawEllipse(QRectF(0.5, 0.5, size - 1, size - 1))
+        p.end()
+
+        glyph = ui_icons.pixmap(name, int(size * 0.70), glyph_colour or "#FFFFFF")
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        gx = (size - glyph.width() / glyph.devicePixelRatio()) / 2.0
+        gy = (size - glyph.height() / glyph.devicePixelRatio()) / 2.0
+        p.drawPixmap(QPointF(gx, gy), glyph)
+        p.end()
+
+        cache[key] = pm
+        return pm
+
+    def _lock_stamp(self, cell_bg):
+        return self._badge_stamp("lock", cell_bg)
+
+    def _combined_stamp(self, cell_bg):
+        return self._badge_stamp("link", cell_bg)
 
     def _text_stamp(self, text, colour, font_px, w, h):
         dpr = self.devicePixelRatioF()
