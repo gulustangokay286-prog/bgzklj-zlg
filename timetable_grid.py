@@ -3115,11 +3115,35 @@ class DropTableWidget(QTableWidget):
         draw_pix = painter.drawPixmap
         set_pen = painter.setPen
 
-        for r in range(top, bottom + 1):
+        # ÜÇ KATMAN: ZEMİN, IZGARA, KART.
+        #
+        # Hepsi tek döngüde çiziliyordu ve bu iki şeyi bozuyordu:
+        #
+        # 1) Çok saatlik bir dersin İÇİNDEKİ hücreler için _build_visual
+        #    None döndürüyor ve döngü onları atlıyordu — o hücrelerin
+        #    ızgara çizgisi de, gün ayracı da hiç çizilmiyordu. Gün sonuna
+        #    denk gelen her blok, o günün ayracını yiyordu: dikey çizgi
+        #    satır satır kesiliyordu.
+        # 2) Kart kendi hücresinde çizilip sonra KOMŞU hücrenin çizgisi
+        #    çiziliyordu, yani çizgi kartın üstüne binebiliyordu.
+        #
+        # Artık sıra sabit: önce her hücrenin zemini ve ızgarası (blok
+        # içindekiler dahil, hiçbiri atlanmadan), sonra kartlar — kart
+        # altındaki çizgiyi kendi zeminiyle siliyor — en sonda gün
+        # ayraçları, kesintisiz ve en üstte.
+        rows = [r for r in range(top, bottom + 1) if hs[r] > 0]
+
+        def cell_w(c):
+            nxt = xs.get(c + 1)
+            if nxt is None:
+                nxt = xs[c] + self.columnWidth(c)
+            return nxt - xs[c]
+
+        # ── Katman 1: zemin + ızgara ──────────────────────────────────
+        set_pen(_PEN_HAIRLINE)
+        for r in rows:
             y = ys[r]
             h = hs[r]
-            if h <= 0:
-                continue
             y2 = y + h - 1
             rowcache = cache.get(r)
             if rowcache is None:
@@ -3131,33 +3155,39 @@ class DropTableWidget(QTableWidget):
                         ctx = self._paint_context()
                     vis = build(r, c, ctx)
                     rowcache[c] = vis
+                x = xs[c]
+                cw = cell_w(c)
+                if cw <= 0:
+                    continue
+                # vis None: bir bloğun içindeki hücre. Zemini yine de
+                # temizleniyor ve ızgarası çiziliyor; kart birazdan
+                # üstünü kapatacak.
+                bg = _CELL_CANVAS if (vis is None or vis.filled) else vis.bg
+                fill(x, y, cw, h, bg)
+                cx2 = x + cw - 1
+                line(cx2, y, cx2, y2)
+                line(x, y2, cx2, y2)
+
+        # ── Katman 2: kartlar, yazı, rozetler, seçim ──────────────────
+        for r in rows:
+            y = ys[r]
+            h = hs[r]
+            rowcache = cache.get(r) or {}
+            for c in cols:
+                vis = rowcache.get(c)
                 if vis is None:
                     continue
                 w = vis.width
                 if w <= 0:
                     continue
                 x = xs[c]
-                x2 = x + w - 1
-
                 filled = vis.filled
 
-                # DERS BİR KART, HÜCRE DEĞİL.
-                #
-                # Dolu hücreler de boş hücreler gibi köşeden köşeye
-                # doldurulan dikdörtgenlerdi; ızgaranın çizgileriyle
-                # birleşince ders, tablonun boyanmış bir karesi gibi
-                # duruyordu. Kart artık hücrenin bir piksel içinden
-                # başlıyor ve köşeleri yumuşak: ızgaranın ÜSTÜNDE duran
-                # ayrı bir nesne.
                 if filled:
-                    # DOLU HÜCREDE IZGARA YOK.
-                    #
-                    # Kart, altındaki boş hücrenin YERİNE geçiyor: hücre
-                    # zemini temizleniyor, kenar çizgileri hiç çizilmiyor.
-                    # Önce kart çiziliyor ama ızgara da altından devam
-                    # ediyordu; kartın köşesinde iki dik çizginin ucu
-                    # kalıyor ve yumuşak köşe sert bir köşenin içinde
-                    # duruyordu. Bir şey koyulan yerde boş ızgara kaybolur.
+                    # Kart, altındaki boş hücrenin YERİNE geçiyor: kendi
+                    # alanını temizliyor, ızgara çizgileri onun altında
+                    # kalıyor. Bir şeyin konulduğu yerde boş ızgara
+                    # kaybolur.
                     fill(x, y, w, h, _CELL_CANVAS)
                     painter.setPen(Qt.NoPen)
                     painter.setBrush(vis.bg)
@@ -3169,20 +3199,15 @@ class DropTableWidget(QTableWidget):
                     rad = max(4.0, min(_CARD_RADIUS, min(cw, ch) * 0.26))
                     painter.drawRoundedRect(
                         QRectF(x + _CARD_PAD, y + _CARD_PAD, cw, ch), rad, rad)
-                else:
-                    fill(x, y, w, h, vis.bg)
-                    set_pen(_PEN_HAIRLINE)
-                    line(x2, y, x2, y2)
-                    line(x, y2, x2, y2)
 
-                # Gün sınırı yapısal: dolu hücrede de duruyor, ama kartın
-                # dışından geçiyor.
-                if periods > 0 and (c + 1) % periods == 0:
-                    set_pen(_PEN_DAYSEP)
-                    line(x2, y, x2, y2)
-
-                if vis.text and not filled:
+                if vis.text:
                     draw_pix(x, y, stamp(vis.text, vis.fg, vis.font_px, w, h))
+
+                if filled:
+                    if vis.locked:
+                        draw_pix(int(x + w - 18), int(y + 4), self._lock_stamp(vis.bg))
+                    if vis.combined:
+                        draw_pix(int(x + 4), int(y + h - 19), self._combined_stamp(vis.bg))
 
                 if (r, c) in selected:
                     # Seçim çerçevesi kartın köşesini izler; köşeli bir
@@ -3197,21 +3222,16 @@ class DropTableWidget(QTableWidget):
                         QRectF(x + _CARD_PAD + 0.5, y + _CARD_PAD + 0.5, sw, sh),
                         srad, srad)
 
-                if filled:
-                    if vis.text:
-                        draw_pix(x, y, stamp(vis.text, vis.fg, vis.font_px, w, h))
-                    # KİLİT: KUTU DEĞİL, KİLİT.
-                    #
-                    # Burada turuncu yuvarlatılmış bir kare çizilip içine
-                    # BOŞ bir metin yazılıyordu — glif bir ara kaldırılmış
-                    # ama kutusu kalmış. Ekranda anlamı olmayan turuncu
-                    # bir leke duruyordu. Artık kilidin kendisi çiziliyor:
-                    # dersin renginin koyusunda yuvarlak bir zemin,
-                    # üstünde beyaz kilit.
-                    if vis.locked:
-                        draw_pix(int(x + w - 18), int(y + 4), self._lock_stamp(vis.bg))
-                    if vis.combined:
-                        draw_pix(int(x + 4), int(y + h - 19), self._combined_stamp(vis.bg))
+        # ── Katman 3: gün ayraçları ───────────────────────────────────
+        if periods > 0 and rows:
+            set_pen(_PEN_DAYSEP)
+            y_top = ys[rows[0]]
+            y_bot = ys[rows[-1]] + hs[rows[-1]] - 1
+            for c in cols:
+                if (c + 1) % periods:
+                    continue
+                cx2 = xs[c] + cell_w(c) - 1
+                line(cx2, y_top, cx2, y_bot)
 
     def _badge_stamp(self, name, cell_bg, glyph_colour=None):
         """Hücre köşesine basılan küçük ikon; hücre rengine göre önbellekli.
