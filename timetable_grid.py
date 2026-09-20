@@ -2121,6 +2121,7 @@ _LIVE_TABLES = weakref.WeakSet()
 _TEXT_STAMPS = {}
 _MAX_SPAN = 8                      # bir dersin kaplayabileceği en fazla saat
 
+_CELL_CANVAS = QColor("#FFFFFF")   # kartın altında kalan hücre zemini
 _PEN_HAIRLINE = QPen(QColor("#CBD5E1"), 1)
 _PEN_DAYSEP = QPen(QColor("#C3C9D4"), 1.2)   # başlıktaki gün çizgisiyle aynı ton
 _PEN_SELECTED = QPen(QColor("#0071E3"), 2)
@@ -3132,7 +3133,24 @@ class DropTableWidget(QTableWidget):
                 x = xs[c]
                 x2 = x + w - 1
 
-                fill(x, y, w, h, vis.bg)
+                filled = vis.filled
+
+                # DERS BİR KART, HÜCRE DEĞİL.
+                #
+                # Dolu hücreler de boş hücreler gibi köşeden köşeye
+                # doldurulan dikdörtgenlerdi; ızgaranın çizgileriyle
+                # birleşince ders, tablonun boyanmış bir karesi gibi
+                # duruyordu. Kart artık hücrenin bir piksel içinden
+                # başlıyor ve köşeleri yumuşak: ızgaranın ÜSTÜNDE duran
+                # ayrı bir nesne.
+                if filled:
+                    fill(x, y, w, h, _CELL_CANVAS)
+                    painter.setPen(Qt.NoPen)
+                    painter.setBrush(vis.bg)
+                    painter.drawRoundedRect(
+                        QRectF(x + 1.0, y + 1.0, w - 2.0, h - 2.0), 5.0, 5.0)
+                else:
+                    fill(x, y, w, h, vis.bg)
 
                 set_pen(_PEN_HAIRLINE)
                 line(x2, y, x2, y2)
@@ -3142,7 +3160,6 @@ class DropTableWidget(QTableWidget):
                     set_pen(_PEN_DAYSEP)
                     line(x2, y, x2, y2)
 
-                filled = vis.filled
                 if vis.text and not filled:
                     draw_pix(x, y, stamp(vis.text, vis.fg, vis.font_px, w, h))
 

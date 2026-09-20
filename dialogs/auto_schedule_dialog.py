@@ -7,7 +7,8 @@ from PySide6.QtWidgets import (
     QComboBox, QWidget, QFrame, QScrollArea, QGraphicsDropShadowEffect,
     QMessageBox
 )
-from PySide6.QtCore import Qt, QTimer, QRectF, QByteArray, QPropertyAnimation, QEasingCurve, Property, Signal
+from PySide6.QtCore import (Qt, QTimer, QRectF, QPoint, QByteArray,
+                            QPropertyAnimation, QEasingCurve, Property, Signal)
 from PySide6.QtGui import (
     QFont, QColor, QPainter, QBrush, QPen, QLinearGradient,
     QRadialGradient, QPainterPath, QPixmap
@@ -577,14 +578,29 @@ class AutoScheduleDialog(QDialog):
         self.setModal(True)
         
         # Clean Apple Sheet Design System
+        # Çizelge sıfırlama sayfasıyla aynı kabuk: çerçevesiz, saydam
+        # zemin, içeride tek bir kart. Sistem başlık çubuğu ve sistem
+        # gölgesi yok — ikisi de kartın kendi gölgesiyle çakışıyor ve
+        # etrafında ikinci bir pencere varmış gibi duruyordu.
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint
+                            | Qt.NoDropShadowWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        self._drag_from = None
+
         self.setStyleSheet("""
             QDialog {
-                background-color: #F5F5F7;
+                background: transparent;
+            }
+            QFrame#sheetCard {
+                background-color: #FFFFFF;
+                border: 1px solid rgba(15, 23, 42, 0.08);
+                border-radius: 20px;
             }
             QFrame#card {
-                background-color: #FFFFFF;
-                border: 1px solid rgba(0, 0, 0, 0.08);
-                border-radius: 12px;
+                background-color: #FBFCFD;
+                border: 1px solid rgba(15, 23, 42, 0.07);
+                border-radius: 14px;
             }
             #etutPanel {
                 background-color: #F8F9FA;
@@ -637,69 +653,120 @@ class AutoScheduleDialog(QDialog):
                 outline: none;
             }
             QPushButton#btnCancel {
-                background: #FFFFFF;
-                color: #1D1D1F;
-                border: 1px solid #D2D2D7;
-                border-radius: 8px;
-                padding: 8px 22px;
+                background: transparent;
+                color: #6E6E76;
+                border: none;
+                border-radius: 19px;
+                padding: 0 16px;
+                min-height: 38px;
                 font-size: 13px;
                 font-weight: 500;
             }
             QPushButton#btnCancel:hover {
-                background: #F5F5F7;
+                background: rgba(15, 23, 42, 0.05);
+                color: #0F172A;
             }
             QPushButton#btnStart {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0077ED, stop:1 #0071E3);
+                background: #0F4AAB;
                 color: #FFFFFF;
-                border: 1px solid #0062C4;
-                border-radius: 8px;
-                padding: 8px 26px;
+                border: none;
+                border-radius: 19px;
+                padding: 0 24px;
+                min-height: 38px;
                 font-size: 13px;
                 font-weight: 600;
             }
             QPushButton#btnStart:hover {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0082FB, stop:1 #0077ED);
+                background: #0C3C8C;
             }
             QPushButton#btnStart:pressed {
-                background: #0062C4;
+                background: #082B67;
             }
             QPushButton#btnStart:disabled {
-                background: #E5E5EA;
-                color: #8E8E93;
-                border: none;
+                background: #E2E8F0;
+                color: #94A3B8;
             }
         """)
         
         self._build_ui()
         self.adjustSize()
+        self._center_on(parent)
+
+    # Çerçevesiz pencere elle taşınır ve elle ortalanır; sistem başlık
+    # çubuğu olmadığı için ikisini de Qt yapmıyor.
+    def _center_on(self, parent):
+        from PySide6.QtWidgets import QApplication
+        self.adjustSize()
+        ref = None
+        if parent is not None:
+            try:
+                w = parent.window()
+                if w is not None and w.isVisible():
+                    ref = w.frameGeometry()
+            except Exception:
+                ref = None
+        if ref is None:
+            screen = QApplication.screenAt(self.pos()) or QApplication.primaryScreen()
+            if screen is None:
+                return
+            ref = screen.availableGeometry()
+        self.move(ref.center() - QPoint(self.width() // 2, self.height() // 2))
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self._drag_from = e.globalPosition().toPoint() - self.frameGeometry().topLeft()
+        super().mousePressEvent(e)
+
+    def mouseMoveEvent(self, e):
+        if self._drag_from is not None and (e.buttons() & Qt.LeftButton):
+            self.move(e.globalPosition().toPoint() - self._drag_from)
+        super().mouseMoveEvent(e)
+
+    def mouseReleaseEvent(self, e):
+        self._drag_from = None
+        super().mouseReleaseEvent(e)
 
     def _build_ui(self):
-        root_layout = QVBoxLayout(self)
-        root_layout.setContentsMargins(20, 16, 20, 16)
-        root_layout.setSpacing(12)
-        
-        # ═══ 1. SEAMLESS HEADER (Pure 3D Vector Icon + BGZ Branding) ═══
-        header_lay = QHBoxLayout()
-        header_lay.setContentsMargins(4, 2, 4, 4)
-        header_lay.setSpacing(14)
-        
-        self.icon_3d = Apple3DIconWidget(self)
-        header_lay.addWidget(self.icon_3d, 0, Qt.AlignVCenter)
-        
-        title_col = QVBoxLayout()
-        title_col.setSpacing(1)
-        title_col.setContentsMargins(0, 0, 0, 0)
-        
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(16, 14, 16, 16)
+
+        sheet = QFrame(self)
+        sheet.setObjectName("sheetCard")
+        _sh = QGraphicsDropShadowEffect(sheet)
+        _sh.setBlurRadius(34)
+        _sh.setOffset(0, 10)
+        _sh.setColor(QColor(15, 23, 42, 52))
+        sheet.setGraphicsEffect(_sh)
+        outer.addWidget(sheet)
+
+        root_layout = QVBoxLayout(sheet)
+        root_layout.setContentsMargins(24, 22, 24, 20)
+        root_layout.setSpacing(13)
+
+        # ═══ BAŞLIK: 3B resim üstte, yazı ortada ═══
+        #
+        # Önce solda küçük bir kutu ikonu ve yanında iki satır vardı.
+        # Sıfırlama sayfasıyla aynı dil: resim ortada ve büyük, çünkü
+        # anlatacağı bir şey var — kartlar tablaya sırayla oturuyor.
+        import bk_ui as _bk
+        self.icon_3d = QLabel()
+        self.icon_3d.setAlignment(Qt.AlignCenter)
+        self.icon_3d.setPixmap(_bk.autoplan_3d(84))
+        self.icon_3d.setStyleSheet("background: transparent; border: none;")
+        root_layout.addWidget(self.icon_3d)
+
         lbl_title = QLabel("Otomatik Ders Programı")
-        lbl_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1D1D1F; letter-spacing: -0.3px;")
-        
-        lbl_sub = QLabel("Chenkron Yapay Zeka Optimizasyon Motoru")
-        lbl_sub.setStyleSheet("color: #86868B; font-size: 11.5px;")
-        
-        title_col.addWidget(lbl_title)
-        title_col.addWidget(lbl_sub)
-        header_lay.addLayout(title_col, 1)
-        root_layout.addLayout(header_lay)
+        lbl_title.setAlignment(Qt.AlignCenter)
+        lbl_title.setStyleSheet("font-size: 17px; font-weight: 700; color: #0F172A;"
+                                " letter-spacing: -0.3px; background: transparent; border: none;")
+        root_layout.addWidget(lbl_title)
+
+        lbl_sub = QLabel("Chenkron Optimizasyon Motoru")
+        lbl_sub.setAlignment(Qt.AlignCenter)
+        lbl_sub.setStyleSheet("color: #8A8A93; font-size: 11.5px;"
+                              " background: transparent; border: none;")
+        root_layout.addWidget(lbl_sub)
+        root_layout.addSpacing(2)
         
         # ═══ 2. PARAMETERS CARD ═══
         param_card = QFrame()
