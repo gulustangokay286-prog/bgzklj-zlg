@@ -8,69 +8,6 @@ from ui_icons import icon, pixmap
 
 FONT_FAMILY = ".AppleSystemUIFont, SF Pro Text, -apple-system, Helvetica Neue, Segoe UI, sans-serif"
 
-class _DayHeader(QHeaderView):
-    """Gün başlığı: öğretmenin DERSE GELDİĞİ günler gri zeminde.
-
-    Bu ekranda müsaitlik ayarlanırken eksik olan bilgi şuydu: hoca zaten
-    hangi günler okulda? Bir günü kapatmadan önce o gün çizelgede dersi
-    olup olmadığı görünmüyordu, bakmak için başka ekrana geçmek
-    gerekiyordu. Gri zemin bunu söylüyor, altındaki küçük yazı da kaç
-    saat olduğunu.
-
-    Yalnızca burada var: yazdırma önizlemesi ve çıktı bundan etkilenmez,
-    orası çizelgenin kendisini gösterir, bu ise bir ayar ekranı.
-    """
-    BG = QColor("#F8FAFC")
-    BG_BUSY = QColor("#E6E9EF")
-    INK = QColor("#0F172A")
-    INK_SOFT = QColor("#64748B")
-    LINE = QColor("#E2E8F0")
-
-    def __init__(self, days, parent=None):
-        super().__init__(Qt.Horizontal, parent)
-        self._days = list(days or [])
-        self._hours = {}
-        self.setSectionsClickable(True)
-        self.setHighlightSections(False)
-
-    def sizeHint(self):
-        # setFixedHeight yerine sizeHint: tablo, satırlarının nereden
-        # başlayacağını başlığın sizeHint'inden hesaplıyor. Yüksekliği
-        # doğrudan sabitleyince ikisi birbirini tutmuyor ve satır
-        # başlıkları hücrelerin yarım satır üstüne kayıyordu.
-        s = super().sizeHint()
-        s.setHeight(42)
-        return s
-
-    def set_hours(self, hours):
-        self._hours = dict(hours or {})
-        self.viewport().update()
-
-    def paintSection(self, painter, rect, logicalIndex):
-        painter.save()
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        hrs = int(self._hours.get(logicalIndex, 0) or 0)
-        painter.fillRect(rect, self.BG_BUSY if hrs else self.BG)
-        painter.setPen(QPen(self.LINE, 1))
-        painter.drawLine(rect.left(), rect.bottom(), rect.right(), rect.bottom())
-        painter.drawLine(rect.right(), rect.top() + 6, rect.right(), rect.bottom() - 6)
-
-        name = self._days[logicalIndex] if 0 <= logicalIndex < len(self._days) else ""
-        f = QFont(FONT_FAMILY.split(",")[0].strip(), 9)
-        f.setBold(True)
-        painter.setFont(f)
-        painter.setPen(QPen(self.INK))
-        top = rect.adjusted(0, 4, 0, -(rect.height() // 2) + 2) if hrs else rect
-        painter.drawText(top, Qt.AlignCenter, name)
-        if hrs:
-            f2 = QFont(FONT_FAMILY.split(",")[0].strip(), 8)
-            painter.setFont(f2)
-            painter.setPen(QPen(self.INK_SOFT))
-            painter.drawText(rect.adjusted(0, rect.height() // 2 - 1, 0, -3),
-                             Qt.AlignCenter, f"{hrs} saat derste")
-        painter.restore()
-
-
 class TimeoffDialog(QDialog):
     """
     Öğretmen, Sınıf veya Derslik için Modern Zaman-Kısıtlama Matrisi (Time-off Matrix).
@@ -186,6 +123,10 @@ class TimeoffDialog(QDialog):
         self.personal_data = constraint_sync.get_personal(
             self.entity_dict, name, self.data_store)
 
+        # Çizelgede hangi saatlerin dolu olduğu, hücreler kurulmadan önce
+        # bilinmeli: _update_item_visuals buna bakıyor.
+        self._busy_slots = self._load_busy_slots()
+
         self._build_ui()
 
     def _is_personal(self, d_idx, p_idx):
@@ -223,41 +164,46 @@ class TimeoffDialog(QDialog):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(14)
         
-        # Üst Bilgi Kartı
-        info_frame = QWidget()
-        info_frame.setStyleSheet("""
-            QWidget {
-                background: #F0F9FF;
-                border: 1px solid #BAE6FD;
-                border-radius: 8px;
-                padding: 10px 14px;
+        # AÇIKLAMA EKRANDA DEĞİL, İSTENDİĞİNDE.
+        #
+        # Üstte üç satırlık mavi bir kart vardı ve tablonun nasıl
+        # kullanılacağını anlatıyordu: tıkla, sağ tıkla, başlığa tıkla.
+        # Bu ekranı ilk kez açan bir kez okur, sonraki her açılışta aynı
+        # üç satır tablonun yerini kaplar. Yardım artık sağ üstteki tek
+        # düğmede duruyor; açılınca küçük bir sayfada aynı şeyleri anlatıp
+        # kapanıyor.
+        head = QHBoxLayout()
+        head.setContentsMargins(2, 0, 2, 0)
+        head.setSpacing(8)
+        title = QLabel(self.entity_name)
+        title.setStyleSheet("color: #0F172A; font-size: 15px; font-weight: 700;"
+                            " background: transparent; border: none;")
+        head.addWidget(title)
+        subtitle = QLabel("zaman tablosu")
+        subtitle.setStyleSheet("color: #94A3B8; font-size: 12px;"
+                               " background: transparent; border: none;")
+        head.addWidget(subtitle)
+        head.addStretch(1)
+        btn_help = QPushButton("?")
+        btn_help.setCursor(Qt.PointingHandCursor)
+        btn_help.setFixedSize(24, 24)
+        btn_help.setToolTip("Bu tablo nasıl kullanılır?")
+        btn_help.setStyleSheet("""
+            QPushButton {
+                background: #F1F5F9; color: #475569;
+                border: 1px solid #E2E8F0; border-radius: 12px;
+                font-weight: 700; font-size: 12px;
             }
+            QPushButton:hover { background: #E2E8F0; color: #0F172A; }
         """)
-        info_lay = QVBoxLayout(info_frame)
-        info_lay.setContentsMargins(12, 10, 12, 10)
-        info_lay.setSpacing(4)
-        
-        info_title = QLabel("<b>Zaman Kısıtlama Tablosu</b> — Gün ve saat bazında müsaitlik durumunu ayarlayın.")
-        info_title.setStyleSheet("color: #0369A1; font-size: 13px;")
-        info_desc = QLabel("Hücreye tıklayarak durumu değiştirin (Müsait ✓ ↔ Kısıtlı ✕). Satır veya sütun başlığına tıklayarak tüm günü/saati çevirebilirsiniz.")
-        info_desc.setStyleSheet("color: #0284C7; font-size: 12px;")
-        info_lay.addWidget(info_title)
-        info_lay.addWidget(info_desc)
-        
-        if self.is_teacher:
-            info_teacher = QLabel("Bu öğretmen için bir saati bu kuruma rezerve etmek veya kaldırmak için hücreye sağ tıklayın.")
-            info_teacher.setStyleSheet("color: #0284C7; font-size: 11px; font-weight: 500;")
-            info_lay.addWidget(info_teacher)
-            
-        layout.addWidget(info_frame)
+        btn_help.clicked.connect(self._show_help)
+        head.addWidget(btn_help)
+        layout.addLayout(head)
         
         # Grid: Y-Ekseni = Periyotlar (1..periods), X-Ekseni = Günler (Pzt..Cuma)
         self.table = QTableWidget(self.periods, len(self.days))
         self.table.setVerticalHeaderLabels([f"{i+1}. Ders" for i in range(self.periods)])
         self.table.setHorizontalHeaderLabels(self.days)
-        self._day_header = _DayHeader(self.days, self.table)
-        self.table.setHorizontalHeader(self._day_header)
-        self._day_header.set_hours(self._teaching_hours_by_day())
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setShowGrid(True)
@@ -323,9 +269,9 @@ class TimeoffDialog(QDialog):
         self.lbl_kapali = self._create_legend_item("Kapalı / Kısıtlı (0)", "#E11D48", "#FFF1F2", "#FECDD3")
         bar_layout.addWidget(self.lbl_musait)
         bar_layout.addWidget(self.lbl_kapali)
-        if self.is_teacher and self._teaching_hours_by_day():
+        if getattr(self, "_busy_slots", None):
             bar_layout.addWidget(self._create_legend_item(
-                "Gri gün: çizelgede dersi var", "#475569", "#E6E9EF", "#D3D8E0"))
+                f"Çizelgede dolu: {len(self._busy_slots)}", "#475569", "#ECEEF2", "#D3D8E0"))
         bar_layout.addStretch(1)
         
         layout.addLayout(bar_layout)
@@ -370,17 +316,20 @@ class TimeoffDialog(QDialog):
         
         layout.addLayout(btn_layout)
         
-    def _teaching_hours_by_day(self):
-        """Bu kişinin çizelgede gün başına kaç saat dersi var.
+    def _load_busy_slots(self):
+        """Bu kişinin çizelgede DOLU olduğu saatler: {(gün, saat): "9A · Matematik"}.
+
+        Müsaitlik ayarlanırken eksik olan bilgi buydu: hangi saatlerde zaten
+        ders var? Bir saati kapatmadan önce oraya bir şey yerleşmiş mi
+        görünmüyordu, bakmak için başka ekrana geçmek gerekiyordu.
 
         Aynı blok gride her saati için bir kayıt olarak durabiliyor ve her
-        kayıt bloğun TOPLAM süresini taşıyor; süreleri toplamak o yüzden
-        iki katı sayardı. Saatler kümede toplanıyor, her (gün, saat) bir
-        kez sayılıyor.
+        kayıt bloğun TOPLAM süresini taşıyor; süreleri toplamak iki katı
+        sayardı. Saatler kümede toplanıyor, her (gün, saat) bir kez.
         """
-        slots = set()
+        out = {}
         if not self.is_teacher:
-            return {}
+            return out
         try:
             from auto_scheduler import format_tr_name
             want = format_tr_name(self.entity_name)
@@ -393,15 +342,68 @@ class TimeoffDialog(QDialog):
                 d = int(p.get("day") if "day" in p else p.get("col", 0))
                 per = int(p.get("period") if "period" in p else p.get("row", 0))
                 dur = max(1, int(p.get("duration", 1) or 1))
+                cls = (p.get("class_name") or p.get("class") or "").strip()
+                subj = (p.get("subject_name") or p.get("subject") or "").strip()
+                label = " · ".join(x for x in (cls, subj) if x) or "Ders"
                 for off in range(dur):
-                    slots.add((d, per + off))
+                    out.setdefault((d, per + off), label)
         except Exception as exc:
-            print(f"[Zaman tablosu] ders günleri okunamadı: {exc}")
+            print(f"[Zaman tablosu] dolu saatler okunamadı: {exc}")
             return {}
-        out = {}
-        for d, _per in slots:
-            out[d] = out.get(d, 0) + 1
         return out
+
+    def _show_help(self):
+        """Kullanımı anlatan küçük sayfa — ekranda değil, istendiğinde."""
+        sheet = QDialog(self)
+        sheet.setWindowTitle("Zaman tablosu nasıl kullanılır?")
+        sheet.setModal(True)
+        sheet.setFixedWidth(430)
+        lay = QVBoxLayout(sheet)
+        lay.setContentsMargins(22, 20, 22, 18)
+        lay.setSpacing(12)
+
+        head = QLabel("Zaman tablosu")
+        head.setStyleSheet("color: #0F172A; font-size: 15px; font-weight: 700;")
+        lay.addWidget(head)
+
+        rows = [
+            ("Hücreye tıklayın", "Saati müsait ✓ ile kısıtlı ✕ arasında çevirir."),
+            ("Gün veya saat başlığına tıklayın", "O günün ya da o saatin tamamını birden çevirir."),
+            ("Gri hücreler", "Çizelgede o saate bir ders yerleşmiş demektir; "
+                             "hangisi olduğunu görmek için üzerine gelin."),
+        ]
+        if self.is_teacher:
+            rows.append(("Sağ tıklayın",
+                         "Bir saati bu kuruma rezerve edebilir, kişisel kısıt "
+                         "koyabilir ya da yarım gün kapatabilirsiniz."))
+        for t, d in rows:
+            box = QVBoxLayout()
+            box.setSpacing(2)
+            lt = QLabel(t)
+            lt.setStyleSheet("color: #0F172A; font-size: 12.5px; font-weight: 600;")
+            ld = QLabel(d)
+            ld.setStyleSheet("color: #64748B; font-size: 12px;")
+            ld.setWordWrap(True)
+            box.addWidget(lt)
+            box.addWidget(ld)
+            lay.addLayout(box)
+
+        btn = QPushButton("Anladım")
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setFixedHeight(32)
+        btn.setStyleSheet("""
+            QPushButton {
+                background: #0F4AAB; color: #FFFFFF; border: none;
+                border-radius: 8px; padding: 0 18px; font-weight: 600; font-size: 12.5px;
+            }
+            QPushButton:hover { background: #0C3C8C; }
+        """)
+        btn.clicked.connect(sheet.accept)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        row.addWidget(btn)
+        lay.addLayout(row)
+        sheet.exec()
 
     def _create_legend_item(self, text, fg, bg, border):
         lbl = QLabel(text)
@@ -465,10 +467,20 @@ class TimeoffDialog(QDialog):
         fg_color = ""
         bg_color = ""
 
+        busy_label = getattr(self, "_busy_slots", {}).get(slot)
+
         if state == 2:
             base_text = "✓"
-            fg_color = "#059669"
-            bg_color = "#ECFDF5"
+            if busy_label:
+                # Müsait AMA dolu: çizelgede o saate bir ders yerleşmiş.
+                # Yeşil "burası boş, kullanılabilir" demektir; burası boş
+                # değil. Aynı işaret, sakin bir zeminde.
+                fg_color = "#64748B"
+                bg_color = "#ECEEF2"
+                item.setToolTip(f"Çizelgede bu saatte ders var: {busy_label}")
+            else:
+                fg_color = "#059669"
+                bg_color = "#ECFDF5"
         elif state == 0:
             base_text = "✕"
             fg_color = "#E11D48"
