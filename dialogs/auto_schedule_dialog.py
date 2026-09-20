@@ -693,7 +693,12 @@ class CrossConflictResolutionDialog(QDialog):
         # QGraphicsDropShadowEffects were removed for this same symptom; this is the
         # remaining shadow source. The cards draw their own border, so nothing is lost.
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool | Qt.NoDropShadowWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground)
+        # Saydam DEĞİL: içeriği henüz boyanmamış saydam bir pencere
+        # macOS'ta kapkara görünüyor. Bu pencereler arayüzün meşgul
+        # olduğu anlarda (kaydetme, motoru durdurma) açıldığı için
+        # ekranda siyah dikdörtgenler olarak kalıyordu.
+        self.setAttribute(Qt.WA_TranslucentBackground, False)
+        self.setAutoFillBackground(True)
         self.setFixedSize(540, 420)
         
         layout = QVBoxLayout(self)
@@ -891,6 +896,8 @@ class AutoScheduleDialog(QDialog):
         self.data_store = data_store
         self.target_class = target_class
         self.worker = None
+        self._stopping = False
+        self._asking_continue = False
         self.setWindowTitle("Otomatik Ders Programı Oluşturucu")
         self.setFixedWidth(560)
         self.setModal(True)
@@ -1463,6 +1470,8 @@ class AutoScheduleDialog(QDialog):
             optimal_mode=True,
             allow_split=True,
         )
+        self._stopping = False
+        self._asking_continue = False
         self.worker.progress_updated.connect(self._on_progress)
         self.worker.iteration_updated.connect(self._on_iteration)
         self.worker.finished_successfully.connect(self._on_finished)
@@ -1471,11 +1480,20 @@ class AutoScheduleDialog(QDialog):
         self.worker.start()
 
     def _on_ask_continue(self, info):
-        """Motor tam çizelgeye ulaşamadı; beklemeye devam edilsin mi?"""
-        if getattr(self, "_closing", False) or self.worker is None or not self.worker.isRunning():
+        """Motor tam çizelgeye ulaşamadı; beklemeye devam edilsin mi?
+
+        Bu soru arka arkaya gelebiliyor. İki kapı var: kullanıcı zaten
+        durdurmak istediyse hiç sorulmuyor, ve bir soru ekrandayken
+        ikincisi açılmıyor — yoksa tek durdurmada onlarca pencere
+        birikiyordu.
+        """
+        if (getattr(self, "_closing", False) or getattr(self, "_stopping", False)
+                or getattr(self, "_asking_continue", False)
+                or self.worker is None or not self.worker.isRunning()):
             if self.worker is not None:
                 self.worker.answer_continue(False)
             return
+        self._asking_continue = True
         saat, toplam = info.get("saat", 0), info.get("toplam", 0)
         gecen = int(info.get("gecen", 0))
         eksik = max(0, toplam - saat)
@@ -1505,12 +1523,19 @@ class AutoScheduleDialog(QDialog):
         b_wait = box.addButton("Bir tur daha bekle", QMessageBox.AcceptRole)
         b_stop = box.addButton("Bu hâliyle bitir", QMessageBox.RejectRole)
         box.setDefaultButton(b_stop)
-        box.exec()
-        devam = box.clickedButton() is b_wait
+        try:
+            box.exec()
+            devam = box.clickedButton() is b_wait
+        finally:
+            self._asking_continue = False
+        # Kutu ekrandayken kullanıcı "Durdur ve Kaydet"e basmış olabilir.
+        if getattr(self, "_stopping", False) or getattr(self, "_closing", False):
+            devam = False
         if devam:
             self.lbl_info.setText("Aramaya devam ediliyor…")
             self.lbl_info.setStyleSheet("color: #0071E3; font-weight: 500;")
-        self.worker.answer_continue(devam)
+        if self.worker is not None:
+            self.worker.answer_continue(devam)
 
     def _confirm_feasibility(self):
         """Başlamadan önce kuralları derler; uygulanamayacak olanları SÖYLER.
@@ -1554,6 +1579,15 @@ class AutoScheduleDialog(QDialog):
 
     def _on_cancel_or_stop(self):
         if self.worker and self.worker.isRunning():
+            # DURDURMA İŞARETİ.
+            #
+            # "Durdur ve Kaydet"e basıldıktan sonra motor hâlâ birkaç
+            # saniye çalışıyor ve bu sırada "beklemeye devam edeyim mi?"
+            # diye sorabiliyor. O soru her gelişinde bir pencere açılıyor;
+            # durdurmak isteyen kullanıcının karşısına arka arkaya
+            # pencereler çıkıyordu. Bayrak konunca o soruya artık
+            # sorulmadan "hayır" deniyor.
+            self._stopping = True
             self.worker.stop()
             self.lbl_info.setText("Durduruluyor, en iyi çözüm kaydediliyor...")
         else:

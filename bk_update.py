@@ -184,7 +184,12 @@ class UpdateAvailableSheet(QWidget):
 
     def __init__(self, parent: QWidget, new_version: str):
         super().__init__(parent, Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
-        self.setAttribute(Qt.WA_TranslucentBackground)
+        # Saydam DEĞİL: içeriği henüz boyanmamış saydam bir pencere
+        # macOS'ta kapkara görünüyor. Bu pencereler arayüzün meşgul
+        # olduğu anlarda (kaydetme, motoru durdurma) açıldığı için
+        # ekranda siyah dikdörtgenler olarak kalıyordu.
+        self.setAttribute(Qt.WA_TranslucentBackground, False)
+        self.setAutoFillBackground(True)
         self._choice_made = False
 
         container = QWidget(self)

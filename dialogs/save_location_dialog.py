@@ -137,7 +137,12 @@ class FolderTransferChoiceDialog(QDialog):
         self.setWindowTitle("Klasör Değişikliği")
         self.setFixedSize(520, 270)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool | Qt.NoDropShadowWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground)
+        # Saydam DEĞİL: içeriği henüz boyanmamış saydam bir pencere
+        # macOS'ta kapkara görünüyor. Bu pencereler arayüzün meşgul
+        # olduğu anlarda (kaydetme, motoru durdurma) açıldığı için
+        # ekranda siyah dikdörtgenler olarak kalıyordu.
+        self.setAttribute(Qt.WA_TranslucentBackground, False)
+        self.setAutoFillBackground(True)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(12, 12, 12, 12)
@@ -285,7 +290,12 @@ class SaveLocationDialog(QDialog):
         self.setWindowTitle("Nereye Kaydedilsin?")
         self.setFixedSize(760, 620)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool | Qt.NoDropShadowWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground)
+        # Saydam DEĞİL: içeriği henüz boyanmamış saydam bir pencere
+        # macOS'ta kapkara görünüyor. Bu pencereler arayüzün meşgul
+        # olduğu anlarda (kaydetme, motoru durdurma) açıldığı için
+        # ekranda siyah dikdörtgenler olarak kalıyordu.
+        self.setAttribute(Qt.WA_TranslucentBackground, False)
+        self.setAutoFillBackground(True)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(14, 14, 14, 14)
