@@ -33,6 +33,14 @@ hidden_modules = [
     'scheduler.finish', 'scheduler.model', 'scheduler.native_bridge', 'scheduler.occupancy',
     'scheduler.placer', 'scheduler.polish', 'scheduler.problem', 'scheduler.rules',
     'scheduler.verify', 'scheduler.worker',
+    # Bu modüller doğrudan import edilmiyor, geç yükleniyor; PyInstaller
+    # onları kendiliğinden bulamıyor ve kurulumda "modül yok" hatası
+    # veriyorlardı.
+    'window_log', 'ui_icons', 'assistant', 'assistant.agent', 'assistant.actions',
+    'assistant.gemini', 'assistant.tools', 'assistant.widget', 'assistant.config',
+    'onboarding', 'onboarding.state', 'onboarding.spotlight', 'onboarding.whatsnew',
+    'onboarding.relations',
+    'dialogs.notice_sheet', 'dialogs.plan_result_sheet', 'dialogs.reset_schedule_sheet',
 ]
 if os.path.isdir(RELEASE_SYSTEM):
     hidden_modules += [
@@ -66,6 +74,17 @@ candidate_datas = [
     ('bk_shield_clean.png', '.'),
     ('bk_lockup.png', '.'),
     ('bk_dashboard_brand.png', '.'),
+    # C++ PLANLAMA MOTORU.
+    #
+    # Bu klasör pakete girmediği için Windows kurulumunda motor
+    # bulunamıyor ve otomatik planlayıcı hiç açılmıyordu. Derlenmiş ikili
+    # (chenkron-scheduler[.exe]) ve kaynağı buradan gidiyor; kaynağın da
+    # gitmesi, ikili yoksa makinede derleyebilmek için.
+    ('scheduler/native', 'scheduler/native'),
+    # Asistan ve tanıtım paketleri: modül olarak gizli içe aktarılıyorlar
+    # ama veri dosyaları (ikon, metin) yanlarında gitmeli.
+    ('assistant', 'assistant'),
+    ('onboarding', 'onboarding'),
 ]
 
 app_datas = []

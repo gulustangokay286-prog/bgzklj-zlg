@@ -6,7 +6,18 @@ from .build import build_world, attach_slots, apply_subject_groups
 from .rules import compile_rules
 from .problem import Problem, impossible_groups
 from .diagnostics import diagnose
-from .native_bridge import search, search_portfolio
+from .native_bridge import search, search_portfolio, NativeEngineMissing
+def _safe_search(pb, *a, **k):
+    """Motor yoksa boş sonuç döndürür; arama olmadan da akış sürer."""
+    try:
+        return search(pb, *a, **k)
+    except NativeEngineMissing as exc:
+        print(f'[engine] {exc}')
+        return dict(hours=0, steps=0, restarts=0, soft_cost=0,
+                    cancelled=False, positions=[-1]*len(pb.world.cards))
+
+
+
 from .verify import validate
 from .model import norm_key, norm_class
 
@@ -434,15 +445,33 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
         # şeritler taşır; sıralı aramaya bütçenin tamamını vermek makinenin
         # yedi çekirdeğini boş bırakır ve tek bir tohuma mahkûm eder.
         stage1_share=0.18
-        rec=search(problem,remaining*stage1_share*(0.7 if trial is not w else 1),
-                   seed if seed is not None else 20260912,search_target,
-                   progress=on_progress,cancelled=cancelled)
-        if trial is not w and rec['hours']<search_target and not rec['cancelled']:
+        # C++ motoru olmayabilir (Windows kurulumunda .exe derlenmemiş
+        # olabiliyor). O zaman arama aşaması boş geçilir ve çizelgeyi
+        # CP-SAT kurar; planlayıcı hiç açılmamak yerine çalışmaya devam
+        # eder.
+        def _no_engine(pb):
+            return dict(hours=0, steps=0, restarts=0, soft_cost=0,
+                        cancelled=False, positions=[-1]*len(pb.world.cards))
+
+        try:
+            rec=search(problem,remaining*stage1_share*(0.7 if trial is not w else 1),
+                       seed if seed is not None else 20260912,search_target,
+                       progress=on_progress,cancelled=cancelled)
+        except NativeEngineMissing as exc:
+            print(f'[engine] {exc}')
+            native_ok=False
+            rec=_no_engine(problem)
+        else:
+            native_ok=True
+        if native_ok and trial is not w and rec['hours']<search_target and not rec['cancelled']:
             remaining=max(0,time_budget-(time.monotonic()-start))
             if remaining>0:
                 problem=Problem(w,rules,completion_first=completion_first)
-                retry=search(problem,remaining*stage1_share,(seed if seed is not None else 20260912)+7919,
-                             search_target,progress=on_progress,cancelled=cancelled)
+                try:
+                    retry=search(problem,remaining*stage1_share,(seed if seed is not None else 20260912)+7919,
+                                 search_target,progress=on_progress,cancelled=cancelled)
+                except NativeEngineMissing:
+                    retry=rec
                 if retry['hours']>rec['hours']: rec=retry
         res.positions=rec['positions'];res.steps=rec['steps'];res.attempts=rec['restarts']+1
         res.soft_cost=rec['soft_cost']
@@ -481,8 +510,14 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
             span=min(left*0.92,max(3.0,time_budget*0.12))
             seeds=[base_seed*generation+k*15485863+generation*2654435761
                    for k in range(1,lanes+1)]
-            alt=search_portfolio(pr,span,seeds,search_target,
-                                 progress=on_progress,cancelled=cancelled)
+            try:
+                alt=search_portfolio(pr,span,seeds,search_target,
+                                     progress=on_progress,cancelled=cancelled)
+            except NativeEngineMissing as exc:
+                # Motor yok (ör. Windows kurulumunda .exe derlenmemiş):
+                # arama aşaması atlanıyor, CP-SAT eldeki sonucu sürdürüyor.
+                print(f'[engine] {exc}')
+                break
             res.steps+=alt['steps'];res.attempts+=alt['restarts']+1
             if alt['hours']>rec['hours'] or (alt['hours']==rec['hours']
                                              and alt['soft_cost']<rec['soft_cost']):
@@ -517,7 +552,7 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
                         card.slots=((idx,locked.footprint(d0,p0,card.duration)),)
                 stage2=Problem(locked,rules,completion_first=True)
                 if not stage2.errors:
-                    rec2=search(stage2,remaining,
+                    rec2=_safe_search(stage2,remaining,
                                 (seed if seed is not None else 20260912)+104729,
                                 search_target,progress=on_progress,cancelled=cancelled)
                     placed1=sum(c.duration*len(c.classes)

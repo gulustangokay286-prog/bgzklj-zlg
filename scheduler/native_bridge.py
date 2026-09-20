@@ -12,6 +12,15 @@ import time
 _BUILD_LOCK = threading.Lock()
 
 
+class NativeEngineMissing(RuntimeError):
+    """C++ motoru yok ya da derlenemiyor.
+
+    Bu bir ARIZA değil, bir yokluk: motor bulunamadığında planlama
+    durmamalı, CP-SAT yoluyla devam etmeli. Ayrı bir tip olması, çağıran
+    tarafın bunu gerçek bir motor hatasından ayırmasını sağlıyor.
+    """
+
+
 def native_binary():
     filename = 'chenkron-scheduler.exe' if os.name == 'nt' else 'chenkron-scheduler'
     bundled = Path(getattr(sys, '_MEIPASS', Path(__file__).parent.parent)) / 'scheduler' / 'native' / filename
@@ -20,15 +29,23 @@ def native_binary():
                               bundled.stat().st_mtime >= source.stat().st_mtime):
         return bundled
     if getattr(sys, 'frozen', False):
-        raise RuntimeError('Uygulama paketinde C++ planlama motoru eksik. Uygulamayı yeniden paketleyin.')
+        # Paket içinde motor yoksa çalışma DURMAZ; çağıran taraf bu hatayı
+        # yakalayıp CP-SAT ile devam ediyor. Windows kurulumunda .exe
+        # derlenmemiş olabiliyor ve orada planlayıcı hiç açılmıyordu.
+        raise NativeEngineMissing(
+            'Uygulama paketinde C++ planlama motoru yok; CP-SAT ile devam ediliyor.')
     source = Path(__file__).parent / 'native' / 'search.cpp'
     digest = hashlib.sha256(source.read_bytes()).hexdigest()[:20]
     target = Path(tempfile.gettempdir()) / 'chenkron-native' / digest / filename
     with _BUILD_LOCK:
         if not target.is_file():
-            compiler = shutil.which(os.environ.get('CXX', 'clang++')) or shutil.which('g++')
+            # Windows'ta clang++/g++ çoğu makinede yok; cl.exe de aranıyor,
+            # bulunamazsa motor yok sayılıyor (çağıran CP-SAT'e düşüyor).
+            compiler = (shutil.which(os.environ.get('CXX', 'clang++'))
+                        or shutil.which('g++') or shutil.which('c++'))
             if not compiler:
-                raise RuntimeError('C++ motoru derlenmemiş; clang++ veya g++ gerekiyor.')
+                raise NativeEngineMissing(
+                    'C++ motoru derlenemiyor (clang++/g++ yok); CP-SAT ile devam ediliyor.')
             target.parent.mkdir(parents=True, exist_ok=True)
             temp = target.with_name(filename+f'.{os.getpid()}.tmp')
             built = subprocess.run([compiler, '-std=c++17', '-O3', '-DNDEBUG', str(source), '-o', str(temp)],

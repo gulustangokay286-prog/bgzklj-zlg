@@ -1991,7 +1991,8 @@ class UnplacedLessonsDock(QWidget):
             # oluyor. Dokun kendi sol kenarı çıkarılınca hedef, dokun iç
             # koordinatına dönüyor.
             dock_left = self.mapTo(grid, self.rect().topLeft()).x()
-            lead_shift = ((icon.width() if icon else 0) + 8) / 2.0
+            # +8: göz bloğu hâlâ bir tık solda görüyor.
+            lead_shift = ((icon.width() if icon else 0) + 8) / 2.0 + 8
             want_center = grid.width() / 2.0 + lead_shift - dock_left
             block = text.sizeHint().width() + (icon.width() if icon else 0) + 8
             left = int(max(0.0, want_center - block / 2.0))
