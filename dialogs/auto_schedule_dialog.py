@@ -2,12 +2,14 @@
 auto_schedule_dialog.py — Otomatik Yerleştirme (Apple Minimalist & BGZ Yapay Zeka Motoru)
 """
 import math
+
+import bk_ui
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QComboBox, QWidget, QFrame, QScrollArea, QGraphicsDropShadowEffect,
     QMessageBox
 )
-from PySide6.QtCore import (Qt, QTimer, QRectF, QPoint, QByteArray,
+from PySide6.QtCore import (Qt, QTimer, QRectF, QPoint, QPointF, QByteArray,
                             QPropertyAnimation, QEasingCurve, Property, Signal)
 from PySide6.QtGui import (
     QFont, QColor, QPainter, QBrush, QPen, QLinearGradient,
@@ -62,6 +64,70 @@ ICON_SVG = b'''
   <polygon points="34,14 24,28 31,28 28,42 40,26 33,26" fill="url(#boltGrad)"/>
 </svg>
 '''
+
+class PlannerArtWidget(QWidget):
+    """Planlayıcının 3B resmi; motor çalışırken altında nefes alan bir ışık.
+
+    Başlık resmi QLabel'a çevrilince start_pulse/stop_pulse kayboldu ve
+    "Planlamayı Başlat" AttributeError ile düşüyordu — planlama daha
+    başlamadan. Resim yine pixmap ama artık kendi widget'ı: aynı iki
+    metot burada, ışık da tablanın ALTINDAN geliyor, ikonu yıkamıyor.
+    """
+
+    def __init__(self, size=84, parent=None):
+        super().__init__(parent)
+        self._pix = bk_ui.autoplan_3d(size)
+        self._size = size
+        self.setFixedHeight(size + 10)
+        self.setMinimumWidth(size + 24)
+        self._phase = 0.0
+        self._active = False
+        self._timer = QTimer(self)
+        self._timer.setInterval(40)
+        self._timer.timeout.connect(self._tick)
+
+    def start_pulse(self):
+        self._active = True
+        if not self._timer.isActive():
+            self._timer.start()
+        self.update()
+
+    def stop_pulse(self):
+        self._active = False
+        self._timer.stop()
+        self.update()
+
+    def _tick(self):
+        self._phase += 0.09
+        if self._phase > 2 * math.pi:
+            self._phase -= 2 * math.pi
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        w, h = self.width(), self.height()
+        px = self._pix
+        pw = px.width() / px.devicePixelRatio()
+        ph = px.height() / px.devicePixelRatio()
+        x, y = (w - pw) / 2.0, (h - ph) / 2.0 + 2
+
+        if self._active:
+            # Işık tablanın altında: resmin kendisini soldurmadan
+            # "çalışıyor" diyor.
+            pulse = 0.5 + 0.5 * math.sin(self._phase)
+            rad = QRadialGradient(w / 2.0, y + ph * 0.78, pw * 0.62)
+            rad.setColorAt(0.0, QColor(15, 74, 171, int(52 + 38 * pulse)))
+            rad.setColorAt(0.55, QColor(15, 74, 171, int(18 + 14 * pulse)))
+            rad.setColorAt(1.0, QColor(15, 74, 171, 0))
+            p.setBrush(QBrush(rad))
+            p.setPen(Qt.NoPen)
+            p.drawEllipse(QRectF(w / 2.0 - pw * 0.62, y + ph * 0.42,
+                                 pw * 1.24, ph * 0.78))
+
+        p.drawPixmap(QPointF(x, y), px)
+        p.end()
+
 
 class Apple3DIconWidget(QWidget):
     """Isometric 3D Schedule Core Icon (Pure floating vector, no square background)."""
@@ -748,11 +814,7 @@ class AutoScheduleDialog(QDialog):
         # Önce solda küçük bir kutu ikonu ve yanında iki satır vardı.
         # Sıfırlama sayfasıyla aynı dil: resim ortada ve büyük, çünkü
         # anlatacağı bir şey var — kartlar tablaya sırayla oturuyor.
-        import bk_ui as _bk
-        self.icon_3d = QLabel()
-        self.icon_3d.setAlignment(Qt.AlignCenter)
-        self.icon_3d.setPixmap(_bk.autoplan_3d(84))
-        self.icon_3d.setStyleSheet("background: transparent; border: none;")
+        self.icon_3d = PlannerArtWidget(84, self)
         root_layout.addWidget(self.icon_3d)
 
         lbl_title = QLabel("Otomatik Ders Programı")
