@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtPrintSupport import QPrintPreviewWidget, QPrinter
 from PySide6.QtGui import QPainter, QPen, QFont, QColor, QPageLayout, QBrush, QPageSize, QPainterPath, QPixmap, QIcon
-from PySide6.QtCore import Qt, QRect, QRectF, QPointF, QSize, Signal
+from PySide6.QtCore import Qt, QRect, QRectF, QPointF, QSize, QTimer, Signal
 from auto_scheduler import matches_class
 from ui_icons import icon, pixmap
 import lesson_hours
@@ -936,6 +936,8 @@ class TimetablePrintPreview(QDialog):
         """
         if self._expanded:
             self._expanded = False
+            self.setWindowFlag(Qt.FramelessWindowHint, False)
+            self.show()
             if self._geom_before_full is not None:
                 # restoreGeometry yerine düz dikdörtgen: kaydedilen bayt
                 # dizisi pencere durumunu da (maximized/fullscreen)
@@ -944,15 +946,39 @@ class TimetablePrintPreview(QDialog):
                 self.setGeometry(self._geom_before_full)
             self.btn_full.setText("Tam Ekran")
             self.btn_full.setIcon(make_preview_icon("fullscreen", 14, "#334155"))
+            self._fit_preview()
             return
 
         self._geom_before_full = QRect(self.geometry())
         screen = self.screen() or QApplication.primaryScreen()
+        # Başlık çubuğu da gider: "tam ekran" deyince beklenen şey
+        # pencerenin büyümesi değil, pencerenin ortadan kalkmasıdır.
+        # availableGeometry yerine geometry: menü çubuğunun bıraktığı
+        # şerit de sayfaya kalıyor.
+        self.setWindowFlag(Qt.FramelessWindowHint, True)
+        self.show()
         if screen is not None:
-            self.setGeometry(screen.availableGeometry())
+            self.setGeometry(screen.geometry())
         self._expanded = True
         self.btn_full.setText("Küçült")
         self.btn_full.setIcon(make_preview_icon("exitfullscreen", 14, "#334155"))
+        self._fit_preview()
+
+    def _fit_preview(self):
+        """Sayfayı pencereye yeniden sığdırır.
+
+        Büyütmek tek başına yetmiyordu: önizleme sayfayı eski ölçeğinde
+        çizmeye devam ediyor, ekran büyüyünce sayfa ortada aynı boyda
+        kalıp etrafı griyle doluyordu. Tam ekranın bütün amacı sayfayı
+        büyütmek olduğu için ölçek her iki yönde de yenileniyor.
+        """
+        def _apply():
+            try:
+                self.preview.fitInView()
+                self.preview.updatePreview()
+            except Exception as exc:
+                print(f"[Önizleme] ölçek yenilenemedi: {exc}")
+        QTimer.singleShot(0, _apply)
 
     def keyPressEvent(self, event):
         # Esc büyütmeyi geri alır, pencereyi kapatmaz: kullanıcının
