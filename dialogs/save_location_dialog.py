@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QFont, QColor, QPixmap, QPainter, QLinearGradient, QBrush, QPen, QIcon, QPainterPath
 from PySide6.QtCore import Qt, QRectF, QPointF
 
+import bk_ui
 import version_store
 from ui_icons import icon, pixmap
 
@@ -45,52 +46,39 @@ def make_save_vector_icon(name: str, size: int = 16, color_hex: str = "#0071E3")
 
 
 class _FolderRow(QFrame):
-    clicked_folder_id = None
+    """Tek satır: klasör adı, kaç sürüm var, seçiliyse tik."""
 
     def __init__(self, folder_id, name, count, is_selected, on_pick, parent=None):
         super().__init__(parent)
         self.folder_id = folder_id
         self._on_pick = on_pick
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedHeight(50)
+        self.setFixedHeight(40)
         self._selected = False
 
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(14, 0, 14, 0)
-        lay.setSpacing(12)
+        lay.setContentsMargins(12, 0, 12, 0)
+        lay.setSpacing(10)
 
-        icon = QLabel()
-        folder_color = "#0071E3" if (folder_id is None) else "#F59E0B"
-        icon.setPixmap(make_save_vector_icon("folder", 18, folder_color).pixmap(18, 18))
-        icon.setStyleSheet("background: transparent; border: none;")
-        lay.addWidget(icon)
+        ico = QLabel()
+        ico.setPixmap(make_save_vector_icon("folder", 16, bk_ui.INK_FAINT).pixmap(16, 16))
+        ico.setFixedSize(16, 16)
+        ico.setStyleSheet("background: transparent; border: none;")
+        lay.addWidget(ico)
 
         name_lbl = QLabel(name)
-        name_lbl.setFont(QFont(FONT_FAMILY, 10.5, QFont.Bold))
-        name_lbl.setStyleSheet("color: #0F172A; background: transparent; border: none;")
+        name_lbl.setFont(bk_ui.font(10, QFont.Medium))
+        name_lbl.setStyleSheet(f"color: {bk_ui.INK}; background: transparent; border: none;")
         name_lbl.setTextFormat(Qt.PlainText)
         lay.addWidget(name_lbl, 1)
 
-        # Full Cylindrical Pill Version Count Badge
-        count_txt = "1 versiyon" if count == 1 else f"{count} versiyon"
-        count_badge = QLabel(count_txt)
-        count_badge.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
-        count_badge.setAlignment(Qt.AlignCenter)
-        count_badge.setStyleSheet("""
-            QLabel {
-                background: #F1F5F9;
-                color: #475569;
-                border-radius: 13px;
-                min-height: 26px;
-                max-height: 26px;
-                padding: 0 12px;
-                border: 1px solid #E2E8F0;
-            }
-        """)
-        lay.addWidget(count_badge)
+        count_lbl = QLabel("1 sürüm" if count == 1 else f"{count} sürüm")
+        count_lbl.setFont(bk_ui.font(9))
+        count_lbl.setStyleSheet(f"color: {bk_ui.INK_FAINT}; background: transparent; border: none;")
+        lay.addWidget(count_lbl)
 
         self.check_lbl = QLabel()
-        self.check_lbl.setPixmap(make_save_vector_icon("check", 14, "#0071E3").pixmap(14, 14))
+        self.check_lbl.setPixmap(make_save_vector_icon("check", 14, bk_ui.BRAND).pixmap(14, 14))
         self.check_lbl.setStyleSheet("background: transparent; border: none;")
         self.check_lbl.setFixedWidth(16)
         lay.addWidget(self.check_lbl)
@@ -106,24 +94,21 @@ class _FolderRow(QFrame):
         self._selected = selected
         self.check_lbl.setVisible(selected)
         if selected:
-            self.setStyleSheet("""
-                QFrame {
-                    background: #EFF6FF;
-                    border: 1.5px solid #0071E3;
-                    border-radius: 12px;
-                }
+            self.setStyleSheet(f"""
+                QFrame {{
+                    background: {bk_ui.BRAND_TINT};
+                    border: 1px solid {bk_ui.BRAND_TINT_LINE};
+                    border-radius: 10px;
+                }}
             """)
         else:
-            self.setStyleSheet("""
-                QFrame {
-                    background: #FFFFFF;
-                    border: 1px solid #E2E8F0;
-                    border-radius: 12px;
-                }
-                QFrame:hover {
-                    background: #F8FAFC;
-                    border-color: #CBD5E1;
-                }
+            self.setStyleSheet(f"""
+                QFrame {{
+                    background: transparent;
+                    border: 1px solid transparent;
+                    border-radius: 10px;
+                }}
+                QFrame:hover {{ background: {bk_ui.HOVER}; }}
             """)
 
 
@@ -266,19 +251,26 @@ class FolderTransferChoiceDialog(QDialog):
 
 
 class SaveLocationDialog(QDialog):
-    """Modal: pick an existing folder, create a new one, or leave it unfoldered ("Genel").
-    Also allows defining a custom schedule name (e.g. 'v200 Oturmaya Yakın') and custom note.
+    """Kaydetme sayfası: isim, not, klasör; en altta üç düğme.
+
+    Burası 760×620'lik, kenarlı-gölgeli bir karttı; "Nereye Kaydedilsin?"
+    başlığı, iki cümlelik açıklama, aç-kapa düğmeleriyle açılan isim ve
+    not kutuları, kapsül rozetler. Kullanıcı bir sürümü kaydetmek için
+    bunların hiçbirine ihtiyaç duymuyor. Şimdi: tek başlık, iki satır
+    (isim, not — ikisi de isteğe bağlı ve hep görünür), klasör listesi,
+    üç düğme. Programın öbür sayfalarıyla aynı dil: beyaz, çerçevesiz,
+    gölgesiz, dış çerçevesiz.
+
+    "Kaydetmeden Çık" ikinci bir pencere açmaz; düğme sırası yerinde
+    "Değişiklikler kaybolacak — Vazgeç / Evet" biçimine döner.
     """
 
     def __init__(self, slug: str, current_folder_id=None, parent=None,
                  version_num: int = 1, initial_custom_name: str = "", initial_note: str = "",
                  allow_discard: bool = False):
         super().__init__(parent)
-        # Bu pencere iki farklı soruyla açılıyor: "Kaydet"e basıldığında
-        # (nereye kaydedeyim?) ve çıkarken (kaydedeyim mi?). İkincisinde
-        # üçüncü bir cevap var: kaydetme. allow_discard yalnızca o
-        # durumda açılır — "Kaydet" düğmesinden gelen kullanıcıya
-        # "kaydetme" seçeneği sunmak saçma olurdu.
+        # allow_discard yalnızca çıkarken (ana sayfa / kapat) açık: "Kaydet"
+        # düğmesinden gelen kullanıcıya "kaydetme" seçeneği sunulmaz.
         self.allow_discard = bool(allow_discard)
         self.discarded = False
         self.slug = slug
@@ -286,496 +278,287 @@ class SaveLocationDialog(QDialog):
         self.selected_folder_id = current_folder_id
         self.version_num = version_num or 1
         self._rows = []
+        self._drag_from = None
 
-        self.setWindowTitle("Nereye Kaydedilsin?")
-        self.setFixedSize(760, 620)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool | Qt.NoDropShadowWindowHint)
-        # Saydam DEĞİL: içeriği henüz boyanmamış saydam bir pencere
-        # macOS'ta kapkara görünüyor. Bu pencereler arayüzün meşgul
-        # olduğu anlarda (kaydetme, motoru durdurma) açıldığı için
-        # ekranda siyah dikdörtgenler olarak kalıyordu.
+        self.setWindowTitle("Kaydet")
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
+        # Saydam değil: içeriği boyanmamış saydam pencere macOS'ta kara görünüyor.
         self.setAttribute(Qt.WA_TranslucentBackground, False)
         self.setAutoFillBackground(True)
+        self.setStyleSheet("QDialog { background: #FFFFFF; }")
+        self.setModal(True)
+        self.setFixedWidth(520)
 
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(14, 14, 14, 14)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(28, 24, 28, 20)
+        lay.setSpacing(0)
 
-        container = QWidget(self)
-        container.setObjectName("saveLocCard")
-        container.setStyleSheet("""
-            #saveLocCard {
+        title = QLabel("Kaydet")
+        title.setFont(bk_ui.font(14.5, QFont.DemiBold, spacing=-0.2))
+        title.setStyleSheet(f"color: {bk_ui.INK}; background: transparent; border: none;")
+        lay.addWidget(title)
+        lay.addSpacing(16)
+
+        # ── İsim: sürüm numarası + isteğe bağlı isim, tek satır ────────
+        field_css = f"""
+            QFrame#field {{
                 background: #FFFFFF;
-                border: 1px solid #CBD5E1;
-                border-radius: 18px;
-            }
-        """)
-
-        c_lay = QVBoxLayout(container)
-        c_lay.setContentsMargins(26, 24, 26, 22)
-        c_lay.setSpacing(12)
-
-        # ── Header & Action Buttons Row ──────────────────────────────────────────
-        header_row = QHBoxLayout()
-        header_row.setSpacing(16)
-
-        title_col = QVBoxLayout()
-        title_col.setSpacing(4)
-
-        t_lbl = QLabel("Nereye Kaydedilsin?")
-        t_lbl.setFont(QFont(FONT_FAMILY, 14, QFont.Bold))
-        t_lbl.setStyleSheet("color: #0F172A; background: transparent; border: none;")
-        title_col.addWidget(t_lbl)
-
-        sub_lbl = QLabel("Bu versiyonu bir klasörde düzenleyebilir (örn. \"Yaz Çizelgesi\") ya da klasörsüz bırakabilirsiniz.")
-        sub_lbl.setFont(QFont(FONT_FAMILY, 9.5))
-        sub_lbl.setStyleSheet("color: #64748B; background: transparent; border: none;")
-        sub_lbl.setWordWrap(True)
-        title_col.addWidget(sub_lbl)
-        header_row.addLayout(title_col, 1)
-
-        # Action buttons: "İsim Tanımla" and "Not Ekle"
-        btn_action_box = QHBoxLayout()
-        btn_action_box.setSpacing(8)
-
-        self.btn_add_name = QPushButton(" İsim Tanımla")
-        self.btn_add_name.setIcon(icon("tag", 14, "#0F172A"))
-        self.btn_add_name.setFixedHeight(34)
-        self.btn_add_name.setCursor(Qt.PointingHandCursor)
-        self.btn_add_name.setToolTip("Çizelgeye 'v200 Oturmaya Yakın' gibi özel bir isim tanımlayın")
-        btn_action_box.addWidget(self.btn_add_name)
-
-        self.btn_add_note = QPushButton(" Not Ekle")
-        self.btn_add_note.setIcon(icon("note", 14, "#0F172A"))
-        self.btn_add_note.setFixedHeight(34)
-        self.btn_add_note.setCursor(Qt.PointingHandCursor)
-        self.btn_add_note.setToolTip("Versiyona ait özel bir not ekleyin")
-        btn_action_box.addWidget(self.btn_add_note)
-
-        header_row.addLayout(btn_action_box)
-        c_lay.addLayout(header_row)
-
-        # ── SCHEDULE NAME COMPONENT BOX (v200 otomatik + text input aynı kutuda) ──
-        self.name_box = QFrame()
-        self.name_box.setObjectName("scheduleNameBox")
-        self.name_box.setFixedHeight(44)
-        self.name_box.setStyleSheet("""
-            #scheduleNameBox {
-                background: #FFFFFF;
-                border: 1.5px solid #CBD5E1;
-                border-radius: 12px;
-            }
-            #scheduleNameBox:hover {
-                border-color: #94A3B8;
-            }
-        """)
-        name_lay = QHBoxLayout(self.name_box)
-        name_lay.setContentsMargins(8, 4, 10, 4)
+                border: 1px solid {bk_ui.HAIRLINE_STRONG};
+                border-radius: 10px;
+            }}
+            QFrame#field:hover {{ border-color: {bk_ui.INK_FAINT}; }}
+        """
+        edit_css = f"""
+            QLineEdit {{
+                border: none; background: transparent; padding: 0;
+                color: {bk_ui.INK};
+            }}
+        """
+        name_box = QFrame()
+        name_box.setObjectName("field")
+        name_box.setFixedHeight(40)
+        name_box.setStyleSheet(field_css)
+        name_lay = QHBoxLayout(name_box)
+        name_lay.setContentsMargins(8, 0, 12, 0)
         name_lay.setSpacing(10)
 
-        # Automatic Version Prefix Badge (v200) inside the component box
         self.prefix_badge = QLabel(f"v{self.version_num}")
-        self.prefix_badge.setFont(QFont(FONT_FAMILY, 9.5, QFont.Bold))
+        self.prefix_badge.setFont(bk_ui.font(9, QFont.DemiBold))
         self.prefix_badge.setAlignment(Qt.AlignCenter)
-        self.prefix_badge.setStyleSheet("""
-            QLabel {
-                background: #EFF6FF;
-                color: #0071E3;
-                border: 1px solid #BFDBFE;
-                border-radius: 8px;
-                padding: 3px 12px;
-                min-height: 24px;
-                max-height: 24px;
-                font-weight: bold;
-            }
+        self.prefix_badge.setStyleSheet(f"""
+            QLabel {{
+                background: {bk_ui.BRAND_TINT}; color: {bk_ui.BRAND};
+                border: none; border-radius: 7px; padding: 0 9px;
+                min-height: 22px; max-height: 22px;
+            }}
         """)
         name_lay.addWidget(self.prefix_badge)
 
-        # Editable Text Field for Custom Schedule Name
         self.name_edit = QLineEdit()
-        self.name_edit.setFont(QFont(FONT_FAMILY, 10.5))
-        self.name_edit.setPlaceholderText("Çizelge ismi tanımlayın (örn: Oturan Program, Oturmaya Yakın, Salı Boş)...")
-        self.name_edit.setStyleSheet(f"""
-            QLineEdit {{
-                border: none;
-                background: transparent;
-                color: #0F172A;
-                font-family: {FONT_FAMILY};
-                font-size: 12.5px;
-                padding: 0;
-            }}
-        """)
+        self.name_edit.setFont(bk_ui.font(10))
+        self.name_edit.setPlaceholderText("İsim (isteğe bağlı)")
+        self.name_edit.setStyleSheet(edit_css)
         if initial_custom_name:
             self.name_edit.setText(initial_custom_name)
         name_lay.addWidget(self.name_edit, 1)
+        lay.addWidget(name_box)
+        lay.addSpacing(8)
 
-        btn_clear_name = QPushButton("✕")
-        btn_clear_name.setFixedSize(22, 22)
-        btn_clear_name.setCursor(Qt.PointingHandCursor)
-        btn_clear_name.setToolTip("İsmi temizle ve kutuyu kapat")
-        btn_clear_name.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                color: #94A3B8;
-                border: none;
-                border-radius: 11px;
-                font-size: 11px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background: #F1F5F9;
-                color: #0F172A;
-            }
-        """)
-        name_lay.addWidget(btn_clear_name)
-        c_lay.addWidget(self.name_box)
-
-        # ── NOTE COMPONENT BOX ───────────────────────────────────────────────────
-        self.note_box = QFrame()
-        self.note_box.setObjectName("scheduleNoteBox")
-        self.note_box.setFixedHeight(44)
-        self.note_box.setStyleSheet("""
-            #scheduleNoteBox {
-                background: #FFFFFF;
-                border: 1.5px solid #CBD5E1;
-                border-radius: 12px;
-            }
-            #scheduleNoteBox:hover {
-                border-color: #94A3B8;
-            }
-        """)
-        note_lay = QHBoxLayout(self.note_box)
-        note_lay.setContentsMargins(8, 4, 10, 4)
-        note_lay.setSpacing(10)
-
-        note_badge = QLabel("Not")
-        note_badge.setFont(QFont(FONT_FAMILY, 9.5, QFont.Bold))
-        note_badge.setAlignment(Qt.AlignCenter)
-        note_badge.setStyleSheet("""
-            QLabel {
-                background: #F1F5F9;
-                color: #475569;
-                border: 1px solid #E2E8F0;
-                border-radius: 8px;
-                padding: 3px 12px;
-                min-height: 24px;
-                max-height: 24px;
-                font-weight: bold;
-            }
-        """)
-        note_lay.addWidget(note_badge)
-
+        # ── Not ───────────────────────────────────────────────────────
+        note_box = QFrame()
+        note_box.setObjectName("field")
+        note_box.setFixedHeight(40)
+        note_box.setStyleSheet(field_css)
+        note_lay = QHBoxLayout(note_box)
+        note_lay.setContentsMargins(12, 0, 12, 0)
         self.note_edit = QLineEdit()
-        self.note_edit.setFont(QFont(FONT_FAMILY, 10.5))
-        self.note_edit.setPlaceholderText("Çizelgeye özel not ekleyin (örn: Cuma öğleden sonra boşaltıldı)...")
-        self.note_edit.setStyleSheet(f"""
-            QLineEdit {{
-                border: none;
-                background: transparent;
-                color: #0F172A;
-                font-family: {FONT_FAMILY};
-                font-size: 12.5px;
-                padding: 0;
-            }}
-        """)
+        self.note_edit.setFont(bk_ui.font(10))
+        self.note_edit.setPlaceholderText("Not (isteğe bağlı)")
+        self.note_edit.setStyleSheet(edit_css)
         if initial_note:
             self.note_edit.setText(initial_note)
         note_lay.addWidget(self.note_edit, 1)
+        lay.addWidget(note_box)
+        # Eski arayüzle uyum: bu iki kutu her zaman görünür.
+        self.name_box, self.note_box = name_box, note_box
 
-        btn_clear_note = QPushButton("✕")
-        btn_clear_note.setFixedSize(22, 22)
-        btn_clear_note.setCursor(Qt.PointingHandCursor)
-        btn_clear_note.setToolTip("Notu temizle ve kutuyu kapat")
-        btn_clear_note.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                color: #94A3B8;
-                border: none;
-                border-radius: 11px;
-                font-size: 11px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background: #F1F5F9;
-                color: #0F172A;
-            }
-        """)
-        note_lay.addWidget(btn_clear_note)
-        c_lay.addWidget(self.note_box)
+        lay.addSpacing(18)
 
-        # Wire up actions
-        def _toggle_name():
-            vis = not self.name_box.isVisible()
-            self.name_box.setVisible(vis)
-            self._update_btn_states()
-            if vis:
-                self.name_edit.setFocus()
-                self.name_edit.selectAll()
+        # ── Klasör ────────────────────────────────────────────────────
+        sec = QLabel("KLASÖR")
+        sec.setFont(bk_ui.font(8.2, QFont.DemiBold, spacing=0.8))
+        sec.setStyleSheet(f"color: {bk_ui.INK_FAINT}; background: transparent; border: none;")
+        lay.addWidget(sec)
+        lay.addSpacing(6)
 
-        def _toggle_note():
-            vis = not self.note_box.isVisible()
-            self.note_box.setVisible(vis)
-            self._update_btn_states()
-            if vis:
-                self.note_edit.setFocus()
-                self.note_edit.selectAll()
-
-        def _clear_and_hide_name():
-            self.name_edit.clear()
-            self.name_box.setVisible(False)
-            self._update_btn_states()
-
-        def _clear_and_hide_note():
-            self.note_edit.clear()
-            self.note_box.setVisible(False)
-            self._update_btn_states()
-
-        self.btn_add_name.clicked.connect(_toggle_name)
-        self.btn_add_note.clicked.connect(_toggle_note)
-        btn_clear_name.clicked.connect(_clear_and_hide_name)
-        btn_clear_note.clicked.connect(_clear_and_hide_note)
-
-        self.name_edit.textChanged.connect(lambda _: self._update_btn_states())
-        self.note_edit.textChanged.connect(lambda _: self._update_btn_states())
-
-        # Initial visibility: if custom name or note is pre-filled, show respective box
-        self.name_box.setVisible(bool(initial_custom_name))
-        self.note_box.setVisible(bool(initial_note))
-        self._update_btn_states()
-
-        div = QFrame()
-        div.setFixedHeight(1)
-        div.setStyleSheet("background: #E2E8F0; border: none;")
-        c_lay.addWidget(div)
-
-        # Scrollable folder list
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.NoFrame)
         self.scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-
         self.list_container = QWidget()
         self.list_container.setStyleSheet("background: transparent;")
         self.list_layout = QVBoxLayout(self.list_container)
-        self.list_layout.setContentsMargins(2, 4, 2, 4)
-        self.list_layout.setSpacing(8)
+        self.list_layout.setContentsMargins(0, 0, 0, 0)
+        self.list_layout.setSpacing(2)
         self.list_layout.addStretch(1)
-
         self.scroll.setWidget(self.list_container)
-        c_lay.addWidget(self.scroll, 1)
+        lay.addWidget(self.scroll)
 
-        # New-folder inline creator
-        new_row = QHBoxLayout()
-        new_row.setSpacing(10)
+        # Yeni klasör: listenin altında tek satır, Enter ile eklenir.
+        new_row = QFrame()
+        new_row.setObjectName("field")
+        new_row.setFixedHeight(40)
+        new_row.setStyleSheet(field_css.replace("#FFFFFF", bk_ui.SURFACE_SUNK, 1))
+        new_lay = QHBoxLayout(new_row)
+        new_lay.setContentsMargins(12, 0, 8, 0)
+        new_lay.setSpacing(10)
+        plus = QLabel()
+        plus.setPixmap(make_save_vector_icon("plus", 14, bk_ui.INK_FAINT).pixmap(14, 14))
+        plus.setFixedSize(16, 16)
+        plus.setStyleSheet("background: transparent; border: none;")
+        new_lay.addWidget(plus)
         self.new_folder_edit = QLineEdit()
-        self.new_folder_edit.setPlaceholderText("Yeni klasör adı (Örn: Yaz Çizelgesi)...")
-        self.new_folder_edit.setFixedHeight(36)
-        self.new_folder_edit.setStyleSheet(f"""
-            QLineEdit {{
-                background: #F8FAFC;
-                border: 1px solid #CBD5E1;
-                border-radius: 18px;
-                padding: 0 16px;
-                font-size: 12px;
-                font-family: {FONT_FAMILY};
-                color: #0F172A;
-            }}
-            QLineEdit:focus {{
-                border-color: #0071E3;
-                background: #FFFFFF;
-            }}
-        """)
+        self.new_folder_edit.setFont(bk_ui.font(10))
+        self.new_folder_edit.setPlaceholderText("Yeni klasör")
+        self.new_folder_edit.setStyleSheet(edit_css)
         self.new_folder_edit.returnPressed.connect(self._create_folder)
-        new_row.addWidget(self.new_folder_edit, 1)
-
-        btn_new = QPushButton("  Yeni Klasör")
-        btn_new.setIcon(icon("folder", 15, "#0F172A"))
-        btn_new.setIcon(make_save_vector_icon("plus", 12, "#0071E3"))
+        new_lay.addWidget(self.new_folder_edit, 1)
+        btn_new = QPushButton("Ekle")
         btn_new.setCursor(Qt.PointingHandCursor)
-        btn_new.setFixedHeight(36)
+        btn_new.setFixedHeight(28)
+        btn_new.setFont(bk_ui.font(9.4, QFont.DemiBold))
         btn_new.setStyleSheet(f"""
             QPushButton {{
-                background: #EFF6FF;
-                color: #0071E3;
-                border: 1px solid #BFDBFE;
-                border-radius: 18px;
-                padding: 0 18px;
-                font-weight: 700;
-                font-size: 11.5px;
-                font-family: {FONT_FAMILY};
+                background: transparent; color: {bk_ui.BRAND};
+                border: none; border-radius: 14px; padding: 0 12px;
             }}
-            QPushButton:hover {{ background: #DBEAFE; }}
+            QPushButton:hover {{ background: rgba(15, 74, 171, 0.07); }}
         """)
         btn_new.clicked.connect(self._create_folder)
-        new_row.addWidget(btn_new)
-        c_lay.addLayout(new_row)
+        new_lay.addWidget(btn_new)
+        lay.addSpacing(4)
+        lay.addWidget(new_row)
 
         self.warn_lbl = QLabel("")
-        self.warn_lbl.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
-        self.warn_lbl.setStyleSheet("color: #DC2626; background: transparent; border: none;")
+        self.warn_lbl.setFont(bk_ui.font(9))
+        self.warn_lbl.setStyleSheet(f"color: {bk_ui.DANGER}; background: transparent; border: none;")
         self.warn_lbl.setVisible(False)
-        c_lay.addWidget(self.warn_lbl)
+        lay.addSpacing(4)
+        lay.addWidget(self.warn_lbl)
         self.new_folder_edit.textEdited.connect(lambda _: self.warn_lbl.setVisible(False))
 
-        # Bottom buttons (Silindirik / Pill)
-        btn_box = QHBoxLayout()
-        btn_box.setSpacing(12)
+        lay.addSpacing(18)
 
-        if self.allow_discard:
-            # SOLDA, ÇERÇEVESİZ, TEK BAŞINA.
-            #
-            # Geri dönüşü olmayan seçenek, kaydetme düğmesinin yanında
-            # aynı ağırlıkta durmamalı: yan yana iki kapsülden birine
-            # yanlışlıkla basmak bir günlük işi siler. Bu yüzden karşı
-            # tarafta ve çıplak duruyor; rengi ne yaptığını söylüyor.
-            btn_discard = QPushButton("Kaydetmeden Çık")
-            btn_discard.setFixedHeight(36)
-            btn_discard.setCursor(Qt.PointingHandCursor)
-            btn_discard.setToolTip("Bu çizelgede yaptığınız değişiklikler kaydedilmez.")
-            btn_discard.setStyleSheet(f"""
+        # ── Düğmeler ─────────────────────────────────────────────────
+        def naked(text, colour, hover_bg):
+            b = QPushButton(text)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setFixedHeight(38)
+            b.setFont(bk_ui.font(9.6, QFont.Medium))
+            b.setStyleSheet(f"""
                 QPushButton {{
-                    background: transparent;
-                    color: #B91C1C;
-                    border: none;
-                    border-radius: 18px;
-                    padding: 0 16px;
-                    font-weight: 600;
-                    font-size: 12px;
-                    font-family: {FONT_FAMILY};
+                    background: transparent; color: {colour};
+                    border: none; border-radius: 19px; padding: 0 16px;
                 }}
-                QPushButton:hover {{ background: #FEF2F2; color: #991B1B; }}
-                QPushButton:pressed {{ background: #FEE2E2; }}
+                QPushButton:hover {{ background: {hover_bg}; }}
             """)
-            btn_discard.clicked.connect(self._on_discard)
-            btn_box.addWidget(btn_discard)
+            return b
 
-        btn_box.addStretch()
+        def filled(text, colour, hover):
+            b = QPushButton(text)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setFixedHeight(38)
+            b.setFont(bk_ui.font(9.6, QFont.DemiBold))
+            b.setStyleSheet(f"""
+                QPushButton {{
+                    background: {colour}; color: #FFFFFF;
+                    border: none; border-radius: 19px; padding: 0 22px;
+                }}
+                QPushButton:hover {{ background: {hover}; }}
+            """)
+            b.setMinimumWidth(b.sizeHint().width() + 14)
+            return b
 
-        btn_cancel = QPushButton("Vazgeç")
-        btn_cancel.setFixedHeight(36)
-        btn_cancel.setCursor(Qt.PointingHandCursor)
-        btn_cancel.setStyleSheet(f"""
-            QPushButton {{
-                background: #FFFFFF;
-                color: #475569;
-                border: 1px solid #CBD5E1;
-                border-radius: 18px;
-                padding: 0 24px;
-                font-weight: 600;
-                font-size: 12px;
-                font-family: {FONT_FAMILY};
-            }}
-            QPushButton:hover {{ background: #F8FAFC; color: #0F172A; }}
-        """)
+        # Asıl sıra
+        self._row_main = QWidget()
+        row = QHBoxLayout(self._row_main)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+        if self.allow_discard:
+            btn_discard = naked("Kaydetmeden Çık", bk_ui.DANGER, bk_ui.DANGER_TINT)
+            btn_discard.clicked.connect(self._ask_discard)
+            row.addWidget(btn_discard)
+        row.addStretch(1)
+        btn_cancel = naked("Vazgeç", bk_ui.INK_SOFT, "rgba(15, 23, 42, 0.05)")
         btn_cancel.clicked.connect(self.reject)
-        btn_box.addWidget(btn_cancel)
-
-        btn_ok = QPushButton("Kaydet")
-        btn_ok.setFixedHeight(36)
-        btn_ok.setCursor(Qt.PointingHandCursor)
-        btn_ok.setStyleSheet(f"""
-            QPushButton {{
-                background: #0071E3;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 18px;
-                padding: 0 32px;
-                font-weight: 700;
-                font-size: 12.5px;
-                font-family: {FONT_FAMILY};
-            }}
-            QPushButton:hover {{ background: #0062C4; }}
-        """)
+        row.addWidget(btn_cancel)
+        btn_ok = filled("Kaydet", bk_ui.BRAND, bk_ui.BRAND_DARK)
         btn_ok.clicked.connect(self.accept)
-        btn_box.addWidget(btn_ok)
+        btn_ok.setDefault(True)
+        row.addWidget(btn_ok)
+        lay.addWidget(self._row_main)
 
-        c_lay.addLayout(btn_box)
-        outer.addWidget(container)
+        # "Kaydetmeden çık" onayı: aynı yerde, ikinci pencere yok.
+        self._row_discard = QWidget()
+        drow = QHBoxLayout(self._row_discard)
+        drow.setContentsMargins(0, 0, 0, 0)
+        drow.setSpacing(8)
+        warn = QLabel("Değişiklikler kaybolacak.")
+        warn.setFont(bk_ui.font(9.6))
+        warn.setStyleSheet(f"color: {bk_ui.INK}; background: transparent; border: none;")
+        drow.addWidget(warn)
+        drow.addStretch(1)
+        btn_back = naked("Vazgeç", bk_ui.INK_SOFT, "rgba(15, 23, 42, 0.05)")
+        btn_back.clicked.connect(lambda: self._show_discard(False))
+        drow.addWidget(btn_back)
+        btn_yes = filled("Evet, kaydetmeden çık", bk_ui.DANGER, "#B93A3A")
+        btn_yes.clicked.connect(self._on_discard)
+        drow.addWidget(btn_yes)
+        self._row_discard.setVisible(False)
+        lay.addWidget(self._row_discard)
 
         self._reload_rows()
 
+    # ── kaydetmeden çık ──────────────────────────────────────────────
+    def _ask_discard(self):
+        self._show_discard(True)
+
+    def _show_discard(self, on):
+        self._row_main.setVisible(not on)
+        self._row_discard.setVisible(on)
+
     def _on_discard(self):
-        """Değişiklikleri atarak çık — önce bir kez sorulur."""
-        from PySide6.QtWidgets import QMessageBox
-        ret = QMessageBox.warning(
-            self, "Kaydetmeden çıkılsın mı?",
-            "Bu çizelgede yaptığınız değişiklikler <b>kaydedilmeyecek</b>.<br><br>"
-            "Çizelge en son kaydedilen hâline döner.",
-            QMessageBox.Discard | QMessageBox.Cancel, QMessageBox.Cancel)
-        if ret != QMessageBox.Discard:
-            return
+        """Değişiklikleri atarak çık; onay aynı sayfada alındı."""
         self.discarded = True
         self.reject()
 
-    def _update_btn_states(self):
-        # Name button style
-        is_name_active = self.name_box.isVisible() or bool(self.name_edit.text().strip())
-        if is_name_active:
-            self.btn_add_name.setStyleSheet(f"""
-                QPushButton {{
-                    background: #EFF6FF;
-                    color: #0071E3;
-                    border: 1.5px solid #0071E3;
-                    border-radius: 17px;
-                    padding: 0 16px;
-                    font-weight: 700;
-                    font-size: 12px;
-                    font-family: {FONT_FAMILY};
-                }}
-            """)
-        else:
-            self.btn_add_name.setStyleSheet(f"""
-                QPushButton {{
-                    background: #F8FAFC;
-                    color: #334155;
-                    border: 1px solid #CBD5E1;
-                    border-radius: 17px;
-                    padding: 0 16px;
-                    font-weight: 600;
-                    font-size: 12px;
-                    font-family: {FONT_FAMILY};
-                }}
-                QPushButton:hover {{
-                    background: #EFF6FF;
-                    border-color: #93C5FD;
-                    color: #0071E3;
-                }}
-            """)
+    # ── konum ────────────────────────────────────────────────────────
+    def _center_on(self, parent):
+        self.adjustSize()
+        ref = None
+        if parent is not None:
+            try:
+                w = parent.window()
+                if w is not None and w.isVisible():
+                    ref = w.frameGeometry()
+            except Exception:
+                ref = None
+        if ref is None:
+            from PySide6.QtWidgets import QApplication
+            screen = QApplication.screenAt(self.pos()) or QApplication.primaryScreen()
+            if screen is None:
+                return
+            ref = screen.availableGeometry()
+        from PySide6.QtCore import QPoint
+        self.move(ref.center() - QPoint(self.width() // 2, self.height() // 2))
 
-        # Note button style
-        is_note_active = self.note_box.isVisible() or bool(self.note_edit.text().strip())
-        if is_note_active:
-            self.btn_add_note.setStyleSheet(f"""
-                QPushButton {{
-                    background: #EFF6FF;
-                    color: #0071E3;
-                    border: 1.5px solid #0071E3;
-                    border-radius: 17px;
-                    padding: 0 16px;
-                    font-weight: 700;
-                    font-size: 12px;
-                    font-family: {FONT_FAMILY};
-                }}
-            """)
-        else:
-            self.btn_add_note.setStyleSheet(f"""
-                QPushButton {{
-                    background: #F8FAFC;
-                    color: #334155;
-                    border: 1px solid #CBD5E1;
-                    border-radius: 17px;
-                    padding: 0 16px;
-                    font-weight: 600;
-                    font-size: 12px;
-                    font-family: {FONT_FAMILY};
-                }}
-                QPushButton:hover {{
-                    background: #EFF6FF;
-                    border-color: #93C5FD;
-                    color: #0071E3;
-                }}
-            """)
+    def showEvent(self, e):
+        super().showEvent(e)
+        if not getattr(self, "_centered", False):
+            self._centered = True
+            self._center_on(self.parent())
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self._drag_from = e.globalPosition().toPoint() - self.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, e):
+        if self._drag_from is not None and (e.buttons() & Qt.LeftButton):
+            self.move(e.globalPosition().toPoint() - self._drag_from)
+
+    def mouseReleaseEvent(self, e):
+        self._drag_from = None
+
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key_Escape:
+            if self._row_discard.isVisible():
+                self._show_discard(False)
+                return
+            self.reject()
+            return
+        super().keyPressEvent(e)
 
     @property
     def custom_name(self) -> str:
@@ -786,10 +569,15 @@ class SaveLocationDialog(QDialog):
         return self.note_edit.text().strip()
 
     def _reload_rows(self):
+        # Listeyi baştan kur: önce Genel, sonra klasörler, en altta esneme.
+        # (Eskiden esneme ilk yeniden kurulumda siliniyor ve Genel listenin
+        # sonuna düşüyordu.)
         while self.list_layout.count():
             item = self.list_layout.takeAt(0)
             w = item.widget()
             if w:
+                w.hide()
+                w.setParent(None)
                 w.deleteLater()
         self._rows = []
 
@@ -801,9 +589,9 @@ class SaveLocationDialog(QDialog):
         for v in versions:
             counts_by_folder[v.get("folder_id")] = counts_by_folder.get(v.get("folder_id"), 0) + 1
 
-        general_row = _FolderRow(None, "Genel (Klasörsüz)", counts_by_folder.get(None, 0),
+        general_row = _FolderRow(None, "Genel", counts_by_folder.get(None, 0),
                                   self.selected_folder_id is None, self._pick_folder)
-        self.list_layout.insertWidget(self.list_layout.count() - 1, general_row)
+        self.list_layout.addWidget(general_row)
         self._rows.append(general_row)
 
         try:
@@ -814,8 +602,15 @@ class SaveLocationDialog(QDialog):
             fid = folder.get("id")
             row = _FolderRow(fid, folder.get("name", ""), counts_by_folder.get(fid, 0),
                               self.selected_folder_id == fid, self._pick_folder)
-            self.list_layout.insertWidget(self.list_layout.count() - 1, row)
+            self.list_layout.addWidget(row)
             self._rows.append(row)
+        self.list_layout.addStretch(1)
+
+        # Liste kadar yer: az klasörde boşluk yok, çokta en çok beş satır
+        # görünür, gerisi kayar.
+        rows = max(1, len(self._rows))
+        self.scroll.setFixedHeight(min(rows, 5) * 42)
+        self.adjustSize()
 
     def _pick_folder(self, folder_id):
         self.selected_folder_id = folder_id

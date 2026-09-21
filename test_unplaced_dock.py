@@ -131,7 +131,7 @@ def run():
     # kullanıcısı VAZGEÇİYOR: böylece "kapalı saate ders konmaz" güvencesi
     # aynen sınanmaya devam ediyor, üstelik uyarı metni de kaydediliyor.
     import main_window as _mw
-    def fake_ask(parent, body_html):
+    def fake_ask(parent, body_html, *_a, **_k):
         asked.append(("Bu Saate Yerleştirilemez", body_html))
         return False
     _mw.ask_place_anyway = fake_ask

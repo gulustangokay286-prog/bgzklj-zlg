@@ -159,6 +159,9 @@ def run():
     check("9B'nin dersleri duruyor", per_class.get("9B", 0) == 10, str(per_class))
     check("9A'nın dersleri duruyor", per_class.get("9A", 0) == 10, str(per_class))
 
+    # Kapanışta kayıt penceresi açılmasın: test load_db'yi atlayıp veriyi
+    # doğrudan bastığı için açılış özeti ile içerik zaten farklı.
+    win._discard_changes = True
     win.close()
     win.deleteLater()
 

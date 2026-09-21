@@ -163,6 +163,8 @@ def test_institution(slug, inst_name):
     check("Teacher atamalar 100% restored via MainWindow undo", len(cur_t_atamalar2) == len(orig_t_atamalar))
 
     dlg.close()
+    # Kapanışta kayıt penceresi açılmasın (test değişiklik yaptı, soru sormasın).
+    win._discard_changes = True
     win.close()
 
 def main():

@@ -479,6 +479,8 @@ class MainWindow(QMainWindow):
             try:
                 self.data_store.clear()
                 self.data_store.update(remote)
+                import placement_identity
+                placement_identity.normalize_store(self.data_store)
             finally:
                 self._is_loading = False
 
@@ -1163,6 +1165,15 @@ class MainWindow(QMainWindow):
                     self.data_store["grid_placements"] = []
                 elif "grid_placements" not in self.data_store:
                     self.data_store["grid_placements"] = []
+
+                # Her kartın kimliği olsun; ızgaradan sızmış çizim alanları
+                # gitsin (bkz. placement_identity). Eski dosyalar kimliksiz
+                # kayıtlarla dolu; kimliksiz kart tepsiye indirilirken yanındaki
+                # aynı dersi de götürüyordu.
+                import placement_identity
+                onarim = placement_identity.normalize_store(self.data_store)
+                if onarim:
+                    print(f"[load_db] {onarim} yerleşim kaydı onarıldı (kimlik/çizim alanı)")
                     
                 # Clean & Format all subject and teacher names to Turkish title case
                 from dialogs.edit_forms import format_tr_name
@@ -1310,95 +1321,32 @@ class MainWindow(QMainWindow):
         return self.is_dirty()
 
     def _sync_grid_to_store(self, view_type=None, entity_name=None):
-        if getattr(self, "_is_loading", False):
-            return
-        if not hasattr(self, "_grid") or not hasattr(self._grid, "get_placed_lessons"):
-            return
-            
-        settings = self.data_store.get("settings", {})
-        periods = int(settings.get("periods", 8))
-        if periods <= 0: periods = 8
-        
-        mode = getattr(self._grid, "current_view_mode", "classes")
-        placed = self._grid.get_placed_lessons()
-        if not placed:
-            if self.data_store.get("grid_placements"):
-                return
-            self.data_store["grid_placements"] = []
-            return
-            
-        import re
-        def cls_sort_key(c):
-            m = re.match(r"(\d+)(.*)", str(c).strip())
-            return (int(m.group(1)), m.group(2)) if m else (999, str(c))
-            
-        classes = self.data_store.get("siniflar", [])
-        class_names = sorted([c.get("ad", "").strip() for c in classes if c.get("ad")], key=cls_sort_key)
-        if not class_names:
-            class_names = ["9A", "9B", "10A", "10B", "11A", "11B", "11C", "12A", "12B"]
-            
-        teachers = self.data_store.get("ogretmenler", [])
-        teacher_names = sorted([t.get("ad", "").strip() for t in teachers if t.get("ad")])
-        if not teacher_names:
-            teacher_names = ["Öğretmen 1"]
+        """Artık mağazaya YAZMAZ. Mağaza (data_store["grid_placements"]) tek
+        doğru kaynak; ızgara onun bir görünümü.
 
-        new_global = []
-        seen_comb = set()
-        for (r, c), info in placed.items():
-            p = dict(info)
-            s_name = p.get("subject_name") or p.get("subject", "")
-            if not s_name or s_name.lower() in ["boş", "bos", "atanmadı"]:
-                continue
-                
-            day = c // periods
-            period = c % periods
-            p["day"] = day
-            p["col"] = day
-            p["period"] = period
-            p["row"] = period
-            p["duration"] = 1
-            
-            c_name = (p.get("class_name") or p.get("class") or "").strip()
-            is_comb = bool(p.get("is_combined") or ("," in c_name or "&" in c_name or "+" in c_name))
-            
-            if is_comb:
-                comb_cls = p.get("combined_classes") or [sc.strip().split("(")[0].strip() for sc in c_name.replace("&", "+").replace(",", "+").split("+") if sc.strip()]
-                p["is_combined"] = True
-                p["combined_classes"] = comb_cls
-                normalized_c_name = " + ".join(comb_cls)
-                p["class_name"] = normalized_c_name
-                p["class"] = normalized_c_name
-                if mode == "teachers" and r < len(teacher_names):
-                    p["teacher_name"] = teacher_names[r]
-                    p["teacher"] = teacher_names[r]
-                p["color"] = get_subject_color(s_name, self.data_store)
-                
-                t_name = p.get("teacher_name") or p.get("teacher") or ""
-                bid = p.get("block_id") or ""
-                dedup_key = (day, period, normalized_c_name, s_name, t_name, bid)
-                if dedup_key in seen_comb:
-                    continue
-                seen_comb.add(dedup_key)
-                
-                new_global.append(p)
-            elif mode == "teachers":
-                if r < len(teacher_names):
-                    p["teacher_name"] = teacher_names[r]
-                    p["teacher"] = teacher_names[r]
-                p["color"] = get_subject_color(s_name, self.data_store)
-                new_global.append(p)
-            else:
-                if r < len(class_names):
-                    cls_name = class_names[r]
-                    p["class_name"] = cls_name
-                    p["class"] = cls_name
-                p["color"] = get_subject_color(s_name, self.data_store)
-                new_global.append(p)
-                
-        existing_count = len(self.data_store.get("grid_placements", []))
-        if existing_count > 50 and len(new_global) < existing_count // 3:
-            return
-        self.data_store["grid_placements"] = new_global
+        Eskiden burası mağazayı ekrandaki hücrelerden yeniden kuruyordu ve
+        bu, tek başına üç ayrı şikâyetin kaynağıydı:
+
+          * Hücrede blok kimliği yok → her kayıt kimliksiz kalıyor, iki
+            saatlik bloklar birer saatlik iki kayda bölünüyordu. Kimliksiz
+            bir kart tepsiye indirilince ders adıyla arama yapılıyor ve
+            yanındaki (±2 saat) ya da başka sınıftaki aynı ders de
+            gidiyordu.
+          * Hücrenin çizim defteri (origin_row/origin_col/day_idx) mağazaya
+            sızıyordu. origin_row ekrandaki satır: sınıf görünümünde sınıf
+            sırası, öğretmen görünümünde öğretmen sırası. Görünüm
+            değişince "içerik" değişmiş sayılıyor, hiçbir şey yapmadan
+            "kaydet" sorusu çıkıyordu.
+          * İki bilgisayar aynı çizelgeyi farklı görünümde açınca aynı
+            çizelgeyi farklı içerik olarak birbirine itip duruyordu
+            (bir sürümde 226 revizyon).
+
+        Her düzenleme yolu (sürükleme, silme, kilit, otomatik planlama,
+        hücre düzenleme) zaten doğrudan mağazaya yazıp ızgarayı tazeliyor.
+        Bu yüzden burada yapılacak bir şey kalmadı; çağıranlar için imza
+        korunuyor.
+        """
+        return
 
     def _restore_grid_placements(self, view_type=None, entity_name=None):
         # Tek birim görünümünde ekranda kimin çizelgesi olduğunu ızgaraya bildir:
@@ -1609,7 +1557,7 @@ class MainWindow(QMainWindow):
                                     break
                                     
                             actual_col = d_idx * periods + p
-                            self._grid.set_cell(r_idx, actual_col, s_name, color, t_name, span, c_name, display_mode="teachers", locked=is_locked, is_manual=is_man, is_combined=cell_info.get("is_combined", False), combined_classes=cell_info.get("combined_classes", []))
+                            self._grid.set_cell(r_idx, actual_col, s_name, color, t_name, span, c_name, display_mode="teachers", locked=is_locked, is_manual=is_man, is_combined=cell_info.get("is_combined", False), combined_classes=cell_info.get("combined_classes", []), block_id=cell_bid)
                             p += span
             else:
                 import re
@@ -1722,7 +1670,7 @@ class MainWindow(QMainWindow):
                                     break
                                     
                             actual_col = d_idx * periods + p
-                            self._grid.set_cell(r_idx, actual_col, s_name, color, t_name, span, tc, display_mode="classes", locked=is_locked, is_manual=is_man, is_combined=is_comb_cell, combined_classes=cell_info.get("combined_classes", []))
+                            self._grid.set_cell(r_idx, actual_col, s_name, color, t_name, span, tc, display_mode="classes", locked=is_locked, is_manual=is_man, is_combined=is_comb_cell, combined_classes=cell_info.get("combined_classes", []), block_id=cell_bid)
                             p += span
         finally:
             if hasattr(self._grid, "table"):

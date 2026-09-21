@@ -1019,10 +1019,10 @@ class APIClient:
                             changed += 1
                         self._index_cache[target] = (file_signature(target), *stamp[1:])
                         continue
-                downloads.append((slug, filename, key, target, expected))
+                downloads.append((slug, filename, key, target, expected, stamp))
 
         def fetch(job):
-            slug, filename, key, target, expected = job
+            slug, filename, key, target, expected, stamp = job
             body = self._request_with_retry("GET", f"{self.base_url}/api/sync/{slug}/{key}", timeout=20)
             if body is None or body.status_code != 200:
                 return 0
@@ -1033,6 +1033,19 @@ class APIClient:
             if isinstance(data, dict) and self._write_if_different(target, data, expected_signature=expected):
                 version_store.invalidate_version_summary(slug, filename)
                 return 1
+            # İNDİRİLDİ AMA DEĞİŞEN BİR ŞEY YOK.
+            #
+            # Sunucunun özeti yerel özetle tutmuyor (iki taraf içeriği farklı
+            # biçimde özetlemiş olabilir) ama dosyanın kendisi zaten aynı.
+            # Burası damgayı hatırlamıyordu; sonraki her sorguda aynı sürüm
+            # yeniden indiriliyor, ekranda "N yeni değişiklik indiriliyor"
+            # yazıyor ve sunucu üç saniyede bir bütün sürümleri yeniden
+            # veriyordu. Damga şimdi hatırlanıyor: sunucudaki kayıt ya da
+            # yerel dosya değişmedikçe bu sürüm bir daha istenmez.
+            try:
+                self._index_cache[target] = (file_signature(target), *stamp[1:])
+            except Exception:
+                pass
             return 0
 
         if downloads:

@@ -3799,13 +3799,37 @@ class DropTableWidget(QTableWidget):
                         if p.get("block_id") == p_bid
                     ]
                 else:
+                    # KİMLİKSİZ KAYIT: yalnızca ekranda tutulan bloğun kendi
+                    # hücreleri. Burası eskiden aynı gün ±2 saat içindeki, aynı
+                    # dersten ve (aynı sınıf VEYA aynı öğretmen) her kaydı
+                    # alıyordu: 6. saatteki Fizik'i indirince 4. saatteki
+                    # Fizik de iniyor, aynı hocanın başka sınıftaki dersi de
+                    # gidiyordu. Blok, ızgaranın çizdiği kadardır:
+                    # orig_c'den başlayan orig_dur saat, bu satırın kendi
+                    # birimi (sınıf görünümünde sınıf, öğretmen görünümünde
+                    # öğretmen), aynı ders.
+                    span_start = int(orig_c) % periods
+                    span_end = span_start + max(1, int(orig_dur or 1))
+
+                    def _in_visual_block(p):
+                        if int(p.get("day") if "day" in p else p.get("col", 0)) != del_day:
+                            return False
+                        q_per = int(p.get("period") if "period" in p else p.get("row", 0))
+                        q_dur = max(1, int(p.get("duration", 1) or 1))
+                        if q_per + q_dur <= span_start or q_per >= span_end:
+                            return False
+                        if (p.get("subject_name") or p.get("subject") or "") != p_sub:
+                            return False
+                        q_cls = (p.get("class_name") or p.get("class") or "").strip()
+                        q_tea = (p.get("teacher_name") or p.get("teacher") or "").strip()
+                        if view_mode == "classes":
+                            return (q_cls == p_cls.strip()
+                                    or matches_class(q_cls, p_cls) or matches_class(p_cls, q_cls))
+                        return format_tr_name(q_tea) == format_tr_name(p_tea)
+
                     matching_block_placements = [
                         p for p in win.data_store.get("grid_placements", [])
-                        if (int(p.get("day") if "day" in p else p.get("col", 0)) == del_day and
-                            abs(int(p.get("period") if "period" in p else p.get("row", 0)) - p_per) <= 2 and
-                            (p.get("subject_name") or p.get("subject")) == p_sub and
-                            (matches_class(p.get("class_name") or p.get("class", ""), p_cls) or
-                             format_tr_name(p.get("teacher_name") or p.get("teacher", "")) == format_tr_name(p_tea)))
+                        if _in_visual_block(p)
                     ]
                     
         # Extract metadata from primary placement or info
@@ -4131,41 +4155,40 @@ class DropTableWidget(QTableWidget):
                             win._push_undo_state(f"'{s_name}' rengi değiştirildi")
                         update_subject_color_globally(self, data_store, s_name, new_color.name())
             elif action == act_move:
-                # Instant move dialog
+                # Sağ tık → Taşı. Gün ve saat sorulur, sonra sürükleyip
+                # bırakmayla AYNI yoldan geçer (_on_lesson_dropped): mağazaya
+                # yazar, çakışmaları denetler, geri alınabilir. Eskiden burası
+                # eski dikey ızgaranın geometrisiyle (satır=saat, sütun=gün)
+                # doğrudan hücreye yazıyordu; yatay ızgarada yanlış hücreye
+                # düşüyor ve mağazaya hiç yansımıyordu.
                 from PySide6.QtWidgets import QInputDialog
-                days = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
                 win = self.window()
+                if hasattr(win, "_editor") and getattr(win, "_editor"):
+                    win = win._editor
+                grid = self.parent()
+                periods = int(getattr(grid, "_periods", 8)) or 8
+                days = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
                 if hasattr(win, "data_store"):
-                    settings = win.data_store.get("settings", {})
-                    days = settings.get("days", ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"])
-                day_choice, ok1 = QInputDialog.getItem(self, "Dersi Taşı", "Hedef Gün:", days, 0, False)
+                    settings = win.data_store.get("settings", {}) or {}
+                    days = list(settings.get("days") or days)
+                cur_day = orig_c // periods
+                cur_per = orig_c % periods
+                day_choice, ok1 = QInputDialog.getItem(
+                    self, "Dersi Taşı", "Hedef gün:", days, min(cur_day, len(days) - 1), False)
                 if ok1 and day_choice:
-                    target_col = days.index(day_choice)
-                    period_strs = [f"{p+1}. Ders" for p in range(self.rowCount())]
-                    p_choice, ok2 = QInputDialog.getItem(self, "Dersi Taşı", "Hedef Saat:", period_strs, 0, False)
-                    if ok2 and p_choice:
-                        target_row = period_strs.index(p_choice)
-                        # Her iki soru da yanıtlandı: taşıma kesin olarak
-                        # yapılacak. İlk mutasyondan ÖNCE anlık görüntü al —
-                        # aşağısı hücreyi boşaltıp save_db() ile diske yazıyor.
-                        if hasattr(win, "_push_undo_state"):
-                            win._push_undo_state("Ders taşındı (sağ tık)")
-                        if orig_item and hasattr(self.parent(), "set_cell"):
-                            txt = orig_item.text()
-                            bg = orig_item.background().color().name()
-                            if self.rowSpan(orig_r, orig_c) > 1 or self.columnSpan(orig_r, orig_c) > 1:
-                                self.setSpan(orig_r, orig_c, 1, 1)
-                            for r_off in range(orig_dur):
-                                tr = orig_r + r_off
-                                if tr < self.rowCount():
-                                    self.setItem(tr, orig_c, None)
-                            if hasattr(self.parent(), "_placed_lessons"):
-                                self.parent()._placed_lessons.pop((orig_r, orig_c), None)
-                            self.parent().set_cell(target_row, target_col, txt.split('\n')[0], bg, txt.split('\n')[1] if '\n' in txt else "", duration=orig_dur)
-                            if hasattr(win, "save_db"):
-                                win.save_db()
-                            if hasattr(win, "_refresh_tree"):
-                                win._refresh_tree()
+                    period_strs = [f"{p + 1}. Ders" for p in range(periods)]
+                    p_choice, ok2 = QInputDialog.getItem(
+                        self, "Dersi Taşı", "Hedef saat:", period_strs, cur_per, False)
+                    if ok2 and p_choice and orig_info and hasattr(win, "_on_lesson_dropped"):
+                        target_col = days.index(day_choice) * periods + period_strs.index(p_choice)
+                        data = dict(orig_info)
+                        data.update({
+                            "is_move": True,
+                            "origin_row": orig_r, "origin_col": orig_c,
+                            "duration": max(1, int(orig_dur or 1)),
+                            "teacher": orig_info.get("teacher_name", ""),
+                        })
+                        win._on_lesson_dropped(orig_r, target_col, data)
         else:
             # BOŞ HÜCRE MENÜSÜ.
             #
@@ -4946,7 +4969,7 @@ class TimetableGrid(QWidget):
             self.table.setRowCount(self._periods)
             self.table.setVerticalHeaderLabels([f"{i+1}" for i in range(self._periods)])
 
-    def set_cell(self, row, col, subject_name, color, teacher_name="", duration=1, class_name="", display_mode="classes", locked=False, is_manual=False, is_combined=False, combined_classes=None):
+    def set_cell(self, row, col, subject_name, color, teacher_name="", duration=1, class_name="", display_mode="classes", locked=False, is_manual=False, is_combined=False, combined_classes=None, block_id=None):
         signature = (subject_name, color, teacher_name, duration, class_name,
                      display_mode, locked, is_manual, is_combined, tuple(combined_classes or []))
         cache = getattr(self, "_rendered_cells", {})
@@ -4999,7 +5022,11 @@ class TimetableGrid(QWidget):
             "is_combined": bool(is_combined),
             "combined_classes": combined_classes or [],
             "day_idx": day_idx, "period": period_idx,
-            "origin_row": row, "origin_col": col
+            "origin_row": row, "origin_col": col,
+            # Kartın kimliği hücreyle birlikte taşınır: sürükleme verisi
+            # buradan kopyalanıyor ve kartı mağazada adıyla değil kimliğiyle
+            # bulmak gerekiyor.
+            "block_id": block_id,
         }
         for off in range(duration):
             self._placed_lessons[(row, col + off)] = info_dict

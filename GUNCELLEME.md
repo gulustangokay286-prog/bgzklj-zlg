@@ -42,8 +42,8 @@ indirir.
 ### Her yayından önce `version.py`
 
 ```python
-APP_VERSION = "5.3.7"
-APP_BUILD = 537
+APP_VERSION = "5.3.8"
+APP_BUILD = 538
 ```
 
 Sunucu "daha yeni mi" kararını bu numaraya göre verir. Yükseltmeden

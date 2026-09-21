@@ -8,11 +8,11 @@
 ;   3) ISCC.exe Chenkron.iss                -> Output\ChenkronKurulum-x.y.z.exe
 ;
 ; Sürüm numarası tek yerden gelsin diye komut satırından geçirilebilir:
-;   ISCC.exe /DAppVersion=5.3.6 Chenkron.iss
+;   ISCC.exe /DAppVersion=5.3.8 Chenkron.iss
 ; Geçilmezse aşağıdaki varsayılan kullanılır ve version.py ile elle eşitlenir.
 
 #ifndef AppVersion
-  #define AppVersion "5.3.6"
+  #define AppVersion "5.3.8"
 #endif
 
 #define AppName       "Chenkron"
