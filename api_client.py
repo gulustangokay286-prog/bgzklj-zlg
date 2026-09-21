@@ -697,11 +697,31 @@ class APIClient:
         return {"Authorization": f"Bearer {self.token}"}
 
     def _request_with_retry(self, method, url, **kwargs):
+        """Bir isteği atar; ağ hatasında KISA aralıkla bir kez daha dener.
+
+        Adında "retry" vardı ama tek deneme yapıyordu: her ağ takılması —
+        DNS'in bir anlık cevap vermemesi, Wi-Fi'nin bir saniyelik kopması,
+        sunucunun o istekte yavaş kalması — doğrudan "sunucuya
+        ulaşılamadı" sayılıyordu. Üç böyle an üst üste gelince program
+        kendi kendine ÇEVRİMDIŞI'na düşüyordu; kullanıcı ise internetinin
+        yerinde olduğunu görüyordu.
+
+        Yalnızca GET tekrarlanır: bir kaydı iki kez göndermek başka bir
+        hata sınıfı açar.
+        """
         headers = kwargs.pop("headers", None) or self.get_headers()
         timeout = kwargs.pop("timeout", 10)
-        try:
-            resp = self.session.request(method, url, headers=headers, timeout=timeout, **kwargs)
-        except Exception:
+        attempts = 2 if str(method).upper() == "GET" else 1
+        resp = None
+        for attempt in range(attempts):
+            try:
+                resp = self.session.request(method, url, headers=headers, timeout=timeout, **kwargs)
+                break
+            except Exception:
+                resp = None
+                if attempt + 1 < attempts:
+                    time.sleep(0.6)
+        if resp is None:
             return None
 
         if resp.status_code != 401:
@@ -835,6 +855,15 @@ class APIClient:
         if resp.status_code == 404:
             self._supports_index = False
             return None
+        if resp.status_code in (408, 425, 429, 500, 502, 503, 504):
+            # SUNUCU MEŞGUL, BAĞLANTI YERİNDE.
+            #
+            # Bu kodlar "şu an cevap veremiyorum" demek, "ulaşılamıyorum"
+            # değil. İkisi aynı sepete konunca sunucudaki üç saniyelik bir
+            # yoğunluk kullanıcının ekranında "Çevrimdışı" olarak
+            # beliriyordu. Geçici olarak işaretleniyor; senkron döngüsü
+            # bunu bir kopukluk saymıyor, yalnızca bekliyor.
+            return False, f"__transient__ Sunucu meşgul (HTTP {resp.status_code})", 0
         if resp.status_code != 200:
             return False, f"Buluttan veri çekilemedi (HTTP {resp.status_code})", 0
         try:

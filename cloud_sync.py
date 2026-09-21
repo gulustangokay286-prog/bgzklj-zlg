@@ -302,14 +302,27 @@ class CloudSyncWorker(QObject):
                             self._seen_generation = api_client.sync_generation
                             self._safe_emit(self.institutions_list_changed)
                             self._safe_emit(self.remote_data_updated, "", "")
+                    elif str(msg or "").startswith("__transient__"):
+                        # Sunucu meşgul ama bağlantı var: kopukluk sayacı
+                        # ilerlemez, kullanıcı "Çevrimdışı" görmez.
+                        self._safe_emit(self.sync_status_changed, "Sunucu meşgul, bekleniyor...")
                     else:
                         self._offline_streak += 1
                         if self._offline_since is None:
                             self._offline_since = now
-                        # Üç ardışık başarısızlık VE en az 8 saniye: geçici bir
-                        # takılma "Çevrimdışı" göstermez, gerçek kopukluk gösterir.
-                        if (self._offline_streak >= 3
-                                and now - self._offline_since >= 8.0):
+                        # ÇEVRİMDIŞI KOLAY VERİLEN BİR HÜKÜM DEĞİL.
+                        #
+                        # Eşik "3 başarısızlık ve 8 saniye"ydi. Poll aralığı
+                        # bir saniye olduğu için bu, sekiz saniyelik herhangi
+                        # bir takılmada — Wi-Fi'nin bir anlık düşmesi, sunucunun
+                        # kısa bir yoğunluğu — programın kendi kendine
+                        # "Çevrimdışı"na düşmesi demekti. Kullanıcı internetinin
+                        # yerinde olduğunu gördüğü için bunu bir arıza sanıyordu
+                        # ve haklıydı. Şimdi beş ardışık başarısızlık VE en az
+                        # otuz saniye gerekiyor; ilk başarılı istek sayacı
+                        # sıfırlıyor.
+                        if (self._offline_streak >= 5
+                                and now - self._offline_since >= 30.0):
                             if not self._offline_shown:
                                 self._offline_shown = True
                                 self._safe_emit(self.sync_status_changed, "Veritabanı: Çevrimdışı (Yerel Mod)")
@@ -325,10 +338,13 @@ class CloudSyncWorker(QObject):
         """WebSocket events fetch immediately; polling recovers missed events."""
         if self._offline_streak:
             return min(3.0 * self._offline_streak, 15.0)
-        # The index is hash-only and the WebSocket is the primary path. Keep a
-        # one-second safety poll so a blocked corporate proxy still converges almost
-        # immediately; the request is only a few KB and downloads changed versions.
-        return 1.0
+        # Saniyede bir yoklama, iki bilgisayar aynı anda açıkken sunucuya
+        # saniyede iki istek demekti; sunucu tek iş parçacığında senkron
+        # sorgu çalıştırdığı için yığılıyor, yanıtlar gecikiyor ve o
+        # gecikme istemcide "çevrimdışı" olarak geri dönüyordu. WebSocket
+        # zaten ana yol; yoklama yalnızca kaçan olayları toplar, üç saniye
+        # ona yeter.
+        return 3.0
 
     def request_version(self, slug, key):
         with self._lock:
