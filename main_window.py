@@ -521,108 +521,43 @@ class MainWindow(QMainWindow):
             if show_message:
                 QMessageBox.warning(self, "Bulut Senkronizasyon", f"Bağlantı hatası: {e}")
 
-    def _ensure_updater(self):
-        """Creates the shared update checker, wiring it up exactly once."""
-        if getattr(self, "_updater", None) is not None:
-            return self._updater
-        from updater import UpdateChecker
-
-        self._updater = UpdateChecker(self)
-        self._update_check_was_manual = False
-        self._updater.update_available.connect(self._on_update_ready)
-        self._updater.download_progress.connect(self._on_update_progress)
-        self._updater.check_failed.connect(self._on_update_check_failed)
-        return self._updater
+    def _update_checker(self):
+        """Güncelleme denetleyicisi kabuk penceresinde yaşar (bkz.
+        main.py -> bk_update.start_in_session_checker): o pencere program
+        boyunca ayakta, çizelge editörü ise açılıp kapanıyor. Denetleyiciyi
+        burada ikinci kez kurmak, aynı sürümü iki kez indiren iki ayrı
+        denetleyici demek olurdu."""
+        shell = self.window()
+        return getattr(shell, "_bk_update_checker", None)
 
     def start_background_update_checks(self):
-        """Checks at startup and hourly thereafter, downloading quietly in the
-        background so the user is only interrupted once the package is ready."""
-        from PySide6.QtCore import QTimer
+        """Artık burada bir şey başlatılmıyor.
 
-        updater = self._ensure_updater()
-        QTimer.singleShot(20_000, lambda: updater.check_async(auto_download=True))
-
-        self._update_timer = QTimer(self)
-        self._update_timer.timeout.connect(lambda: updater.check_async(auto_download=True))
-        self._update_timer.start(60 * 60 * 1000)
+        Eskiden burası kendi UpdateChecker'ını kurup VDS'te var olmayan
+        /api/updates ucunu yokluyordu; istek her seferinde 404 dönüyor,
+        kod da sessizce "zaten güncelsiniz" dalına düşüyordu — kullanıcıya
+        hiçbir zaman güncelleme sunulmamasının sebeplerinden biri buydu.
+        Periyodik denetim tek bir yerde, kabuk penceresindeki
+        InSessionUpdateChecker'da yapılıyor. Metot, çağrıldığı yer
+        değişmesin diye duruyor."""
+        return None
 
     def _act_check_updates(self):
-        """Menu action: check now, and say something either way."""
-        updater = self._ensure_updater()
-        self._update_check_was_manual = True
+        """Menü eylemi: şimdi denetle. Sonuç ne olursa olsun ekranın
+        ortasındaki güncelleme penceresi bir şey söyler, çünkü denetimi
+        kullanıcı istedi."""
+        checker = self._update_checker()
+        if checker is None:
+            from version import APP_VERSION
+
+            QMessageBox.information(
+                self, "Güncelleme Kontrolü",
+                "Güncelleme denetimi bu oturumda kullanılamıyor."
+                f"\n\nSürüm: {APP_VERSION}",
+            )
+            return
         self.statusBar().showMessage("Güncellemeler denetleniyor...", 4000)
-        updater.check_async(auto_download=True)
-
-    def _on_update_progress(self, percent):
-        self.statusBar().showMessage(f"Güncelleme indiriliyor... %{percent}", 2000)
-
-    def _on_update_check_failed(self, reason):
-        if not getattr(self, "_update_check_was_manual", False):
-            return  # a background check that found nothing stays silent
-        self._update_check_was_manual = False
-        from updater import current_version_string
-
-        if reason == "up-to-date" or reason == "no-release":
-            QMessageBox.information(
-                self, "Güncelleme Kontrolü",
-                f"En güncel sürümü kullanıyorsunuz.\nSürüm: {current_version_string()}",
-            )
-        else:
-            QMessageBox.warning(
-                self, "Güncelleme Kontrolü",
-                f"Güncelleme sunucusuna ulaşılamadı.\n({reason})",
-            )
-
-    def _on_update_ready(self, manifest):
-        """The package is downloaded and its checksum verified."""
-        self._update_check_was_manual = False
-        from updater import install_staged_update, is_frozen
-
-        version = manifest.get("version", "?")
-        notes = manifest.get("notes") or "Bu sürüm için not girilmemiş."
-        package = self._updater.staged_package
-
-        if not package:
-            return
-
-        if not is_frozen():
-            QMessageBox.information(
-                self, "Güncelleme Hazır",
-                f"Sürüm {version} indirildi.\n\nKaynak koddan çalıştırdığınız için "
-                f"otomatik kurulum yapılmadı.\nPaket: {package}",
-            )
-            return
-
-        box = QMessageBox(self)
-        box.setWindowTitle("Güncelleme Hazır")
-        box.setText(f"Yeni sürüm indirildi: {version}")
-        box.setInformativeText(
-            f"Değişiklikler:\n{notes}\n\n"
-            "Uygulama kapatılıp güncellenecek ve yeniden açılacaktır. Şimdi kurulsun mu?"
-        )
-        box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-        box.setDefaultButton(QMessageBox.Yes)
-
-        if box.exec() != QMessageBox.Yes:
-            self.statusBar().showMessage(
-                "Güncelleme hazır — uygulamayı kapattığınızda kurulacak.", 6000
-            )
-            return
-
-        # Save before the process is replaced, or unsaved grid edits are lost.
-        try:
-            self._save_new_version_with_folder_picker("", force=False)
-        except Exception as exc:
-            print(f"[update] pre-update save note: {exc}")
-
-        if install_staged_update(package, manifest):
-            from PySide6.QtWidgets import QApplication
-            QApplication.quit()
-        else:
-            QMessageBox.warning(
-                self, "Güncelleme",
-                "Güncelleme başlatılamadı. Lütfen uygulamayı yeniden başlatıp tekrar deneyin.",
-            )
+        checker.check_now()
 
     def cleanup(self):
         """Clean up background workers and resources before deletion."""

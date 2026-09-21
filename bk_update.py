@@ -1,321 +1,383 @@
-"""In-process update engine for BK Planner.
+"""
+bk_update.py — guncelleme akisinin Qt katmani.
 
-Replaces the standalone Updater.exe background service entirely — that
-service (spawned by Launcher, kept alive independently, holding its own
-WebSocket connection) was the "bir sürü updater arka planda çalışıyor"
-complaint made real: Task Manager legitimately showed extra always-on
-processes for something the user never asked to run.
+ota_update.py agi ve diski yapar, bu dosya onu arayuze baglar. Tek is
+parcacigi kurali gecerli: her ag/disk isi bir QThread'de, her widget
+dokunusu ana is parcaciginda (sinyaller araciligiyla).
 
-Every update check, download, verify, stage, and activate now happens
-INSIDE this process, using the ReleaseSystem client package directly (same
-engine, same crash-safety guarantees, same content-defined-chunking speed —
-none of that changes) — just called as a library instead of run as a
-separate exe, from two places:
+BU DOSYA NEDEN DEGISTI
+----------------------
+Onceki hali ReleaseSystem'in Launcher/Versions kurulum duzenini sart
+kosuyordu: install_root() o duzeni bulamazsa None donuyor ve buradaki HER
+SEY sessizce devre disi kaliyordu. Chenkron.iss ise duz kurulum yapiyor,
+yani install_root() kurulu her makinede None donuyordu — guncelleme
+denetimi yillardir hic calismamisti. Artik ota_update.py duz kurulumu
+destekledigi icin bu katman her zaman calisir; Launcher.exe'ye,
+Versions/ duzenine ve arka planda duran ayri bir updater surecine gerek
+yok.
 
-  1. Synchronously on the splash screen at startup (see splash_screen.py),
-     with real progress, so a stale install catches up and finishes BEFORE
-     the dashboard ever shows — exactly "loading ekranında güncellemeleri
-     indirmeli ve uygulamalıdır".
-  2. On a background thread while the app is already open, polling
-     periodically. When something new is found and staged, this shows
-     UpdateAvailableSheet ("Şimdi Güncelle" / "Daha Sonra") instead of
-     silently applying — the user asked explicitly never to be surprised
-     by a restart, only offered one.
+IKI GIRIS NOKTASI
+-----------------
+  1. Acilista, splash ekraninda (run_blocking_check + apply_and_restart):
+     bayat bir kurulum, anasayfa hic gorunmeden once kendini toparlar.
+  2. Program acikken (InSessionUpdateChecker): periyodik denetim; yeni
+     surum bulunursa ortada UpdateCenterOverlay acilir, indirme kendi
+     basina baslar, bitince tek bir karar sorulur. Kullanici calisirken
+     hicbir sey kendiliginden yeniden baslatilmaz.
 
-Trade-off worth stating plainly: dropping the standalone agent means
-dropping its always-open WebSocket, so a release published while the app
-is running is noticed within one polling interval (IN_SESSION_POLL_MS)
-rather than within the same second. Given the explicit ask to eliminate
-background processes, that's the right trade for this app.
-
-Everything here no-ops safely under `python main.py` (dev, unfrozen) —
-install_root() returns None and every public function checks for that.
+Tercihin bedeli acikca soylenmeli: surekli acik bir WebSocket yerine
+periyodik denetim var, yani program acikken yayinlanan bir surum saniyesi
+saniyesine degil, en gec bir denetim araligi sonra fark edilir. Buna
+karsilik arka planda hicbir surec durmuyor.
 """
 from __future__ import annotations
 
-import os
-import sys
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QThread, Qt, QTimer, Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QObject, QThread, QTimer, Signal
+from PySide6.QtWidgets import QWidget
 
-import bk_branding
+import ota_update
+from ota_update import OtaError  # noqa: F401  (cagiranlar icin yeniden disa vurum)
 from version import APP_VERSION
 
-IN_SESSION_POLL_MS = 10 * 60 * 1000  # 10 minutes
+# Program acikken denetim araligi. 10 dakika: yeni surum yayinlandiktan
+# sonra makul bir gecikme, ama bos yere sunucuya gidip gelmeyecek kadar da
+# seyrek.
+IN_SESSION_POLL_MS = 10 * 60 * 1000
+
+# Ilk denetim acilistan hemen sonra degil: acilis zaten agir (oturum
+# dogrulama, kurum listesi, bulut senkronu). Guncelleme denetimi o
+# kalabaliga karismasin.
+FIRST_CHECK_DELAY_MS = 45 * 1000
+
+# Eski adin karsiligi; update_notifications.py gibi cagiranlar bunu
+# kontrol ediyor.
+_HAS_UPDATE_ENGINE = ota_update.ENGINE_AVAILABLE
 
 
-def _release_system_root() -> Path | None:
-    """Only meaningful in dev (`python main.py`) — in a frozen build the
-    `client` package is compiled straight into this exe's own archive by
-    the PyInstaller spec's `pathex`, so no filesystem path is needed."""
-    if getattr(sys, "frozen", False):
-        return None
-    candidate = Path(__file__).resolve().parent.parent / "ReleaseSystem"
-    return candidate if candidate.is_dir() else None
-
-
-_rs_root = _release_system_root()
-if _rs_root is not None and str(_rs_root) not in sys.path:
-    sys.path.insert(0, str(_rs_root))
-
-try:
-    from client.config import ClientConfig, ca_bundle_path
-    from client.networking.http_client import HttpClient
-    from client.state.paths import Layout
-    from client.updater.downloader import DownloadProgress
-    from client.updater.engine import UpdateEngine
-
-    _HAS_UPDATE_ENGINE = True
-except Exception:
-    _HAS_UPDATE_ENGINE = False
+def updates_supported() -> bool:
+    return ota_update.updates_supported()
 
 
 def install_root() -> Path | None:
-    """BKPlanner.exe (frozen) lives at <ROOT>/Versions/<version>/ when
-    launched through Launcher.exe — walk up to <ROOT>. None for a dev run
-    or a copy not installed under that layout; callers must treat that as
-    "updates unavailable here", not an error."""
-    if not getattr(sys, "frozen", False) or not _HAS_UPDATE_ENGINE:
+    """Geriye donuk ad. Artik "kurulumun kokunu bul" degil, "guncelleme
+    durumu nerede duruyor" sorusunun cevabi: %LOCALAPPDATA%\\Chenkron\\OTA.
+    Motor yoksa None — cagiranlar bunu "burada guncelleme yapilamaz"
+    olarak ele aliyor, oyle de kalsin."""
+    if not ota_update.updates_supported():
         return None
-    exe_dir = Path(sys.executable).resolve().parent
-    candidate = exe_dir.parent.parent
-    if (candidate / "State").is_dir() and (candidate / "Versions").is_dir():
-        return candidate
-    return None
+    return ota_update.ota_root()
 
 
-def _make_engine(root: Path) -> "UpdateEngine":
-    layout = Layout(root)
-    cfg = ClientConfig()
-    http = HttpClient(cfg.api_base_url, verify_tls=ca_bundle_path() or True)
-    engine = UpdateEngine(layout, cfg, http)
-    engine.recover()
-    if not engine.is_registered:
-        engine.register()
-    return engine
+# -- Arka plan isi --------------------------------------------------------
+class UpdateWorker(QObject):
+    """Tek bir denetim-indir-kurgula turu, bir QThread icinde.
 
+    found:     yeni surum var, indirme basliyor (surum, toplam bayt)
+    progress:  indirilen / toplam bayt
+    verifying: indirme bitti, imza + saglama dogrulamasi basladi
+    staged:    paket kurulmaya hazir (surum, notlar)
+    nothing:   guncel
+    failed:    hata metni
+    """
 
-class UpdateCheckWorker(QObject):
-    """One full check-and-update pass, run on a background QThread so the
-    caller's UI (splash progress bar, or the rest of the app) never
-    blocks. `applied` means a new version was downloaded, verified, staged
-    AND activated (current.json now points at it) — not that this running
-    process is executing it; that still needs a relaunch, see
-    relaunch_via_launcher()."""
+    found = Signal(str, int)
+    progress = Signal(int, int)
+    verifying = Signal(str)
+    staged = Signal(str, str)
+    nothing = Signal()
+    failed = Signal(str)
 
-    progress = Signal(int, int)  # downloaded_bytes, total_bytes
-    finished = Signal(bool, str)  # applied, new_version_or_empty
-
-    def __init__(self, root: Path):
+    def __init__(self, current_version: str | None = None):
         super().__init__()
-        self._root = root
+        self._current_version = current_version or APP_VERSION
 
     def run(self) -> None:
-        applied = False
-        new_version = ""
         try:
-            engine = _make_engine(self._root)
+            client = ota_update.OtaClient(self._current_version)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+            return
 
-            def on_progress(p: "DownloadProgress") -> None:
-                self.progress.emit(p.downloaded_bytes, p.total_bytes)
+        try:
+            client.ensure_registered()
+            info = client.check()
+        except Exception as exc:
+            self.failed.emit(f"Sunucuya ulasilamadi: {exc}")
+            return
 
-            applied = engine.check_and_update(on_progress=on_progress)
-            if applied:
-                new_version = engine.layout.read_current().get("active_version", "")
-        except Exception:
-            applied = False
-        self.finished.emit(applied, new_version)
+        if info is None:
+            try:
+                client.heartbeat()
+            except Exception:
+                pass
+            self.nothing.emit()
+            return
+
+        self.found.emit(info.version, info.total_size_bytes)
+
+        try:
+            # Onceki turda indirilip kurgulanmis olabilir: o zaman tek bir
+            # bayt bile yeniden indirilmez.
+            ready = client.staged_dir(info.version)
+            if ready is None:
+                client.prepare(
+                    info,
+                    on_progress=lambda d, t: self.progress.emit(d, t),
+                    on_stage=lambda: self.verifying.emit(info.version),
+                )
+        except Exception as exc:
+            self.failed.emit(str(exc))
+            return
+
+        self.staged.emit(info.version, info.notes)
 
 
-def run_blocking_check(root: Path, on_progress=None) -> tuple[bool, str]:
-    """Splash-screen use: runs the check on a worker thread but blocks the
-    CALLING thread until it's done (via a local Qt event loop), so splash's
-    existing exec()-based flow doesn't need restructuring — it just calls
-    this once, synchronously, and gets back whether an update landed."""
+class _ThreadRunner(QObject):
+    """QThread + UpdateWorker ikilisinin omrunu tek yerde tutar.
+
+    Ayri bir sinif olmasinin sebebi somut: worker'i yerel degiskende
+    tutmak Python'un onu toplamasina, thread'i yerel degiskende tutmak da
+    "QThread: Destroyed while thread is still running" cokmesine yol
+    aciyor. Ikisi de burada, cagirana referans olarak veriliyor."""
+
+    def __init__(self, parent: QObject, current_version: str | None = None):
+        super().__init__(parent)
+        self.thread = QThread(parent)
+        self.worker = UpdateWorker(current_version)
+        self.worker.moveToThread(self.thread)
+        self.thread.started.connect(self.worker.run)
+
+    def start(self) -> None:
+        self.thread.start()
+
+    def stop(self) -> None:
+        """Thread'i durdurup Qt nesnelerini de sil. deleteLater olmadan
+        her denetim (10 dakikada bir) ana pencereye bir QThread cocugu
+        daha takiyor: uzun bir gun sonunda onlarca olu nesne birikiyor."""
+        self.thread.quit()
+        self.thread.wait(3000)
+        self.worker.deleteLater()
+        self.thread.deleteLater()
+        self.deleteLater()
+
+
+# -- Acilis (splash) yolu -------------------------------------------------
+def run_blocking_check(root=None, on_progress=None, on_stage=None):
+    """Splash ekrani icin: denetle, gerekiyorsa indir ve kurgula; CAGIRAN
+    is parcacigini yerel bir olay dongusuyle bekletir, boylece splash'in
+    var olan exec() akisini degistirmeye gerek kalmaz.
+
+    Doner: (hazir_mi, surum). hazir_mi True ise paket kurulmayi bekliyor;
+    kurulumu baslatmak cagirana ait (apply_and_restart).
+
+    `root` yalnizca eski imzayi korumak icin duruyor ve kullanilmiyor.
+    """
+    if not ota_update.updates_supported():
+        return False, ""
+
     from PySide6.QtCore import QEventLoop
 
-    result = {"applied": False, "version": ""}
+    result = {"ready": False, "version": ""}
     loop = QEventLoop()
-    thread = QThread()
-    worker = UpdateCheckWorker(root)
-    worker.moveToThread(thread)
+    runner = _ThreadRunner(None)
 
-    def _done(applied: bool, version: str) -> None:
-        result["applied"] = applied
+    def _done_ok(version: str, _notes: str) -> None:
+        result["ready"] = True
         result["version"] = version
         loop.quit()
 
-    worker.finished.connect(_done)
+    def _done_none() -> None:
+        loop.quit()
+
+    def _done_fail(_msg: str) -> None:
+        loop.quit()
+
+    runner.worker.staged.connect(_done_ok)
+    runner.worker.nothing.connect(_done_none)
+    runner.worker.failed.connect(_done_fail)
     if on_progress:
-        worker.progress.connect(on_progress)
-    thread.started.connect(worker.run)
-    thread.start()
+        runner.worker.progress.connect(on_progress)
+    if on_stage:
+        runner.worker.verifying.connect(lambda _v: on_stage())
+
+    runner.start()
     loop.exec()
-    thread.quit()
-    thread.wait(2000)
-    return result["applied"], result["version"]
+    runner.stop()
+    return result["ready"], result["version"]
 
 
-def relaunch_via_launcher(root: Path) -> None:
-    """Hands off to Launcher.exe (which re-reads current.json fresh and
-    supervises the new version's first seconds — same crash-safe path any
-    normal start takes) and hard-exits this process immediately after.
-    os._exit, not sys.exit: skips atexit/cleanup that could hang on
-    whatever background thread is still winding down — the new process is
-    already on its way up, nothing here needs to finish gracefully."""
-    launcher_exe = root / "Launcher" / "Launcher.exe"
-    try:
-        import subprocess
-
-        if launcher_exe.exists():
-            subprocess.Popen([str(launcher_exe)], cwd=str(launcher_exe.parent), close_fds=True)
-    except Exception:
-        pass
-    os._exit(0)
-
-
-class UpdateAvailableSheet(QWidget):
-    """A modal-feeling sheet, centered on the parent window: "a new update
-    is ready — update now, or later?" Never appears without the update
-    already fully downloaded and verified — clicking "Şimdi Güncelle" is
-    just a relaunch, not a fresh download, so it's fast."""
-
-    def __init__(self, parent: QWidget, new_version: str):
-        super().__init__(parent, Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
-        # Saydam DEĞİL: içeriği henüz boyanmamış saydam bir pencere
-        # macOS'ta kapkara görünüyor. Bu pencereler arayüzün meşgul
-        # olduğu anlarda (kaydetme, motoru durdurma) açıldığı için
-        # ekranda siyah dikdörtgenler olarak kalıyordu.
-        self.setAttribute(Qt.WA_TranslucentBackground, False)
-        self.setAutoFillBackground(True)
-        self._choice_made = False
-
-        container = QWidget(self)
-        container.setObjectName("sheetContainer")
-        container.setStyleSheet(f"""
-            #sheetContainer {{
-                background-color: #FFFFFF;
-                border-radius: 16px;
-                border: 1px solid #E5E5E5;
-            }}
-            QLabel#sheetTitle {{ color: #111111; font-size: 19px; font-weight: 600; }}
-            QLabel#sheetMessage {{ color: #444444; font-size: 14px; }}
-            QPushButton#sheetPrimary {{
-                background-color: {bk_branding.BRAND_BLUE}; color: #FFFFFF;
-                border: none; border-radius: 10px; padding: 11px 22px; font-size: 14px; font-weight: 600;
-            }}
-            QPushButton#sheetPrimary:hover {{ background-color: {bk_branding.BRAND_BLUE_DARK}; }}
-            QPushButton#sheetSecondary {{
-                background-color: transparent; color: #666666;
-                border: none; padding: 11px 18px; font-size: 14px;
-            }}
-            QPushButton#sheetSecondary:hover {{ color: #111111; }}
-        """)
-
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.addWidget(container)
-
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(34, 28, 34, 24)
-        layout.setSpacing(10)
-
-        title = QLabel("Yeni Güncelleme Hazır")
-        title.setObjectName("sheetTitle")
-        layout.addWidget(title)
-
-        msg = QLabel(f"{bk_branding.PRODUCT_NAME} {new_version} indirildi ve doğrulandı. Şimdi güncellensin mi?")
-        msg.setObjectName("sheetMessage")
-        msg.setWordWrap(True)
-        msg.setMinimumWidth(380)
-        msg.setMaximumWidth(380)
-        layout.addWidget(msg)
-
-        layout.addSpacing(8)
-        btn_row = QHBoxLayout()
-        btn_row.addStretch(1)
-
-        btn_later = QPushButton("Daha Sonra")
-        btn_later.setObjectName("sheetSecondary")
-        btn_later.setCursor(Qt.PointingHandCursor)
-        btn_later.clicked.connect(self._dismiss)
-        btn_row.addWidget(btn_later)
-
-        btn_now = QPushButton("Şimdi Güncelle")
-        btn_now.setObjectName("sheetPrimary")
-        btn_now.setCursor(Qt.PointingHandCursor)
-        btn_now.clicked.connect(self._update_now)
-        btn_row.addWidget(btn_now)
-
-        layout.addLayout(btn_row)
-        self.setFixedWidth(380 + 68)
-        self.adjustSize()
-
-        self.on_update_now = None  # set by the caller
-
-    def _dismiss(self) -> None:
-        self.close()
-
-    def _update_now(self) -> None:
-        self.close()
-        if self.on_update_now:
-            self.on_update_now()
-
-    def show_centered(self) -> None:
-        parent = self.parentWidget()
-        if parent is not None:
-            geo = parent.geometry()
-            x = geo.x() + (geo.width() - self.width()) // 2
-            y = geo.y() + (geo.height() - self.height()) // 2
-        else:
-            x, y = 200, 200
-        self.move(max(0, x), max(0, y))
-        self.show()
+def apply_and_restart(version: str) -> bool:
+    """Kurgulanmis surumu kurar ve sureci SERT bicimde kapatir; takas
+    betigi tam olarak bunu bekliyor. Basarisizsa False doner ve hicbir sey
+    olmaz — cagiran eski surumle devam edebilir."""
+    if not ota_update.updates_supported() or not version:
+        return False
+    staged = ota_update.ota_root() / "Versions" / version
+    if not staged.is_dir():
+        return False
+    # Takastan once yazilir: sonrasi yok, bu surec birazdan oluyor.
+    ota_update.write_pending_notes(version)
+    if not ota_update.apply_staged(staged):
+        return False
+    ota_update.quit_now(0)
+    return True  # pragma: no cover - quit_now doner donmez
 
 
+# -- Oturum ici denetleyici ----------------------------------------------
 class InSessionUpdateChecker(QObject):
-    """Started once the dashboard is up. Polls on a timer; when a check
-    lands a new version, shows UpdateAvailableSheet. Keeps itself alive by
-    being parented to the main window, matching the pattern already used
-    for the version-status checker and the old restart watcher."""
+    """Program acikken calisan denetleyici.
 
-    def __init__(self, parent: QWidget):
+    Yeni surum bulundugu anda ekranin ortasinda UpdateCenterOverlay acilir
+    ve indirme KENDILIGINDEN baslar; kullanicinin bir sey onaylamasi
+    gerekmez. Onay yalnizca en sonda, yeniden baslatma icin sorulur —
+    calisma ortasinda kendiliginden kapanan bir program olmasin diye.
+
+    on_before_restart: yeniden baslatmadan hemen once cagrilir ve False
+    donerse baslatma iptal edilir (ornegin kullanici kaydetme penceresini
+    iptal ettiyse).
+    """
+
+    def __init__(self, parent: QWidget, on_before_restart=None):
         super().__init__(parent)
         self._parent = parent
-        self._root = install_root()
+        self._on_before_restart = on_before_restart
+        self._overlay = None
+        self._runner: _ThreadRunner | None = None
         self._busy = False
-        self._notified = False
-        self._thread: QThread | None = None
-        self._worker: UpdateCheckWorker | None = None
+        self._manual = False
+        self._downloading_version = ""  # su an iniyor
+        self._pending_version = ""      # inmis, kurulmayi bekliyor
+        self._declined_version = ""
+
         self._timer = QTimer(parent)
-        self._timer.timeout.connect(self._check)
-        if self._root is not None:
+        self._timer.timeout.connect(self.check_silently)
+        if ota_update.updates_supported():
+            QTimer.singleShot(FIRST_CHECK_DELAY_MS, self.check_silently)
             self._timer.start(IN_SESSION_POLL_MS)
 
-    def _check(self) -> None:
-        if self._busy or self._notified or self._root is None:
+    # --- Kaplama ---------------------------------------------------------
+    def _ensure_overlay(self):
+        if self._overlay is None:
+            from update_overlay import UpdateCenterOverlay
+
+            self._overlay = UpdateCenterOverlay(self._parent)
+            self._overlay.restart_requested.connect(self._do_restart)
+            self._overlay.dismissed.connect(self._on_dismissed)
+        return self._overlay
+
+    # --- Denetim ---------------------------------------------------------
+    def check_silently(self) -> None:
+        self._check(manual=False)
+
+    def check_now(self) -> None:
+        """Menuden elle denetim: sonuc ne olursa olsun kullaniciya bir sey
+        gosterilir, cunku denetimi kullanici istedi."""
+        self._check(manual=True)
+
+    def _check(self, manual: bool) -> None:
+        if not ota_update.updates_supported():
+            if manual:
+                self._ensure_overlay().show_failed(
+                    "Bu derlemede guncelleme motoru bulunmuyor."
+                )
             return
+        if self._busy:
+            if manual and self._pending_version:
+                self._ensure_overlay().show_ready(self._pending_version)
+            return
+
+        # Indirilmis ama kullanicinin "daha sonra" dedigi bir surum varsa
+        # onu tekrar tekrar onune koymanin anlami yok; elle denetimde
+        # yeniden gosterilir.
+        if self._pending_version and not manual:
+            return
+
+        self._manual = manual
         self._busy = True
-        self._thread = QThread()
-        self._worker = UpdateCheckWorker(self._root)
-        self._worker.moveToThread(self._thread)
-        self._thread.started.connect(self._worker.run)
-        self._worker.finished.connect(self._on_finished)
-        self._thread.start()
+        if manual:
+            self._ensure_overlay().show_checking()
 
-    def _on_finished(self, applied: bool, new_version: str) -> None:
+        self._runner = _ThreadRunner(self._parent)
+        w = self._runner.worker
+        w.found.connect(self._on_found)
+        w.progress.connect(self._on_progress)
+        w.verifying.connect(self._on_verifying)
+        w.staged.connect(self._on_staged)
+        w.nothing.connect(self._on_nothing)
+        w.failed.connect(self._on_failed)
+        self._runner.start()
+
+    # --- Sinyaller (ana is parcacigi) ------------------------------------
+    def _on_found(self, version: str, total_bytes: int) -> None:
+        # Sessiz denetimde bile kaplama BURADA acilir: indirilecek gercek
+        # bir sey var demektir. Anasayfadaki senkron penceresinin davranisi
+        # da aynidir (bkz. HomeDashboard._on_sync_started).
+        self._downloading_version = version
+        self._ensure_overlay().show_downloading(0, total_bytes, version)
+
+    def _on_progress(self, downloaded: int, total: int) -> None:
+        if self._overlay is not None:
+            self._overlay.show_downloading(downloaded, total, self._downloading_version)
+
+    def _on_verifying(self, version: str) -> None:
+        self._ensure_overlay().show_staging(version)
+
+    def _on_staged(self, version: str, notes: str) -> None:
+        self._finish_thread()
+        self._downloading_version = ""
+        self._pending_version = version
+        if version and version == self._declined_version and not self._manual:
+            return  # kullanici bu surumu zaten erteledi
+        self._ensure_overlay().show_ready(version, notes)
+
+    def _on_nothing(self) -> None:
+        self._finish_thread()
+        if self._manual:
+            self._ensure_overlay().show_up_to_date()
+
+    def _on_failed(self, message: str) -> None:
+        self._finish_thread()
+        was_visible = self._overlay is not None and self._overlay.isVisible()
+        self._downloading_version = ""
+        # Sessiz denetimin basarisizligi sessiz kalir (cevrimdisi olmak
+        # hata degil) — AMA kaplama zaten aciksa kullanici bir seyin
+        # indigini gormus demektir; o pencereyi yarida birakip kaybolmak
+        # olmaz, ne oldugu soylenir.
+        if self._manual or was_visible:
+            self._ensure_overlay().show_failed(message)
+
+    def _finish_thread(self) -> None:
         self._busy = False
-        if self._thread:
-            self._thread.quit()
-            self._thread.wait(2000)
-        if applied and new_version and new_version != APP_VERSION and not self._notified:
-            self._notified = True
-            sheet = UpdateAvailableSheet(self._parent, new_version)
-            sheet.on_update_now = lambda: relaunch_via_launcher(self._root)
-            sheet.show_centered()
+        if self._runner is not None:
+            self._runner.stop()
+            self._runner = None
+
+    # --- Kullanici karari -------------------------------------------------
+    def _on_dismissed(self) -> None:
+        self._declined_version = self._pending_version
+
+    def _do_restart(self) -> None:
+        if self._on_before_restart is not None:
+            try:
+                if self._on_before_restart() is False:
+                    if self._overlay is not None:
+                        self._overlay.show_ready(self._pending_version)
+                    return
+            except Exception:
+                pass  # kaydetme sorunu guncellemeyi engellemesin
+        if not apply_and_restart(self._pending_version):
+            if self._overlay is not None:
+                self._overlay.show_failed(
+                    "Guncelleme baslatilamadi. Programi kapatip tekrar deneyin."
+                )
 
 
-def start_in_session_checker(parent: QWidget) -> None:
-    parent._bk_update_checker = InSessionUpdateChecker(parent)  # noqa: SLF001
+def start_in_session_checker(parent: QWidget, on_before_restart=None):
+    """Denetleyiciyi ana pencereye baglar. Referansi pencerede tutulur:
+    yerel bir degiskende birakilsa Python nesneyi toplar ve zamanlayici
+    hicbir zaman atesle(n)mez."""
+    checker = InSessionUpdateChecker(parent, on_before_restart=on_before_restart)
+    parent._bk_update_checker = checker  # noqa: SLF001
+    return checker

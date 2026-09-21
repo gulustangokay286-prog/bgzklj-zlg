@@ -492,7 +492,7 @@ def main():
     logo_path = bk_branding.INNER_LOGO_PNG if os.path.exists(bk_branding.INNER_LOGO_PNG) else icon_path
 
     from splash_screen import BKSplashScreen
-    splash = BKSplashScreen(bk_update.install_root())
+    splash = BKSplashScreen()
     splash.exec()
     auth_data = splash.auth_data if splash.is_valid_token else None
     del splash
@@ -517,9 +517,26 @@ def main():
     # no standalone background process — see bk_update.py's module
     # docstring) replaces the old silent restart-watcher toast with a real
     # "update now / later" sheet.
+    def _save_before_update_restart() -> bool:
+        """Güncelleme yeniden başlatmadan hemen önce çağrılır. Açık bir
+        çizelge varsa ve kaydedilmemiş değişiklik içeriyorsa kullanıcıya
+        sorulur; kullanıcı iptal ederse False döner ve yeniden başlatma
+        yapılmaz — bir güncelleme yüzünden çalışma kaybedilmez."""
+        editor = getattr(shell, "_editor", None)
+        if editor is None:
+            return True
+        try:
+            if not editor.has_unsaved_changes():
+                return True
+            return bool(
+                editor._save_new_version_with_folder_picker("", force=False, allow_discard=True)
+            )
+        except Exception:
+            return True  # kaydetme yolu bozuksa güncellemeyi de kilitlemesin
+
     try:
         QTimer.singleShot(500, lambda: update_notifications.check_and_show_whats_new(shell))
-        bk_update.start_in_session_checker(shell)
+        bk_update.start_in_session_checker(shell, on_before_restart=_save_before_update_restart)
     except Exception:
         pass  # must never block app startup
 

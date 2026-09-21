@@ -34,3 +34,8 @@ scheduler/native/*.exe
 .venv-timefold/
 assistant/secrets.py
 Output/
+
+# Kurulum paketinin ara ciktisi: build_installer.py uretir, 160 MB+
+# ve her derlemede yeniden olusur. Depoda durmasi anlamsiz.
+build_payload/
+Output/

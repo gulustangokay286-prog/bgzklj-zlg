@@ -1,22 +1,21 @@
 """"What's New" toast, shown once, centered on screen, right when the app
-opens, if this launch is the first run of a version bk_update.py just
-installed. Sourced from State/pending_notes.json (see
-ReleaseSystem/client/updater/engine.py's _write_pending_notes), which is
-consumed (deleted) the moment it's read, so it can never show twice.
+opens, if this launch is the first run of a version the updater just
+installed. Sourced from State/pending_notes.json (written by
+bk_update.apply_and_restart just before the install directory is swapped),
+which is consumed (deleted) the moment it's read, so it can never show
+twice.
 
 Also `VersionStatusChecker` — a lightweight background query against the
 control-plane's own "what should this device be running" endpoint (the
-same one bk_update.py's engine calls), used by home_dashboard.py to show a
-live "up to date" / "update available" status next to the version number
-on the home screen.
+same one ota_update.py uses), for the small "up to date" / "update
+available" label next to the version number on the home screen.
 
-The "update is ready, restart now?" case lives in bk_update.py
-(UpdateAvailableSheet) now, not here — this module only ever shows a
-one-time informational toast, never one that asks for a restart.
+The "update is ready, restart now?" case lives in bk_update.py /
+update_overlay.py, not here — this module only ever shows a one-time
+informational toast, never one that asks for a restart.
 
-Fails silent everywhere: a dev run of `python main.py` (no Launcher, no
-State/ directory) simply never shows the toast, and any I/O or network
-error is swallowed — this must never be able to crash or block the app.
+Fails silent everywhere: any I/O or network error is swallowed — this must
+never be able to crash or block the app.
 """
 from __future__ import annotations
 
@@ -35,18 +34,20 @@ VERSION_CHECK_TIMEOUT_S = 5.0
 
 
 def install_root() -> Path | None:
-    """Chenki_Akademi.exe (frozen) lives at <ROOT>/Versions/<version>/ when
-    launched through Launcher.exe — walk up to <ROOT>. Returns None for a
-    plain `python main.py` dev run, or a build not installed under that
-    layout (e.g. a standalone copy) — callers must treat that as "no
-    update-notification data available", not an error."""
-    if not getattr(sys, "frozen", False):
+    """Güncelleme durum dosyalarının kökü.
+
+    Eskiden burada <ROOT>/Versions/<sürüm>/ düzenini arayan ayrı bir kopya
+    vardı ve kurulu her makinede None dönüyordu (Chenkron.iss düz kurulum
+    yapıyor), yani "yenilikler" bildirimi hiç görünmüyordu. Artık tek
+    kaynak ota_update: %LOCALAPPDATA%\Chenkron\OTA."""
+    try:
+        import ota_update
+
+        if not ota_update.updates_supported():
+            return None
+        return ota_update.ota_root()
+    except Exception:
         return None
-    exe_dir = Path(sys.executable).resolve().parent
-    candidate = exe_dir.parent.parent
-    if (candidate / "State").is_dir() and (candidate / "Versions").is_dir():
-        return candidate
-    return None
 
 
 class Toast(QWidget):
@@ -217,30 +218,17 @@ class VersionStatusChecker(QObject):
     def _run(self) -> None:
         status, detail = "unknown", ""
         try:
-            import bk_update
+            import ota_update
 
-            root = bk_update.install_root()
-            if root is None or not bk_update._HAS_UPDATE_ENGINE:
+            if not ota_update.updates_supported():
                 self.result_ready.emit("unknown", "")
                 return
 
-            from client.config import ClientConfig, ca_bundle_path
-            from client.networking.http_client import HttpClient
-            from client.security import device_identity
-            from client.state.paths import Layout
-
-            cfg = ClientConfig()
-            http = HttpClient(cfg.api_base_url, timeout=VERSION_CHECK_TIMEOUT_S, verify_tls=ca_bundle_path() or True)
-            identity = device_identity.load_or_create(Layout(root).state_dir)
-            body = http.get_json("/v1/releases/latest", params={
-                "product": cfg.product,
-                "channel": cfg.channel,
-                "platform": cfg.platform,
-                "current_version": APP_VERSION,
-                "device_id": identity.device_uuid,
-            })
-            if body and body.get("version"):
-                status, detail = "update_available", body["version"]
+            client = ota_update.OtaClient(APP_VERSION)
+            client.http.timeout = VERSION_CHECK_TIMEOUT_S
+            info = client.check()
+            if info is not None:
+                status, detail = "update_available", info.version
             else:
                 status = "latest"
         except Exception:

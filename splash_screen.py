@@ -16,11 +16,11 @@ leaves a stray connecting line.
 This screen is also where updates actually happen. It is not "emek payı"
 (fake padding to look busy) — every second on screen is real work: session
 check, then update check, then, if one is found, the full
-download+verify+stage+activate cycle with the percentage shown as text.
-Nothing needs downloading? It leaves as soon as the animation finishes.
-Something big does? It stays exactly as long as that takes. If an update
-IS applied, this never returns to main.py at all — it relaunches into the
-new version via Launcher.exe and hard-exits (see bk_update.py).
+download+verify+stage cycle with the percentage shown as text. Nothing
+needs downloading? It leaves as soon as the animation finishes. Something
+big does? It stays exactly as long as that takes. If an update IS staged,
+this never returns to main.py at all — the installed directory is swapped
+and the new version is launched (see bk_update.apply_and_restart).
 """
 import time
 import os
@@ -221,7 +221,7 @@ class _AuthWorker(QObject):
 
 
 class BKSplashScreen(QDialog):
-    def __init__(self, root, parent=None):
+    def __init__(self, root=None, parent=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.SplashScreen | Qt.FramelessWindowHint)
         # NOT WA_DeleteOnClose — accept() must end exec()'s modal loop
@@ -230,7 +230,11 @@ class BKSplashScreen(QDialog):
         self.setAttribute(Qt.WA_DeleteOnClose, False)
         self.setFixedSize(640, 440)
 
+        # `root` artik kullanilmiyor (eski Launcher/Versions duzeninden
+        # kalma); guncellemenin burada yapilip yapilmayacagini motorun var
+        # olup olmadigi belirliyor.
         self._root = root
+        self._updates_on = bk_update.updates_supported()
         self.is_valid_token = False
         self.auth_data = None
         self._work_done = False
@@ -259,7 +263,7 @@ class BKSplashScreen(QDialog):
         self._auth_thread.quit()
         self._auth_thread.wait(2000)
 
-        if self._root is None:
+        if not self._updates_on:
             self._work_done = True
             self._maybe_finish()
             return
@@ -271,13 +275,32 @@ class BKSplashScreen(QDialog):
                 pct = int(100 * downloaded / total)
                 self.canvas.set_status(f"Güncelleme indiriliyor  %{pct}")
 
-        applied, new_version = bk_update.run_blocking_check(self._root, on_progress=on_progress)
-        if applied:
-            self.canvas.set_status(f"Güncelleme tamamlandı — v{new_version}")
+        def on_stage() -> None:
+            self.canvas.set_status("Paket doğrulanıyor...")
+
+        ready, new_version = bk_update.run_blocking_check(
+            on_progress=on_progress, on_stage=on_stage
+        )
+        if ready:
+            # Kurulum klasörünü ŞİMDİ değiştirmek en güvenli an: program
+            # henüz hiçbir çizelge açmadı, kaybolacak kullanıcı verisi yok.
+            self.canvas.set_status(f"Güncelleme uygulanıyor — v{new_version}")
             self._pending_relaunch = True
-            QTimer.singleShot(900, lambda: bk_update.relaunch_via_launcher(self._root))
+            QTimer.singleShot(700, lambda: self._apply_update(new_version))
             return
 
+        self.canvas.set_status("Hazır")
+        self._work_done = True
+        self._maybe_finish()
+
+    def _apply_update(self, new_version: str) -> None:
+        """Takas başarısızsa (kullanıcı UAC'yi reddetti, klasör kilitli)
+        program kapanmamalı: eski sürümle açılmaya devam eder, güncelleme
+        bir sonraki açılışta yeniden denenir — indirilen paket zaten
+        diskte, yeniden indirilmez."""
+        if bk_update.apply_and_restart(new_version):
+            return
+        self._pending_relaunch = False
         self.canvas.set_status("Hazır")
         self._work_done = True
         self._maybe_finish()

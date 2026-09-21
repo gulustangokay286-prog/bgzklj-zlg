@@ -1578,17 +1578,13 @@ class APIClient:
         return resp is not None and resp.status_code in (200, 204)
 
     # ── Updates ───────────────────────────────────────────────────────────
-
-    def get_latest_release(self):
-        """Update manifest, or None. Needs no authentication by design."""
-        try:
-            resp = self.session.get(f"{self.base_url}/api/updates", timeout=8)
-            if resp.status_code == 200:
-                data = resp.json()
-                return data if isinstance(data, dict) and data.get("version") else None
-        except Exception:
-            pass
-        return None
+    #
+    # get_latest_release() buradan kaldırıldı. Bu VDS'te (Bogazici_Backend)
+    # /api/updates diye bir uç hiç olmadı: çağrı her seferinde 404 alıyor,
+    # metot None dönüyor, çağıran da bunu "güncelleme yok" diye okuyordu —
+    # yani hangi sürüm yayınlanırsa yayınlansın kullanıcıya hiçbir zaman
+    # güncelleme sunulmuyordu. Sürüm sorgusu artık kendi kontrol düzleminde:
+    # ota_update.OtaClient.check() -> updates.chenki.net /v1/releases/latest.
 
 
 def filename_to_key(filename: str) -> str:
