@@ -624,7 +624,7 @@ def solve_cpsat(world, rule_list, seconds=60.0, seed=0, workers=8,
                 takas_out=None, forced=None, cancelled=None,
                 stop_when_full=False, bound_out=None,
                 stop_at_hours=None, warm_pieces=None, min_hours=None,
-                pure_objective=False):
+                pure_objective=False, fixed=None, model_cache=None):
     """World + kurallar -> (positions, placed_hours, status).
 
     positions[i] = kart i'nin ızgara indeksi, yerleşmediyse -1.
@@ -650,6 +650,13 @@ def solve_cpsat(world, rule_list, seconds=60.0, seed=0, workers=8,
     warm_pieces : {kart: [saat indeksleri]} — ısıtmada bölünmüş kartların
                  parça yerleri. Verilmezse bölünmüş kart ipucu almaz ve CP-SAT
                  önceki turun çözümünü baştan kurmak zorunda kalır.
+    fixed      : {kart: hücre indeksi | [parça hücreleri]} — bu kartlar
+                 SABİTLENİR (komşuluk araması: geri kalanı serbest).
+    model_cache : sözlük verilirse KURULU MODEL yeniden kullanılır. Kurulum
+                 (bütün kural kısıtları) 5-7 sn sürüyor; komşuluk aramasında
+                 8 saniyelik bir çözüm 17 saniyeye çıkıyordu. Çağrıya özgü
+                 eklemeler (amaç, sabitleme, en az saat, ipuçları) çözümden
+                 sonra geri alınır; model bir sonraki çağrıya temiz döner.
     pure_objective : amaç YALNIZCA yerleşen saat (ceza yok). Böylece
                  BestObjectiveBound // SAAT geçerli bir saat ÜST SINIRIDIR —
                  cezalı amaçta değildi (zorunlu grup cezaları sınırı bir saatin
@@ -666,8 +673,22 @@ def solve_cpsat(world, rule_list, seconds=60.0, seed=0, workers=8,
     if forced is None:
         from .problem import impossible_groups
         forced = impossible_groups(w)
-    M = _Model(w, rule_list, allow_split, forced)
-    model, xs, su_kayit, splits = M.m, M.xs, M.su, M.splits
+    cache_key = (id(w), id(rule_list), bool(allow_split), frozenset(forced))
+    if model_cache is not None and model_cache.get('key') == cache_key:
+        M = model_cache['M']
+    else:
+        M = _Model(w, rule_list, allow_split, forced)
+        if model_cache is not None:
+            model_cache.clear()
+            model_cache.update(key=cache_key, M=M)
+    xs, su_kayit, splits = M.xs, M.su, M.splits
+    if model_cache is not None:
+        # Temel model el değmeden kalır; bu çağrı bir KOPYA üzerinde çalışır.
+        # Değişken nesneleri indeks tabanlı olduğu için kopyada da geçerlidir.
+        model = cp_model.CpModel()
+        model.Proto().copy_from(M.m.Proto())
+    else:
+        model = M.m
 
     # ── AMAÇ ──
     saat_terms = []
@@ -718,6 +739,23 @@ def solve_cpsat(world, rule_list, seconds=60.0, seed=0, workers=8,
             sapma.append(oynadi)
         model.Minimize(sum(sapma) if sapma else 0)
 
+    for i, yer in (fixed or {}).items():
+        if i >= len(xs):
+            continue
+        if isinstance(yer, (list, tuple)):
+            us_list = su_kayit.get(i, [])
+            if len(us_list) == len(yer):
+                for k, us in enumerate(us_list):
+                    for sidx, v in us:
+                        model.Add(v == (1 if sidx == yer[k] else 0))
+                for _, v in xs[i]:
+                    model.Add(v == 0)
+        elif yer is not None and yer >= 0:
+            for sidx, v in xs[i]:
+                model.Add(v == (1 if sidx == yer else 0))
+            for us in su_kayit.get(i, []):
+                for _, v in us:
+                    model.Add(v == 0)
     if warm_start:
         wp = warm_pieces or {}
         for i, idx in enumerate(warm_start):
@@ -814,10 +852,91 @@ def solve_cpsat(world, rule_list, seconds=60.0, seed=0, workers=8,
     return positions, placed, solver.StatusName(st)
 
 
+def lns_climb(world, rule_list, forced, pos, pieces, hedef, budget=45.0, workers=8,
+              cancelled=None, seed=1, log=False, progress=None, model_cache=None):
+    """Komşuluk aramasıyla eldeki çizelgeyi saat saat yükseltir.
+
+    CP-SAT'in kendi LNS'i açıkta kalan kartların NEREDE sıkıştığını bilmez.
+    Burada komşuluk bilinçli seçilir: açıkta kalan kartların sınıfları ve
+    öğretmenleri (+ rastgele bir iki sınıf) SERBEST, geri kalan her kart
+    yerine SABİT; küçük model "en az +1 saat" sert kısıtıyla birkaç saniyede
+    kesin çözülür. Kazanç varsa yeni çizelge sabit kabul edilip devam edilir.
+    Döner: (pos, pieces, placed, tur_sayisi).
+    """
+    import random
+    import time as _t
+    w = world
+    rng = random.Random(seed)
+    t0 = _t.monotonic()
+    placed = sum(w.cards[i].duration * len(w.cards[i].classes) for i, x in enumerate(pos) if x >= 0)
+    placed += sum(len(v) * len(w.cards[i].classes) for i, v in pieces.items())
+    n_cls = len(w.classes)
+    kinds = ("cevre", "cevre+1", "cevre2", "cevre+2", "rastgele3")
+    tur = 0
+    k = 0
+    while placed < hedef and _t.monotonic() - t0 < budget:
+        if callable(cancelled) and cancelled():
+            break
+        U = [i for i, x in enumerate(pos) if x < 0 and i not in pieces and w.cards[i].locked_at is None]
+        if not U:
+            break
+        kind = kinds[k % len(kinds)]
+        k += 1
+        tur += 1
+        # Komşuluk KÜÇÜK kalmalı (≈30-70 kart): açıkta çok kart varsa hepsinin
+        # sınıf/öğretmenini serbest bırakmak modeli neredeyse bütün hâline
+        # getiriyor ve 8 sn'de hiçbir şey çözülmüyordu. Açıkta kalanlar 1-3'lük
+        # öbekler hâlinde sırayla ele alınır.
+        obek = 3
+        while True:
+            off = (tur * obek) % len(U)
+            odak = (U[off:] + U[:off])[:obek]
+            tset = {w.cards[i].teacher for i in odak if w.cards[i].teacher >= 0}
+            cset = {ci for i in odak for ci in w.cards[i].classes}
+            if kind == "cevre2":
+                tset |= {c.teacher for c in w.cards if c.teacher >= 0 and set(c.classes) & cset}
+            elif kind == "cevre+1":
+                cset |= set(rng.sample(range(n_cls), min(n_cls, 1)))
+            elif kind == "cevre+2":
+                cset |= set(rng.sample(range(n_cls), min(n_cls, 2)))
+            elif kind == "rastgele3":
+                cset = set(rng.sample(range(n_cls), min(n_cls, 3))) | cset
+            free = set(odak) | {c.cid for c in w.cards if c.teacher in tset or set(c.classes) & cset}
+            if len(free) <= 80 or obek == 1:
+                break
+            obek -= 1
+        fixed = {}
+        for i, x in enumerate(pos):
+            if i in free or w.cards[i].locked_at is not None:
+                continue
+            if x >= 0:
+                fixed[i] = x
+            elif i in pieces:
+                fixed[i] = list(pieces[i])
+        kalan = budget - (_t.monotonic() - t0)
+        if kalan < 2:
+            break
+        pcs = []
+        pos2, placed2, st = solve_cpsat(
+            w, rule_list, seconds=min(7.0, kalan), workers=workers, allow_split=True,
+            pieces_out=pcs, forced=forced, stop_when_full=True, stop_at_hours=hedef,
+            min_hours=placed + 1, fixed=fixed, warm_start=pos, warm_pieces=pieces,
+            seed=seed + tur, cancelled=cancelled, model_cache=model_cache)
+        if log:
+            print(f"[lns] {kind}: serbest {len(free)} açıkta {len(U)} -> {st} {placed2} "
+                  f"({_t.monotonic() - t0:.0f}s)")
+        if placed2 > placed:
+            pos, pieces, placed = pos2, dict(pcs), placed2
+            k = 0
+            if callable(progress):
+                progress(placed)
+    return pos, pieces, placed, tur
+
+
 def solve_optimal(world, rule_list, referans=None, allow_split=True,
                   tur_saniye=20.0, azami_saniye=3600.0, workers=8,
                   progress=None, cancelled=None, log=False, ask_continue=None,
-                  bilinen_ust=None):
+                  bilinen_ust=None, isitma=None):
     """OPTİMAL KİP — kanıt gelene kadar durmaz.
 
     Kullanıcının isteği: "optimale çıkana kadar durmasın, optimale ulaşınca
@@ -846,6 +965,10 @@ def solve_optimal(world, rule_list, referans=None, allow_split=True,
     bilinen_ust: dışarıdan kanıtlanmış üst sınır (gün-seviyesi gevşetme,
       bkz. daybound.py). Motor bu sayıya ulaştığı an OPTIMAL der ve durur;
       "285'e çıkamıyor" diye tur atmaz, çünkü 285 bu kurallarla yoktur.
+    isitma: (positions, saat, gecerli) — tabu portföyünün bulduğu çizelge.
+      gecerli ise "eldeki en iyi" olarak başlar (CP-SAT bunun altına inmez),
+      değilse yalnızca ipucu olur. Ölçüm: tabu 20 sn'de 266/267 bulurken
+      CP-SAT tek başına uzun koşuda 264'te kalıyordu.
 
     Dönüş: (positions, parcalar, placed_hours, status, tur_sayisi)
       parcalar = {kart indeksi: [saat indeksleri]} — bölünerek yerleşenler
@@ -866,6 +989,20 @@ def solve_optimal(world, rule_list, referans=None, allow_split=True,
     # Kanıtlanmış saat üst sınırı: dışarıdan (gün-seviyesi) gelir, CP-SAT'in
     # kendi sınırıyla tur tur aşağı çekilir.
     ust_sinir = int(bilinen_ust) if bilinen_ust is not None else None
+    if isitma:
+        try:
+            i_pos, i_saat, i_gecerli = isitma
+            if i_pos and len(i_pos) == len(w.cards) and int(i_saat) > 0:
+                ipucu, ipucu_parca = list(i_pos), {}
+                if i_gecerli:
+                    en_iyi_pos, en_iyi_parca, en_iyi_saat = list(i_pos), {}, int(i_saat)
+        except Exception:
+            pass
+    # Soru en geç bu kadar saniyede bir sorulur: ilerleme küçük küçük
+    # geldiğinde durgun tur hiç oluşmuyor ve motor bir saat boyunca kimseye
+    # sormadan çalışıyordu.
+    SORU_ARALIGI = 150.0
+    son_soru = _t.monotonic()
 
     def iptal():
         return bool(callable(cancelled) and cancelled())
@@ -886,6 +1023,7 @@ def solve_optimal(world, rule_list, referans=None, allow_split=True,
     # her turun ardından sorulur; soran yoksa iki durgun turda durulur.
     tur_saniye = 20.0
     fiz_denendi = set()
+    onbellek = {}          # kurulu CP-SAT modeli; her çağrı sonrası temizlenir
     while durum not in ("OPTIMAL", "STALLED", "CANCELLED"):
         if iptal():
             durum = "CANCELLED"
@@ -906,15 +1044,15 @@ def solve_optimal(world, rule_list, referans=None, allow_split=True,
         # genelde hızlı (v209: 16-27 sn) ve tavanı bir indirir; döngü hemen
         # bir altını dener. Böylece ekrandaki "tavan" gerçeğe iner ve tavan
         # ulaşılabilirse tam orada bulunur. UNKNOWN ise en iyilemeye dönülür.
-        if (en_iyi_saat > 0 and hedef > en_iyi_saat and hedef not in fiz_denendi
+        if (en_iyi_saat > 0 and 0 < hedef - en_iyi_saat <= 2 and hedef not in fiz_denendi
                 and tur >= 1 and kalan > 5):
             fiz_denendi.add(hedef)
-            itis = 60.0 if hedef - en_iyi_saat <= 2 else 40.0
+            itis = 60.0
             pos, placed, st = solve_cpsat(
                 w, rule_list, seconds=min(itis, kalan), workers=workers,
                 allow_split=allow_split, pieces_out=pieces, log=log, forced=forced,
                 cancelled=cancelled, stop_when_full=True, stop_at_hours=hedef,
-                min_hours=hedef, seed=tur * 7 + 3)
+                min_hours=hedef, seed=tur * 7 + 3, model_cache=onbellek)
             if placed > en_iyi_saat:
                 en_iyi_saat, en_iyi_pos, en_iyi_parca = placed, pos, dict(pieces)
                 ipucu, ipucu_parca = pos, dict(pieces)
@@ -929,7 +1067,7 @@ def solve_optimal(world, rule_list, referans=None, allow_split=True,
             w, rule_list, seconds=min(tur_saniye, kalan), workers=workers,
             warm_start=ipucu, warm_pieces=ipucu_parca, allow_split=allow_split,
             pieces_out=pieces, log=log, forced=forced, cancelled=cancelled,
-            stop_when_full=True, stop_at_hours=ust_sinir, seed=tur)
+            stop_when_full=True, stop_at_hours=ust_sinir, seed=tur, model_cache=onbellek)
         if placed > en_iyi_saat:
             en_iyi_saat, en_iyi_pos, en_iyi_parca = placed, pos, dict(pieces)
             ipucu, ipucu_parca = pos, dict(pieces)
@@ -955,8 +1093,30 @@ def solve_optimal(world, rule_list, referans=None, allow_split=True,
             ust_sinir = en_iyi_saat
             durum = "OPTIMAL"
             break
-        # İlk turdan sonra ilerleme getirmeyen her tur: karar kullanıcının.
-        if tur >= 2 and durgun >= 1 and en_iyi_saat > 0:
+        # İlerleme getirmeyen turdan sonra, sormadan önce: bilinçli komşuluk
+        # araması (açıkta kalanların sınıf/öğretmenleri serbest, gerisi sabit).
+        # Tam model 276'da takılırken bu küçük modeller saat saat yükseltir.
+        if en_iyi_saat > 0 and en_iyi_saat < hedef:
+            kalan = azami_saniye - (_t.monotonic() - baslangic)
+            def _lns_prog(saat):
+                if callable(progress):
+                    progress(dict(asama=1, tur=tur, saat=saat, toplam=w.total_hours(),
+                                  durum="LNS", ust=ust_sinir, gecen=_t.monotonic() - baslangic))
+            pos_l, parca_l, placed_l, _n = lns_climb(
+                w, rule_list, forced, list(en_iyi_pos), dict(en_iyi_parca), hedef,
+                budget=min(75.0, max(5.0, kalan)), workers=workers, cancelled=cancelled,
+                seed=tur, log=log, progress=_lns_prog, model_cache=onbellek)
+            if placed_l > en_iyi_saat:
+                en_iyi_saat, en_iyi_pos, en_iyi_parca = placed_l, pos_l, dict(parca_l)
+                ipucu, ipucu_parca = pos_l, dict(parca_l)
+                durgun = 0
+                if en_iyi_saat >= hedef:
+                    durum = "OPTIMAL"
+                    break
+        # İlk turdan sonra ilerleme getirmeyen her tur — ya da soru sorulmadan
+        # SORU_ARALIGI geçtiyse: karar kullanıcının.
+        sure_doldu = (_t.monotonic() - son_soru) >= SORU_ARALIGI
+        if tur >= 2 and (durgun >= 1 or sure_doldu) and en_iyi_saat > 0:
             if callable(ask_continue):
                 try:
                     devam = bool(ask_continue(dict(saat=en_iyi_saat, toplam=w.total_hours(),
@@ -964,6 +1124,7 @@ def solve_optimal(world, rule_list, referans=None, allow_split=True,
                                                    durgun=durgun, ust=ust_sinir)))
                 except Exception:
                     devam = False
+                son_soru = _t.monotonic()
                 if not devam:
                     durum = "STALLED"
                     break
@@ -1013,7 +1174,8 @@ def solve_optimal(world, rule_list, referans=None, allow_split=True,
             w, rule_list, seconds=min(takas_sure, kalan), workers=workers,
             warm_start=en_iyi_pos, warm_pieces=en_iyi_parca, allow_split=allow_split,
             pieces_out=pieces, hedef_saat=en_iyi_saat, referans=ref,
-            takas_out=takas, log=log, forced=forced, cancelled=cancelled)
+            takas_out=takas, log=log, forced=forced, cancelled=cancelled,
+            model_cache=onbellek)
         if placed2 == en_iyi_saat and st2 in ("OPTIMAL", "FEASIBLE") \
                 and len(pieces) <= len(en_iyi_parca):
             en_iyi_pos = pos2

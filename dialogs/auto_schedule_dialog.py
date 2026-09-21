@@ -1520,7 +1520,13 @@ class AutoScheduleDialog(QDialog):
                 tavan += f"Bu sayıya {ust - saat} saat kaldı. "
         else:
             tavan = ""
-        box.setInformativeText(tavan + "Motor son turda ilerleme kaydedemedi. Bir tur daha "
+        # İki sebeple sorulur: tur ilerleme getirmedi, ya da ilerleme küçük
+        # küçük geliyor ama epeydir soru sorulmadı. Metin sebebi söyler.
+        if int(info.get("durgun", 0) or 0) > 0:
+            neden = "Motor son turda ilerleme kaydedemedi. "
+        else:
+            neden = "Motor ilerliyor ama epeydir çalışıyor. "
+        box.setInformativeText(tavan + neden + "Bir tur daha "
                                "arayabilirim (en fazla 1 dk) ya da bu hâliyle bitirip açıkta "
                                "kalanları yerleştirilemeyen dersler listesine koyabilirim.")
         b_wait = box.addButton("Bir tur daha bekle", QMessageBox.AcceptRole)

@@ -19,6 +19,8 @@ def _safe_search(pb, *a, **k):
 
 
 from .verify import validate
+# Optimal kipte CP-SAT'ten önce tabu portföyüne verilen süre (saniye).
+ISITMA_SANIYE = 15.0
 from .model import norm_key, norm_class
 
 
@@ -479,10 +481,57 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
             res.diagnostics = res.diagnostics
             if callable(progress):
                 progress(rec.get('saat', 0) + locked_hours, res.total_hours, rec.get('tur', 1))
+        # ── ISITMA: önce C++ tabu portföyü ──
+        #
+        # Ölçüm (Birey v161, 250 serbest + 17 kilitli saat): normal kipin
+        # tabu+CP-SAT yarışı 20 saniyede 266/267 buluyor; CP-SAT tek başına
+        # uzun koşuda 264'te kalıyordu. Optimal kip CP-SAT'in kanıtı için
+        # var, tırmanışı için değil — tırmanışı tabu daha iyi yapıyor. Bu
+        # yüzden optimal kip de aynı yerden başlar: tabu kısa sürede ne
+        # bulursa CP-SAT'e ısıtma olarak gider; CP-SAT oradan yukarı kanıt
+        # arar. Isıtma sert kuralları sağlıyorsa "eldeki en iyi" olarak da
+        # sayılır, sağlamıyorsa yalnızca ipucu olur.
+        isitma = None
+        if not (callable(cancelled) and cancelled()):
+            try:
+                pr_i = Problem(w, rules, completion_first=completion_first)
+                if not pr_i.errors:
+                    def _tabu_ilerle(rec_):
+                        if callable(progress):
+                            progress(rec_['hours'] + locked_hours, res.total_hours, rec_['restarts'] + 1)
+                    base_i = seed if seed is not None else 20260912
+                    lanes_i = max(2, (os.cpu_count() or 4))
+                    en_iyi_i = None
+                    son_i = time.monotonic() + ISITMA_SANIYE
+                    kusak = 0
+                    while time.monotonic() < son_i and not (callable(cancelled) and cancelled()):
+                        kusak += 1
+                        kalan_i = son_i - time.monotonic()
+                        if kalan_i < 1.5:
+                            break
+                        seeds_i = [base_i * kusak + k * 15485863 + kusak * 2654435761
+                                   for k in range(1, lanes_i + 1)]
+                        alt = search_portfolio(pr_i, min(6.0, kalan_i), seeds_i, w.total_hours(),
+                                               progress=_tabu_ilerle, cancelled=cancelled)
+                        if en_iyi_i is None or alt['hours'] > en_iyi_i['hours']:
+                            en_iyi_i = alt
+                        if en_iyi_i['hours'] >= w.total_hours():
+                            break
+                    if en_iyi_i is not None and en_iyi_i['hours'] > 0:
+                        errs_i, _, _ = validate(w, rules, en_iyi_i['positions'], bend_rules=False,
+                                                forced=impossible_groups(w))
+                        isitma = (list(en_iyi_i['positions']), int(en_iyi_i['hours']), not errs_i)
+                        res.warnings.append(
+                            f"Isıtma (tabu, {kusak} kuşak): {en_iyi_i['hours'] + locked_hours}/{res.total_hours} saat"
+                            + ("" if not errs_i else " (sert kural ihlali var, yalnızca ipucu)") + ".")
+            except NativeEngineMissing as exc:
+                print(f'[engine] {exc}')
+            except Exception as exc:
+                res.warnings.append(f"Isıtma çalışmadı: {exc}")
         pos, parcalar, placed, durum, tur = solve_optimal(
             w, rules, referans=mevcut, allow_split=allow_split,
             azami_saniye=azami_saniye, progress=_ilerle, cancelled=cancelled,
-            ask_continue=ask_continue, bilinen_ust=gun_ust)
+            ask_continue=ask_continue, bilinen_ust=gun_ust, isitma=isitma)
         res.positions = pos
         res.split_pieces = parcalar
         res.status = 'optimal' if durum == 'OPTIMAL' else durum.lower()
