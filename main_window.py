@@ -654,12 +654,21 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 print("Error stopping cloud_worker:", e)
 
+        # Clean up temporary session backup file
+        bak_path = getattr(self, "_session_backup_file", None)
+        if bak_path and os.path.exists(bak_path):
+            try:
+                os.remove(bak_path)
+            except Exception:
+                pass
+            self._session_backup_file = None
+
     def closeEvent(self, event):
-        # Commit whatever is on the grid into the data store first: the save below
-        # reads data_store, so a change made right before closing (not yet mirrored
-        # out of the grid widget) would otherwise be lost.
+        # Sync whatever is on the grid into data_store before asking the user.
+        # Calling save_db here previously wrote to disk BEFORE the user even had
+        # a chance to choose "Kaydetmeden Çık" (discard).
         try:
-            self.save_db(sync_from_grid=True)
+            self._sync_grid_to_store()
         except Exception as e:
             print(f"[CLOSE] grid sync note: {e}")
 
@@ -672,7 +681,9 @@ class MainWindow(QMainWindow):
 
         # 2. Quick save feedback
         from save_dialog import run_apple_save_sequence
-        run_apple_save_sequence(self, duration_seconds=0.15, title="Kapatılıyor", message="Veriler kaydedildi.")
+        is_discarded = getattr(self, "_discard_changes", False)
+        feedback_msg = "Değişiklikler kaydedilmedi." if is_discarded else "Veriler kaydedildi."
+        run_apple_save_sequence(self, duration_seconds=0.15, title="Kapatılıyor", message=feedback_msg)
 
         # 3. Clean up
         self.cleanup()
@@ -1274,8 +1285,33 @@ class MainWindow(QMainWindow):
         self._refresh_grid()
         self._refresh_tree()
         self._is_loading = False
+        try:
+            self._sync_grid_to_store()
+        except Exception as e:
+            print(f"[load_db] sync error: {e}")
         self._initial_hash = self._calc_data_hash()
         self._is_dirty = False
+
+        # Session baseline for reliable "Kaydetmeden Çık" (discard) support
+        import copy, json
+        self._session_baseline_data = copy.deepcopy(self.data_store)
+        old_bak = getattr(self, "_session_backup_file", None)
+        if old_bak and os.path.exists(old_bak):
+            try:
+                os.remove(old_bak)
+            except Exception:
+                pass
+            self._session_backup_file = None
+
+        if getattr(self, "current_roz_path", None):
+            try:
+                bak_path = self.current_roz_path + ".session_bak"
+                with open(bak_path, "w", encoding="utf-8") as f:
+                    json.dump(self._session_baseline_data, f, ensure_ascii=False, indent=2)
+                self._session_backup_file = bak_path
+            except Exception as e:
+                print(f"[load_db] session backup note: {e}")
+                self._session_backup_file = None
 
         # Update checks start only once the editor is fully loaded, so nothing
         # competes with the schedule for CPU while the window is opening.
@@ -1286,52 +1322,54 @@ class MainWindow(QMainWindow):
 
     def _calc_data_hash(self):
         import hashlib, json
-        clean_data = {k: v for k, v in self.data_store.items() if k != "_version_meta"}
+        clean_data = {k: v for k, v in self.data_store.items() if k not in ("_version_meta", "_sync_meta")}
         try:
-            raw = json.dumps(clean_data, sort_keys=True, ensure_ascii=False)
+            raw = json.dumps(clean_data, sort_keys=True, ensure_ascii=False, default=str)
             return hashlib.md5(raw.encode("utf-8")).hexdigest()
-        except Exception:
+        except Exception as exc:
+            print(f"[_calc_data_hash error] {exc}")
             return ""
 
     def mark_dirty(self):
         self._is_dirty = True
 
     def _content_changed(self) -> bool:
-        """Çizelge AÇILDIĞINDAN BERİ gerçekten değişti mi?
+        """Çizelge AÇILDIĞINDAN BERİ (veya son kayıttan beri) gerçekten değişti mi?
 
         Çıkışta kayıt penceresinin açılıp açılmayacağına bu karar veriyor.
-        Önce yalnızca _is_dirty bayrağına bakılıyordu; o bayrak "bir şey
-        yapıldı" demek için konuyor ama yapılan şeyin veriyi değiştirmesi
-        şart değil — bir dersi tutup aynı yere bırakmak, bir sheet'i açıp
-        hiçbir şeye dokunmadan kapatmak gibi. Kullanıcı hiçbir şey
-        değiştirmediğini bildiği hâlde kayıt penceresiyle karşılaşıyordu.
-
-        İçerik damgası gerçeği söyler: veri açılıştaki hâlindeyse kaydedecek
-        bir şey yoktur. Damga yoksa (hiç hesaplanamadıysa) eski davranışa,
-        bayrağa düşülüyor — soruyu kaçırmaktansa fazladan sormak yeğdir.
         """
+        try:
+            self._sync_grid_to_store()
+        except Exception as e:
+            print(f"[_content_changed] sync error: {e}")
+
         initial = getattr(self, "_initial_hash", "")
-        if not initial:
-            return bool(getattr(self, "_is_dirty", False))
         current = self._calc_data_hash()
-        if not current:
+
+        if not initial or not current:
             return bool(getattr(self, "_is_dirty", False))
         return current != initial
 
     def _mark_saved(self):
         """Kaydedilen hâl yeni taban: bundan sonraki karşılaştırma buna göre."""
+        import copy, json
         self._is_dirty = False
         try:
-            self._initial_hash = self._calc_data_hash()
+            self._sync_grid_to_store()
         except Exception:
             pass
+        try:
+            self._initial_hash = self._calc_data_hash()
+            self._session_baseline_data = copy.deepcopy(self.data_store)
+            bak_path = getattr(self, "_session_backup_file", None)
+            if bak_path:
+                with open(bak_path, "w", encoding="utf-8") as f:
+                    json.dump(self._session_baseline_data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[_mark_saved note] {e}")
 
     def is_dirty(self) -> bool:
-        if getattr(self, "_is_dirty", False):
-            return True
-        current_hash = self._calc_data_hash()
-        initial_hash = getattr(self, "_initial_hash", "")
-        return bool(initial_hash and current_hash and current_hash != initial_hash)
+        return self._content_changed()
 
     def has_unsaved_changes(self) -> bool:
         return self.is_dirty()
@@ -1805,6 +1843,13 @@ class MainWindow(QMainWindow):
         if getattr(self, "_discard_changes", False):
             return
 
+        if sync_from_grid:
+            try:
+                self._sync_grid_to_store()
+            except Exception as e:
+                print(f"[save_db] sync error: {e}")
+
+        self.mark_dirty()
         self._protect_availability()
         import json
         slug = getattr(self, "institution_slug", None)
@@ -3626,12 +3671,6 @@ class MainWindow(QMainWindow):
         has_existing_version = bool(ver_fn)
 
         if not force and not self._content_changed():
-            try:
-                if ver_fn:
-                    if not version_store.update_version_in_place(slug, ver_fn, self.data_store):
-                        raise OSError("Çizelge dosyası yazılamadı")
-            except Exception as e:
-                print(f"[SAVE] Auto-save error: {e}")
             return True
 
         # Determine target version number preview and existing custom name / note
@@ -3677,12 +3716,60 @@ class MainWindow(QMainWindow):
         if cancelled:
             return False
         if action == "discard":
-            # Bellekteki değişiklikler atılıyor: diskteki sürüm neyse o
-            # kalır. Bayrak, çıkış yolundaki sonraki otomatik kayıtları da
-            # susturuyor — "kaydetmeden çık" ancak hiçbir şey yazılmazsa
-            # doğru olur.
+            # Bellekteki değişiklikler atılıyor: oturum açılışındaki (veya son
+            # açık kayıttaki) orijinal durum hem belleğe hem diske geri yazılır.
+            # Oturum sırasında ara işlemlerin (oto-plan, dialoglar, silinen kartlar)
+            # çağırdığı save_db() diski ezmiş olsa bile, dosya açıldığı hâle
+            # döner.
             self._discard_changes = True
             self._is_dirty = False
+
+            # 1. Restore from session backup file if available
+            bak_path = getattr(self, "_session_backup_file", None)
+            restored_from_file = False
+            if bak_path and os.path.exists(bak_path):
+                try:
+                    target_path = getattr(self, "current_roz_path", None)
+                    if not target_path and slug and ver_fn:
+                        target_path = os.path.join(version_store._base_dir(), slug, "versions", ver_fn)
+                    if target_path:
+                        import shutil
+                        shutil.copy2(bak_path, target_path)
+                        restored_from_file = True
+                except Exception as e:
+                    print(f"[DISCARD] Error restoring from backup file: {e}")
+                try:
+                    os.remove(bak_path)
+                except Exception:
+                    pass
+                self._session_backup_file = None
+
+            # 2. Restore in-memory data_store and update disk if not already restored from file
+            if hasattr(self, "_session_baseline_data") and self._session_baseline_data:
+                try:
+                    import copy
+                    self.data_store = copy.deepcopy(self._session_baseline_data)
+                    if not restored_from_file:
+                        if slug and ver_fn:
+                            version_store.update_version_in_place(slug, ver_fn, self.data_store)
+                        elif getattr(self, "current_roz_path", None) and os.path.exists(self.current_roz_path):
+                            import json
+                            with open(self.current_roz_path, "w", encoding="utf-8") as f:
+                                json.dump(self.data_store, f, ensure_ascii=False, indent=2)
+                except Exception as e:
+                    print(f"[DISCARD] Error restoring baseline data: {e}")
+
+            # 3. Invalidate caches and re-sync queue with the clean reverted file
+            if slug and ver_fn:
+                try:
+                    version_store.invalidate_version_summary(slug, ver_fn)
+                    version_store.invalidate_cross_busy_cache(slug)
+                    from sync_coordinator import enqueue
+                    enqueue(slug, ver_fn)
+                    version_store.touch_institution_timestamp(slug)
+                except Exception as e:
+                    print(f"[DISCARD] Cache invalidate error: {e}")
+
             self.statusBar().showMessage("Değişiklikler kaydedilmedi.", 5000)
             return True
 
@@ -3781,6 +3868,11 @@ class MainWindow(QMainWindow):
         var. Kaydetmemek geri alınamayan bir karar olduğu için ayrıca bir
         kez soruluyor ve seçildiğinde bu oturumda hiçbir yol diske yazmaz.
         """
+        try:
+            self._sync_grid_to_store()
+        except Exception as e:
+            print(f"[GO_HOME] grid sync note: {e}")
+
         if not self._save_new_version_with_folder_picker("", force=False, allow_discard=True):
             return  # user cancelled the folder picker — stay in the editor
         if callable(self.go_home_requested):

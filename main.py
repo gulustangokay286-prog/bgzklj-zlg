@@ -328,7 +328,10 @@ class AppShell(QMainWindow):
 
         # 3. Switch to dashboard instantly
         from save_dialog import run_apple_save_sequence
-        run_apple_save_sequence(self, duration_seconds=0.1, title="Kaydedildi", message="Anasayfaya dönülüyor...")
+        is_discarded = bool(editor and getattr(editor, "_discard_changes", False))
+        feedback_title = "Değişiklikler İptal Edildi" if is_discarded else "Kaydedildi"
+        feedback_msg = "Değişiklikler kaydedilmeden anasayfaya dönülüyor..." if is_discarded else "Anasayfaya dönülüyor..."
+        run_apple_save_sequence(self, duration_seconds=0.1, title=feedback_title, message=feedback_msg)
         
         # Bulut yüklemesi ARKA PLANDA sürer; burada beklenmez. Eskiden 2,5 sn'ye
         # kadar wait_for_pending çağrılıyordu: 280 KB'lık sürüm düşük güçlü
@@ -365,12 +368,14 @@ class AppShell(QMainWindow):
         """Save active editor (asking which folder to save into, if there's anything new
         to save) and flush database & cloud sync before closing the application."""
         if self._editor and hasattr(self._editor, "_save_new_version_with_folder_picker"):
-            if not self._editor._save_new_version_with_folder_picker("", force=False):
+            if not self._editor._save_new_version_with_folder_picker("", force=False, allow_discard=True):
                 event.ignore()  # user cancelled the folder picker — don't close
                 return
 
         from save_dialog import run_apple_save_sequence
-        run_apple_save_sequence(self, duration_seconds=0.2, title="Kapatılıyor", message="Veriler kaydedildi.")
+        is_discarded = bool(self._editor and getattr(self._editor, "_discard_changes", False))
+        feedback_msg = "Değişiklikler kaydedilmedi." if is_discarded else "Veriler kaydedildi."
+        run_apple_save_sequence(self, duration_seconds=0.2, title="Kapatılıyor", message=feedback_msg)
 
         # Kapanışta yüklemeye kısa bir şans: tamamlanmazsa sonraki açılışta
         # resume_pending() kaldığı yerden gönderir; kullanıcı 3 sn bekletilmez.
