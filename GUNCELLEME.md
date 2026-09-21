@@ -6,13 +6,27 @@ dosyası göndermek gerekmiyor.
 
 ## Yayınlamak
 
+Windows makinede, depo klasöründe tek komut:
+
+```bat
+yayinla.bat "Çevrimdışına düşme düzeltildi"
+```
+
+Betik `git pull` → motor → PyInstaller → yayın adımlarını sırayla koşar;
+adımlardan biri düşerse orada durur. Elle yapmak isterseniz aynı sıra:
+
 ```bat
 python tools\build_scheduler.py
 pyinstaller Chenkron.spec --noconfirm
 python publish_update.py --notes "Kilitli sütun sıfırlama düzeltildi"
 ```
 
-Bu kadar. Komut sırasıyla şunları yapar:
+Yayın **yalnızca Windows makineden** yapılabilir: yönetici anahtarı ve
+Ed25519 imza anahtarı `..\ReleaseSystem\backend\` altında, paket de
+`windows-x64`. Mac'te `publish_update.py` "ReleaseSystem/backend
+bulunamadı" der.
+
+`publish_update.py` sırasıyla şunları yapar:
 
 1. `dist\Chenkron` klasörünü içerik-tanımlı parçalara böler (CDC),
 2. sunucuda **olmayan** parçaları yükler (değişmeyen ~%95 tekrar yüklenmez),
