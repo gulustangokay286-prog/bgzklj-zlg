@@ -404,7 +404,7 @@ def main() -> int:
     parser.add_argument("--admin-key", default=None)
     parser.add_argument("--private-key-file", default=None)
     parser.add_argument("--canary", action="store_true",
-                        help="Dagitimi %100'e cikarma, ilk kademede birak")
+                        help="Dagitimi %%100'e cikarma, ilk kademede birak")
     parser.add_argument("--force-version", action="store_true",
                         help="version.py ile uyusmasa da yayinla")
     parser.add_argument("--dry-run", action="store_true",
@@ -412,7 +412,7 @@ def main() -> int:
     parser.add_argument("--status", action="store_true",
                         help="Sunucudaki surumleri ve cihazlari listele, cik")
     parser.add_argument("--advance", default=None, metavar="RELEASE_ID",
-                        help="Var olan bir surumun dagitimini %100'e cikar, cik")
+                        help="Var olan bir surumun dagitimini %%100'e cikar, cik")
     args = parser.parse_args()
 
     if args.status:

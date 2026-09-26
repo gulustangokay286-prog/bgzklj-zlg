@@ -1,0 +1,14 @@
+import { readFileSync } from 'node:fs';
+import { runTabu } from '../src/engine/wasi.ts';
+const [,, problemPath, goldenPath] = process.argv;
+const mod = new WebAssembly.Module(readFileSync(new URL('../public/search.wasm', import.meta.url)));
+const input = readFileSync(problemPath);
+const lines = [];
+const t = performance.now();
+const code = runTabu(mod, input, 2, 17, (l) => lines.push(l));
+const g = JSON.parse(readFileSync(goldenPath, 'utf8'));
+const firstP = lines.find((l) => l.startsWith('P'));
+const last = lines[lines.length - 1].split(' ');
+console.log('exit', code, 'lines', lines.length, 'ms', (performance.now() - t).toFixed(0));
+console.log('first P identical to native:', firstP === g.tabu_first_line);
+console.log('wasm best hours', last[1], '| native first P hours', g.tabu_first_line.split(' ')[1]);

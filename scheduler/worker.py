@@ -5,13 +5,18 @@ from .engine import solve
 from .model import norm_class
 
 
-def run_worker(worker):
+def hazirla(data_store, target_class=None, institution_slug=None):
+    """Planlamanın girdisi: veri kopyası, boyutlar, sınıflar, dış meşguliyet.
+
+    run_worker ve planlama öncesi kilit denetimi AYNI girdiyi buradan alır;
+    ön kontrolün gördüğü dünya motorun göreceği dünyanın birebir aynısıdır.
+    """
     import constraint_sync
     from auto_scheduler import _build_teacher_timeoff_map, norm_teacher, matches_class
-    data=copy.deepcopy(worker.data_store)
+    data=copy.deepcopy(data_store)
     D,P=constraint_sync.grid_dimensions(data)
     names=[c.get('ad') or c.get('name') for c in data.get('siniflar',[])]
-    selected=names if not worker.target_class else [n for n in names if matches_class(n,worker.target_class)]
+    selected=names if not target_class else [n for n in names if matches_class(n,target_class)]
     if not selected: raise ValueError('Planlanacak sınıf bulunamadı')
     if not data.get('atamalar'): raise ValueError('Herhangi bir ders ataması bulunamadı.')
     # Expand a target to all members of a combined lesson.
@@ -30,7 +35,7 @@ def run_worker(worker):
     # rezervasyon ya da yayınlanmış kısıt bu çizelgeyi bağlamaz. Eskiden bu
     # veriler okunup öğretmenin meşguliyetine ekleniyordu; diğer kurumun ESKİ
     # aktif sürümü yüzünden burada saatler kapalı görünüyordu.
-    closed,avoid=_build_teacher_timeoff_map(data,worker.institution_slug,include_shared=False)
+    closed,avoid=_build_teacher_timeoff_map(data,institution_slug,include_shared=False)
     cross={}
     others=[]
     selected_keys={norm_class(n) for n in selected}
@@ -62,6 +67,22 @@ def run_worker(worker):
         name=t.get('ad') or t.get('name');key=norm_teacher(name)
         ek=closed.get(key,set()) | cross.get(key,set())
         if ek: engel[name]={(d,p) for d,p in ek if 0<=d<D and 0<=p<P}
+    return data,D,P,selected,engel,others
+
+
+def kilit_catismalari(data_store, target_class=None, institution_slug=None):
+    """Planlamadan ÖNCE: veriyle ya da birbiriyle çelişen kilitli dersler.
+
+    Boş liste = kilitler tutarlı. Her öğe dict(mesaj, neden, ids, ...).
+    """
+    from .engine import kilit_catismalari_verisi
+    data,D,P,selected,engel,_=hazirla(data_store,target_class,institution_slug)
+    return kilit_catismalari_verisi(data,D=D,P=P,cross_busy=engel,only_classes=selected)
+
+
+def run_worker(worker):
+    data,D,P,selected,engel,others=hazirla(worker.data_store,worker.target_class,
+                                           worker.institution_slug)
     def progress(hours,total,attempt):
         worker.progress_updated.emit(hours,total)
         worker.iteration_updated.emit(attempt,0,hours)
@@ -76,7 +97,9 @@ def run_worker(worker):
                  allow_split=bool(getattr(worker,'allow_split',True)),
                  azami_saniye=float(getattr(worker,'azami_saniye',3600.0)),
                  progress=progress,cancelled=lambda:not worker._is_running,
-                 ask_continue=getattr(worker,'ask_continue',None))
+                 ask_continue=getattr(worker,'ask_continue',None),
+                 # Kullanıcı ön kontrolde "çelişen kilitleri çöz" dediyse.
+                 unlock_conflicting_locks=bool(getattr(worker,'unlock_conflicting_locks',False)))
     per_key=defaultdict(int)
     for x in result.unplaced: per_key[x['class'],x['subject'],x['teacher']]+=x['hours']
     unplaced=[dict(**{'class':cn},subject=subj,teacher=tch,hours=h)

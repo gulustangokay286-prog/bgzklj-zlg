@@ -353,15 +353,58 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(locked_pls[0]['day'],2)
         self.assertEqual(locked_pls[0]['period'],1)
 
-    def test_lock_on_closed_time_is_not_silently_dropped(self):
+    def test_lock_on_closed_time_is_not_silently_accepted(self):
+        # Motor kapalı saati kendiliğinden AÇMAZ. Eskiden kapalı saatteki kilit
+        # olduğu gibi kabul ediliyor, çizelge "tam" görünüyordu (Birey: kilitli
+        # yolda 267/267, aynı veride sıfırdan 266/267).
+        from scheduler.engine import LockedConflict
         d=store('2');d['grid_placements']=[dict(**{'class':'9A'},subject='Matematik',teacher='Öğretmen A',day=0,period=0,duration=2,locked=True)]
-        d['siniflar'][0]['timeoff']=[[0]*4 for _ in range(3)]
-        # Kilitli kart kapali saate denk gelse bile kullanici kilidine saygi duyulur ve oldugu yerde korunur
+        d['siniflar'][0]['timeoff']=[[0,0,2,2],[2,2,2,2],[2,2,2,2]]
+        with self.assertRaises(LockedConflict) as ctx:
+            solve(d,time_budget=1,seed=17)
+        self.assertEqual(len(ctx.exception.catismalar),1)
+        self.assertIn('KAPALI',str(ctx.exception))
+        self.assertIn('9A · Matematik',str(ctx.exception))
+        # Kullanıcı "çöz" derse ders kurallara uygun bir yere gider, kapalı
+        # saate asla düşmez ve rapor kilidin neden çözüldüğünü söyler.
+        r=self.run_valid(d,unlock_conflicting_locks=True);self.assertTrue(r.complete)
+        self.assertFalse(any(p.get('locked') for p in r.placements))
+        self.assertTrue(all(not (p['day']==0 and p['period']<2) for p in r.placements))
+        self.assertTrue(any('KİLİT ÇÖZÜLDÜ' in x for x in r.warnings))
+
+    def test_locked_lesson_counts_for_rules(self):
+        # Kilitli ders modelin içindedir: "aynı ders aynı gün tekrar etmesin"
+        # kilitli Matematiği görür, serbest Matematik aynı güne konmaz.
+        d=store('1+1',D=2,P=4);d['planlama_iliskileri']=[rule('Aynı ders aynı gün tekrar etmesin')]
+        d['grid_placements']=[dict(**{'class':'9A'},subject='Matematik',teacher='Öğretmen A',day=0,period=3,duration=1,locked=True)]
         r=self.run_valid(d);self.assertTrue(r.complete)
-        locked_pls=[p for p in r.placements if p.get('locked')]
-        self.assertEqual(len(locked_pls),1)
-        self.assertEqual(locked_pls[0]['day'],0)
-        self.assertEqual(locked_pls[0]['period'],0)
+        free=[p for p in r.placements if not p.get('locked')]
+        self.assertEqual(len(free),1);self.assertEqual(free[0]['day'],1)
+
+    def test_locked_block_stored_as_hourly_entries(self):
+        # 2 saatlik blok sınıf başına 1'er saatlik iki kayıt olarak durabiliyor
+        # (aynı block_id). Tek kilitli karttır; kayıtlar olduğu gibi geri döner.
+        d=store('2+1',D=2,P=4)
+        d['grid_placements']=[dict(**{'class':'9A'},subject='Matematik',teacher='Öğretmen A',day=1,period=p,duration=1,
+                                   locked=True,block_id='blok-x',color='#123456') for p in (1,2)]
+        r=self.run_valid(d);self.assertTrue(r.complete);self.assertEqual(r.placed_hours,3)
+        locked=[p for p in r.placements if p.get('locked')]
+        self.assertEqual(sorted(p['period'] for p in locked),[1,2])
+        self.assertTrue(all(p['block_id']=='blok-x' and p['color']=='#123456' for p in locked))
+        free=[p for p in r.placements if not p.get('locked')]
+        self.assertEqual([p['duration'] for p in free],[1])
+
+    def test_clashing_locks_blame_only_one(self):
+        from scheduler.engine import LockedConflict
+        d=store('1',D=1,P=2);d['atamalar'].append(dict(**{'class':'9B'},subject='Geometri',teacher='Öğretmen A',type='1'))
+        d['grid_placements']=[dict(**{'class':'9A'},subject='Matematik',teacher='Öğretmen A',day=0,period=0,duration=1,locked=True),
+                              dict(**{'class':'9B'},subject='Geometri',teacher='Öğretmen A',day=0,period=0,duration=1,locked=True)]
+        with self.assertRaises(LockedConflict) as ctx:
+            solve(d,time_budget=1,seed=17)
+        self.assertEqual(len(ctx.exception.catismalar),1)
+        self.assertIn('Öğretmen çakışması',str(ctx.exception))
+        r=self.run_valid(d,unlock_conflicting_locks=True);self.assertTrue(r.complete)
+        self.assertEqual(sum(1 for p in r.placements if p.get('locked')),1)
 
     def test_daily_hour_limit(self):
         d=store('1+1+1',D=2);d['planlama_iliskileri']=[rule('Günde maksimum ders sayısı',parametre=2)]

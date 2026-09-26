@@ -149,7 +149,9 @@ class Finisher:
             if not self._rules_ok(i, idx):
                 continue
             blk = self._blockers(i, idx)
-            if not blk or len(blk) > 2 or (blk & banned) or any(j < 0 for j in blk):
+            # Kilitli ders asla tahliye edilmez.
+            if (not blk or len(blk) > 2 or (blk & banned) or any(j < 0 for j in blk)
+                    or any(self.w.cards[j].locked_at is not None for j in blk)):
                 continue
             snap = list(self.pos)
             moved = []

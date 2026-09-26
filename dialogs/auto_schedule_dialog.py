@@ -1473,6 +1473,7 @@ class AutoScheduleDialog(QDialog):
             optimal_mode=True,
             allow_split=True,
         )
+        self.worker.unlock_conflicting_locks = bool(getattr(self, "_unlock_conflicting_locks", False))
         self._stopping = False
         self._asking_continue = False
         self.worker.progress_updated.connect(self._on_progress)
@@ -1584,7 +1585,57 @@ class AutoScheduleDialog(QDialog):
                 self.icon_3d.stop_pulse()
                 self.skeleton.set_active(False)
                 return False
-        return True
+        return self._confirm_locks()
+
+    def _confirm_locks(self):
+        """Veriyle çelişen KİLİTLİ dersler varsa başlamadan söyler.
+
+        Motor kapalı saati kendiliğinden açmaz. Kapalı saatte duran, başka bir
+        kilitle çakışan ya da sıkı bir kuralı çiğneyen kilit sessizce kabul
+        edilmez: Birey'de LOCAEA1'in kapalı Cumartesi saatlerindeki 4 kilitli
+        saat yüzünden "kilitliler kalsın" 267/267 gösteriyor, aynı veride
+        "tümünü sıfırla" 266/267 buluyordu — ikisi de aynı veriydi, biri
+        kısıtı delmişti. Karar kullanıcınındır: kilitleri çözdürmek ya da
+        zaman tablosunu/kilidi kendisi düzeltmek.
+        """
+        self._unlock_conflicting_locks = False
+        try:
+            from scheduler.worker import kilit_catismalari
+            catisma = kilit_catismalari(
+                self.data_store, self.cb_target_class.currentData(),
+                getattr(self.parent(), "institution_slug", None))
+        except Exception as exc:
+            print(f"[AUTO] kilit denetimi yapılamadı: {exc}")
+            return True
+        if not catisma:
+            return True
+        satirlar = "\n".join(f"• {k['mesaj']}" for k in catisma[:12])
+        if len(catisma) > 12:
+            satirlar += f"\n… ve {len(catisma) - 12} kilit daha."
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("Kilitli dersler verilerle çelişiyor")
+        box.setText(f"{len(catisma)} kilitli ders zaman tablosuyla ya da kurallarla çelişiyor.")
+        box.setInformativeText(
+            satirlar + "\n\nMotor kapalı saati ya da kuralı kendiliğinden açmaz. "
+            "Kilitleri çözersem bu dersleri kurallara uygun bir yere yerleştiririm "
+            "(yer yoksa yerleştirilemeyenler listesine koyarım). İsterseniz vazgeçip "
+            "zaman tablosunu ya da kilidi kendiniz düzeltebilirsiniz.")
+        b_coz = box.addButton("Bu kilitleri çöz ve planla", QMessageBox.AcceptRole)
+        b_vazgec = box.addButton("Vazgeç", QMessageBox.RejectRole)
+        box.setDefaultButton(b_vazgec)
+        box.exec()
+        if box.clickedButton() is b_coz:
+            self._unlock_conflicting_locks = True
+            return True
+        self.btn_start.setEnabled(True)
+        self.btn_cancel.setText("Kapat")
+        self.lbl_info.setText("Planlama başlatılmadı; çelişen kilitleri düzeltin.")
+        self.lbl_info.setStyleSheet("color: #B45309; font-weight: 500;")
+        self.icon_3d.stop_pulse()
+        self.skeleton.set_active(False)
+        self._close_run_panel()
+        return False
 
     def _on_cancel_or_stop(self):
         if self.worker and self.worker.isRunning():

@@ -315,13 +315,11 @@ def attach_slots(world, rule_list):
         for d in range(D):
             for p in range(P - card.duration + 1):
                 fp = world.footprint(d, p, card.duration)
+                # Kilitli kart yalnızca kendi yerinde durur — ama o yer de
+                # verilere uymak zorundadır. Kilit kapalı saati AÇMAZ: kapalı
+                # saatteki kilidin aday yeri kalmaz ve motor bunu çelişki
+                # olarak kullanıcıya söyler (engine.kilit_catismalari).
                 if card.locked_at is not None and world.idx(d, p) != card.locked_at:
-                    continue
-                # Kilitli kart: kullanıcının açık kararı kısıtları geçersiz kılar.
-                if card.locked_at is not None and world.idx(d, p) == card.locked_at:
-                    if fp == 0:
-                        continue
-                    allowed.append((world.idx(d, p), fp))
                     continue
                 if fp == 0 or (fp & base_block):
                     continue

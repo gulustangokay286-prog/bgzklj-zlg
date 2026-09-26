@@ -2257,6 +2257,11 @@ class AutoSchedulerWorker(QThread):
         # kalmadığında böler.
         self.allow_split = allow_split
         self.azami_saniye = azami_saniye
+        # Veriyle çelişen kilitler (kapalı saatte duran, çakışan, kural
+        # çiğneyen) motor tarafından ASLA kendiliğinden kabul edilmez. Bu
+        # bayrak yalnızca kullanıcı planlama öncesi soruda "bu kilitleri çöz"
+        # dediğinde açılır; kapalıyken motor durur ve çelişkiyi söyler.
+        self.unlock_conflicting_locks = False
         self._is_running = True
 
     def run(self):

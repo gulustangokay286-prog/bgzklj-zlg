@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chenkron Web Motoru</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">Chenkron <span>Web Motoru · deneme</span></div>
+    <div id="env" class="env"></div>
+  </header>
+  <main>
+    <section class="card controls">
+      <div class="row">
+        <label class="file">
+          <input id="file" type="file" accept=".roz,.json" />
+          <span>.roz dosyası seç</span>
+        </label>
+        <div id="samples" class="samples"></div>
+        <div id="loaded" class="muted">Henüz veri yüklenmedi.</div>
+      </div>
+      <div class="row modes">
+        <label><input type="radio" name="mode" value="all" checked /> Tümünü sıfırla</label>
+        <label><input type="radio" name="mode" value="locked" /> Kilitliler kalsın</label>
+        <label><input type="radio" name="mode" value="asis" /> Mevcut çizelgeden</label>
+        <button id="run" class="primary" disabled>Planla</button>
+        <button id="stop" class="ghost" hidden>Durdur</button>
+      </div>
+    </section>
+
+    <section id="progress" class="card" hidden>
+      <div class="bar"><div id="barfill"></div></div>
+      <div class="progress-line"><strong id="hours">0/0 saat</strong><span id="elapsed" class="muted"></span></div>
+      <div id="status" class="muted"></div>
+    </section>
+
+    <section id="ask" class="card notice" hidden>
+      <div id="asktext"></div>
+      <div class="row">
+        <button id="askwait" class="primary">Bir tur daha bekle</button>
+        <button id="askstop" class="ghost">Bu hâliyle bitir</button>
+      </div>
+    </section>
+
+    <section id="conflict" class="card warn" hidden>
+      <strong>Kilitli dersler verilerle çelişiyor</strong>
+      <ul id="conflictlist"></ul>
+      <p class="muted">Motor kapalı saati ya da kuralı kendiliğinden açmaz. Kilitleri çözersem bu dersleri kurallara uygun
+        bir yere yerleştiririm; yer yoksa yerleştirilemeyenlere koyarım.</p>
+      <div class="row">
+        <button id="unlock" class="primary">Bu kilitleri çöz ve planla</button>
+        <button id="cancelconflict" class="ghost">Vazgeç</button>
+      </div>
+    </section>
+
+    <section id="result" class="card" hidden>
+      <div id="summary" class="summary"></div>
+      <div id="unplaced"></div>
+      <details><summary>Rapor</summary><ul id="warnings"></ul></details>
+      <div class="row">
+        <label>Sınıf <select id="cls"></select></label>
+      </div>
+      <div id="grid" class="grid"></div>
+    </section>
+  </main>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

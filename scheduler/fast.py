@@ -15,6 +15,7 @@ import threading
 from pathlib import Path
 
 from . import rules as R
+from .native_bridge import gizli_pencere
 
 _LOCK = threading.Lock()
 
@@ -28,7 +29,7 @@ def binary():
             if not cxx:
                 raise RuntimeError('C++ motoru derlenmemiş; clang++ veya g++ gerekiyor.')
             r = subprocess.run([cxx, '-std=c++17', '-O3', '-DNDEBUG', str(src), '-o', str(out)],
-                               capture_output=True, text=True, timeout=120)
+                               capture_output=True, text=True, timeout=120, **gizli_pencere())
             if r.returncode:
                 raise RuntimeError('C++ motoru derlenemedi: ' + r.stderr[-2000:])
     return out
@@ -71,7 +72,8 @@ def _one(binpath, payload_path, seconds, seed, n):
         op = Path(tmp) / 'out'
         with open(payload_path) as si, op.open('w') as so:
             p = subprocess.Popen([str(binpath), str(seconds), str(seed)],
-                                 stdin=si, stdout=so, stderr=subprocess.DEVNULL)
+                                 stdin=si, stdout=so, stderr=subprocess.DEVNULL,
+                                 **gizli_pencere())
             try:
                 p.wait(timeout=seconds + 20)
             except subprocess.TimeoutExpired:

@@ -12,6 +12,26 @@ import time
 _BUILD_LOCK = threading.Lock()
 
 
+def gizli_pencere():
+    """Alt süreç için "pencere açma" ayarları (yalnızca Windows).
+
+    C++ motoru bir konsol programıdır. Uygulama penceresiz (console=False)
+    paketlendiği için Windows, konsol programı başlatılınca ona YENİ bir
+    konsol penceresi açar. Planlayıcı her kuşakta çekirdek sayısı kadar
+    şerit başlattığından ekranda art arda siyah terminaller beliriyordu.
+    CREATE_NO_WINDOW konsolu hiç oluşturmaz; STARTUPINFO da ek güvence
+    olarak pencereyi gizli başlatır. Çıktı zaten dosyaya yönlendirildiği
+    için motorun çalışması değişmez, yalnızca görünmez olur.
+    """
+    if os.name != 'nt':
+        return {}
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    si.wShowWindow = 0      # SW_HIDE
+    return dict(creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
+                startupinfo=si)
+
+
 class NativeEngineMissing(RuntimeError):
     """C++ motoru yok ya da derlenemiyor.
 
@@ -49,7 +69,7 @@ def native_binary():
             target.parent.mkdir(parents=True, exist_ok=True)
             temp = target.with_name(filename+f'.{os.getpid()}.tmp')
             built = subprocess.run([compiler, '-std=c++17', '-O3', '-DNDEBUG', str(source), '-o', str(temp)],
-                                   capture_output=True, text=True, timeout=60)
+                                   capture_output=True, text=True, timeout=60, **gizli_pencere())
             if built.returncode:
                 raise RuntimeError('C++ motoru derlenemedi: '+built.stderr[-2000:])
             temp.replace(target)
@@ -75,7 +95,8 @@ def search(problem, seconds, seed, upper_bound, progress=None, cancelled=None,
         with inp.open('r') as stdin, out.open('w') as stdout, err.open('w') as stderr:
             proc = subprocess.Popen([str(binary), str(max(0.0, deadline-time.monotonic())),
                                      str(seed & 0x7fffffff)],
-                                    stdin=stdin,stdout=stdout,stderr=stderr)
+                                    stdin=stdin,stdout=stdout,stderr=stderr,
+                                    **gizli_pencere())
         cancel_sent = False
         stop_time = None
         def read_line(line):

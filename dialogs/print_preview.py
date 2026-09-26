@@ -1082,7 +1082,7 @@ class TimetablePrintPreview(QDialog):
     # iptal" diye okunur ve elle çizilmiş gibi durur. Çıktıda o hücreler
     # sessizce gri kalır: boş olduğu görülür, sebebi sorulmaz.
     PREVIEW_CLOSED_FILL = "#F1F5F9"
-    PRINT_CLOSED_FILL = "#E3E6EB"     # kâğıtta hafif koyu gri
+    PRINT_CLOSED_FILL = "#FFFFFF"     # kâğıtta/yazdırmada beyaz zemin (çarpı ve gri yok)
 
     def _is_printing(self):
         return bool(getattr(self, "_output_is_print", False))

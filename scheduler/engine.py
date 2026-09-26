@@ -2,7 +2,9 @@
 import time
 import copy
 import os
-from .build import build_world, attach_slots, apply_subject_groups
+from .build import build_world, attach_slots, apply_subject_groups, window_breaks
+from . import rules as R
+from .model import Card
 from .rules import compile_rules
 from .problem import Problem, impossible_groups
 from .diagnostics import diagnose
@@ -200,6 +202,285 @@ def bind_locks(world, placements):
 
 
 
+class LockedConflict(ValueError):
+    """Kilitli dersler verilerle ya da birbirleriyle çelişiyor.
+
+    Motor kısıtı kendiliğinden açmaz ve veriyle çelişen bir kilidi sessizce
+    kabul etmez. Eskiden kapalı saatteki kilit "kullanıcının kararı" sayılıp
+    olduğu gibi bırakılıyordu; Birey'de LOCAEA1'in kapalı Cumartesi
+    saatlerindeki 4 kilitli saat yüzünden "kilitliler kalsın" 267/267
+    gösteriyor, aynı veride "tümünü sıfırla" dürüstçe 266/267 buluyordu.
+
+    `catismalar` her biri dict(kart, ids, pls, mesaj, neden) olan listedir;
+    ids çelişen kilitli yerleşimlerin grid_placements içindeki sıralarıdır.
+    """
+
+    def __init__(self, catismalar):
+        self.catismalar = list(catismalar)
+        satirlar = [k['mesaj'] for k in self.catismalar]
+        fazla = len(satirlar) - 15
+        super().__init__(
+            "Kilitli dersler verilerle çelişiyor. Motor kapalı saati ya da "
+            "kuralı kendiliğinden açmaz, bu kilitleri de sessizce kabul etmez:\n"
+            + "\n".join("• " + s for s in satirlar[:15])
+            + (f"\n… ve {fazla} kilit daha." if fazla > 0 else ""))
+
+
+_EVET = (True, 'True', 'true', 1, '1')
+
+
+def _kilitli_mi(pl):
+    return (pl.get('locked') in _EVET or pl.get('pinned') in _EVET
+            or pl.get('is_locked') in _EVET)
+
+
+def _kilitli_kopya(pl):
+    """Kilitli kaydı çizelgeye döndürülecek biçime getirir (değer değiştirmeden)."""
+    out = dict(pl)
+    d = int(pl.get('day', pl.get('col', 0)))
+    p = int(pl.get('period', pl.get('row', 0)))
+    cn = pl.get('class_name') or pl.get('class')
+    sn = pl.get('subject_name') or pl.get('subject')
+    tn = pl.get('teacher_name') or pl.get('teacher')
+    out.update({
+        'class_name': cn, 'class': cn,
+        'subject_name': sn, 'subject': sn,
+        'teacher_name': tn, 'teacher': tn,
+        'day': d, 'day_idx': d, 'col': d,
+        'period': p, 'row': p,
+        'duration': int(pl.get('duration') or 1),
+        'locked': True, 'is_manual': True, 'is_filler': False,
+    })
+    return out
+
+
+def _gun_adlari(data_store, D):
+    gunler = ((data_store or {}).get('settings') or {}).get('days') if hasattr(data_store, 'get') else None
+    if isinstance(gunler, list) and len(gunler) >= D:
+        return [str(g) for g in gunler[:D]]
+    return [f"{d + 1}. gün" for d in range(D)]
+
+
+def _dunya_kur(data_store, D, P, cross_busy, only_classes, raw, atla=frozenset()):
+    """Dünya + kurallar + kilitli kartlar + aday yerler. solve() ve ön
+    kontrol (kilit_catismalari_verisi) AYNI dünyayı buradan kurar."""
+    w = build_world(data_store, D=D, P=P, cross_busy=cross_busy, only_classes=only_classes)
+    rules, report = compile_rules(raw, w)
+    if report.errors:
+        return w, rules, report, []
+    # "Seçilen dersler aynı ders sayılsın": aileler burada kurulur, kural
+    # kapsamları aileye genişler. Bundan sonra "aynı ders" her katmanda aynı
+    # şeyi ifade eder — arama, CP-SAT, bitirme geçişi ve bağımsız denetim.
+    apply_subject_groups(w, rules)
+    if only_classes:
+        active = {norm_class(cn) for c in w.cards for cn in c.class_names}
+        teachers = {norm_key(n): i for i, n in enumerate(w.teachers)}
+        for pl in data_store.get('grid_placements', []):
+            if norm_class(pl.get('class_name') or pl.get('class')) in active:
+                continue
+            ti = teachers.get(norm_key(pl.get('teacher_name') or pl.get('teacher')))
+            if ti is None: continue
+            d = int(pl.get('day', pl.get('col', 0))); p = int(pl.get('period', pl.get('row', 0)))
+            for off in range(int(pl.get('duration') or 1)):
+                if 0 <= d < w.D and 0 <= p + off < w.P:
+                    w.teacher_closed[ti] |= 1 << (d * w.P + p + off)
+    kilitler = _kilitleri_isle(data_store, w, only_classes, atla)
+    attach_slots(w, rules)
+    return w, rules, report, kilitler
+
+
+def _kilitleri_isle(data_store, w, only_classes, atla=frozenset()):
+    """Kilitli yerleşimleri dünyaya SABİT KART olarak ekler.
+
+    Kilitli kart modelin içindedir: hücrelerini gerçekten kaplar ve bütün
+    kurallar onu sayar ("aynı ders aynı gün tekrar etmesin" kilitli
+    Matematiği görür, günlük saat tavanı kilitli saatleri de toplar). Eskiden
+    kilitli ders modelden çıkarılıp yalnızca hücreleri kapatılıyordu; kurallar
+    onu hiç görmüyordu.
+
+    Kilidin karşılığı olan saatler atamaların kartlarından düşülür (2 saatlik
+    kartın 1 saati kilitliyse kalan 1 saat serbest kart olur); böylece toplam
+    saat verideki atamalarla birebir kalır.
+
+    Aynı blok kimliğini taşıyan, aynı günde bitişik kilitli kayıtlar TEK
+    karttır (2 saatlik blok sınıf başına 1'er saatlik kayıt olarak durabiliyor).
+    Birleşik derste her sınıfın kaydı ayrıdır; bunlar tek kartta birleşir.
+
+    Döner: [dict(kart, ids, pls, d, p)] — kart, dünyadaki son indekstir.
+    """
+    grid = data_store.get('grid_placements') or []
+    sec = {norm_class(x) for x in only_classes} if only_classes else None
+    cls_ix = {norm_class(n): i for i, n in enumerate(w.classes)}
+    tch_ix = {norm_key(n): i for i, n in enumerate(w.teachers)}
+    sub_ix = {norm_key(n): i for i, n in enumerate(w.subjects)}
+    gruplar = {}
+    disi = []
+    for n, pl in enumerate(grid):
+        if not isinstance(pl, dict) or n in atla or not _kilitli_mi(pl):
+            continue
+        cn = norm_class(pl.get('class_name') or pl.get('class'))
+        if sec is not None and cn not in sec:
+            continue
+        ci = cls_ix.get(cn)
+        try:
+            d = int(pl.get('day', pl.get('col', 0))); p = int(pl.get('period', pl.get('row', 0)))
+            dur = max(1, int(pl.get('duration') or 1))
+        except (TypeError, ValueError):
+            ci = None
+        if ci is None:
+            # Dünyada karşılığı yok (bilinmeyen sınıf): veride nasılsa öyle
+            # korunur, bu çizelgenin saatlerine karışmaz.
+            disi.append(pl)
+            continue
+        sn = norm_key(pl.get('subject_name') or pl.get('subject'))
+        tn = norm_key(pl.get('teacher_name') or pl.get('teacher'))
+        comb = bool(pl.get('is_combined')) or bool(pl.get('combined_classes'))
+        bid = str(pl.get('block_id') or '')
+        if comb:
+            key = (sn, tn, d, bid or ('@', p), None)
+        else:
+            key = (sn, tn, d, bid or ('#', n), ci)
+        g = gruplar.setdefault(key, dict(hucre={}, kayit=[], sn=sn, tn=tn, d=d, ad=None))
+        if g['ad'] is None:
+            g['ad'] = (pl.get('subject_name') or pl.get('subject') or '',
+                       pl.get('teacher_name') or pl.get('teacher') or '')
+        for off in range(dur):
+            g['hucre'].setdefault(p + off, set()).add(ci)
+        g['kayit'].append((n, pl, p))
+
+    talep = list(w.cards)
+    tuketilen = set()
+    yeni = []
+    for g in gruplar.values():
+        # Bitişik ve aynı sınıf kümesini taşıyan hücreler tek kart.
+        saatler = sorted(g['hucre'])
+        kosular = []
+        for q in saatler:
+            if kosular and q == kosular[-1][-1] + 1 and g['hucre'][q] == g['hucre'][kosular[-1][0]]:
+                kosular[-1].append(q)
+            else:
+                kosular.append([q])
+        for kosu in kosular:
+            siniflar = sorted(g['hucre'][kosu[0]])
+            L = len(kosu)
+            # Kilidin karşılığını atamalardan düş.
+            koken = None
+            gerek = L
+            while gerek > 0:
+                aday = [c for c in talep if c.cid not in tuketilen
+                        and norm_key(c.subject_name) == g['sn'] and norm_key(c.teacher_name) == g['tn']
+                        and set(c.classes) & set(siniflar)]
+                if not aday:
+                    break
+                aday.sort(key=lambda c: (set(c.classes) != set(siniflar), c.duration != gerek))
+                c = aday[0]
+                if koken is None:
+                    koken = c.origin
+                if c.duration <= gerek:
+                    gerek -= c.duration
+                    tuketilen.add(c.cid)
+                else:
+                    c.duration -= gerek
+                    gerek = 0
+            s_ix = sub_ix.get(g['sn'], -1)
+            t_ix = tch_ix.get(g['tn'], -1)
+            if koken is None:
+                koken = -2 - len(yeni)      # atamalarda karşılığı yok: kendine ait köken
+            kart = Card(cid=-1, classes=tuple(siniflar), subject=s_ix, teacher=t_ix,
+                        duration=L, origin=koken, group=koken,
+                        locked_at=g['d'] * w.P + kosu[0],
+                        family=(w.subject_family[s_ix] if 0 <= s_ix < len(w.subject_family) else -1),
+                        subject_name=(w.subjects[s_ix] if s_ix >= 0 else g['ad'][0]),
+                        teacher_name=(w.teachers[t_ix] if t_ix >= 0 else g['ad'][1]),
+                        class_names=tuple(w.classes[ci] for ci in siniflar))
+            kayit = [(n, pl) for n, pl, p0 in g['kayit'] if kosu[0] <= p0 <= kosu[-1]]
+            yeni.append(dict(kart_obj=kart, ids=[n for n, _ in kayit], pls=[pl for _, pl in kayit],
+                             d=g['d'], p=kosu[0]))
+    w.cards = [c for c in w.cards if c.cid not in tuketilen] + [k['kart_obj'] for k in yeni]
+    for i, c in enumerate(w.cards):
+        c.cid = i
+    w._kilit_disi = disi
+    out = []
+    for k in yeni:
+        kart = k.pop('kart_obj')
+        k['kart'] = kart.cid
+        out.append(k)
+    return out
+
+
+def _slot_yok_nedeni(w, rules, c, k):
+    """Kilitli kartın kendi yerine neden oturamadığı — veriyle hangi çelişki."""
+    d, p, P = k['d'], k['p'], w.P
+    if not (0 <= d < w.D) or p < 0 or p + c.duration > P:
+        return "çizelgenin gün/saat sınırı dışında"
+    maske = w.footprint(d, p, c.duration)
+    parca = []
+    for ci in c.classes:
+        if maske & w.class_closed[ci]:
+            parca.append(f"{w.classes[ci]} sınıfının zaman tablosunda KAPALI")
+    if c.teacher >= 0 and maske & w.teacher_closed[c.teacher]:
+        parca.append(f"{w.teachers[c.teacher]} öğretmeninin zaman tablosunda KAPALI")
+    if parca:
+        return "; ".join(parca)
+    for r in rules:
+        if r.kind in R.WINDOW_RULES and r.is_hard() and r.applies_card(c) \
+                and window_breaks(r, p, c.duration, P):
+            return f"sıkı kural «{r.label}» bu saate izin vermiyor"
+    return "bu saat ders için izin verilen bir yer değil"
+
+
+def kilit_catismalari(w, rules, kilitler, data_store=None, completion_first=True):
+    """Veriyle ya da birbiriyle çelişen kilitli kartlar.
+
+    Kilitler yerleşim sırasıyla tek tek eklenir; her biri o ana kadar kabul
+    edilenlerle birlikte BAĞIMSIZ DENETİMDEN (verify.validate) geçer. Geçemeyen
+    kilit çelişkilidir: kapalı saatte durur, başka bir kilitle çakışır ya da
+    sıkı bir kuralı çiğner. Aynı saati paylaşan iki kilitten yalnızca biri
+    çelişkili sayılır — diğerine dokunmaya gerek yoktur.
+    """
+    if not kilitler:
+        return []
+    forced = impossible_groups(w) if completion_first else set()
+    gunler = _gun_adlari(data_store, w.D)
+    kabul = []
+    out = []
+    for k in kilitler:
+        i = k['kart']
+        c = w.cards[i]
+        if not c.slots:
+            neden = _slot_yok_nedeni(w, rules, c, k)
+        else:
+            alt = copy.copy(w)
+            alt.cards = [w.cards[j] for j in kabul] + [c]
+            errs, _, _ = validate(alt, rules, [x.locked_at for x in alt.cards],
+                                  bend_rules=completion_first, forced=forced)
+            if errs:
+                neden = "; ".join(dict.fromkeys(errs))
+            else:
+                kabul.append(i)
+                continue
+        d, p = k['d'], k['p']
+        gun = gunler[d] if 0 <= d < len(gunler) else f"{d + 1}. gün"
+        saat = f"{p + 1}." if c.duration == 1 else f"{p + 1}-{p + c.duration}."
+        mesaj = (f"{' + '.join(c.class_names)} · {c.subject_name} ({c.teacher_name}) — "
+                 f"{gun} {saat} saat: {neden}")
+        out.append(dict(k, neden=neden, mesaj=mesaj))
+    return out
+
+
+def kilit_catismalari_verisi(data_store, D=None, P=None, cross_busy=None,
+                             only_classes=None, relations=None, completion_first=True):
+    """Planlamadan ÖNCE arayüzün sorması için: hangi kilit veriyle çelişiyor?
+
+    solve() ile aynı dünyayı kurar; arama yapmaz.
+    """
+    raw = relations if relations is not None else data_store.get('planlama_iliskileri', [])
+    w, rules, report, kilitler = _dunya_kur(data_store, D, P, cross_busy, only_classes, raw)
+    if report.errors:
+        return []
+    return kilit_catismalari(w, rules, kilitler, data_store, completion_first)
+
+
 def _kayitli_yer(data_store, world, card):
     """Kartın KAYITLI çizelgedeki yeri (ızgara indeksi) — yoksa None.
 
@@ -235,10 +516,14 @@ def _kayitli_yer(data_store, world, card):
 
 def _bitir(res, w, rules, data_store, completion_first, start):
     """Doğrulama + çizelgenin kurulması. Bütün kipler buradan çıkar."""
-    # Kilitli kartlar motora sokulmadı; verify.py'de hata vermemesi için
-    # dünyada kalmış olabilecek kilit işaretlerini temizle.
-    for c in w.cards:
-        c.locked_at = None
+    # Kilitli kartlar modelin içinde ve yerlerinde sabittir. Hiçbir kipte
+    # oynatılmazlar; yine de sonuç yolunda bir kilit boşa düştüyse (ör. iptal
+    # ilk çözümden önce geldi) kilit yerine konur. Kilitlerin birbirleriyle
+    # ve verilerle tutarlı olduğu aramadan ÖNCE kanıtlandı.
+    kilitler=getattr(res,'_kilitler',None) or {}
+    for i in kilitler:
+        if res.positions[i]<0 and w.cards[i].locked_at is not None:
+            res.positions[i]=w.cards[i].locked_at
     forced=impossible_groups(w) if completion_first else set()
     errors,soft,bent=validate(w,rules,res.positions,bend_rules=completion_first,
                               forced=forced,pieces=getattr(res,'split_pieces',None))
@@ -250,28 +535,15 @@ def _bitir(res, w, rules, data_store, completion_first, start):
     for b in bent:
         res.warnings.append('ARİTMETİK TABAN — '+b+
                             ' (bu ders için mümkün olan en az tekrar)')
-    # Kilitli yerleşimleri olduğu gibi geri ekle (motor bunlara dokunmadı).
-    for pl in getattr(res, '_locked_placements', []):
-        dur = int(pl.get('duration') or 1)
-        res.placed_hours += dur
-        p_copy = dict(pl)
-        d = int(pl.get('day', pl.get('col', 0)))
-        p = int(pl.get('period', pl.get('row', 0)))
-        cn = pl.get('class_name') or pl.get('class')
-        sn = pl.get('subject_name') or pl.get('subject')
-        tn = pl.get('teacher_name') or pl.get('teacher')
-        p_copy.update({
-            'class_name': cn, 'class': cn,
-            'subject_name': sn, 'subject': sn,
-            'teacher_name': tn, 'teacher': tn,
-            'day': d, 'day_idx': d, 'col': d,
-            'period': p, 'row': p,
-            'duration': dur,
-            'locked': True, 'is_manual': True, 'is_filler': False
-        })
-        res.placements.append(p_copy)
     parcalar=getattr(res,'split_pieces',None) or {}
     for i,(c,idx) in enumerate(zip(w.cards,res.positions)):
+        if i in kilitler:
+            # KİLİTLİ DERS — kullanıcının kendi kaydı olduğu gibi döner
+            # (renk, blok kimliği, elle yerleştirme işareti korunur).
+            res.placed_hours+=c.duration*len(c.classes)
+            for pl in kilitler[i]['pls']:
+                res.placements.append(_kilitli_kopya(pl))
+            continue
         if idx<0 and i in parcalar:
             # BÖLÜNMÜŞ KART — 1 saatlik parçalar halinde yerleşti.
             original=data_store.get('atamalar',[])[c.origin]
@@ -304,6 +576,8 @@ def _bitir(res, w, rules, data_store, completion_first, start):
                 block_id=f'c{c.cid}',card_id=c.cid,assignment_index=c.origin,
                 locked=False,is_manual=False,is_filler=False,
                 color=original.get('color') or original.get('renk')))
+    for pl in getattr(res,'_kilit_disi',[]):
+        res.placements.append(_kilitli_kopya(pl))
     if res.status!='cancelled':
         res.status='complete' if res.placed_hours==res.total_hours else 'timeout'
     if res.complete:
@@ -324,7 +598,7 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
           only_classes=None, seed=None, max_attempts=6, progress=None,
           relations=None, cancelled=None, completion_first=True, use_cpsat=True,
           optimal_mode=False, allow_split=True, azami_saniye=3600.0,
-          ask_continue=None):
+          ask_continue=None, unlock_conflicting_locks=False):
     """Çizelgeyi kurar.
 
     completion_first VARSAYILAN OLARAK AÇIKTIR: çizelgenin tamamlanması
@@ -339,102 +613,31 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
     ve gereken en az ölçüde esner; esneyen her nokta sonuçta listelenir.
     """
     start=time.monotonic();res=Result()
-    w=build_world(data_store,D=D,P=P,cross_busy=cross_busy,only_classes=only_classes)
     raw=relations if relations is not None else data_store.get('planlama_iliskileri',[])
-    rules,report=compile_rules(raw,w)
+    w,rules,report,kilitler=_dunya_kur(data_store,D,P,cross_busy,only_classes,raw)
     if report.errors:
         raise ValueError('Planlama ilişkileri uygulanamadı:\n'+'\n'.join(report.errors))
-    # "Seçilen dersler aynı ders sayılsın": aileler burada kurulur, kural
-    # kapsamları aileye genişler. Bundan sonra "aynı ders" her katmanda aynı
-    # şeyi ifade eder — arama, CP-SAT, bitirme geçişi ve bağımsız denetim.
-    apply_subject_groups(w,rules)
-    if only_classes:
-        active={norm_class(cn) for c in w.cards for cn in c.class_names}
-        teachers={norm_key(n):i for i,n in enumerate(w.teachers)}
-        for pl in data_store.get('grid_placements',[]):
-            if norm_class(pl.get('class_name') or pl.get('class')) in active:
-                continue
-            ti=teachers.get(norm_key(pl.get('teacher_name') or pl.get('teacher')))
-            if ti is None: continue
-            d=int(pl.get('day',pl.get('col',0)));p=int(pl.get('period',pl.get('row',0)))
-            for off in range(int(pl.get('duration') or 1)):
-                if 0<=d<w.D and 0<=p+off<w.P:
-                    w.teacher_closed[ti] |= 1 << (d*w.P+p+off)
     # ── KİLİTLİ YERLEŞİMLER ──
-    # Kilitli dersler motora GİRMEZ. Olduğu yerde kalır:
-    # 1) Saatleri meşgul olarak işaretlenir (başka ders konmaz)
-    # 2) Eşleşen kart aramadan çıkarılır (çift yerleşim olmasın)
-    # 3) Sonuçta oldukları gibi geri eklenir
-    all_grid = data_store.get('grid_placements', [])
-    locked_pls = [pl for pl in all_grid if isinstance(pl, dict)
-                  and (pl.get('locked') in (True, 'True', 'true', 1, '1') or
-                       pl.get('pinned') in (True, 'True', 'true', 1, '1'))
-                  and (not only_classes or
-                       norm_class(pl.get('class_name') or pl.get('class'))
-                       in {norm_class(x) for x in only_classes})]
-    teachers_idx = {norm_key(n): i for i, n in enumerate(w.teachers)}
-    classes_idx = {norm_class(n): i for i, n in enumerate(w.classes)}
-    neutralized_cids = set()
-    # 1) Mark locked slots as busy
-    for pl in locked_pls:
-        tn = norm_key(pl.get('teacher_name') or pl.get('teacher'))
-        cn = norm_class(pl.get('class_name') or pl.get('class'))
-        ti = teachers_idx.get(tn)
-        ci = classes_idx.get(cn)
-        d = int(pl.get('day', pl.get('col', 0)))
-        p = int(pl.get('period', pl.get('row', 0)))
-        dur = int(pl.get('duration') or 1)
-        for off in range(dur):
-            cell = d * w.P + p + off
-            if 0 <= cell < w.D * w.P:
-                if ti is not None: w.teacher_closed[ti] |= 1 << cell
-                if ci is not None: w.class_closed[ci] |= 1 << cell
-    # 2) Deduplicate (combined lessons have one entry per class)
-    seen_inst = set()
-    unique_locked = []
-    for pl in locked_pls:
-        sn = norm_key(pl.get('subject_name') or pl.get('subject'))
-        tn = norm_key(pl.get('teacher_name') or pl.get('teacher'))
-        cn = norm_class(pl.get('class_name') or pl.get('class'))
-        d = int(pl.get('day', pl.get('col', 0)))
-        p = int(pl.get('period', pl.get('row', 0)))
-        is_comb = bool(pl.get('is_combined')) or bool(pl.get('combined_classes'))
-        key = ('_comb_', sn, tn, d, p) if is_comb else (cn, sn, tn, d, p)
-        if key not in seen_inst:
-            seen_inst.add(key)
-            unique_locked.append(pl)
-    # 3) Find and remove matching world cards (or reduce duration)
-    for pl in unique_locked:
-        cn = norm_class(pl.get('class_name') or pl.get('class'))
-        sn = norm_key(pl.get('subject_name') or pl.get('subject'))
-        tn = norm_key(pl.get('teacher_name') or pl.get('teacher'))
-        needed_dur = int(pl.get('duration') or 1)
-        while needed_dur > 0:
-            candidates = [c for c in w.cards
-                          if cn in {norm_class(x) for x in c.class_names}
-                          and norm_key(c.subject_name) == sn
-                          and norm_key(c.teacher_name) == tn
-                          and c.cid not in neutralized_cids]
-            if not candidates:
-                break
-            exact = [c for c in candidates if c.duration == needed_dur]
-            chosen = exact[0] if exact else candidates[0]
-            if chosen.duration <= needed_dur:
-                needed_dur -= chosen.duration
-                neutralized_cids.add(chosen.cid)
-            else:
-                chosen.duration -= needed_dur
-                needed_dur = 0
-    if neutralized_cids:
-        w.cards = [c for c in w.cards if c.cid not in neutralized_cids]
-        for new_id, c in enumerate(w.cards):
-            c.cid = new_id
-    # Store for _bitir
-    res._locked_placements = locked_pls
-    locked_hours = sum(int(pl.get('duration') or 1) for pl in locked_pls)
-    attach_slots(w, rules)
-    res.world = w; res.rules = rules; res.warnings = list(report.warnings)
-    res.total_hours = w.total_hours() + locked_hours; res.positions = [-1] * len(w.cards)
+    # Kilitli ders modelin İÇİNDEDİR: yerinde sabit bir karttır. Kapalı saat,
+    # çakışma ve bütün planlama kuralları ona da uygulanır, motorun diğer
+    # dersleri de ona göre dizilir. Veriyle çelişen bir kilit (kapalı saatte
+    # duran, başka bir kilitle çakışan, sıkı bir kuralı çiğneyen) SESSİZCE
+    # kabul edilmez: motor kısıtı kendiliğinden açmaz. Ya durur ve hangi
+    # kilidin neden çeliştiğini söyler, ya da kullanıcı açıkça "çöz" dediyse
+    # o kilidi çözüp dersi kurallara uygun bir yere koyar.
+    catisma=kilit_catismalari(w,rules,kilitler,data_store,completion_first)
+    kilit_notu=[]
+    if catisma:
+        if not unlock_conflicting_locks:
+            raise LockedConflict(catisma)
+        atla=frozenset(n for k in catisma for n in k['ids'])
+        w,rules,report,kilitler=_dunya_kur(data_store,D,P,cross_busy,only_classes,raw,atla=atla)
+        kilit_notu=['KİLİT ÇÖZÜLDÜ — '+k['mesaj'] for k in catisma]
+    res._kilitler={k['kart']:k for k in kilitler}
+    res._kilit_disi=list(getattr(w,'_kilit_disi',[]))
+    res.world = w; res.rules = rules; res.warnings = list(report.warnings)+kilit_notu
+    res.total_hours = w.total_hours()
+    res.positions = [c.locked_at if c.locked_at is not None else -1 for c in w.cards]
     res.diagnostics,res.upper_bound=diagnose(w,rules)
     # Aritmetiğin dayattığı gruplar bir kez hesaplanır; her denetim aynı kümeyi
     # kullanır. Tamamlanma öncelikli kip kapalıysa hiçbir grup esnemez.
@@ -456,10 +659,6 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
         if gun_ust<res.upper_bound: res.upper_bound=gun_ust
         if gun_ust<search_target: search_target=gun_ust
     res.warnings.extend(x['message'] for x in res.diagnostics)
-    for c in w.cards:
-        if c.locked_at is not None and not c.slots:
-            res.warnings.append(f"Kilitli kart kapalı saate veya planlama kuralına aykırı (kilit kaldırıldı): {c}")
-            c.locked_at = None
     # ── OPTİMAL KİP ──
     #
     # "Optimale çıkana kadar durmasın, optimale ulaşınca dursun; uzun sürmesi
@@ -480,7 +679,7 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
         def _ilerle(rec):
             res.diagnostics = res.diagnostics
             if callable(progress):
-                progress(rec.get('saat', 0) + locked_hours, res.total_hours, rec.get('tur', 1))
+                progress(rec.get('saat', 0), res.total_hours, rec.get('tur', 1))
         # ── ISITMA: önce C++ tabu portföyü ──
         #
         # Ölçüm (Birey v161, 250 serbest + 17 kilitli saat): normal kipin
@@ -498,7 +697,7 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
                 if not pr_i.errors:
                     def _tabu_ilerle(rec_):
                         if callable(progress):
-                            progress(rec_['hours'] + locked_hours, res.total_hours, rec_['restarts'] + 1)
+                            progress(rec_['hours'], res.total_hours, rec_['restarts'] + 1)
                     base_i = seed if seed is not None else 20260912
                     lanes_i = max(2, (os.cpu_count() or 4))
                     en_iyi_i = None
@@ -522,7 +721,7 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
                                                 forced=impossible_groups(w))
                         isitma = (list(en_iyi_i['positions']), int(en_iyi_i['hours']), not errs_i)
                         res.warnings.append(
-                            f"Isıtma (tabu, {kusak} kuşak): {en_iyi_i['hours'] + locked_hours}/{res.total_hours} saat"
+                            f"Isıtma (tabu, {kusak} kuşak): {en_iyi_i['hours']}/{res.total_hours} saat"
                             + ("" if not errs_i else " (sert kural ihlali var, yalnızca ipucu)") + ".")
             except NativeEngineMissing as exc:
                 print(f'[engine] {exc}')
@@ -587,7 +786,7 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
         else:
             aciklama = f"CP-SAT {durum}"
         res.warnings.append(
-            f"Optimal kip: {tur} tur, {placed + locked_hours}/{res.total_hours} saat, {aciklama}."
+            f"Optimal kip: {tur} tur, {placed}/{res.total_hours} saat, {aciklama}."
             + (f" {len(parcalar)} blok parçalara bölündü." if parcalar else ""))
         return _bitir(res, w, rules, data_store, completion_first, start)
 
@@ -641,7 +840,7 @@ def solve(data_store, time_budget=10.0, D=None, P=None, cross_busy=None,
 
     if w.cards and not cozuldu:
         def on_progress(rec):
-            if callable(progress): progress(rec['hours'] + locked_hours, res.total_hours, rec['restarts']+1)
+            if callable(progress): progress(rec['hours'], res.total_hours, rec['restarts']+1)
         # A proved day-capacity deficit gives a candidate set of absent cards.
         # Try that subset first. It is only a search seed, never a change to the
         # assignment data. If it cannot reach the bound, reopen all cards.
